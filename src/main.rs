@@ -23,13 +23,25 @@ use crate::notification::NotificationBroadcast;
 use crate::history::HistoryState;
 use crate::plugin::PluginManagerState;
 
-async fn index(State(state): State<AppState>) -> impl IntoResponse {
+async fn index(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let content = StaticFiles::get("index.html")
         .expect("index.html must exist in frontend/dist/");
     let html = String::from_utf8_lossy(&content.data);
+
+    // Only embed token if ?token=xxx matches the server token
+    let token_value = params.get("token")
+        .filter(|t| {
+            urlencoding::decode(t).map(|d| &*d == &*state.auth_token).unwrap_or(false)
+        })
+        .map(|_| state.auth_token.to_string())
+        .unwrap_or_default();
+
     let tag = format!(
         "<meta name=\"auth-token\" content=\"{}\">\n</head>",
-        &*state.auth_token
+        token_value
     );
     let html = html.replace("</head>", &tag);
     (
@@ -117,6 +129,39 @@ async fn static_handler(Path(path): Path<String>) -> impl IntoResponse {
     }
 }
 
+async fn manifest_handler() -> impl IntoResponse {
+    match StaticFiles::get("manifest.json") {
+        Some(content) => {
+            Response::builder()
+                .header(header::CONTENT_TYPE, "application/manifest+json")
+                .body(Body::from(content.data.into_owned()))
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("not found"))
+            .unwrap(),
+    }
+}
+
+async fn icon_handler(Path(path): Path<String>) -> impl IntoResponse {
+    let lookup = format!("icons/{}", path);
+    match StaticFiles::get(&lookup) {
+        Some(content) => {
+            let mime = mime_guess::from_path(&lookup).first_or_octet_stream();
+            Response::builder()
+                .header(header::CONTENT_TYPE, mime.as_ref())
+                .header(header::CACHE_CONTROL, "public, max-age=86400")
+                .body(Body::from(content.data.into_owned()))
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("not found"))
+            .unwrap(),
+    }
+}
+
 fn parse_port() -> u16 {
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -160,7 +205,9 @@ async fn main() {
     let manager = Arc::new(SessionManager::new());
     manager.start_cleanup_task();
 
-    let auth_token = {
+    let auth_token = if let Ok(t) = std::env::var("DINOTTY_TOKEN") {
+        Arc::new(t)
+    } else {
         let mut buf = [0u8; 32];
         rand::fill(&mut buf);
         let token: String = buf.iter().map(|b| format!("{:02x}", b)).collect();
@@ -249,6 +296,23 @@ async fn main() {
         .route("/preview/:port/", any(proxy::proxy_handler_root))
         .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
         .route("/assets/*path", get(static_handler))
+        .route("/icons/*path", get(icon_handler))
+        .route("/manifest.json", get(manifest_handler))
+        .route("/logo.png", get(|| async {
+            match StaticFiles::get("logo.png") {
+                Some(content) => {
+                    Response::builder()
+                        .header(header::CONTENT_TYPE, "image/png")
+                        .header(header::CACHE_CONTROL, "public, max-age=86400")
+                        .body(Body::from(content.data.into_owned()))
+                        .unwrap()
+                }
+                None => Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::from("not found"))
+                    .unwrap(),
+            }
+        }))
         .route("/", get(index))
         .layer(middleware::from_fn(move |req, next| {
             let token = auth_token.clone();

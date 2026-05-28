@@ -13,7 +13,9 @@ pub async fn auth_middleware(
 ) -> Response {
     let path = request.uri().path();
 
-    if path == "/" || path == "/api/notify" || path.starts_with("/assets/") || path.starts_with("/preview/") {
+    if path == "/" || path == "/api/notify" || path == "/manifest.json" || path == "/logo.png"
+        || path.starts_with("/assets/") || path.starts_with("/preview/") || path.starts_with("/icons/")
+    {
         return next.run(request).await;
     }
 
@@ -40,7 +42,9 @@ fn check_token(request: &Request, token: &str) -> bool {
     if let Some(query) = request.uri().query() {
         for pair in query.split('&') {
             if let Some(val) = pair.strip_prefix("token=") {
-                return constant_time_eq(val, token);
+                if let Ok(decoded) = urlencoding::decode(val) {
+                    return constant_time_eq(&decoded, token);
+                }
             }
         }
     }

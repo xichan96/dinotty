@@ -6,7 +6,7 @@
   z-index: 500;
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
-  padding: 3px 4px env(safe-area-inset-bottom, 0px);
+  padding: 3px 4px 4px;
   gap: 3px;
   user-select: none;
   -webkit-user-select: none;
@@ -202,12 +202,12 @@
 }
 .mkb-swipe-track {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   width: 200%;
 }
 .mkb-swipe-track > #mkb-action-panel {
   justify-content: space-between;
-  overflow: hidden;
+  overflow-x: clip;
 }
 .mkb-swipe-track > #mkb-main-panel,
 .mkb-swipe-track > #mkb-action-panel {
@@ -219,7 +219,7 @@
   display: flex;
   justify-content: center;
   gap: 6px;
-  padding: 14px 0 10px;
+  padding: 4px 0 3px;
   touch-action: pan-y;
   cursor: grab;
 }
@@ -326,8 +326,8 @@
 #kb-toggle-btn {
   position: fixed;
   right: 16px;
-  bottom: calc(var(--mkb-height, 0px) + 16px + env(safe-area-inset-bottom, 0px));
-  z-index: 501;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px) + 8px);
+  z-index: 11;
   width: 44px;
   height: 36px;
   border-radius: 50%;
@@ -433,7 +433,7 @@
 /* ── Phone portrait optimizations ────────────────────────── */
 @media (max-width: 480px) {
   #mobile-kb {
-    padding: 3px 2px env(safe-area-inset-bottom, 0px);
+    padding: 3px 2px 4px;
     gap: 3px;
   }
   .mkb-row-wrap { gap: 3px; }

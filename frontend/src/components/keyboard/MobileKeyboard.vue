@@ -470,8 +470,11 @@ function updateHeight() {
   if (!barRef.value) return
   // Sync swipe container height to main panel so action panel doesn't exceed it
   const mainPanel = barRef.value.querySelector('#mkb-main-panel') as HTMLElement | null
-  if (mainPanel && swipeContainerRef.value) {
-    swipeContainerRef.value.style.height = `${mainPanel.scrollHeight}px`
+  const actionPanel = barRef.value.querySelector('#mkb-action-panel') as HTMLElement | null
+  if (swipeContainerRef.value) {
+    const mainH = mainPanel ? mainPanel.scrollHeight : 0
+    const actionH = actionPanel ? actionPanel.scrollHeight : 0
+    swipeContainerRef.value.style.height = `${Math.max(mainH, actionH) + 2}px`
   }
   const h = props.visible ? barRef.value.getBoundingClientRect().height : 0
   document.documentElement.style.setProperty('--mkb-height', `${h}px`)

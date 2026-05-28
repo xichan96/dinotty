@@ -484,6 +484,20 @@ export function applyThemeToDOM(theme: ThemeDefinition) {
   for (const [key, value] of Object.entries(theme.colors)) {
     root.style.setProperty(key, value)
   }
+
+  // Sync color-scheme so browser UI (scrollbars, form controls) matches theme
+  const isLight = theme.name === 'light'
+  root.style.setProperty('color-scheme', isLight ? 'light' : 'dark')
+
+  // Sync theme-color meta tag for iOS status bar and browser chrome
+  const bgColor = theme.colors['--bg'] || '#1E1E1E'
+  let meta = document.querySelector('meta[name="theme-color"]')
+  if (!meta) {
+    meta = document.createElement('meta')
+    meta.setAttribute('name', 'theme-color')
+    document.head.appendChild(meta)
+  }
+  meta.setAttribute('content', bgColor)
 }
 
 export function getXtermTheme(theme: ThemeDefinition) {

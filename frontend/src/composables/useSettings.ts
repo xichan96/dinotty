@@ -263,6 +263,18 @@ export function applyCurrentTheme() {
     document.documentElement.style.setProperty('--bg', settings.background.color)
   }
 
+  // Sync theme-color to final resolved background color (after overrides)
+  const finalBg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
+  if (finalBg) {
+    let meta = document.querySelector('meta[name="theme-color"]')
+    if (!meta) {
+      meta = document.createElement('meta')
+      meta.setAttribute('name', 'theme-color')
+      document.head.appendChild(meta)
+    }
+    meta.setAttribute('content', finalBg)
+  }
+
   const xtermTheme = getCurrentXtermTheme()
   themeChangeListeners.forEach((fn) => fn(xtermTheme))
 }

@@ -129,6 +129,7 @@ defineExpose({ open, close, getActiveServer })
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) 0;
 }
 
 .serverlist-panel {
@@ -164,6 +165,7 @@ defineExpose({ open, close, getActiveServer })
 
 .serverlist-body {
   padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   max-height: 400px;
   overflow-y: auto;
 }

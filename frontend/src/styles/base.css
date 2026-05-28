@@ -1,5 +1,6 @@
 /* Cursor-style dark palette + design tokens */
 :root {
+  color-scheme: dark;
   /* Background / surface */
   --bg:           #1E1E1E;
   --bg-surface:   #252526;

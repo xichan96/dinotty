@@ -106,6 +106,7 @@ const tabs = computed(() => [
   transform: translateX(100%);
   transition: transform 0.25s ease;
   z-index: 901;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 .settings-panel.open {
   transform: translateX(0);
@@ -184,6 +185,7 @@ const tabs = computed(() => [
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 
 .settings-section {

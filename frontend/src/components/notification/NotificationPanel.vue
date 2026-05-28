@@ -40,7 +40,7 @@ const { t } = useI18n()
 <style scoped>
 .notification-panel {
   position: fixed;
-  top: 40px;
+  top: calc(40px + env(safe-area-inset-top, 0px));
   right: 8px;
   width: min(320px, calc(100vw - 16px));
   max-height: min(480px, calc(100vh - 60px));
@@ -93,6 +93,7 @@ const { t } = useI18n()
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 8px;

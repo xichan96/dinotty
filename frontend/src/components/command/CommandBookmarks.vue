@@ -118,6 +118,7 @@ defineExpose({ open, close })
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) 0;
 }
 
 .bookmarks-panel {
@@ -159,6 +160,7 @@ defineExpose({ open, close })
   flex: 1;
   overflow-y: auto;
   padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 }
 
 .bookmarks-groups {

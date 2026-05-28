@@ -1,5 +1,6 @@
 <template>
-  <div id="app-root">
+  <LoginPage v-if="!authenticated" @success="onLoginSuccess" />
+  <div v-else id="app-root">
     <TabBar
       :tabs="tabList"
       :active-pane-id="activePaneId"
@@ -103,7 +104,7 @@ import ServerList from './components/ServerList.vue'
 import StatusBar from './components/terminal/StatusBar.vue'
 import type { SyncServerMsg, SyncClientMsg } from './types/protocol'
 import { useSettings } from './composables/useSettings'
-import { getApiBase, wsUrlWithToken } from './composables/apiBase'
+import { getApiBase, wsUrlWithToken, hasAuthToken } from './composables/apiBase'
 import { isTauri } from './composables/useTransport'
 import { isTouchDevice } from './composables/useTerminal'
 import { useI18n } from './composables/useI18n'
@@ -114,6 +115,7 @@ import { useNotification } from './composables/useNotification'
 import { usePluginLoader, handlePluginChanged } from './composables/usePluginLoader'
 import PluginView from './components/plugin/PluginView.vue'
 import { Settings, Bell, PanelRight, Plus, X, Star, AppWindow } from 'lucide-vue-next'
+import LoginPage from './components/LoginPage.vue'
 
 interface TerminalTab {
   type: 'terminal'
@@ -139,6 +141,7 @@ const activePaneId = ref<string | null>(null)
 const kbVisible = ref(false)
 let linkJustActivated = false
 const settingsOpen = ref(false)
+const authenticated = ref(hasAuthToken())
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
 const previewPanelRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
@@ -410,6 +413,10 @@ function onFileClick(path: string) {
 function getSendFn(): ((data: string) => void) | null {
   if (!activePaneId.value || !termRefs[activePaneId.value]) return null
   return (data: string) => termRefs[activePaneId.value!]?.sendData(data)
+}
+
+function onLoginSuccess() {
+  authenticated.value = true
 }
 
 function shellEscapePath(path: string): string {

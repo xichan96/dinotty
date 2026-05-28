@@ -2,7 +2,8 @@
 #tab-bar {
   display: flex;
   align-items: stretch;
-  height: var(--tab-height);
+  height: calc(var(--tab-height) + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
   background: var(--tab-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -165,7 +166,7 @@
   z-index: 1000;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 15vh;
+  padding-top: calc(15vh + env(safe-area-inset-top, 0px));
 }
 #palette-backdrop.open { display: flex; }
 

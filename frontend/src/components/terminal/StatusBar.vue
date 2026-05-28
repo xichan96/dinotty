@@ -109,13 +109,14 @@ function togglePopover(key: MetricKey, event: MouseEvent) {
 
 <style scoped>
 .status-bar {
-  height: 24px;
+  height: calc(24px + env(safe-area-inset-bottom, 0px));
   background: var(--bg, #1a1a2e);
+  border-top: 1px solid var(--border, #3C3C3C);
   display: flex;
   align-items: center;
   justify-content: flex-start;
   flex-shrink: 0;
-  padding: 0 12px env(safe-area-inset-bottom, 0px);
+  padding: 0 12px;
   position: relative;
   z-index: 2;
 }

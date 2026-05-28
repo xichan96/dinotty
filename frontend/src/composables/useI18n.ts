@@ -187,6 +187,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.plugins.update': 'Update',
     'settings.plugins.uninstall': 'Uninstall',
     'settings.plugins.none': 'No plugins installed',
+    'login.subtitle': 'Enter your access token to continue',
+    'login.placeholder': 'Access Token',
+    'login.submit': 'Sign In',
+    'login.loading': 'Verifying…',
+    'login.empty': 'Please enter a token',
+    'login.invalid': 'Invalid token, please try again',
   },
   zh: {
     'app.settings': '设置',
@@ -371,6 +377,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.plugins.update': '更新',
     'settings.plugins.uninstall': '卸载',
     'settings.plugins.none': '暂无已安装插件',
+    'login.subtitle': '请输入访问令牌以继续',
+    'login.placeholder': '访问令牌',
+    'login.submit': '登录',
+    'login.loading': '验证中…',
+    'login.empty': '请输入令牌',
+    'login.invalid': '令牌无效，请重新输入',
   },
 }
 

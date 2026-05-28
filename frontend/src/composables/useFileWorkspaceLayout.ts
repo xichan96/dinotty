@@ -39,18 +39,18 @@ export function useFileWorkspaceLayout(): FileWorkspaceLayout {
   const direction = computed(() => (isLandscape.value ? 'horizontal' : 'vertical') as 'horizontal' | 'vertical')
 
   const treeWrapStyle = computed((): Record<string, string> => {
-    if (narrow.value) return { width: 'clamp(100px, 35vw, 160px)' }
+    if (narrow.value) return { width: `${treePaneWidth.value}px` }
     return { width: `${treePaneWidth.value}px` }
   })
 
   function clampTreePaneWidth(body: HTMLElement | null) {
-    if (!body || narrow.value) return
+    if (!body) return
     const maxW = Math.min(body.getBoundingClientRect().width * 0.78, 560)
     if (treePaneWidth.value > maxW) treePaneWidth.value = Math.max(120, maxW)
   }
 
   function startTreeWidthDrag(e: MouseEvent, body: HTMLElement | null) {
-    if (narrow.value || !body) return
+    if (!body) return
     const startX = e.clientX
     const startW = treePaneWidth.value
     const overlay = document.createElement('div')
@@ -73,7 +73,7 @@ export function useFileWorkspaceLayout(): FileWorkspaceLayout {
   }
 
   function startTreeWidthDragTouch(e: TouchEvent, body: HTMLElement | null) {
-    if (narrow.value || !body) return
+    if (!body) return
     const startX = e.touches[0].clientX
     const startW = treePaneWidth.value
     const onMove = (ev: TouchEvent) => {

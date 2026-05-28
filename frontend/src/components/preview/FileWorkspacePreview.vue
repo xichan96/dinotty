@@ -42,13 +42,13 @@
         </div>
       </div>
       <div
-        v-if="!layout.narrow.value && !treeCollapsed"
+        v-if="!treeCollapsed"
         class="file-workspace-tree-splitter"
         @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
         @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
       ></div>
       <button
-        v-if="!layout.narrow.value && treeCollapsed"
+        v-if="treeCollapsed"
         type="button"
         class="file-workspace-tree-reveal"
         :title="t('previewPanel.expandTree')"
@@ -179,13 +179,13 @@
           </div>
         </div>
         <div
-          v-if="!layout.narrow.value && !treeCollapsed"
+          v-if="!treeCollapsed"
           class="file-workspace-tree-splitter"
           @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
           @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
         ></div>
         <button
-          v-if="!layout.narrow.value && treeCollapsed"
+          v-if="treeCollapsed"
           type="button"
           class="file-workspace-tree-reveal"
           :title="t('previewPanel.expandTree')"
@@ -1171,7 +1171,6 @@ async function boot() {
   expanded.value = new Set()
   try {
     await ensureChildren('')
-    await expandFirstLevelDirs()
     fileWatch.connectTreeWatchSocket()
     fetchGitStatus()
   } catch { previewErr.value = 'list failed' }

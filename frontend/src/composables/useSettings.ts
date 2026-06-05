@@ -27,6 +27,7 @@ export interface SettingsData {
   open_api: OpenApiConfig
   auth_token?: string
   ip_whitelist: string[]
+  keybindings: Record<string, { key: string; shift: boolean }>
 }
 
 export interface OpenApiConfig {
@@ -98,6 +99,7 @@ export interface ActionKeyboardConfig {
 export const DEFAULT_ACTION_KEYBOARD: ActionKeyboardConfig = {
   rows: [
     [
+      { label: '🔖', send: '', special: 'bookmarks' },
       { label: 'cc', send: 'claude', auto_enter: true },
       { label: 'oc', send: 'opencode', auto_enter: true },
     ],
@@ -170,6 +172,7 @@ export const settings = reactive<SettingsData>({
     enabled: false,
   },
   ip_whitelist: ['127.0.0.1', '::1'],
+  keybindings: {},
 })
 
 let loaded = false

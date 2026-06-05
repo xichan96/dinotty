@@ -212,6 +212,13 @@ const messages: Record<Locale, Record<string, string>> = {
     'login.loading': 'Verifying…',
     'login.empty': 'Please enter a token',
     'login.invalid': 'Invalid token, please try again',
+    'keybinding.title': 'Keyboard Shortcuts',
+    'keybinding.togglePalette': 'Command Palette',
+    'keybinding.openBookmarks': 'Saved Commands',
+    'keybinding.newTab': 'New Tab',
+    'keybinding.closeTab': 'Close Tab',
+    'keybinding.pressKeys': 'Press keys…',
+    'keybinding.reset': 'Reset',
   },
   zh: {
     'app.settings': '设置',
@@ -421,6 +428,13 @@ const messages: Record<Locale, Record<string, string>> = {
     'login.loading': '验证中…',
     'login.empty': '请输入令牌',
     'login.invalid': '令牌无效，请重新输入',
+    'keybinding.title': '快捷键',
+    'keybinding.togglePalette': '命令面板',
+    'keybinding.openBookmarks': '已保存命令',
+    'keybinding.newTab': '新建标签页',
+    'keybinding.closeTab': '关闭标签页',
+    'keybinding.pressKeys': '按下按键…',
+    'keybinding.reset': '重置',
   },
 }
 

@@ -78,6 +78,7 @@
       :pane-id="activePaneId ?? ''"
       :get-send-fn="getSendFn"
       @update:visible="(v: boolean) => kbVisible = v"
+      @bookmarks="openQuickPicks()"
     />
 
     <KbToggleButton
@@ -108,6 +109,7 @@ import { getApiBase, wsUrlWithToken, hasAuthToken } from './composables/apiBase'
 import { isTauri } from './composables/useTransport'
 import { isTouchDevice } from './composables/useTerminal'
 import { useI18n } from './composables/useI18n'
+import { useKeybindings } from './composables/useKeybindings'
 import { isWebPreviewInput } from './utils/previewRouting'
 import { initMonitorHistory } from './composables/useMonitor'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
@@ -153,8 +155,9 @@ const serverListRef = ref<InstanceType<typeof ServerList>>()
 
 const { settings: appSettings } = useSettings()
 const { t } = useI18n()
+const { getBinding, formatBinding } = useKeybindings()
 const notif = useNotification()
-const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = usePluginLoader()
+const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands, allQuickPicks } = usePluginLoader()
 
 const isLandscape = ref(window.innerWidth > window.innerHeight)
 
@@ -542,14 +545,14 @@ const paletteCommands = computed<Command[]>(() => {
       icon: '＋',
       title: 'New Tab',
       subtitle: 'Open a new terminal tab',
-      kbd: ['⌘', 'T'],
+      kbd: formatBinding(getBinding('newTab')),
       action: () => newTab(),
     },
     {
       icon: '✕',
       title: 'Close Tab',
       subtitle: 'Close the current tab',
-      kbd: ['⌘', 'W'],
+      kbd: formatBinding(getBinding('closeTab')),
       action: () => {
         if (activePaneId.value) closeTab(activePaneId.value)
       },
@@ -558,6 +561,7 @@ const paletteCommands = computed<Command[]>(() => {
       icon: '★',
       title: 'Saved Commands',
       subtitle: 'Open bookmarked commands',
+      kbd: formatBinding(getBinding('openBookmarks')),
       action: () => bookmarksRef.value?.open(),
     },
     {
@@ -596,28 +600,52 @@ const paletteCommands = computed<Command[]>(() => {
   return base
 })
 
+async function openQuickPicks() {
+  const picks = allQuickPicks.value
+  if (picks.length === 0) {
+    bookmarksRef.value?.open()
+    return
+  }
+
+  const commands: Command[] = []
+  for (const pick of picks) {
+    const items = await pick.options.items()
+    for (const item of items) {
+      commands.push({
+        icon: item.icon || '★',
+        title: item.label,
+        subtitle: item.detail,
+        action: item.action,
+      })
+    }
+  }
+  if (commands.length > 0) {
+    paletteRef.value?.openWithItems(commands)
+  }
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
   const cmd = e.metaKey || e.ctrlKey
-  const shift = e.shiftKey
   if (!cmd) return
 
-  if (e.key === 'k' && !shift) {
-    e.preventDefault()
-    paletteRef.value?.toggle()
-    return
-  }
-  if (e.key === 't' && !shift) {
-    e.preventDefault()
-    newTab()
-    return
-  }
-  if (e.key === 'w' && !shift) {
-    e.preventDefault()
-    if (activePaneId.value) closeTab(activePaneId.value)
-    return
+  const keyActions: Record<string, () => void> = {
+    togglePalette: () => paletteRef.value?.toggle(),
+    openBookmarks: () => openQuickPicks(),
+    newTab: () => newTab(),
+    closeTab: () => { if (activePaneId.value) closeTab(activePaneId.value) },
   }
 
-  if (!shift && e.key >= '1' && e.key <= '9') {
+  for (const [id, action] of Object.entries(keyActions)) {
+    const binding = getBinding(id)
+    const eventKey = binding.key.length === 1 ? e.key.toLowerCase() : e.key
+    if (eventKey === binding.key.toLowerCase() && e.shiftKey === binding.shift) {
+      e.preventDefault()
+      action()
+      return
+    }
+  }
+
+  if (!e.shiftKey && e.key >= '1' && e.key <= '9') {
     const idx = parseInt(e.key) - 1
     if (idx < tabs.value.length) {
       e.preventDefault()

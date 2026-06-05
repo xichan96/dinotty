@@ -1,6 +1,22 @@
 <template>
   <div>
     <section class="settings-section">
+      <h3>{{ t('keybinding.title') }}</h3>
+      <div v-for="def in defs" :key="def.id" class="settings-row kb-shortcut-row">
+        <label><span class="kb-icon">{{ def.icon }}</span> {{ t(def.titleKey) }}</label>
+        <div class="kb-shortcut-ctrl">
+          <span v-if="kbRecording !== def.id" class="kb-keys">
+            <kbd v-for="(k, i) in formatBinding(getBinding(def.id))" :key="i">{{ k }}</kbd>
+          </span>
+          <span v-else class="kb-keys recording">{{ t('keybinding.pressKeys') }}</span>
+          <button v-if="kbRecording !== def.id" class="shortcut-add" @click="startKbRecord(def.id)">{{ t('settings.record') }}</button>
+          <button v-else class="shortcut-add kb-stop" @click="stopKbRecord()">{{ t('settings.stop') }}</button>
+          <button v-if="settings.keybindings[def.id]" class="shortcut-del" @click="resetKbBinding(def.id)">{{ t('keybinding.reset') }}</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="settings-section">
       <h3>{{ t('settings.actionKeyboard') }}</h3>
       <p class="settings-hint">{{ t('settings.akHint') }}</p>
       <div class="ak-wysiwyg">
@@ -183,12 +199,15 @@
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import { useSettings, DEFAULT_ACTION_KEYBOARD } from '../../composables/useSettings'
 import { useI18n } from '../../composables/useI18n'
+import { useKeybindings } from '../../composables/useKeybindings'
 import type { ActionKey } from '../../composables/useSettings'
+import type { KeyBinding } from '../../composables/useKeybindings'
 import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
 import { getApiBase, apiUrl, authFetch } from '../../composables/apiBase'
 
 const { settings, saveSettings } = useSettings()
 const { t } = useI18n()
+const { defs, getBinding, formatBinding } = useKeybindings()
 
 const openApiPaneId = ref('')
 const openApiData = ref('')
@@ -200,6 +219,41 @@ const openApiResultOk = ref(false)
 const openApiSending = ref(false)
 const apiBaseUrl = ref('')
 getApiBase().then(b => { apiBaseUrl.value = b })
+
+// --- Keyboard shortcuts recording ---
+const kbRecording = ref<string | null>(null)
+let kbRecordHandler: ((e: KeyboardEvent) => void) | null = null
+
+function startKbRecord(id: string) {
+  kbRecording.value = id
+  kbRecordHandler = (e: KeyboardEvent) => {
+    const k = e.key
+    if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta') return
+    e.preventDefault()
+    e.stopPropagation()
+    const binding: KeyBinding = { key: k.toLowerCase(), shift: e.shiftKey }
+    settings.keybindings[id] = binding
+    stopKbRecord()
+  }
+  window.addEventListener('keydown', kbRecordHandler, true)
+  nextTick(() => {
+    document.querySelector<HTMLElement>('.xterm-helper-textarea')?.blur()
+    const ae = document.activeElement
+    if (ae instanceof HTMLElement) ae.blur()
+  })
+}
+
+function stopKbRecord() {
+  kbRecording.value = null
+  if (kbRecordHandler) {
+    window.removeEventListener('keydown', kbRecordHandler, true)
+    kbRecordHandler = null
+  }
+}
+
+function resetKbBinding(id: string) {
+  delete settings.keybindings[id]
+}
 
 function unescapeData(s: string): string {
   return s.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').replace(/\\\\/g, '\\')
@@ -458,6 +512,7 @@ function stopRecord() {
 
 onBeforeUnmount(() => {
   stopRecord()
+  stopKbRecord()
 })
 
 const FKEY_SEQ: Record<string, string> = {
@@ -721,5 +776,47 @@ function unescapeFromDisplay(s: string): string {
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+.kb-shortcut-row {
+  justify-content: space-between;
+}
+.kb-shortcut-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kb-keys {
+  display: flex;
+  gap: 3px;
+  min-width: 80px;
+  justify-content: flex-end;
+}
+.kb-keys kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1.4;
+  color: var(--fg, #e0e0e0);
+  background: var(--bg-secondary, rgba(255,255,255,0.06));
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  min-width: 18px;
+  text-align: center;
+}
+.kb-keys.recording {
+  color: var(--fg-muted, #999);
+  font-size: 12px;
+  font-style: italic;
+}
+.kb-icon {
+  display: inline-block;
+  width: 24px;
+  text-align: center;
+  font-size: 13px;
+}
+.kb-stop {
+  color: #ef4444 !important;
+  border-color: #ef4444 !important;
 }
 </style>

@@ -1,0 +1,16 @@
+{
+  "id": "dinotty-whiteboard",
+  "name": "Whiteboard",
+  "version": "1.0.0",
+  "description": "无限画布白板工具，支持自由绘图、图形、文本和图片",
+  "icon": "pen-tool",
+  "entry": "./main.js",
+  "styles": "./styles.css",
+  "commands": [
+    { "id": "whiteboard.open", "title": "Open Whiteboard" },
+    { "id": "whiteboard.new", "title": "New Whiteboard" },
+    { "id": "whiteboard.clear", "title": "Clear Whiteboard" },
+    { "id": "whiteboard.export-png", "title": "Export as PNG" },
+    { "id": "whiteboard.export-json", "title": "Export as JSON" }
+  ]
+}

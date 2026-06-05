@@ -102,6 +102,27 @@ export function activate(ctx) {
 
   ctx.commands.register('command-bookmarks.open', () => {})
 
+  ctx.commands.registerQuickPick('command-bookmarks.quick', {
+    title: 'Command Bookmarks',
+    async items() {
+      const data = await ctx.storage.get('bookmarks')
+      const bms = data || []
+      return bms.map(bm => ({
+        label: bm.name,
+        detail: bm.command,
+        icon: '★',
+        action() {
+          const paneId = ctx.terminal.activePaneId()
+          if (!paneId) {
+            ctx.ui.notify('没有活动终端', 'warn')
+            return
+          }
+          ctx.terminal.send(paneId, bm.command + '\n')
+        },
+      }))
+    },
+  })
+
   return {
     component: {
       render() {

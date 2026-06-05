@@ -58,11 +58,13 @@ const isOpen = ref(false)
 const query = ref('')
 const selected = ref(0)
 const inputRef = ref<HTMLInputElement>()
+const overrideItems = ref<Command[] | null>(null)
 
 const filtered = computed(() => {
+  const items = overrideItems.value ?? props.commands
   const q = query.value.trim().toLowerCase()
-  if (!q) return props.commands
-  return props.commands
+  if (!q) return items
+  return items
     .filter((c) => fuzzyMatch(c.title, q) !== null || c.subtitle?.toLowerCase().includes(q))
     .sort((a, b) => {
       const sa = fuzzyMatch(a.title, q) ?? 999
@@ -81,10 +83,18 @@ function open() {
 
 function close() {
   isOpen.value = false
+  overrideItems.value = null
 }
 
 function toggle() {
   isOpen.value ? close() : open()
+}
+
+function openWithItems(items: Command[]) {
+  overrideItems.value = items
+  isOpen.value = true
+  query.value = ''
+  nextTick(() => inputRef.value?.focus())
 }
 
 function onKey(e: KeyboardEvent) {
@@ -142,5 +152,5 @@ function highlightTitle(title: string) {
   ).join('')
 }
 
-defineExpose({ open, close, toggle })
+defineExpose({ open, close, toggle, openWithItems })
 </script>

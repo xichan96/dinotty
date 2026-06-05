@@ -36,6 +36,7 @@ export interface PluginContext {
 
   commands: {
     register(id: string, handler: () => void): Disposable
+    registerQuickPick(id: string, options: QuickPickOptions): Disposable
   }
 
   ui: {
@@ -85,6 +86,18 @@ export interface ProcessInfo {
 export interface ProcessHandle {
   info: ProcessInfo
   stop(): Promise<void>
+}
+
+export interface QuickPickItem {
+  label: string
+  detail?: string
+  icon?: string
+  action: () => void
+}
+
+export interface QuickPickOptions {
+  title: string
+  items: () => QuickPickItem[] | Promise<QuickPickItem[]>
 }
 
 export interface Disposable {

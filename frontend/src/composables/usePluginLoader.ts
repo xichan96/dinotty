@@ -26,6 +26,18 @@ export interface Disposable {
   dispose(): void
 }
 
+export interface QuickPickItem {
+  label: string
+  detail?: string
+  icon?: string
+  action: () => void
+}
+
+export interface QuickPickOptions {
+  title: string
+  items: () => QuickPickItem[] | Promise<QuickPickItem[]>
+}
+
 export interface PluginContext {
   reactive: typeof reactive
   ref: typeof ref
@@ -62,6 +74,7 @@ export interface PluginContext {
 
   commands: {
     register(id: string, handler: () => void): Disposable
+    registerQuickPick(id: string, options: QuickPickOptions): Disposable
   }
 
   ui: {
@@ -113,6 +126,7 @@ export interface LoadedPlugin {
 
 export const loadedPlugins = reactive(new Map<string, LoadedPlugin>())
 const pluginCommands = new Map<string, { pluginId: string; handler: () => void }>()
+const pluginQuickPicks = new Map<string, { pluginId: string; options: QuickPickOptions }>()
 
 // ─── Window API Injection Points ──────────────────────────────────────────────
 
@@ -240,6 +254,10 @@ function createPluginContext(pluginId: string): PluginContext {
       pluginCommands.set(id, { pluginId, handler })
       return { dispose: () => pluginCommands.delete(id) }
     },
+    registerQuickPick(id, options) {
+      pluginQuickPicks.set(id, { pluginId, options })
+      return { dispose: () => pluginQuickPicks.delete(id) }
+    },
   }
 
   const context: PluginContext = {
@@ -361,6 +379,11 @@ async function unloadPlugin(id: string) {
     if (entry.pluginId === id) pluginCommands.delete(cmdId)
   }
 
+  // Clean up quick picks
+  for (const [qpId, entry] of pluginQuickPicks) {
+    if (entry.pluginId === id) pluginQuickPicks.delete(qpId)
+  }
+
   removePluginCSS(id)
   loadedPlugins.delete(id)
 }
@@ -448,6 +471,17 @@ export function usePluginLoader() {
     return result
   })
 
+  const allQuickPicks = computed(() => {
+    const result: Array<{ id: string; pluginId: string; options: QuickPickOptions }> = []
+    for (const [id, { pluginId, options }] of pluginQuickPicks) {
+      const plugin = loadedPlugins.get(pluginId)
+      if (plugin?.state === 'active') {
+        result.push({ id, pluginId, options })
+      }
+    }
+    return result
+  })
+
   const pluginList = computed(() => {
     return Array.from(loadedPlugins.values()).map(p => ({
       id: p.id,
@@ -458,5 +492,5 @@ export function usePluginLoader() {
     }))
   })
 
-  return { loadedPlugins, loadPlugin, unloadPlugin, loadAll, allCommands, getPluginContext, pluginList }
+  return { loadedPlugins, loadPlugin, unloadPlugin, loadAll, allCommands, allQuickPicks, getPluginContext, pluginList }
 }

@@ -162,6 +162,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [val: boolean]
+  bookmarks: []
 }>()
 
 const { settings } = useSettings()
@@ -397,6 +398,9 @@ function onSpecial(sp: string) {
     kbMode.value = kbMode.value === 'action' ? 'default' : 'action'
     if (kbMode.value === 'default') fetchSuggestions()
     nextTick(applyHeight)
+  }
+  if (sp === 'bookmarks') {
+    emit('bookmarks')
   }
 }
 

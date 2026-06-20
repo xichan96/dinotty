@@ -879,12 +879,10 @@ function onGlobalKeydown(e: KeyboardEvent) {
       if (!activePaneId.value) return
       const tab = tabs.value.find(t => t.paneId === activePaneId.value)
       if (tab?.type === 'terminal' && getAllLeaves(tab.layout).length > 1) {
-        // Multi-pane: close current pane
-        if (!await splitPane.closePane(tab.activePaneId)) {
-          requestCloseTab(activePaneId.value)
-        }
+        // Multi-pane: route through confirmation gate (consistent with X button)
+        await onClosePane(tab.paneId, tab.activePaneId)
       } else {
-        requestCloseTab(activePaneId.value)
+        await requestCloseTab(activePaneId.value)
       }
     },
     splitHorizontal: () => splitPane.splitPane('horizontal'),

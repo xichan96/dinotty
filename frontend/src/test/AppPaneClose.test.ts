@@ -58,9 +58,25 @@ vi.mock('../composables/apiBase', () => ({
 }))
 vi.mock('../composables/useTransport', () => ({ isTauri: () => false }))
 vi.mock('../composables/useTerminal', () => ({ isTouchDevice: () => false }))
+// Per-binding key map so Cmd+W can be dispatched without colliding with
+// other keyActions in onGlobalKeydown (the first matching binding wins).
+const BINDING_KEYS: Record<string, string> = {
+  togglePalette: 'p',
+  openBookmarks: 'b',
+  newTab: 't',
+  closeTab: 'w',
+  splitHorizontal: 'd',
+  splitVertical: 'e',
+  toggleBroadcast: 'g',
+  toggleZoom: 'z',
+  equalizePanes: '=',
+  focusNextPane: ']',
+  focusPrevPane: '[',
+  searchTerminal: 'f',
+}
 vi.mock('../composables/useKeybindings', () => ({
   useKeybindings: () => ({
-    getBinding: () => ({ key: 'x', shift: false }),
+    getBinding: (id: string) => ({ key: BINDING_KEYS[id] ?? 'x', shift: false }),
     formatBinding: (b: any) => b.key,
   }),
 }))
@@ -301,6 +317,98 @@ describe('App.vue - onClosePane routes through confirmation gate', () => {
 
     expect(mocks.closePane).toHaveBeenCalledWith('pane-1')
     expect(mocks.apiCloseTab).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+})
+
+describe('App.vue - Cmd+W routes through confirmation gate in split-pane mode', () => {
+  beforeEach(() => {
+    settings.confirm_before_close_tab = true
+    mocks.closePane.mockReset()
+    mocks.splitPane.mockReset()
+    mocks.toggleBroadcast.mockReset()
+    mocks.toggleZoom.mockReset()
+    mocks.equalizePanes.mockReset()
+    mocks.focusPane.mockReset()
+    mocks.focusNext.mockReset()
+    mocks.focusPrev.mockReset()
+    mocks.keyboardResize.mockReset()
+    mocks.reorderPane.mockReset()
+    mocks.onTerminalInput.mockReset()
+    mocks.focusNeighbor.mockReset()
+    mocks.apiCloseTab.mockReset()
+    localStorageMock.clear()
+  })
+
+  it('Cmd+W on multi-pane layout → does NOT closePane, shows modal', async () => {
+    mocks.closePane.mockResolvedValue(true)
+
+    const wrapper = await mountWithTabs()
+
+    // Dispatch Cmd+W (stubbed key 'w' for closeTab binding).
+    // App.vue attaches the keydown listener to `document`.
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+
+    // closePane must NOT have been called yet — we expect the modal gate
+    expect(mocks.closePane).not.toHaveBeenCalled()
+
+    // ConfirmModal must now be visible
+    const confirmModal = wrapper.findComponent(ConfirmModalStub)
+    expect(confirmModal.exists()).toBe(true)
+    expect((confirmModal.vm as any).$props.visible).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('Cmd+W + confirm in multi-pane mode → calls splitPane.closePane with active pane id', async () => {
+    mocks.closePane.mockResolvedValue(true)
+
+    const wrapper = await mountWithTabs()
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+
+    const confirmModal = wrapper.findComponent(ConfirmModalStub)
+    await confirmModal.vm.$emit('confirm')
+    await nextTick()
+
+    // closePane should be called with the active pane id (pane-1 in fixture)
+    expect(mocks.closePane).toHaveBeenCalledWith('pane-1')
+    // apiCloseTab should NOT have been called (closePane returned true)
+    expect(mocks.apiCloseTab).not.toHaveBeenCalled()
+    // Modal should be closed
+    expect((confirmModal.vm as any).$props.visible).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('Cmd+W + setting off → bypasses modal and calls closePane directly', async () => {
+    settings.confirm_before_close_tab = false
+    mocks.closePane.mockResolvedValue(true)
+
+    const wrapper = await mountWithTabs()
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'w',
+      metaKey: true,
+      bubbles: true,
+    }))
+    await nextTick()
+
+    expect(mocks.closePane).toHaveBeenCalledWith('pane-1')
+    // Modal should NOT be visible (bypass)
+    const confirmModal = wrapper.findComponent(ConfirmModalStub)
+    expect((confirmModal.vm as any).$props.visible).toBe(false)
 
     wrapper.unmount()
   })

@@ -2,6 +2,9 @@
 dist/
 node_modules/
 .claude/
+.claude-code/
+.codegraph/
+openspec/
 CLAUDE.md
 *.tsbuildinfo
 .pnpm-store/

@@ -25,6 +25,7 @@
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+  touch-action: pan-x;
 }
 #tabs-list::-webkit-scrollbar { display: none; }
 
@@ -44,6 +45,7 @@
   transition: background 0.1s;
   position: relative;
   flex-shrink: 0;
+  touch-action: pan-x;
 }
 .tab:hover { background: var(--tab-hover-bg); }
 .tab.active {

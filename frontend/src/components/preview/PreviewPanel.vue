@@ -15,27 +15,30 @@
         <button type="button" :disabled="!canGoBack" @click="goBack" title="Back"><ChevronLeft :size="14" /></button>
         <button type="button" :disabled="!canGoForward" @click="goForward" title="Forward"><ChevronRight :size="14" /></button>
         <button type="button" @click="refresh" title="Refresh"><RotateCw :size="14" /></button>
-        <form class="preview-address" @submit.prevent="go">
-          <input
-            ref="addressInputRef"
-            v-model="localAddress"
-            type="text"
-            enterkeyhint="go"
-            autocapitalize="none"
-            autocorrect="off"
-            spellcheck="false"
-            :placeholder="t('previewPanel.placeholder')"
+        <div class="preview-address-wrap">
+          <form class="preview-address" @submit.prevent="go">
+            <input
+              ref="addressInputRef"
+              v-model="localAddress"
+              type="text"
+              enterkeyhint="go"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="t('previewPanel.placeholder')"
+              @focus="onAddressFocus"
+              @blur="onAddressBlur"
+            />
+            <button type="submit" class="go-btn" title="Go"><ArrowRight :size="14" /></button>
+          </form>
+          <AddressDropdown
+            :visible="addressDropdownVisible && kind === 'web'"
+            @select="onDropdownSelect"
+            @close="addressDropdownVisible = false"
           />
-          <button type="submit" class="go-btn" title="Go"><ArrowRight :size="14" /></button>
-        </form>
+        </div>
         <button v-if="kind === 'web' && webUrl" type="button" @click="openInBrowser" :title="t('previewPanel.openInBrowser')"><ExternalLink :size="14" /></button>
-        <template v-if="kind === 'files'">
-          <button type="button" @click="onFilesTreeToggle" :title="filesTreeTitle">
-            <component :is="filesTreeIcon" :size="14" />
-          </button>
-          <button type="button" @click="onFilesUpload()" title="Upload"><Upload :size="14" /></button>
-          <button type="button" @click="onFilesDownload" title="Download"><Download :size="14" /></button>
-        </template>
+        <button v-if="kind === 'web' && webUrl" type="button" :class="{ 'star-active': isWebBookmarked }" @click="onToggleWebBookmark" :title="isWebBookmarked ? t('webBookmark.removeFrom') : t('webBookmark.addTo')"><Star :size="14" :fill="isWebBookmarked ? 'currentColor' : 'none'" /></button>
         <button type="button" @click="close" title="Close"><X :size="14" /></button>
       </div>
       <div class="preview-body">
@@ -62,14 +65,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, unref, type Ref } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import FileWorkspacePreview from './FileWorkspacePreview.vue'
 import { isWebPreviewInput, normalizeWebUrl, urlToPreviewSrc } from '../../utils/previewRouting'
 import { getApiBase, getAuthToken } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
-import { ChevronLeft, ChevronRight, RotateCw, ArrowRight, ExternalLink, PanelLeftClose, PanelLeftOpen, Upload, Download, X, Globe, FolderOpen } from 'lucide-vue-next'
-import { isNarrowViewport } from '../../utils/viewport'
+import { ChevronLeft, ChevronRight, RotateCw, ArrowRight, ExternalLink, X, Globe, FolderOpen, Star } from 'lucide-vue-next'
 import { usePaneResize } from '../../composables/usePaneResize'
+import { useWebBookmarks } from '../../composables/useWebBookmarks'
+import { useRecentUrls } from '../../composables/useRecentAccess'
+import { settings } from '../../composables/useSettings'
+import AddressDropdown from './AddressDropdown.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -95,7 +101,35 @@ const treeCollapsed = ref(false)
 const addressInputRef = ref<HTMLInputElement>()
 const localAddress = ref('')
 const navCounter = ref(0)
-const narrow = ref(isNarrowViewport())
+const webBookmarks = useWebBookmarks()
+const recentUrlsComposable = useRecentUrls()
+const addressDropdownVisible = ref(false)
+
+const isWebBookmarked = computed(() => {
+  if (props.kind !== 'web' || !props.webUrl) return false
+  return webBookmarks.isBookmarked(props.webUrl)
+})
+
+function onToggleWebBookmark() {
+  if (!props.webUrl) return
+  webBookmarks.toggleBookmark(props.webUrl, props.webUrl)
+}
+
+function onAddressFocus() {
+  if (webBookmarks.bookmarks.value.length > 0 || settings.recent_urls.length > 0) {
+    addressDropdownVisible.value = true
+  }
+}
+
+function onAddressBlur() {
+  setTimeout(() => { addressDropdownVisible.value = false }, 200)
+}
+
+function onDropdownSelect(url: string) {
+  localAddress.value = url
+  go()
+  addressDropdownVisible.value = false
+}
 
 const navHistory = ref<string[]>([])
 const navIndex = ref(-1)
@@ -148,28 +182,6 @@ const direction = computed(() =>
     ? 'horizontal' : 'vertical'
 )
 
-function filesDrawerRef(): Ref<boolean> | undefined {
-  const inst = filesRef.value as { drawerOpen?: Ref<boolean> } | undefined
-  return inst?.drawerOpen
-}
-
-const filesTreeIcon = computed(() => {
-  if (!narrow.value) return treeCollapsed.value ? PanelLeftOpen : PanelLeftClose
-  return unref(filesDrawerRef()) ? PanelLeftClose : PanelLeftOpen
-})
-
-const filesTreeTitle = computed(() => {
-  if (!narrow.value) {
-    return treeCollapsed.value ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')
-  }
-  return unref(filesDrawerRef()) ? t('previewPanel.collapseTree') : t('previewPanel.expandTree')
-})
-
-function onFilesTreeToggle() {
-  if (narrow.value) filesRef.value?.toggleDrawer()
-  else treeCollapsed.value = !treeCollapsed.value
-}
-
 const resolvedIframeSrc = computed(() => {
   if (!props.webUrl) return 'about:blank'
   const base = urlToPreviewSrc(props.webUrl, previewHttpBase.value || undefined)
@@ -186,10 +198,6 @@ function openInBrowser() {
   if (props.webUrl) window.open(props.webUrl, '_blank')
 }
 
-function onResize() {
-  narrow.value = isNarrowViewport()
-}
-
 watch(
   () => [props.address, props.visible],
   () => {
@@ -203,6 +211,7 @@ watch(
   () => {
     if (props.visible && props.kind === 'web' && props.webUrl) {
       navCounter.value++
+      recentUrlsComposable.recordUrl(props.webUrl)
     }
   },
   { immediate: true },
@@ -228,6 +237,7 @@ async function restoreFilesPreview() {
 function switchToWeb() {
   if (props.kind === 'web') return
   emit('update:kind', 'web')
+  localAddress.value = props.webUrl || ''
   if (!props.webUrl) {
     nextTick(() => addressInputRef.value?.focus())
   }
@@ -237,6 +247,7 @@ function switchToFiles() {
   if (props.kind === 'files') return
   treeCollapsed.value = false
   emit('update:kind', 'files')
+  localAddress.value = props.address || ''
   void (async () => {
     await nextTick()
     await nextTick()
@@ -271,14 +282,6 @@ function go() {
 function refresh() {
   if (props.kind === 'web') navCounter.value++
   else filesRef.value?.reloadAll()
-}
-
-function onFilesUpload() {
-  filesRef.value?.triggerUpload()
-}
-
-function onFilesDownload() {
-  filesRef.value?.downloadSelected()
 }
 
 function close() {
@@ -325,7 +328,6 @@ function onProxyMessage(e: MessageEvent) {
 }
 
 onMounted(async () => {
-  window.addEventListener('resize', onResize)
   window.addEventListener('message', onProxyMessage)
   previewHttpBase.value = await getApiBase()
   if (props.visible && props.kind === 'files' && props.address) {
@@ -342,7 +344,6 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', onResize)
   window.removeEventListener('message', onProxyMessage)
 })
 </script>
@@ -431,7 +432,7 @@ onBeforeUnmount(() => {
 
 .preview-mode-switch button.active {
   color: var(--accent, #89b4fa);
-  background: var(--tab-active-bg, #2a2a2a);
+  background: var(--tab-hover-bg, #333);
 }
 
 .preview-toolbar-sep {
@@ -537,5 +538,18 @@ onBeforeUnmount(() => {
 .preview-body > :deep(.file-workspace-embedded) {
   position: absolute;
   inset: 0;
+}
+
+.star-active {
+  color: var(--accent, #89b4fa) !important;
+}
+
+.preview-address-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.preview-address-wrap .preview-address {
+  flex: 1;
 }
 </style>

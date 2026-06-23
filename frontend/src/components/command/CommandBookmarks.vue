@@ -3,7 +3,15 @@
     <div v-if="visible" class="bookmarks-backdrop" @click.self="close" @keydown.escape="close">
       <div class="bookmarks-panel">
         <div class="bookmarks-header">
-          <h2>{{ t('bookmarks.title') }}</h2>
+          <div class="bookmarks-search">
+            <Search :size="14" />
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              :placeholder="t('bookmarks.search')"
+              class="bookmarks-search-input"
+            />
+          </div>
           <div class="bookmarks-header-actions">
             <button class="bookmarks-add-toggle" @click="toggleAddMode" :class="{ active: addMode }">
               <Plus :size="14" />
@@ -58,21 +66,59 @@
             :key="bm.id"
             class="bookmark-item"
             :class="{ 'drag-over-top': dropTarget === bm.id && dropPos === 'top', 'drag-over-bottom': dropTarget === bm.id && dropPos === 'bottom', dragging: dragId === bm.id }"
-            draggable="true"
+            :draggable="editId !== bm.id"
             @dragstart="onDragStart($event, bm.id)"
             @dragover.prevent="onDragOver($event, bm.id)"
             @dragleave="onDragLeave(bm.id)"
             @drop.prevent="onDrop(bm.id)"
             @dragend="onDragEnd"
           >
-            <GripVertical :size="14" class="bookmark-grip" />
-            <div class="bookmark-info" @click="sendBookmark(bm)">
-              <span class="bookmark-name">{{ bm.name || bm.command }}</span>
-              <span class="bookmark-cmd">{{ bm.command }}</span>
-            </div>
-            <button class="bookmark-del" @click="removeBookmark(bm.id)">
-              <X :size="12" />
-            </button>
+            <template v-if="editId === bm.id">
+              <div class="bookmark-edit-form">
+                <input
+                  ref="editNameInputRef"
+                  v-model="editName"
+                  :placeholder="t('bookmarks.name')"
+                  class="bookmark-input"
+                  @keydown.enter="editCommandInputRef?.focus()"
+                  @keydown.escape="cancelEdit"
+                />
+                <input
+                  ref="editCommandInputRef"
+                  v-model="editCommand"
+                  :placeholder="t('bookmarks.command')"
+                  class="bookmark-input wide"
+                  @keydown.meta.enter="saveEdit"
+                  @keydown.ctrl.enter="saveEdit"
+                  @keydown.escape="cancelEdit"
+                />
+                <input
+                  v-model="editGroup"
+                  :placeholder="t('bookmarks.group')"
+                  class="bookmark-input short"
+                  @keydown.escape="cancelEdit"
+                />
+                <button class="bookmark-add-btn" @click="saveEdit" :disabled="!editCommand.trim()">
+                  <Check :size="14" />
+                </button>
+                <button class="bookmark-edit-cancel" @click="cancelEdit">
+                  <X :size="14" />
+                </button>
+              </div>
+            </template>
+            <template v-else>
+              <GripVertical :size="14" class="bookmark-grip" />
+              <div class="bookmark-info" @click="sendBookmark(bm)">
+                <span class="bookmark-name">{{ bm.name || bm.command }}</span>
+                <span class="bookmark-cmd">{{ bm.command }}</span>
+              </div>
+              <button class="bookmark-edit" @click.stop="startEdit(bm)" :title="t('bookmarks.edit')">
+                <Pencil :size="12" />
+              </button>
+              <button class="bookmark-del" @click="removeBookmark(bm.id)">
+                <X :size="12" />
+              </button>
+            </template>
           </div>
         </div>
       </div>
@@ -82,7 +128,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
-import { Plus, X, Check, GripVertical } from 'lucide-vue-next'
+import { Plus, X, Check, GripVertical, Search, Pencil } from 'lucide-vue-next'
 import { useSettings } from '../../composables/useSettings'
 import { randomId } from '../../utils/id'
 import { useI18n } from '../../composables/useI18n'
@@ -100,6 +146,16 @@ const newCommand = ref('')
 const newGroup = ref('')
 const nameInputRef = ref<HTMLInputElement>()
 const commandInputRef = ref<HTMLInputElement>()
+const searchInputRef = ref<HTMLInputElement>()
+const searchQuery = ref('')
+
+// Edit state
+const editId = ref<string | null>(null)
+const editName = ref('')
+const editCommand = ref('')
+const editGroup = ref('')
+const editNameInputRef = ref<HTMLInputElement>()
+const editCommandInputRef = ref<HTMLInputElement>()
 
 // Drag state
 const dragId = ref<string | null>(null)
@@ -118,21 +174,34 @@ const groups = computed(() => {
 })
 
 const filteredBookmarks = computed(() => {
-  if (activeGroup.value === 'All') return settings.bookmarks
-  return settings.bookmarks.filter((b) => b.group === activeGroup.value)
+  let list = settings.bookmarks
+  if (activeGroup.value !== 'All') {
+    list = list.filter((b) => b.group === activeGroup.value)
+  }
+  const q = searchQuery.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter((b) =>
+      b.name.toLowerCase().includes(q) || b.command.toLowerCase().includes(q)
+    )
+  }
+  return list
 })
 
 function open() {
   visible.value = true
   addMode.value = false
+  searchQuery.value = ''
+  nextTick(() => searchInputRef.value?.focus())
 }
 function close() {
   visible.value = false
   addMode.value = false
+  editId.value = null
 }
 function toggleAddMode() {
   addMode.value = !addMode.value
   if (addMode.value) {
+    editId.value = null
     nextTick(() => nameInputRef.value?.focus())
   }
 }
@@ -172,6 +241,31 @@ function removeBookmark(id: string) {
     settings.bookmarks.splice(idx, 1)
     saveSettings()
   }
+}
+
+function startEdit(bm: { id: string; name: string; command: string; group: string | null }) {
+  editId.value = bm.id
+  editName.value = bm.name
+  editCommand.value = bm.command
+  editGroup.value = bm.group || ''
+  addMode.value = false
+  nextTick(() => editNameInputRef.value?.focus())
+}
+
+function saveEdit() {
+  if (!editId.value || !editCommand.value.trim()) return
+  const bm = settings.bookmarks.find((b) => b.id === editId.value)
+  if (bm) {
+    bm.name = editName.value.trim() || editCommand.value.trim()
+    bm.command = editCommand.value.trim()
+    bm.group = editGroup.value.trim() || null
+    saveSettings()
+  }
+  editId.value = null
+}
+
+function cancelEdit() {
+  editId.value = null
 }
 
 function onDragStart(e: DragEvent, id: string) {
@@ -253,10 +347,24 @@ defineExpose({ open, close })
   padding: 12px 16px;
   border-bottom: 1px solid var(--border, #333);
 }
-.bookmarks-header h2 {
-  font-size: 15px;
-  font-weight: 600;
+.bookmarks-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  color: var(--fg-muted);
+}
+.bookmarks-search-input {
+  flex: 1;
+  background: none;
+  border: none;
   color: var(--fg-bright);
+  font-size: 14px;
+  outline: none;
+  min-width: 0;
+}
+.bookmarks-search-input::placeholder {
+  color: var(--fg-muted);
 }
 .bookmarks-header-actions {
   display: flex;
@@ -388,6 +496,42 @@ defineExpose({ open, close })
 }
 .bookmark-item:hover .bookmark-del { opacity: 1; }
 .bookmark-del:hover { background: rgba(255,100,100,0.2); color: #ff6b6b; }
+
+.bookmark-edit {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  cursor: pointer;
+}
+.bookmark-item:hover .bookmark-edit { opacity: 1; }
+.bookmark-edit:hover { background: rgba(100,150,255,0.2); color: #6b9fff; }
+
+.bookmark-edit-form {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  align-items: center;
+}
+.bookmark-edit-cancel {
+  width: 32px;
+  height: 30px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.bookmark-edit-cancel:hover { background: rgba(255,100,100,0.2); color: #ff6b6b; }
 
 .bookmark-add-form {
   display: flex;

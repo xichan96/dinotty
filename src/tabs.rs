@@ -111,9 +111,9 @@ pub async fn close_tab(
         .map(|layout| session::collect_leaf_pane_ids(&layout))
         .unwrap_or_default();
 
-    // Remove all PTY sessions
+    // Kill and remove all PTY sessions
     for leaf_id in &leaf_ids {
-        manager.sessions.remove(leaf_id);
+        manager.kill_and_remove(leaf_id);
     }
 
     // Remove tab
@@ -203,7 +203,7 @@ pub async fn split_pane(
         Some(l) => l,
         None => {
             // Clean up PTY if layout update fails
-            manager.sessions.remove(&new_pane_id);
+            manager.kill_and_remove(&new_pane_id);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "failed to update layout" })),
@@ -275,8 +275,8 @@ pub async fn close_pane(
             .into_response();
     }
 
-    // Remove PTY session
-    manager.sessions.remove(&pane_id);
+    // Kill and remove PTY session
+    manager.kill_and_remove(&pane_id);
 
     // Update layout
     if leaf_ids.len() <= 1 {

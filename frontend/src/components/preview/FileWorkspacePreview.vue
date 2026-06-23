@@ -1,20 +1,20 @@
 <template>
   <div v-if="visible && embedded" class="file-workspace-embedded">
-    <input ref="fileInputRef" type="file" multiple class="sr-only" @change="onFilePick" />
+    <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
     <div ref="fileWorkspaceBodyRef" class="file-workspace-body" :class="{ embedded }"
       @dragover.prevent
-      @dragenter.prevent="dragCounter++"
-      @dragleave="dragCounter = Math.max(0, dragCounter - 1)"
-      @drop.prevent="dragCounter = 0; onDrop($event)"
+      @dragenter.prevent="ops.onWorkspaceDragEnter()"
+      @dragleave="ops.onWorkspaceDragLeave()"
+      @drop.prevent="ops.onWorkspaceDrop($event)"
     >
-      <div v-if="dragging" class="file-workspace-drop-overlay">{{ t('filePreview.dropHint') }}</div>
+      <div v-if="ops.dragging.value" class="file-workspace-drop-overlay">{{ t('filePreview.dropHint') }}</div>
       <div
         v-if="!treeCollapsed"
         class="file-workspace-tree-wrap"
         :class="{ narrow: layout.narrow.value }"
         :style="layout.treeWrapStyle.value"
       >
-        <div class="file-workspace-tree tree-host" @click.stop @pointerdown.capture="bumpTreePointerTs" @contextmenu.prevent="onTreeBgContextMenu">
+        <div class="file-workspace-tree tree-host" @click.stop @pointerdown.capture="bumpTreePointerTs" @contextmenu.prevent="ctxMenu.onTreeBgContextMenu">
           <TreeRows
             :pane-id="paneId"
             :depth="0"
@@ -34,10 +34,13 @@
             @inline-create-cancel="onInlineCreateCancel"
             @inline-rename-commit="onInlineRenameCommit"
             @inline-rename-cancel="onInlineRenameCancel"
-            @context-menu="onTreeContextMenu"
-            @long-press="onTreeLongPress"
-            @move-entry="onMoveEntry"
+            @context-menu="ctxMenu.onTreeContextMenu"
+            @long-press="ctxMenu.onTreeLongPress"
+            @move-entry="ctxMenu.onMoveEntry"
             @swipe-action="onSwipeAction"
+            @upload-to-dir="onUploadToDir"
+            :on-dir-drag-enter="ops.setHoveredDir"
+            :on-dir-drag-leave="ops.clearHoveredDir"
           />
         </div>
       </div>
@@ -47,55 +50,56 @@
         @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
         @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
       ></div>
-      <button
-        v-if="treeCollapsed"
-        type="button"
-        class="file-workspace-tree-reveal"
-        :title="t('previewPanel.expandTree')"
-        @click="treeCollapsed = false"
-      >
-        ▶
-      </button>
-      <FilePreviewContent
-        ref="previewContentRef1"
-        :pane-id="paneId"
-        :file-path="selectedRel ?? undefined"
-        :preview-loading="previewLoading"
-        :preview-err="previewErr"
-        :selected-rel="selectedRel"
-        :selected-is-dir="selectedIsDir"
-        :meta="meta"
-        :raw-url="rawUrl"
-        :show-save="false"
-        :audio-title="audioTitle"
-        :audio-sub="audioSub"
-        :audio-time-now="audio.audioTimeNow.value"
-        :audio-time-total="audio.audioTimeTotal.value"
-        :audio-seek-value="audio.audioSeekValue.value"
-        :audio-vol-value="audio.audioVolValue.value"
-        :audio-playing="audio.audioPlaying.value"
-        :editor-dirty="editorDirty"
-        :editor-text="editorText"
-        :can-save-editor="canSaveEditor"
-        :md-show-preview="mdShowPreview"
-        :html-show-preview="htmlShowPreview"
-        :markdown-editor-html="markdownEditorHtml"
-        :office-loading="officeLoading"
-        :office-err="officeErr"
-        :office-html="officeHtml"
-        @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
-        @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
-        @audio-ended="audio.onAudioEnded()"
-        @audio-seek-input="(ev) => audio.onAudioSeekInput(audioRef, ev)"
-        @seek-audio="(d) => audio.seekAudio(audioRef, d)"
-        @toggle-audio="audio.toggleAudio(audioRef)"
-        @audio-volume-input="(ev) => audio.onAudioVolumeInput(audioRef, ev)"
-        @update:md-show-preview="mdShowPreview = $event"
-        @update:html-show-preview="htmlShowPreview = $event"
-        @update:editor-text="editorText = $event"
-        @save-editor="saveEditor"
-        @selection-change="onEditorSelectionChange"
-      />
+      <div class="file-workspace-preview-wrap">
+        <button
+          type="button"
+          class="tree-collapse-btn"
+          :title="treeCollapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')"
+          @click="treeCollapsed = !treeCollapsed"
+        >
+          <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
+        </button>
+        <FilePreviewContent
+          ref="previewContentRef1"
+          :pane-id="paneId"
+          :file-path="selectedRel ?? undefined"
+          :preview-loading="previewLoading"
+          :preview-err="previewErr"
+          :selected-rel="selectedRel"
+          :selected-is-dir="selectedIsDir"
+          :meta="meta"
+          :raw-url="ops.rawUrl.value"
+          :show-save="false"
+          :audio-title="audioTitle"
+          :audio-sub="audioSub"
+          :audio-time-now="audio.audioTimeNow.value"
+          :audio-time-total="audio.audioTimeTotal.value"
+          :audio-seek-value="audio.audioSeekValue.value"
+          :audio-vol-value="audio.audioVolValue.value"
+          :audio-playing="audio.audioPlaying.value"
+          :editor-dirty="editor.editorDirty.value"
+          :editor-text="editor.editorText.value"
+          :can-save-editor="editor.canSaveEditor.value"
+          :md-show-preview="editor.mdShowPreview.value"
+          :html-show-preview="editor.htmlShowPreview.value"
+          :markdown-editor-html="editor.markdownEditorHtml.value"
+          :office-loading="office.officeLoading.value"
+          :office-err="office.officeErr.value"
+          :office-html="office.officeHtml.value"
+          @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
+          @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
+          @audio-ended="audio.onAudioEnded()"
+          @audio-seek-input="(ev) => audio.onAudioSeekInput(audioRef, ev)"
+          @seek-audio="(d) => audio.seekAudio(audioRef, d)"
+          @toggle-audio="audio.toggleAudio(audioRef)"
+          @audio-volume-input="(ev) => audio.onAudioVolumeInput(audioRef, ev)"
+          @update:md-show-preview="editor.mdShowPreview.value = $event"
+          @update:html-show-preview="editor.htmlShowPreview.value = $event"
+          @update:editor-text="editor.editorText.value = $event"
+          @save-editor="editor.saveEditor"
+          @selection-change="editor.onEditorSelectionChange"
+        />
+      </div>
     </div>
   </div>
   <div v-else-if="visible" class="file-workspace" :class="layout.direction.value">
@@ -106,55 +110,52 @@
     ></div>
     <div class="file-workspace-panel">
       <div class="file-workspace-toolbar">
-        <button
-          v-if="!layout.narrow.value"
-          type="button"
-          class="file-workspace-drawer-btn"
-          :title="treeCollapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')"
-          @click="treeCollapsed = !treeCollapsed"
-        >
-          {{ treeCollapsed ? '▶' : '◀' }}
-        </button>
-        <button
-          v-if="layout.narrow.value"
-          type="button"
-          class="file-workspace-drawer-btn"
-          :title="treeCollapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')"
-          @click="treeCollapsed = !treeCollapsed"
-        >
-          {{ treeCollapsed ? '▶' : '◀' }}
-        </button>
         <button type="button" :disabled="!nav.canGoBack.value" @click="doGoBack" title="Back">←</button>
         <button type="button" :disabled="!nav.canGoForward.value" @click="doGoForward" title="Forward">→</button>
         <button type="button" @click="reloadAll" title="Refresh">↻</button>
-        <span class="file-workspace-cwd" :title="cwdLabel">{{ cwdShort }}</span>
+        <div class="file-workspace-cwd-wrap">
+          <span class="file-workspace-cwd" :title="cwdLabel" @click="recentDropdownOpen = !recentDropdownOpen">{{ cwdShort }}</span>
+          <div v-if="recentDropdownOpen" class="file-workspace-cwd-backdrop" @click="recentDropdownOpen = false"></div>
+          <FileRecentDropdown
+            :visible="recentDropdownOpen"
+            @select="onRecentSelect"
+            @close="recentDropdownOpen = false"
+          />
+        </div>
+        <button
+          type="button"
+          :class="{ 'star-active': isSelectedBookmarked }"
+          :disabled="!selectedRel || selectedIsDir"
+          :title="isSelectedBookmarked ? t('fileBookmark.removeFrom') : t('fileBookmark.addTo')"
+          @click="onToggleBookmark"
+        >
+          <Star :size="14" :fill="isSelectedBookmarked ? 'currentColor' : 'none'" />
+        </button>
         <div class="file-workspace-add-menu">
-          <button type="button" @click="addMenuOpen = !addMenuOpen" title="New">+</button>
-          <div v-if="addMenuOpen" class="file-workspace-add-backdrop" @click="addMenuOpen = false"></div>
-          <div v-if="addMenuOpen" class="file-workspace-add-dropdown">
-            <button type="button" @click="addMenuOpen = false; startNewFile()">{{ t('filePreview.ctxNewFile') }}</button>
-            <button type="button" @click="addMenuOpen = false; startNewFolder()">{{ t('filePreview.ctxNewFolder') }}</button>
+          <button type="button" @click="ctxMenu.addMenuOpen.value = !ctxMenu.addMenuOpen.value" title="New">+</button>
+          <div v-if="ctxMenu.addMenuOpen.value" class="file-workspace-add-backdrop" @click="ctxMenu.addMenuOpen.value = false"></div>
+          <div v-if="ctxMenu.addMenuOpen.value" class="file-workspace-add-dropdown">
+            <button type="button" @click="ctxMenu.addMenuOpen.value = false; startNewFile()">{{ t('filePreview.ctxNewFile') }}</button>
+            <button type="button" @click="ctxMenu.addMenuOpen.value = false; startNewFolder()">{{ t('filePreview.ctxNewFolder') }}</button>
           </div>
         </div>
-        <button type="button" @click="triggerUpload()" title="Upload">↑</button>
-        <button type="button" :disabled="!canDownload" @click="downloadSelected" title="Download">↓</button>
         <button type="button" @click="close" title="Close">✕</button>
       </div>
-      <input ref="fileInputRef" type="file" multiple class="sr-only" @change="onFilePick" />
+      <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
       <div ref="fileWorkspaceBodyRef" class="file-workspace-body"
         @dragover.prevent
-        @dragenter.prevent="dragCounter++"
-        @dragleave="dragCounter = Math.max(0, dragCounter - 1)"
-        @drop.prevent="dragCounter = 0; onDrop($event)"
+        @dragenter.prevent="ops.dragCounter.value++"
+        @dragleave="ops.dragCounter.value = Math.max(0, ops.dragCounter.value - 1)"
+        @drop.prevent="ops.dragCounter.value = 0; ops.onDrop($event)"
       >
-        <div v-if="dragging" class="file-workspace-drop-overlay">{{ t('filePreview.dropHint') }}</div>
+        <div v-if="ops.dragging.value" class="file-workspace-drop-overlay">{{ t('filePreview.dropHint') }}</div>
         <div
           v-if="!treeCollapsed"
           class="file-workspace-tree-wrap"
           :class="{ narrow: layout.narrow.value }"
           :style="layout.treeWrapStyle.value"
         >
-          <div class="file-workspace-tree tree-host" @click.stop @pointerdown.capture="bumpTreePointerTs" @contextmenu.prevent="onTreeBgContextMenu">
+          <div class="file-workspace-tree tree-host" @click.stop @pointerdown.capture="bumpTreePointerTs" @contextmenu.prevent="ctxMenu.onTreeBgContextMenu">
             <TreeRows
               :pane-id="paneId"
               :depth="0"
@@ -171,10 +172,13 @@
               @select-dir="trySelectDir"
               @inline-create-commit="onInlineCreateCommit"
               @inline-create-cancel="onInlineCreateCancel"
-              @context-menu="onTreeContextMenu"
-              @long-press="onTreeLongPress"
-              @move-entry="onMoveEntry"
+              @context-menu="ctxMenu.onTreeContextMenu"
+              @long-press="ctxMenu.onTreeLongPress"
+              @move-entry="ctxMenu.onMoveEntry"
               @swipe-action="onSwipeAction"
+              @upload-to-dir="onUploadToDir"
+              :on-dir-drag-enter="ops.setHoveredDir"
+              :on-dir-drag-leave="ops.clearHoveredDir"
             />
           </div>
         </div>
@@ -184,88 +188,89 @@
           @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
           @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
         ></div>
-        <button
-          v-if="treeCollapsed"
-          type="button"
-          class="file-workspace-tree-reveal"
-          :title="t('previewPanel.expandTree')"
-          @click="treeCollapsed = false"
-        >
-          ▶
-        </button>
-          <FilePreviewContent
-          ref="previewContentRef2"
-          :pane-id="paneId"
-          :file-path="selectedRel ?? undefined"
-          :preview-loading="previewLoading"
-          :preview-err="previewErr"
-          :selected-rel="selectedRel"
-          :selected-is-dir="selectedIsDir"
-          :meta="meta"
-          :raw-url="rawUrl"
-          :show-save="true"
-          :audio-title="audioTitle"
-          :audio-sub="audioSub"
-          :audio-time-now="audio.audioTimeNow.value"
-          :audio-time-total="audio.audioTimeTotal.value"
-          :audio-seek-value="audio.audioSeekValue.value"
-          :audio-vol-value="audio.audioVolValue.value"
-          :audio-playing="audio.audioPlaying.value"
-          :editor-dirty="editorDirty"
-          :editor-text="editorText"
-          :can-save-editor="canSaveEditor"
-          :md-show-preview="mdShowPreview"
-          :html-show-preview="htmlShowPreview"
-          :markdown-editor-html="markdownEditorHtml"
-          :office-loading="officeLoading"
-          :office-err="officeErr"
-          :office-html="officeHtml"
-          @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
-          @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
-          @audio-ended="audio.onAudioEnded()"
-          @audio-seek-input="(ev) => audio.onAudioSeekInput(audioRef, ev)"
-          @seek-audio="(d) => audio.seekAudio(audioRef, d)"
-          @toggle-audio="audio.toggleAudio(audioRef)"
-          @audio-volume-input="(ev) => audio.onAudioVolumeInput(audioRef, ev)"
-          @update:md-show-preview="mdShowPreview = $event"
-          @update:html-show-preview="htmlShowPreview = $event"
-          @save-editor="saveEditor"
-          @update:editor-text="editorText = $event"
-          @selection-change="onEditorSelectionChange"
-        />
+          <div class="file-workspace-preview-wrap">
+            <button
+              type="button"
+              class="tree-collapse-btn"
+              :title="treeCollapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')"
+              @click="treeCollapsed = !treeCollapsed"
+            >
+              <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
+            </button>
+            <FilePreviewContent
+              ref="previewContentRef2"
+              :pane-id="paneId"
+              :file-path="selectedRel ?? undefined"
+              :preview-loading="previewLoading"
+              :preview-err="previewErr"
+              :selected-rel="selectedRel"
+              :selected-is-dir="selectedIsDir"
+              :meta="meta"
+              :raw-url="ops.rawUrl.value"
+              :show-save="true"
+              :audio-title="audioTitle"
+              :audio-sub="audioSub"
+              :audio-time-now="audio.audioTimeNow.value"
+              :audio-time-total="audio.audioTimeTotal.value"
+              :audio-seek-value="audio.audioSeekValue.value"
+              :audio-vol-value="audio.audioVolValue.value"
+              :audio-playing="audio.audioPlaying.value"
+              :editor-dirty="editor.editorDirty.value"
+              :editor-text="editor.editorText.value"
+              :can-save-editor="editor.canSaveEditor.value"
+              :md-show-preview="editor.mdShowPreview.value"
+              :html-show-preview="editor.htmlShowPreview.value"
+              :markdown-editor-html="editor.markdownEditorHtml.value"
+              :office-loading="office.officeLoading.value"
+              :office-err="office.officeErr.value"
+              :office-html="office.officeHtml.value"
+              @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
+              @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
+              @audio-ended="audio.onAudioEnded()"
+              @audio-seek-input="(ev) => audio.onAudioSeekInput(audioRef, ev)"
+              @seek-audio="(d) => audio.seekAudio(audioRef, d)"
+              @toggle-audio="audio.toggleAudio(audioRef)"
+              @audio-volume-input="(ev) => audio.onAudioVolumeInput(audioRef, ev)"
+              @update:md-show-preview="editor.mdShowPreview.value = $event"
+              @update:html-show-preview="editor.htmlShowPreview.value = $event"
+              @save-editor="editor.saveEditor"
+              @update:editor-text="editor.editorText.value = $event"
+              @selection-change="editor.onEditorSelectionChange"
+            />
+          </div>
       </div>
     </div>
   </div>
   <Teleport to="body">
     <div
-      v-if="contextMenu && visible"
+      v-if="ctxMenu.contextMenu.value && visible"
       class="tree-ctx-backdrop"
-      @mousedown="closeContextMenu"
-      @touchstart="closeContextMenu"
+      @mousedown="ctxMenu.closeContextMenu"
+      @touchstart="ctxMenu.closeContextMenu"
     ></div>
     <div
-      v-if="contextMenu && visible"
+      v-if="ctxMenu.contextMenu.value && visible"
       class="tree-ctx-menu"
       :class="{ 'tree-ctx-menu--bottom': layout.narrow.value }"
       role="menu"
-      :style="contextMenuStyle"
+      :style="ctxMenu.contextMenuStyle.value"
       @mousedown.stop
       @touchstart.stop
     >
-      <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxNewFile">
+      <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxNewFile">
         <span class="tree-ctx-label">{{ t('filePreview.ctxNewFile') }}</span>
       </button>
-      <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxNewFolder">
+      <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxNewFolder">
         <span class="tree-ctx-label">{{ t('filePreview.ctxNewFolder') }}</span>
       </button>
-      <template v-if="contextMenu?.rel || selectedRel">
+      <template v-if="ctxMenu.contextMenu.value?.rel || selectedRel">
         <div class="tree-ctx-sep" />
         <button
           type="button"
           class="tree-ctx-item"
           role="menuitem"
-          :disabled="!contextMenu?.rel && !selectedRel"
-          @click="ctxRename"
+          :disabled="!ctxMenu.contextMenu.value?.rel && !selectedRel"
+          @click="ctxMenu.ctxRename"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxRename') }}</span>
           <span class="tree-ctx-kbd">F2</span>
@@ -275,7 +280,7 @@
           type="button"
           class="tree-ctx-item"
           role="menuitem"
-          @click="ctxCopyPath"
+          @click="ctxMenu.ctxCopyPath"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxCopyPath') }}</span>
         </button>
@@ -283,86 +288,90 @@
           type="button"
           class="tree-ctx-item"
           role="menuitem"
-          @click="ctxInsertToTerminal"
+          @click="ctxMenu.ctxInsertToTerminal"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxInsertToTerminal') }}</span>
+        </button>
+        <button
+          type="button"
+          class="tree-ctx-item"
+          role="menuitem"
+          @click="ctxMenu.ctxUpload"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxUpload') }}</span>
+        </button>
+        <button
+          v-if="!ctxMenu.contextMenu.value?.isDir"
+          type="button"
+          class="tree-ctx-item"
+          role="menuitem"
+          @click="ctxMenu.ctxDownload"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxDownload') }}</span>
+        </button>
+        <button
+          type="button"
+          class="tree-ctx-item"
+          role="menuitem"
+          @click="ctxToggleBookmark"
+        >
+          <span class="tree-ctx-label">{{ ctxIsBookmarked ? t('fileBookmark.removeFrom') : t('fileBookmark.addTo') }}</span>
         </button>
         <div class="tree-ctx-sep" />
         <button
           type="button"
           class="tree-ctx-item tree-ctx-item-danger"
           role="menuitem"
-          :disabled="!contextMenu?.rel && !selectedRel"
-          @click="ctxDelete"
+          :disabled="!ctxMenu.contextMenu.value?.rel && !selectedRel"
+          @click="ctxMenu.ctxDelete"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxDelete') }}</span>
-          <span class="tree-ctx-kbd">{{ ctxDeleteKeyHint }}</span>
+          <span class="tree-ctx-kbd">{{ ctxMenu.ctxDeleteKeyHint.value }}</span>
         </button>
       </template>
     </div>
   </Teleport>
   <ConfirmModal
-    :visible="!!moveConfirm"
+    :visible="!!ctxMenu.moveConfirm.value"
     :title="t('filePreview.moveTitle')"
     :message="t('filePreview.moveConfirmMsg')"
-    :target="moveConfirm ? (moveConfirm.destDir || t('filePreview.moveToRoot')) : ''"
+    :target="ctxMenu.moveConfirm.value ? (ctxMenu.moveConfirm.value.destDir || t('filePreview.moveToRoot')) : ''"
     :confirm-text="t('filePreview.moveTitle')"
     :cancel-text="t('filePreview.cancel')"
-    @confirm="onMoveConfirm"
-    @cancel="onMoveCancel"
+    @confirm="ctxMenu.onMoveConfirm"
+    @cancel="ctxMenu.onMoveCancel"
   />
   <SelectionToolbar
-    :selected-text="editorSelection?.text ?? ''"
-    :anchor-rect="editorSelection?.rect ?? null"
-    @dismiss="onSelectionDismiss"
+    :selected-text="editor.editorSelection.value?.text ?? ''"
+    :anchor-rect="editor.editorSelection.value?.rect ?? null"
+    @dismiss="editor.onSelectionDismiss"
   />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import { getApiBase, apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
+import { getApiBase, apiUrl, authFetch } from '../../composables/apiBase'
+import { isTauri } from '../../composables/useTransport'
+import { copyToClipboard } from '../../utils/clipboard'
 import { usePaneResize } from '../../composables/usePaneResize'
-import { useFileNavigation } from '../../composables/useFileNavigation'
+import { useFileNavigation, useSelectedPath } from '../../composables/useFileNavigation'
 import { useAudioPlayer } from '../../composables/useAudioPlayer'
 import { useFileWorkspaceLayout } from '../../composables/useFileWorkspaceLayout'
 import { useFileWatch } from '../../composables/useFileWatch'
+import { useFileEditor } from '../../composables/useFileEditor'
+import { useOfficePreview } from '../../composables/useOfficePreview'
+import { useFileOperations } from '../../composables/useFileOperations'
+import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import FilePreviewContent from '../workspace/FilePreviewContent.vue'
 import SelectionToolbar from '../workspace/SelectionToolbar.vue'
 import ConfirmModal from '../ui/ConfirmModal.vue'
-import { useSelectedPath } from '../../composables/useFileNavigation'
-import { copyToClipboard } from '../../utils/clipboard'
-
-// Lazy-loaded heavy libraries (promise-cache avoids concurrent-init races)
-let _markedPromise: Promise<typeof import('marked')> | null = null
-let _domPurifyPromise: Promise<typeof import('dompurify')> | null = null
-
-function getMarked() {
-  if (!_markedPromise) {
-    _markedPromise = import('marked').then((m) => {
-      m.use({
-        gfm: true,
-        breaks: true,
-        renderer: {
-          code({ text, lang }: { text: string; lang?: string }) {
-            const language = (lang || 'plaintext').trim() || 'plaintext'
-            const safeLang = language.replace(/[^a-z0-9_-]/gi, '') || 'plaintext'
-            return `<pre><code class="language-${safeLang}">${esc(text)}</code></pre>`
-          },
-        },
-      })
-      return m
-    })
-  }
-  return _markedPromise
-}
-
-function getDOMPurify() {
-  if (!_domPurifyPromise) _domPurifyPromise = import('dompurify')
-  return _domPurifyPromise
-}
+import { useRecentFiles } from '../../composables/useRecentAccess'
+import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
+import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
+import { Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 
 const props = withDefaults(
   defineProps<{ visible: boolean; paneId: string; embedded?: boolean }>(),
@@ -373,51 +382,76 @@ const emit = defineEmits<{ close: []; navigate: [path: string]; 'update:canGoBac
 
 const { t } = useI18n()
 
-interface Meta {
-  kind: string
-  content?: string
-  language?: string
-  truncated?: boolean
-  message?: string
-}
-
-// --- Composables ---
-const nav = useFileNavigation()
-const audio = useAudioPlayer()
-const layout = useFileWorkspaceLayout()
-
-watch(nav.canGoBack, v => emit('update:canGoBack', v), { immediate: true })
-watch(nav.canGoForward, v => emit('update:canGoForward', v), { immediate: true })
-
-// --- State ---
+// --- Shared state ---
 const cwdLabel = ref('')
 const childCache = ref<Record<string, DirEntry[]>>({})
 const expanded = ref<Set<string>>(new Set())
 const selectedRel = ref<string | null>(null)
 const selectedIsDir = ref(false)
-const meta = ref<Meta | null>(null)
+const meta = ref<any | null>(null)
 const previewLoading = ref(false)
 const previewErr = ref('')
-const fileInputRef = ref<HTMLInputElement>()
-const dragCounter = ref(0)
-const dragging = computed(() => dragCounter.value > 0)
 const lastTreePointerTs = ref(0)
-const officeLoading = ref(false)
-const officeErr = ref('')
-const officeHtml = ref('')
 const gitStatusMap = ref<Record<string, string>>({})
 const inlineCreate = ref<{ parentRel: string; kind: 'file' | 'dir' } | null>(null)
 const inlineRename = ref<{ rel: string; isDir: boolean } | null>(null)
-const editorText = ref('')
-const editorBaseline = ref('')
-const mdShowPreview = ref(false)
-const htmlShowPreview = ref(false)
-const contextMenu = ref<{ x: number; y: number; rel: string; isDir: boolean } | null>(null)
-const addMenuOpen = ref(false)
-const moveConfirm = ref<{ src: string; destDir: string } | null>(null)
+const recentDropdownOpen = ref(false)
 const fileWorkspaceBodyRef = ref<HTMLElement | null>(null)
-const cacheBustTs = ref<number | null>(null)
-const editorSelection = ref<{ text: string; rect: DOMRect | null } | null>(null)
+
+// --- Composables ---
+const nav = useFileNavigation()
+const audio = useAudioPlayer()
+const layout = useFileWorkspaceLayout()
+const recentFiles = useRecentFiles()
+const workspaceBookmarks = useWorkspaceBookmarks()
+
+const editor = useFileEditor({
+  paneId: () => props.paneId,
+  selectedRel,
+  selectedIsDir,
+  meta,
+})
+
+const office = useOfficePreview({ paneId: () => props.paneId })
+
+const ops = useFileOperations({
+  paneId: () => props.paneId,
+  selectedRel,
+  selectedIsDir,
+  meta,
+  childCache,
+  expanded,
+  inlineCreate,
+  cwdLabel,
+  ensureChildren,
+  emit: (event, path) => emit(event, path),
+})
+
+const ctxMenu = useTreeContextMenu({
+  selectedRel,
+  selectedIsDir,
+  meta,
+  editorDirty: editor.editorDirty,
+  editorText: editor.editorText,
+  editorBaseline: editor.editorBaseline,
+  childCache,
+  expanded,
+  inlineCreate,
+  inlineRename,
+  narrow: layout.narrow,
+  absolutePath: ops.absolutePath,
+  parentRelPath: ops.parentRelPath,
+  ensureChildren,
+  deleteSelected: ops.deleteSelected,
+  onSelectFile,
+  onSelectDir,
+  triggerUpload: ops.triggerUpload,
+  downloadFile: ops.downloadFile,
+  t,
+})
+
+watch(nav.canGoBack, v => emit('update:canGoBack', v), { immediate: true })
+watch(nav.canGoForward, v => emit('update:canGoForward', v), { immediate: true })
 
 // --- File Watch ---
 const fileWatch = useFileWatch({
@@ -428,7 +462,7 @@ const fileWatch = useFileWatch({
   selectedRel,
   selectedIsDir,
   meta,
-  editorDirty: () => editorDirty.value,
+  editorDirty: () => editor.editorDirty.value,
   onFileDeleted: () => {
     selectedRel.value = null
     selectedIsDir.value = false
@@ -437,12 +471,12 @@ const fileWatch = useFileWatch({
   },
   onFileChanged: (newMeta) => {
     meta.value = newMeta
-    editorText.value = newMeta.content ?? ''
-    editorBaseline.value = newMeta.content ?? ''
+    editor.editorText.value = newMeta.content ?? ''
+    editor.editorBaseline.value = newMeta.content ?? ''
     fetchGitStatus()
   },
   onBinaryChanged: () => {
-    cacheBustTs.value = Date.now()
+    ops.cacheBustTs.value = Date.now()
   },
   fetchList,
 })
@@ -462,15 +496,6 @@ const cwdShort = computed(() => {
   return '…' + s.slice(-34)
 })
 
-const rawUrl = computed(() => {
-  if (!selectedRel.value || selectedIsDir.value) return ''
-  const q = new URLSearchParams({ pane_id: props.paneId, path: selectedRel.value })
-  const token = getAuthToken()
-  if (token) q.set('token', token)
-  if (cacheBustTs.value) q.set('_t', String(cacheBustTs.value))
-  return apiUrl(`/api/workspace/raw?${q}`)
-})
-
 const inlineCreateForTree = computed(() => inlineCreate.value ?? undefined)
 
 const inlineInputPlaceholder = computed(() => {
@@ -478,60 +503,32 @@ const inlineInputPlaceholder = computed(() => {
   return inlineCreate.value.kind === 'dir' ? t('filePreview.nameFolder') : t('filePreview.nameFile')
 })
 
-const editorDirty = computed(() => editorText.value !== editorBaseline.value)
-
-const canSaveEditorContext = computed(
-  () =>
-    !!selectedRel.value &&
-    !selectedIsDir.value &&
-    !meta.value?.truncated &&
-    (meta.value?.kind === 'text' || meta.value?.kind === 'markdown'),
-)
-
-const canSaveEditor = computed(() => canSaveEditorContext.value && editorDirty.value)
-
-const canDownload = computed(
-  () => !!selectedRel.value && !selectedIsDir.value && meta.value?.kind !== 'unsupported',
-)
-
-const ctxDeleteKeyHint = computed(() =>
-  typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘⌫' : 'Del',
-)
-
-const contextMenuStyle = computed(() => {
-  const m = contextMenu.value
-  if (!m) return {}
-  if (layout.narrow.value) return { left: '0', right: '0', bottom: '0' }
-  const pad = 8
-  const mw = 220
-  const mh = 140
-  let left = m.x
-  let top = m.y
-  if (typeof window !== 'undefined') {
-    if (left + mw > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - mw - pad)
-    if (top + mh > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - mh - pad)
-  }
-  return { left: `${left}px`, top: `${top}px` }
+const isSelectedBookmarked = computed(() => {
+  if (!selectedRel.value || selectedIsDir.value) return false
+  return workspaceBookmarks.isBookmarked(ops.absolutePath(selectedRel.value))
 })
 
-function esc(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+function onToggleBookmark() {
+  if (!selectedRel.value || selectedIsDir.value) return
+  const name = selectedRel.value.split('/').pop() || selectedRel.value
+  workspaceBookmarks.toggleBookmark(name, ops.absolutePath(selectedRel.value), false)
 }
 
-const markdownEditorHtml = ref('')
-let mdDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
-watch(editorText, (src) => {
-  if (mdDebounceTimer) { clearTimeout(mdDebounceTimer); mdDebounceTimer = null }
-  if (!src) { markdownEditorHtml.value = ''; return }
-  mdDebounceTimer = setTimeout(async () => {
-    try {
-      const [m, dp] = await Promise.all([getMarked(), getDOMPurify()])
-      const html = m.parse(src, { async: false }) as string
-      markdownEditorHtml.value = dp.default.sanitize(html)
-    } catch { markdownEditorHtml.value = '' }
-  }, 300)
+const ctxIsBookmarked = computed(() => {
+  const rel = ctxMenu.contextMenu.value?.rel || selectedRel.value
+  if (!rel) return false
+  return workspaceBookmarks.isBookmarked(ops.absolutePath(rel))
 })
+
+function ctxToggleBookmark() {
+  if (!ctxMenu.contextMenu.value) return
+  const { rel, isDir } = ctxMenu.contextMenu.value
+  ctxMenu.closeContextMenu()
+  const targetRel = rel || selectedRel.value
+  if (!targetRel) return
+  const name = targetRel.split('/').pop() || targetRel
+  workspaceBookmarks.toggleBookmark(name, ops.absolutePath(targetRel), isDir)
+}
 
 // --- Navigation ---
 function ensureParentsExpanded(rel: string) {
@@ -568,7 +565,7 @@ function doGoForward() {
 function bumpTreePointerTs() { lastTreePointerTs.value = Date.now() }
 
 function shouldBlockNavigate(): boolean {
-  if (!editorDirty.value || !meta.value || (meta.value.kind !== 'text' && meta.value.kind !== 'markdown')) return false
+  if (!editor.editorDirty.value || !meta.value || (meta.value.kind !== 'text' && meta.value.kind !== 'markdown')) return false
   return !confirm(t('filePreview.discardChanges'))
 }
 
@@ -582,16 +579,6 @@ function trySelectDir(rel: string) {
   onSelectDir(rel)
 }
 
-function parentRelPath(rel: string): string {
-  const i = rel.lastIndexOf('/')
-  return i === -1 ? '' : rel.slice(0, i)
-}
-
-function absolutePath(rel: string): string {
-  const root = cwdLabel.value.replace(/\/+$/, '')
-  return rel ? `${root}/${rel}` : root
-}
-
 const { selectedPath: globalSelectedPath } = useSelectedPath()
 
 function onSelectDir(rel: string) {
@@ -600,8 +587,8 @@ function onSelectDir(rel: string) {
   meta.value = null
   previewErr.value = ''
   nav.pushNav(rel, true)
-  globalSelectedPath.value = absolutePath(rel)
-  emit('navigate', absolutePath(rel))
+  globalSelectedPath.value = ops.absolutePath(rel)
+  emit('navigate', ops.absolutePath(rel))
 }
 
 async function onSelectFile(rel: string) {
@@ -610,12 +597,12 @@ async function onSelectFile(rel: string) {
   previewErr.value = ''
   previewLoading.value = true
   meta.value = null
-  officeLoading.value = false
-  officeErr.value = ''
-  officeHtml.value = ''
+  office.officeLoading.value = false
+  office.officeErr.value = ''
+  office.officeHtml.value = ''
   nav.pushNav(rel, false)
-  globalSelectedPath.value = absolutePath(rel)
-  emit('navigate', absolutePath(rel))
+  globalSelectedPath.value = ops.absolutePath(rel)
+  emit('navigate', ops.absolutePath(rel))
   try {
     await getApiBase()
     const q = new URLSearchParams({ pane_id: props.paneId, path: rel })
@@ -626,7 +613,10 @@ async function onSelectFile(rel: string) {
       return
     }
     meta.value = await res.json()
-    if (meta.value?.kind === 'office') void loadOfficePreview(rel)
+    if (meta.value) {
+      recentFiles.recordFile(ops.absolutePath(rel), rel.split('/').pop() || rel)
+    }
+    if (meta.value?.kind === 'office') void office.loadOfficePreview(rel)
   } catch {
     previewErr.value = 'network'
   } finally {
@@ -680,7 +670,7 @@ function onToggle(rel: string) {
 // --- Inline create/rename ---
 function newItemParentRel(): string {
   if (selectedIsDir.value && selectedRel.value) return selectedRel.value
-  if (!selectedIsDir.value && selectedRel.value) return parentRelPath(selectedRel.value)
+  if (!selectedIsDir.value && selectedRel.value) return ops.parentRelPath(selectedRel.value)
   return ''
 }
 
@@ -753,7 +743,7 @@ async function onInlineRenameCommit(newName: string) {
   previewErr.value = ''
   const data = await res.json()
   const newRel = data.rel as string
-  const parentRel = parentRelPath(rel)
+  const parentRel = ops.parentRelPath(rel)
   const next = { ...childCache.value }
   delete next[parentRel]
   if (isDir) {
@@ -771,145 +761,24 @@ async function onInlineRenameCommit(newName: string) {
 
 function onInlineRenameCancel() { inlineRename.value = null }
 
-function onMoveEntry(payload: { src: string; destDir: string }) {
-  const { src, destDir } = payload
-  if (!src) return
-  const srcParent = parentRelPath(src)
-  if (srcParent === destDir) return
-  moveConfirm.value = { src, destDir }
-}
-
-async function executeMove() {
-  const info = moveConfirm.value
-  if (!info) return
-  moveConfirm.value = null
-  const { src, destDir } = info
-  const srcParent = parentRelPath(src)
-  await getApiBase()
-  const q = new URLSearchParams({ pane_id: props.paneId, path: src })
-  const res = await authFetch(apiUrl(`/api/workspace/move?${q}`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dest: destDir }),
-  })
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}))
-    previewErr.value = j.error || 'move failed'
-    return
+async function onUploadToDir(dir: string, ev: DragEvent) {
+  if (isTauri()) return // handled by file-drop-paths listener
+  const items = ev.dataTransfer?.items
+  if (!items) return
+  const allFiles: { file: File; path: string }[] = []
+  const promises: Promise<void>[] = []
+  for (let i = 0; i < items.length; i++) {
+    const entry = items[i].webkitGetAsEntry?.()
+    if (entry) promises.push(ops.traverseEntry(entry, '').then(files => { allFiles.push(...files) }))
   }
-  previewErr.value = ''
-  const next = { ...childCache.value }
-  delete next[srcParent]
-  delete next[destDir]
-  for (const k of Object.keys(next)) {
-    if (k === src || k.startsWith(`${src}/`)) delete next[k]
-  }
-  childCache.value = next
-  try { await Promise.all([ensureChildren(srcParent), ensureChildren(destDir)]) } catch {}
-}
-
-function onMoveConfirm() { executeMove() }
-function onMoveCancel() { moveConfirm.value = null }
-
-// --- Context menu ---
-function closeContextMenu() { contextMenu.value = null }
-
-function onTreeContextMenu(payload: { ev: MouseEvent; rel: string; isDir: boolean }) {
-  payload.ev.preventDefault()
-  contextMenu.value = { x: payload.ev.clientX, y: payload.ev.clientY, rel: payload.rel, isDir: payload.isDir }
-}
-
-function onTreeBgContextMenu(ev: MouseEvent) {
-  ev.preventDefault()
-  contextMenu.value = { x: ev.clientX, y: ev.clientY, rel: '', isDir: true }
-}
-
-function onTreeLongPress(pos: { clientX: number; clientY: number }, rel: string, isDir: boolean) {
-  contextMenu.value = { x: pos.clientX, y: pos.clientY, rel, isDir }
-}
-
-function ctxNewFile() {
-  if (!contextMenu.value) return
-  const { rel, isDir } = contextMenu.value
-  closeContextMenu()
-  if (shouldBlockNavigate()) return
-  const parentRel = isDir ? rel : parentRelPath(rel)
-  inlineCreate.value = { parentRel, kind: 'file' }
-  expanded.value = new Set([...expanded.value, parentRel])
-  void ensureChildren(parentRel)
-}
-
-function ctxNewFolder() {
-  if (!contextMenu.value) return
-  const { rel, isDir } = contextMenu.value
-  closeContextMenu()
-  if (shouldBlockNavigate()) return
-  const parentRel = isDir ? rel : parentRelPath(rel)
-  inlineCreate.value = { parentRel, kind: 'dir' }
-  expanded.value = new Set([...expanded.value, parentRel])
-  void ensureChildren(parentRel)
-}
-
-function ctxRename() {
-  if (!contextMenu.value) return
-  const { rel, isDir } = contextMenu.value
-  closeContextMenu()
-  const targetRel = rel || selectedRel.value
-  if (!targetRel) return
-  const targetIsDir = rel ? isDir : selectedIsDir.value
-  inlineRename.value = { rel: targetRel, isDir: targetIsDir }
-}
-
-async function ctxDelete() {
-  if (!contextMenu.value) return
-  const { rel, isDir } = contextMenu.value
-  closeContextMenu()
-  const targetRel = rel || selectedRel.value
-  const targetIsDir = rel ? isDir : selectedIsDir.value
-  if (!targetRel) return
-  const discardNeeded = editorDirty.value && meta.value && (meta.value.kind === 'text' || meta.value.kind === 'markdown')
-  const prevRel = selectedRel.value
-  const prevIsDir = selectedIsDir.value
-  const prevMeta = meta.value
-  const deleteMsg = targetIsDir ? t('filePreview.confirmDeleteFolder') : t('filePreview.confirmDeleteFile')
-  if (discardNeeded) {
-    if (!confirm(`${t('filePreview.discardChanges')}\n\n${deleteMsg}`)) return
-    editorText.value = editorBaseline.value
-  }
-  selectedRel.value = targetRel
-  selectedIsDir.value = targetIsDir
-  meta.value = null
-  const ok = await deleteSelected(discardNeeded ?? false)
-  if (!ok) {
-    selectedRel.value = prevRel
-    selectedIsDir.value = prevIsDir
-    meta.value = prevMeta
-  }
-}
-
-function ctxCopyPath() {
-  if (!contextMenu.value) return
-  const { rel } = contextMenu.value
-  closeContextMenu()
-  const targetRel = rel || selectedRel.value
-  if (!targetRel) return
-  void copyToClipboard(absolutePath(targetRel))
-}
-
-function ctxInsertToTerminal() {
-  if (!contextMenu.value) return
-  const { rel } = contextMenu.value
-  closeContextMenu()
-  const targetRel = rel || selectedRel.value
-  if (!targetRel) return
-  window.dispatchEvent(new CustomEvent('terminal-insert-path', {
-    detail: { path: absolutePath(targetRel) },
-  }))
+  try { await Promise.all(promises) } catch {}
+  if (!allFiles.length) return
+  await ops.uploadFiles(allFiles, dir)
 }
 
 function onSwipeAction(payload: { rel: string; action: string }) {
   const { rel, action } = payload
-  const absPath = absolutePath(rel)
+  const absPath = ops.absolutePath(rel)
   if (action === 'copy-path') {
     void copyToClipboard(absPath)
   } else if (action === 'insert-to-terminal') {
@@ -919,230 +788,10 @@ function onSwipeAction(payload: { rel: string; action: string }) {
   }
 }
 
-// --- Selection Toolbar ---
-function onEditorSelectionChange(payload: { text: string; rect: DOMRect | null }) {
-  if (payload.text && payload.rect) {
-    editorSelection.value = payload
-  } else {
-    editorSelection.value = null
-  }
-}
-
-function onSelectionDismiss() {
-  editorSelection.value = null
-}
-
-// --- Editor ---
-async function saveEditor() {
-  if (!canSaveEditor.value || !selectedRel.value) return
-  await getApiBase()
-  const q = new URLSearchParams({ pane_id: props.paneId, path: selectedRel.value })
-  const res = await authFetch(apiUrl(`/api/workspace/file?${q}`), {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: editorText.value }),
-  })
-  if (!res.ok) return
-  editorBaseline.value = editorText.value
-  if (meta.value && (meta.value.kind === 'text' || meta.value.kind === 'markdown')) {
-    meta.value = { ...meta.value, content: editorText.value, truncated: false, message: undefined }
-  }
-}
-
-// --- Office preview ---
-function officeNodeToHtml(node: any): string {
-  if (!node) return ''
-  const type = String(node.type || '')
-  if (type === 'table') {
-    const rows = Array.isArray(node.children) ? node.children : []
-    const tr = rows.map((r: any) => {
-      const cells = Array.isArray(r.children) ? r.children : []
-      const tds = cells.map((c: any) => `<td>${esc(String(c.text ?? ''))}</td>`).join('')
-      return `<tr>${tds}</tr>`
-    }).join('')
-    return `<table>${tr}</table>`
-  }
-  if (type === 'list') {
-    const items = Array.isArray(node.children) ? node.children : []
-    const li = items.map((it: any) => `<li>${officeNodeToHtml(it) || esc(String(it.text ?? ''))}</li>`).join('')
-    return `<ul>${li}</ul>`
-  }
-  if (type === 'heading') {
-    const level = Math.max(1, Math.min(6, Number(node?.metadata?.level || 2)))
-    return `<h${level}>${esc(String(node.text ?? ''))}</h${level}>`
-  }
-  if (type === 'paragraph') {
-    const txt = String(node.text ?? '').trim()
-    if (!txt) return ''
-    return `<p>${esc(txt)}</p>`
-  }
-  const children = Array.isArray(node.children) ? node.children.map(officeNodeToHtml).join('') : ''
-  if (children) return children
-  const txt = String(node.text ?? '').trim()
-  return txt ? `<p>${esc(txt)}</p>` : ''
-}
-
-async function loadOfficePreview(rel: string) {
-  officeLoading.value = true
-  officeErr.value = ''
-  officeHtml.value = ''
-  try {
-    await getApiBase()
-    const q = new URLSearchParams({ pane_id: props.paneId, path: rel })
-    const res = await authFetch(apiUrl(`/api/workspace/raw?${q}`))
-    if (!res.ok) throw new Error('raw')
-    const buf = await res.arrayBuffer()
-    const [officeMod, dp] = await Promise.all([import('officeparser'), getDOMPurify()])
-    const ast: any = await (officeMod.default as any).parseOffice(buf)
-    const nodes = Array.isArray(ast?.content) ? ast.content : []
-    const html = nodes.map(officeNodeToHtml).join('') || `<pre>${esc(ast?.toText?.() || '')}</pre>`
-    officeHtml.value = dp.default.sanitize(html)
-  } catch {
-    officeErr.value = 'unsupported'
-  } finally {
-    officeLoading.value = false
-  }
-}
-
-// --- Upload/Download/Delete ---
-function triggerUpload() { fileInputRef.value?.click() }
-
-async function uploadFiles(files: { file: File; path: string }[]) {
-  if (!files.length) return
-  await getApiBase()
-  const dir = selectedIsDir.value && selectedRel.value ? selectedRel.value : ''
-  const q = new URLSearchParams({ pane_id: props.paneId, dir })
-  const fd = new FormData()
-  for (const { file, path } of files) {
-    fd.append('path', path)
-    fd.append('file', file)
-  }
-  try {
-    const res = await authFetch(apiUrl(`/api/workspace/upload?${q}`), { method: 'POST', body: fd })
-    if (!res.ok) console.error('[upload] server error:', res.status)
-  } catch (e) {
-    console.error('[upload] request failed:', e)
-  }
-  const next = { ...childCache.value }
-  delete next[dir]
-  childCache.value = next
-  try { await ensureChildren(dir) } catch {}
-}
-
-async function onFilePick(ev: Event) {
-  const inp = ev.target as HTMLInputElement
-  const fileList = inp.files
-  if (!fileList?.length) return
-  const files: { file: File; path: string }[] = []
-  for (let i = 0; i < fileList.length; i++) {
-    const f = fileList[i]
-    files.push({ file: f, path: f.webkitRelativePath || f.name })
-  }
-  inp.value = ''
-  try { await uploadFiles(files) } catch (e) { console.error('[upload]', e) }
-}
-
-async function traverseEntry(entry: FileSystemEntry, basePath: string): Promise<{ file: File; path: string }[]> {
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntry
-    try {
-      const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject))
-      return [{ file, path: basePath + entry.name }]
-    } catch { return [] }
-  }
-  if (entry.isDirectory) {
-    const dirEntry = entry as FileSystemDirectoryEntry
-    const reader = dirEntry.createReader()
-    const entries: FileSystemEntry[] = []
-    try {
-      let batch: FileSystemEntry[]
-      do {
-        batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject))
-        entries.push(...batch)
-      } while (batch.length > 0)
-    } catch { return [] }
-    const results: { file: File; path: string }[] = []
-    const childResults = await Promise.all(entries.map(child => traverseEntry(child, basePath + entry.name + '/')))
-    for (const r of childResults) results.push(...r)
-    return results
-  }
-  return []
-}
-
-async function onDrop(ev: DragEvent) {
-  const items = ev.dataTransfer?.items
-  if (!items) return
-  const allFiles: { file: File; path: string }[] = []
-  const promises: Promise<void>[] = []
-  for (let i = 0; i < items.length; i++) {
-    const entry = items[i].webkitGetAsEntry?.()
-    if (entry) promises.push(traverseEntry(entry, '').then(files => { allFiles.push(...files) }))
-  }
-  try { await Promise.all(promises) } catch {}
-  if (!allFiles.length) return
-  await uploadFiles(allFiles)
-}
-
-async function downloadSelected() {
-  if (!selectedRel.value || selectedIsDir.value) return
-  await getApiBase()
-  const q = new URLSearchParams({ pane_id: props.paneId, path: selectedRel.value })
-  const res = await authFetch(apiUrl(`/api/workspace/raw?${q}`))
-  if (!res.ok) return
-  const blob = await res.blob()
-  const name = selectedRel.value.split('/').pop() || 'file'
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(a.href)
-}
-
-async function deleteSelected(skipConfirm = false): Promise<boolean> {
-  const rel = selectedRel.value
-  if (!rel) return false
-  inlineCreate.value = null
-  const wasDir = selectedIsDir.value
-  const msg = wasDir ? t('filePreview.confirmDeleteFolder') : t('filePreview.confirmDeleteFile')
-  if (!skipConfirm && !confirm(msg)) return false
-  await getApiBase()
-  const q = new URLSearchParams({ pane_id: props.paneId, path: rel })
-  const res = await authFetch(apiUrl(`/api/workspace/delete?${q}`), { method: 'DELETE' })
-  if (!res.ok) return false
-  const parentRel = parentRelPath(rel)
-  if (wasDir) {
-    const next: Record<string, DirEntry[]> = { ...childCache.value }
-    for (const k of Object.keys(next)) {
-      if (k === rel || k.startsWith(`${rel}/`)) delete next[k]
-    }
-    delete next[parentRel]
-    childCache.value = next
-    const nextExp = new Set(expanded.value)
-    for (const k of [...nextExp]) {
-      if (k === rel || k.startsWith(`${rel}/`)) nextExp.delete(k)
-    }
-    expanded.value = nextExp
-  } else {
-    const next = { ...childCache.value }
-    delete next[parentRel]
-    childCache.value = next
-  }
-  selectedRel.value = null
-  selectedIsDir.value = false
-  meta.value = null
-  previewErr.value = ''
-  officeLoading.value = false
-  officeErr.value = ''
-  officeHtml.value = ''
-  emit('navigate', absolutePath(parentRel))
-  try { await ensureChildren(parentRel) } catch {}
-  return true
-}
-
 // --- Reload/Boot ---
 async function reloadAll() {
   inlineCreate.value = null
-  contextMenu.value = null
+  ctxMenu.contextMenu.value = null
   childCache.value = {}
   expanded.value = new Set()
   previewErr.value = ''
@@ -1166,7 +815,7 @@ async function boot() {
   meta.value = null
   previewErr.value = ''
   inlineCreate.value = null
-  contextMenu.value = null
+  ctxMenu.contextMenu.value = null
   childCache.value = {}
   expanded.value = new Set()
   try {
@@ -1178,6 +827,11 @@ async function boot() {
 
 function close() { emit('close') }
 
+function onRecentSelect(path: string) {
+  recentDropdownOpen.value = false
+  openFromTerminal(path)
+}
+
 // --- Open from terminal ---
 async function openFromTerminal(path: string) {
   await getApiBase()
@@ -1187,7 +841,7 @@ async function openFromTerminal(path: string) {
   const { rel } = await res.json()
   previewErr.value = ''
   inlineCreate.value = null
-  contextMenu.value = null
+  ctxMenu.contextMenu.value = null
   childCache.value = {}
   expanded.value = new Set()
   try { await ensureChildren('') } catch { previewErr.value = 'list failed'; return }
@@ -1218,21 +872,21 @@ async function openFromTerminal(path: string) {
 
 // --- Keyboard ---
 function onEditorSaveKeydown(e: KeyboardEvent) {
-  if (contextMenu.value && e.key === 'Escape') {
+  if (ctxMenu.contextMenu.value && e.key === 'Escape') {
     e.preventDefault()
-    closeContextMenu()
+    ctxMenu.closeContextMenu()
     return
   }
   if (!props.visible) return
   const saveChord = (e.metaKey || e.ctrlKey) && (e.code === 'KeyS' || e.key === 's' || e.key === 'S')
   if (!saveChord) return
-  if (!canSaveEditorContext.value) return
+  if (!editor.canSaveEditorContext.value) return
   e.preventDefault()
-  if (canSaveEditor.value) void saveEditor()
+  if (editor.canSaveEditor.value) void editor.saveEditor()
 }
 
 function onCloseContextScroll() {
-  if (contextMenu.value) contextMenu.value = null
+  if (ctxMenu.contextMenu.value) ctxMenu.contextMenu.value = null
 }
 
 // --- Watchers ---
@@ -1244,31 +898,31 @@ watch(
   () => [selectedRel.value, selectedIsDir.value, meta.value?.kind, meta.value?.content, meta.value?.truncated],
   () => {
     if (selectedIsDir.value || !selectedRel.value) {
-      editorText.value = ''
-      editorBaseline.value = ''
+      editor.editorText.value = ''
+      editor.editorBaseline.value = ''
       return
     }
     const m = meta.value
     if (m?.kind === 'text' || m?.kind === 'markdown') {
       const c = m.content ?? ''
-      editorText.value = c
-      editorBaseline.value = c
+      editor.editorText.value = c
+      editor.editorBaseline.value = c
     } else {
-      editorText.value = ''
-      editorBaseline.value = ''
+      editor.editorText.value = ''
+      editor.editorBaseline.value = ''
     }
   },
 )
 
 watch(
-  () => [rawUrl.value, meta.value?.kind],
+  () => [ops.rawUrl.value, meta.value?.kind],
   () => {
     if (meta.value?.kind !== 'audio') return
     audio.resetAudio(audioRef.value)
   },
 )
 
-watch(selectedRel, () => { mdShowPreview.value = false; htmlShowPreview.value = false; editorSelection.value = null })
+watch(selectedRel, () => { editor.mdShowPreview.value = false; editor.htmlShowPreview.value = false; editor.editorSelection.value = null })
 
 watch(
   () => [props.visible, props.paneId, props.embedded],
@@ -1285,6 +939,7 @@ onMounted(() => {
   window.addEventListener('resize', layout.onResize)
   window.addEventListener('keydown', onEditorSaveKeydown, true)
   window.addEventListener('scroll', onCloseContextScroll, true)
+  ops.setActiveWorkspace()
   void getApiBase()
 })
 
@@ -1292,18 +947,17 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', layout.onResize)
   window.removeEventListener('keydown', onEditorSaveKeydown, true)
   window.removeEventListener('scroll', onCloseContextScroll, true)
+  ops.clearActiveWorkspace()
   fileWatch.disconnectTreeWatchSocket()
 })
 
 defineExpose({
   openFromTerminal,
   reloadAll,
-  triggerUpload,
-  downloadSelected,
-  deleteSelected,
+  deleteSelected: ops.deleteSelected,
   startNewFile,
   startNewFolder,
-  saveEditor,
+  saveEditor: editor.saveEditor,
   openDrawer: layout.openDrawer,
   toggleDrawer: layout.toggleDrawer,
   drawerOpen: layout.drawerOpen,
@@ -1445,6 +1099,23 @@ defineExpose({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.file-workspace-cwd:hover {
+  color: var(--fg, #ccc);
+}
+
+.file-workspace-cwd-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.file-workspace-cwd-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 499;
 }
 
 .file-workspace-body {
@@ -1478,6 +1149,33 @@ defineExpose({
   background: var(--bg, #1a1a1a);
 }
 
+.file-workspace-preview-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+
+.tree-collapse-btn {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 10;
+  background: var(--bg, #1a1a1a);
+  border: 1px solid var(--border, #333);
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+}
+.tree-collapse-btn:hover {
+  color: var(--fg, #ccc);
+  background: var(--tab-hover-bg, #333);
+}
+
 .file-workspace-tree-splitter {
   flex-shrink: 0;
   width: 5px;
@@ -1489,30 +1187,13 @@ defineExpose({
 
 .file-workspace-tree-splitter:hover { background: var(--accent, #89b4fa); }
 
-.file-workspace-tree-reveal {
-  flex-shrink: 0;
-  width: 22px;
-  align-self: stretch;
-  border: none;
-  border-right: 1px solid var(--border, #333);
-  background: var(--bg, #1a1a1a);
-  color: var(--fg-muted, #888);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 0;
-  line-height: 1;
-}
-
-.file-workspace-tree-reveal:hover {
-  color: var(--accent, #89b4fa);
-  background: var(--tab-hover-bg, #333);
-}
-
 .file-workspace-tree-wrap.narrow {
   border-right: 1px solid var(--border, #333);
 }
 
-.file-workspace-body { position: relative; }
+.star-active {
+  color: var(--accent, #89b4fa) !important;
+}
 
 </style>
 

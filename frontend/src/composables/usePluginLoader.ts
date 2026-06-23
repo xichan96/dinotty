@@ -82,6 +82,9 @@ export interface PluginContext {
     confirm(message: string): Promise<boolean>
   }
 
+  /** Open this plugin's tab in the UI */
+  open(): void
+
   process: {
     start(args: string[], options?: { cwd?: string; env?: Record<string, string> }): Promise<ProcessHandle>
     list(): Promise<ProcessInfo[]>
@@ -136,6 +139,7 @@ declare global {
     __dinotty_terminal_api?: PluginContext['terminal']
     __dinotty_ui_notify?: PluginContext['ui']['notify']
     __dinotty_ui_confirm?: PluginContext['ui']['confirm']
+    __dinotty_open_plugin?: (pluginId: string) => void
     __dinotty_settings_listener?: PluginContext['settings']['onDidChange']
   }
 }
@@ -282,6 +286,7 @@ function createPluginContext(pluginId: string): PluginContext {
       notify: window.__dinotty_ui_notify ?? (() => {}),
       confirm: window.__dinotty_ui_confirm ?? (async () => false),
     },
+    open() { window.__dinotty_open_plugin?.(pluginId) },
   }
 
   return context

@@ -25,7 +25,7 @@ pub use syntax::{
 };
 
 const MAX_TEXT_PREVIEW: usize = 512 * 1024;
-const MAX_DOWNLOAD: u64 = 100 * 1024 * 1024;
+const MAX_DOWNLOAD: u64 = 500 * 1024 * 1024;
 
 #[derive(Deserialize)]
 pub struct PaneQuery {

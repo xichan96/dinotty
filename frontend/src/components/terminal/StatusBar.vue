@@ -21,6 +21,8 @@
       :mem-history="memHistory"
       :net-rx-history="netRxHistory"
       :net-tx-history="netTxHistory"
+      :gpu-util-history="gpuUtilHistory"
+      :gpu-mem-history="gpuMemHistory"
       @close="activePopover = null"
     />
   </div>
@@ -28,9 +30,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Cpu, MemoryStick, HardDrive, Wifi } from 'lucide-vue-next'
+import { Cpu, MemoryStick, HardDrive, Wifi, Gpu } from 'lucide-vue-next'
 import { monitorData } from '../../composables/useMonitor'
-import { cpuHistory, memHistory, netRxHistory, netTxHistory } from '../../composables/useMonitor'
+import { cpuHistory, memHistory, netRxHistory, netTxHistory, gpuUtilHistory, gpuMemHistory } from '../../composables/useMonitor'
 import { useSettings } from '../../composables/useSettings'
 import MonitorPopover from './MonitorPopover.vue'
 
@@ -39,7 +41,7 @@ const { settings } = useSettings()
 
 const monitorSettings = computed(() => settings.monitor ?? { enabled: true, cpu: true, memory: true, disk: true, network: true })
 
-type MetricKey = 'cpu' | 'memory' | 'disk' | 'network'
+type MetricKey = 'cpu' | 'memory' | 'disk' | 'network' | 'gpu'
 
 const activePopover = ref<MetricKey | null>(null)
 const anchorRect = ref<DOMRect | null>(null)
@@ -70,7 +72,7 @@ const allMetrics = computed(() => {
   const totalRx = d.network.reduce((s, n) => s + n.rx_rate, 0)
   const totalTx = d.network.reduce((s, n) => s + n.tx_rate, 0)
 
-  return [
+  const metrics = [
     { key: 'cpu' as MetricKey, icon: Cpu, label: `${d.cpu.usage.toFixed(0)}%` },
     {
       key: 'memory' as MetricKey,
@@ -90,6 +92,19 @@ const allMetrics = computed(() => {
       label: `↑${fmtRate(totalTx)} ↓${fmtRate(totalRx)}`,
     },
   ]
+
+  if (d.gpu?.length > 0) {
+    const totalUsed = d.gpu.reduce((s, g) => s + g.memory_used, 0)
+    const totalMem = d.gpu.reduce((s, g) => s + g.memory_total, 0)
+    const pct = totalMem > 0 ? (totalUsed / totalMem * 100) : 0
+    metrics.push({
+      key: 'gpu' as MetricKey,
+      icon: Gpu,
+      label: `${fmtBytes(totalUsed * 1024 * 1024)}/${fmtBytes(totalMem * 1024 * 1024)} ${pct.toFixed(0)}%`,
+    })
+  }
+
+  return metrics
 })
 
 const visibleMetrics = computed(() =>

@@ -3,7 +3,7 @@ members = ["src-tauri"]
 
 [package]
 name = "dinotty-server"
-version = "0.10.7"
+version = "0.11.2"
 edition = "2021"
 license = "MIT"
 build = "build.rs"
@@ -46,5 +46,24 @@ tempfile = "3"
 tar = "0.4"
 flate2 = "1"
 zip = "2"
+
+[package.metadata.deb]
+maintainer = "Dinotty Contributors <noreply@github.com>"
+copyright = "2024, Dinotty Contributors"
+license-file = ["LICENSE", "0"]
+extended-description = "Dinotty is a web-based terminal IDE accessible from any browser."
+section = "net"
+priority = "optional"
+depends = "libc6"
+assets = [
+    ["target/release/dinotty-server", "usr/bin/dinotty-server", "755"],
+    ["deploy/systemd/dinotty.service", "lib/systemd/system/dinotty.service", "644"],
+    ["deploy/systemd/env.example", "etc/dinotty/env.example", "644"],
+]
+conf-files = ["/etc/dinotty/env.example"]
+
+[package.metadata.deb.systemd-units]
+enable = true
+start = true
 
 [dev-dependencies]

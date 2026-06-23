@@ -58,6 +58,24 @@
           <div class="popover-row"><span>↓ Total</span><span>{{ fmtBytes(n.rx_total) }}</span></div>
         </template>
       </div>
+
+      <!-- GPU Detail -->
+      <div v-if="metric === 'gpu' && data" class="popover-content">
+        <div class="popover-title">GPU</div>
+        <div class="popover-subtitle">Compute</div>
+        <div class="popover-chart"><Line :data="gpuChartData" :options="pctChartOptions" /></div>
+        <div class="popover-subtitle">VRAM</div>
+        <div class="popover-chart"><Line :data="gpuMemChartData" :options="autoChartOptions" /></div>
+        <div class="popover-divider" />
+        <template v-for="(g, i) in (data.gpu ?? [])" :key="i">
+          <div v-if="i > 0" class="popover-divider" />
+          <div class="popover-subtitle">GPU {{ i }} · {{ g.name }}</div>
+          <div class="popover-row"><span>Compute</span><span>{{ g.utilization_gpu.toFixed(0) }}%</span></div>
+          <div class="popover-row"><span>VRAM</span><span>{{ fmtBytes(g.memory_used * 1024 * 1024) }} / {{ fmtBytes(g.memory_total * 1024 * 1024) }} ({{ g.memory_usage.toFixed(0) }}%)</span></div>
+          <div class="popover-row"><span>Temp</span><span>{{ g.temperature.toFixed(0) }}°C</span></div>
+          <div class="popover-row"><span>Power</span><span>{{ g.power_draw.toFixed(0) }}W / {{ g.power_limit.toFixed(0) }}W</span></div>
+        </template>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -79,13 +97,15 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler)
 
 const props = defineProps<{
   visible: boolean
-  metric: 'cpu' | 'memory' | 'disk' | 'network'
+  metric: 'cpu' | 'memory' | 'disk' | 'network' | 'gpu'
   data: MonitorData | null
   anchorRect: DOMRect | null
   cpuHistory: number[]
   memHistory: number[]
   netRxHistory: number[]
   netTxHistory: number[]
+  gpuUtilHistory: number[][]
+  gpuMemHistory: number[][]
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -111,6 +131,14 @@ const baseOptions = {
 const pctChartOptions = {
   ...baseOptions,
   scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, max: 100 } },
+}
+
+const autoChartOptions = {
+  ...baseOptions,
+  scales: {
+    ...baseOptions.scales,
+    y: { ...baseOptions.scales.y, beginAtZero: true },
+  },
 }
 
 const netChartOptions = baseOptions
@@ -144,6 +172,36 @@ const netChartData = computed(() => ({
     { data: [...props.netRxHistory], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.05)', fill: true },
   ],
 }))
+
+const gpuColors = ['#76b900', '#00a8e8', '#e84040', '#f59e0b', '#8b5cf6', '#34d399', '#f472b6', '#fbbf24', '#60a5fa', '#a78bfa']
+
+const gpuChartData = computed(() => {
+  const len = props.gpuUtilHistory.reduce((m, a) => Math.max(m, a.length), 0)
+  return {
+    labels: Array(len).fill(''),
+    datasets: props.gpuUtilHistory.map((hist, i) => ({
+      data: [...hist],
+      borderColor: gpuColors[i % gpuColors.length],
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      fill: false,
+    })),
+  }
+})
+
+const gpuMemChartData = computed(() => {
+  const len = props.gpuMemHistory.reduce((m, a) => Math.max(m, a.length), 0)
+  return {
+    labels: Array(len).fill(''),
+    datasets: props.gpuMemHistory.map((hist, i) => ({
+      data: [...hist],
+      borderColor: gpuColors[i % gpuColors.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      fill: false,
+    })),
+  }
+})
 
 const popoverStyle = computed(() => {
   if (!props.anchorRect) return {}

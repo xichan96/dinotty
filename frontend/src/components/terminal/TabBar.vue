@@ -8,7 +8,7 @@
         :class="{ active: tab.paneId === activePaneId, 'drag-over': dragOverId === tab.paneId }"
         :data-pane-id="tab.paneId"
         @mousedown.prevent="onTabMouseDown($event, tab.paneId)"
-        @touchstart.prevent="onTabTouchStart($event, tab.paneId)"
+        @touchstart="onTabTouchStart($event, tab.paneId)"
         @click="onTabClick($event, tab.paneId)"
         @touchend.prevent="onTabTouchEnd($event, tab.paneId)"
       >
@@ -212,6 +212,12 @@ function onPointerMove(e: MouseEvent | TouchEvent) {
       return
     }
     dragStarted = true
+    // Only prevent scroll once drag gesture is confirmed
+    if (isTouchDrag) {
+      e.preventDefault()
+    }
+  } else if (isTouchDrag) {
+    e.preventDefault()
   }
 
   // Find tab element under cursor

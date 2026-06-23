@@ -75,12 +75,16 @@ function focus() {
   terminal?.focus()
 }
 
+function blur() {
+  terminal?.blur()
+}
+
 function fit() {
   terminal?.fit()
 }
 
-function sendData(data: string) {
-  terminal?.sendData(data)
+function sendData(data: string, force?: boolean) {
+  terminal?.sendData(data, force)
 }
 
 function setOutputListener(cb: ((data: string) => void) | null) {
@@ -216,7 +220,7 @@ onBeforeUnmount(() => {
   terminal = null
 })
 
-defineExpose({ getTerminal, focus, fit, sendData, setOutputListener, toggleSearch })
+defineExpose({ getTerminal, focus, blur, fit, sendData, setOutputListener, toggleSearch })
 </script>
 
 <style scoped>

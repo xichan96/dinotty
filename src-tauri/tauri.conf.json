@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nickelpack/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "Dinotty",
-  "version": "0.10.7",
+  "version": "0.11.2",
   "identifier": "com.dinotty.terminal",
   "build": {
     "frontendDist": "../frontend/dist",

@@ -138,7 +138,7 @@ import { migrateTab, getAllLeaves, findLeaf, findFirstLeaf, ensureSplitRoot } fr
 import { useSettings } from './composables/useSettings'
 import { getApiBase, wsUrlWithToken, hasAuthToken, checkTokenConfigured, setAuthToken } from './composables/apiBase'
 import { isTauri } from './composables/useTransport'
-import { isTouchDevice } from './composables/useTerminal'
+import { isTouchDevice, setActivePaneId } from './composables/useTerminal'
 import { useI18n } from './composables/useI18n'
 import { useKeybindings } from './composables/useKeybindings'
 import { useSplitPane } from './composables/useSplitPane'
@@ -205,6 +205,17 @@ watch(
     document.title = title || 'Terminal'
   },
   { immediate: true },
+)
+
+// Track effective active pane for Tauri WKWebView input guard
+watch(
+  [activePaneId, tabs],
+  () => {
+    const tab = tabs.value.find(t => t.paneId === activePaneId.value)
+    const paneId = (tab?.type === 'terminal') ? tab.activePaneId : null
+    setActivePaneId(paneId)
+  },
+  { immediate: true, deep: true },
 )
 
 const termRefs = shallowReactive<Record<string, InstanceType<typeof TerminalPane>>>({})
@@ -570,6 +581,12 @@ function focusActive() {
   if (tab.type === 'terminal') {
     const paneId = tab.activePaneId
     if (!(isTouchDevice() && kbVisible.value)) {
+      // Blur all other panes first to prevent duplicate input in Tauri WKWebView
+      for (const leaf of getAllLeaves(tab.layout)) {
+        if (leaf.paneId !== paneId) {
+          termRefs[leaf.paneId]?.blur()
+        }
+      }
       termRefs[paneId]?.focus()
     }
     termRefs[paneId]?.fit()
@@ -782,59 +799,58 @@ window.__dinotty_ui_notify = (message: string, level?: 'info' | 'warn' | 'error'
   else console.log('[plugin]', message)
 }
 window.__dinotty_ui_confirm = async (message: string) => window.confirm(message)
+window.__dinotty_open_plugin = openPlugin
 
 const paletteCommands = computed<Command[]>(() => {
   const base: Command[] = [
     {
       icon: '＋',
-      title: 'New Tab',
-      subtitle: 'Open a new terminal tab',
+      title: t('palette.newTab'),
+      subtitle: t('palette.newTabDesc'),
       kbd: formatBinding(getBinding('newTab')),
       action: () => newTab(),
     },
     {
       icon: '✕',
-      title: 'Close Tab',
-      subtitle: 'Close the current tab',
+      title: t('palette.closeTab'),
+      subtitle: t('palette.closeTabDesc'),
       kbd: formatBinding(getBinding('closeTab')),
       action: async () => {
         if (activePaneId.value) {
           const tab = tabs.value.find(t => t.paneId === activePaneId.value)
           if (tab?.type === 'terminal' && getAllLeaves(tab.layout).length > 1) {
-            if (!await splitPane.closePane(tab.activePaneId)) {
-              requestCloseTab(activePaneId.value)
-            }
+            await onClosePane(tab.paneId, tab.activePaneId)
           } else {
-            requestCloseTab(activePaneId.value)
+            await requestCloseTab(activePaneId.value)
           }
         }
       },
     },
     {
       icon: '⊞',
-      title: 'Split Horizontal',
-      subtitle: 'Split pane left/right',
+      title: t('palette.splitHorizontal'),
+      subtitle: t('palette.splitHorizontalDesc'),
       kbd: formatBinding(getBinding('splitHorizontal')),
       action: () => splitPane.splitPane('horizontal'),
     },
     {
       icon: '⊟',
-      title: 'Split Vertical',
-      subtitle: 'Split pane top/bottom',
+      title: t('palette.splitVertical'),
+      subtitle: t('palette.splitVerticalDesc'),
       kbd: formatBinding(getBinding('splitVertical')),
       action: () => splitPane.splitPane('vertical'),
     },
     {
       icon: '★',
-      title: 'Bookmarks',
-      subtitle: 'Open bookmarked commands',
+      title: t('palette.bookmarks'),
+      subtitle: t('palette.bookmarksDesc'),
       kbd: formatBinding(getBinding('openBookmarks')),
       action: () => bookmarksRef.value?.open(),
     },
     {
       icon: '⊡',
-      title: 'Open Preview',
-      subtitle: 'URL or path in the address bar',
+      title: t('palette.openPreview'),
+      subtitle: t('palette.openPreviewDesc'),
       action: () => openPreview(),
     },
   ]
@@ -852,13 +868,14 @@ const paletteCommands = computed<Command[]>(() => {
     })
   }
 
-  // Plugin open commands
+  // Plugin open commands (skip if plugin already registered its own commands)
+  const pluginsWithCommands = new Set(allCommands.value.map(c => c.pluginId))
   for (const p of pluginList.value) {
-    if (p.state === 'active') {
+    if (p.state === 'active' && !pluginsWithCommands.has(p.id)) {
       base.push({
         icon: '◈',
-        title: `Open ${p.name}`,
-        subtitle: 'Open plugin tab',
+        title: t('palette.openPlugin', { name: p.name }),
+        subtitle: t('palette.openPluginDesc'),
         action: () => openPlugin(p.id),
       })
     }

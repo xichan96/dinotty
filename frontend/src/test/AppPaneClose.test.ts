@@ -57,7 +57,7 @@ vi.mock('../composables/apiBase', () => ({
   checkTokenConfigured: async () => false,
 }))
 vi.mock('../composables/useTransport', () => ({ isTauri: () => false }))
-vi.mock('../composables/useTerminal', () => ({ isTouchDevice: () => false }))
+vi.mock('../composables/useTerminal', () => ({ isTouchDevice: () => false, setActivePaneId: () => {} }))
 // Per-binding key map so Cmd+W can be dispatched without colliding with
 // other keyActions in onGlobalKeydown (the first matching binding wins).
 const BINDING_KEYS: Record<string, string> = {

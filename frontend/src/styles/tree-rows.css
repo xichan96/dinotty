@@ -30,6 +30,7 @@
 
 .tree-host .tree-row:hover { background: var(--tree-row-hover); }
 .tree-host .tree-row.drop-target { background: var(--tree-row-selected); outline: 1px solid var(--focus-border, #007fd4); outline-offset: -1px; }
+.tree-host .tree-row.drop-target-upload { background: rgba(59, 130, 246, 0.15); outline: 2px dashed rgba(59, 130, 246, 0.5); outline-offset: -2px; }
 .tree-host .tree-row:has(.tree-label.sel) { background: var(--tree-row-selected); }
 .tree-host .tree-row:has(.tree-label.sel):hover { background: var(--tree-row-selected); }
 

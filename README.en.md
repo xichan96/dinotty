@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/language-Rust-orange" alt="Rust">
   <img src="https://img.shields.io/badge/frontend-Vue%203-brightgreen" alt="Vue 3">
   <a href="https://github.com/xichan96/dinotty/stargazers"><img src="https://img.shields.io/github/stars/xichan96/dinotty?style=social" alt="GitHub Stars"></a>
+  <a href="https://github.com/xichan96/dinotty/releases"><img src="https://img.shields.io/github/downloads/xichan96/dinotty/total" alt="GitHub Downloads"></a>
   <a href="https://github.com/xichan96/dinotty/issues"><img src="https://img.shields.io/github/issues/xichan96/dinotty" alt="GitHub Issues"></a>
 </p>
 
@@ -34,6 +35,28 @@ A **multi-device** terminal server purpose-built for **coding agents**. Run Clau
 </p>
 <p align="center">
   <img src="docs/images/7.png" alt="Tablet landscape desktop-class layout" width="500" />
+</p>
+
+## Desktop Demo
+
+The desktop client delivers a professional experience comparable to iTerm2:
+
+**Split Screen** — Draggable multi-pane split with free layout adjustment:
+
+<p align="center">
+  <img src="docs/images/split-screen.GIF" alt="Split screen demo" width="600" />
+</p>
+
+**Plugin System** — Hot-reloadable JS plugins with built-in CC Switch, JSON Formatter, and more:
+
+<p align="center">
+  <img src="docs/images/plugin-system.GIF" alt="Plugin system demo" width="600" />
+</p>
+
+**Web Preview** — Preview local dev servers on your phone, built-in reverse proxy, no need to switch browsers:
+
+<p align="center">
+  <img src="docs/images/web-preview.GIF" alt="Web preview demo" width="600" />
 </p>
 
 ## Why Dinotty?
@@ -62,6 +85,8 @@ Terminal-based coding agents (Claude Code, opencode, Codex, OpenClaw, etc.) are 
 - **Server-side virtual terminal** — full VTE parser, server knows exact screen state, enables session recovery & screen snapshots
 - **Session persistence** — PTY processes survive disconnection, auto-reconnect with exponential backoff, refresh page to restore
 - **Split pane & multi-tab** — draggable split, multi-tab management with server-led pane lifecycle
+- **Broadcast mode** — input in one pane, execute in all panes simultaneously, free
+- **Command bookmarks** — right-click terminal text to bookmark, group management, one-click execution
 - **Server list** — manage multiple remote servers, quick switch connections
 - **Responsive layout** — portrait stacks vertically, landscape side-by-side; touch-optimized buttons & pane resizing
 - **Customizable shortcut keyboard** — add Ctrl/Esc/function keys for mobile, supports arbitrary escape sequences
@@ -70,7 +95,7 @@ Terminal-based coding agents (Claude Code, opencode, Codex, OpenClaw, etc.) are 
 - **Web preview** — built-in reverse proxy to preview local dev servers in iframe
 - **Notification system** — terminal bell/OSC detection, WebSocket push, configurable sound alerts
 - **System monitor** — real-time CPU/memory/network charts
-- **Plugin system** — JS plugins + CLI bridge, hot-reload; ships with CC Switch, JSON Formatter, etc.
+- **Plugin system** — JS plugins + CLI bridge, hot-reload; ships with CC Switch, JSON Formatter, Claude Code conversation manager, etc.
 - **Open API** — HTTP endpoint for external device control (Stream Deck, Shortcuts, automation scripts)
 - **Command palette** — quick-access command launcher
 - **Desktop app** — optional Tauri-based native client
@@ -86,6 +111,8 @@ Terminal-based coding agents (Claude Code, opencode, Codex, OpenClaw, etc.) are 
 | Git change indicators | ✅ | ❌ | ❌ | ❌ |
 | Built-in web preview (reverse proxy) | ✅ | ❌ | ❌ | ❌ |
 | Customizable shortcut keyboard | ✅ | ❌ | ❌ | ❌ |
+| Broadcast mode | ✅ | ❌ | ❌ | ❌ |
+| Command bookmarks | ✅ | ❌ | ❌ | ❌ |
 | Plugin system | ✅ | ❌ | ❌ | ❌ |
 | Token auth | ✅ | ✅ | ❌ | ✅ |
 
@@ -101,13 +128,57 @@ Other web terminals are thin WebSocket-to-PTY pipes. Dinotty runs a **full virtu
 | Native app | Tauri (optional) | iOS + Android | ❌ | iOS + Android | ❌ (PWA) | All platforms | ❌ |
 | General terminal | ✅ Any command | ❌ AI agents only | ❌ AI agents only | ❌ AI agents only | ❌ AI agents only | ✅ SSH | ✅ |
 | Coding agent support | ✅ File browser/preview/notify | ✅ Built-in | ✅ Built-in | ✅ Voice/approve | ✅ Voice/workspace | ❌ | ❌ |
+| Split screen | ✅ Native drag | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ tmux commands |
+| Broadcast mode | ✅ Free | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Command bookmarks | ✅ Free | ❌ | ❌ | ❌ | ❌ | 💰 Paid | ❌ |
 | Plugin system | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Multi-device sync | ✅ Browser-based | ✅ Cross-device session sync | ✅ Cloud sessions | ✅ | ✅ | ✅ Vault | ❌ Requires SSH |
 | Relay service | Planned | ✅ Anthropic hosted | ✅ OpenAI hosted | ✅ | ✅ | SaaS | ❌ |
 | Deployment | Self-hosted | SaaS | SaaS | Relay service | Self-hosted/relay | SaaS | Self-hosted |
 | Code runs on | Your own server | Local / Anthropic cloud | OpenAI cloud | Local | Local | Remote SSH | Remote server |
+| Price | 🆓 Free & open source | 💰 Pro subscription | 💰 Plus subscription | Relay service | Self-hosted/relay | 💰 $10/mo | 🆓 but painful |
 
 Claude Code and Codex each offer built-in remote solutions, but are limited to their own agent ecosystem. Happy and hapi are third-party remote control layers that wrap CLI tools for phone-based approval and voice interaction. Dinotty is a general-purpose web terminal server where agents run natively on the server, with a full working environment including file browser, web preview, and plugin system, delivering a professional experience on both desktop and mobile.
+
+## Installation
+
+Download the installer for your platform from [GitHub Releases](https://github.com/xichan96/dinotty/releases):
+
+| Platform | Format | Notes |
+|----------|--------|-------|
+| **macOS** | `.dmg` | Open and drag to Applications |
+| **Linux** | `.deb` | `sudo dpkg -i dinotty_*.deb` |
+
+> You can also build from source, see "Quick Start" below.
+
+**macOS Note**: Since the app is unsigned, macOS may show **"Dinotty" is damaged and can't be opened**. Run the following command after installation to remove the restriction:
+
+```bash
+xattr -cr /Applications/Dinotty.app
+```
+
+**Linux one-liner install**:
+
+```bash
+curl -LO https://github.com/xichan96/dinotty/releases/download/v0.11.2/dinotty-server_0.11.2-1_amd64.deb && sudo dpkg -i dinotty-server_0.11.2-1_amd64.deb
+```
+
+**Linux startup**:
+
+```bash
+# systemd
+systemctl start dinotty-server
+systemctl enable dinotty-server  # auto-start on boot
+
+# Docker container
+nohup dinotty-server &
+```
+
+Default port is **8999**. After starting, visit `http://<your-ip>:8999`. Use `-p` to specify a custom port:
+
+```bash
+dinotty-server -p 3000
+```
 
 ## Quick Start
 
@@ -136,6 +207,8 @@ cd frontend && npx vue-tsc --noEmit
 | Backend | Rust, Axum 0.7, Tokio, portable-pty, vte |
 | Frontend | Vue 3, TypeScript, Vite, xterm.js 5 |
 | Desktop | Tauri |
+
+**Written in Rust · Single binary · Zero dependencies** — Runs a full VT state machine on the server, not a pipe-forwarding proxy, so sessions survive disconnection.
 
 ## Project Structure
 

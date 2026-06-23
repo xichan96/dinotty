@@ -109,8 +109,10 @@ export const TreeRows = defineComponent({
     inlinePlaceholder: { type: String, default: '' },
     inlineRename: { type: Object, default: undefined },
     gitStatus: { type: Object, default: () => ({}) },
+    onDirDragEnter: { type: Function, default: undefined },
+    onDirDragLeave: { type: Function, default: undefined },
   },
-  emits: ['toggle', 'select-file', 'select-dir', 'inline-create-commit', 'inline-create-cancel', 'inline-rename-commit', 'inline-rename-cancel', 'context-menu', 'long-press', 'move-entry', 'swipe-action'],
+  emits: ['toggle', 'select-file', 'select-dir', 'inline-create-commit', 'inline-create-cancel', 'inline-rename-commit', 'inline-rename-cancel', 'context-menu', 'long-press', 'move-entry', 'swipe-action', 'upload-to-dir'],
   setup(p, { emit }) {
     const { t } = useI18n()
     const swipedRel = ref<string | null>(null)
@@ -276,21 +278,31 @@ export const TreeRows = defineComponent({
                   if (root) dispatchDropToTerminal(ev, absJoinWorkspaceRoot(root, rel))
                 },
                 onDragover: (ev: DragEvent) => {
-                  if (ev.dataTransfer?.types.includes('application/x-tree-move')) {
+                  const types = ev.dataTransfer?.types
+                  if (types?.includes('application/x-tree-move')) {
                     ev.preventDefault()
                     ev.dataTransfer!.dropEffect = 'move'
                     ;(ev.currentTarget as HTMLElement).classList.add('drop-target')
+                  } else if (types?.includes('Files')) {
+                    ev.preventDefault()
+                    ev.dataTransfer!.dropEffect = 'copy'
+                    ;(ev.currentTarget as HTMLElement).classList.add('drop-target-upload')
+                    if (p.onDirDragEnter) p.onDirDragEnter(rel)
                   }
                 },
                 onDragleave: (ev: DragEvent) => {
-                  ;(ev.currentTarget as HTMLElement).classList.remove('drop-target')
+                  ;(ev.currentTarget as HTMLElement).classList.remove('drop-target', 'drop-target-upload')
+                  if (p.onDirDragLeave) p.onDirDragLeave()
                 },
                 onDrop: (ev: DragEvent) => {
                   ev.preventDefault()
-                  ;(ev.currentTarget as HTMLElement).classList.remove('drop-target')
+                  ev.stopPropagation()
+                  ;(ev.currentTarget as HTMLElement).classList.remove('drop-target', 'drop-target-upload')
                   const srcRel = ev.dataTransfer?.getData('application/x-tree-move')
                   if (srcRel !== undefined && srcRel !== rel && !rel.startsWith(srcRel + '/')) {
                     emit('move-entry', { src: srcRel, destDir: rel })
+                  } else if (ev.dataTransfer?.types.includes('Files')) {
+                    emit('upload-to-dir', rel, ev)
                   }
                 },
                 ...makeLongPressHandlers(rel, true),
@@ -355,6 +367,8 @@ export const TreeRows = defineComponent({
                   emit('move-entry', payload),
                 onSwipeAction: (payload: { rel: string; action: string }) =>
                   emit('swipe-action', payload),
+                onUploadToDir: (dir: string, ev: DragEvent) =>
+                  emit('upload-to-dir', dir, ev),
               }),
             )
           }
@@ -429,9 +443,13 @@ export const TreeRows = defineComponent({
       return h('div', {
         class: 'tree-rows',
         onDragover: (ev: DragEvent) => {
-          if (ev.dataTransfer?.types.includes('application/x-tree-move')) {
+          const types = ev.dataTransfer?.types
+          if (types?.includes('application/x-tree-move')) {
             ev.preventDefault()
             ev.dataTransfer!.dropEffect = 'move'
+          } else if (types?.includes('Files')) {
+            ev.preventDefault()
+            ev.dataTransfer!.dropEffect = 'copy'
           }
         },
         onDrop: (ev: DragEvent) => {
@@ -439,6 +457,8 @@ export const TreeRows = defineComponent({
           const srcRel = ev.dataTransfer?.getData('application/x-tree-move')
           if (srcRel !== undefined && srcRel.includes('/')) {
             emit('move-entry', { src: srcRel, destDir: '' })
+          } else if (ev.dataTransfer?.types.includes('Files')) {
+            emit('upload-to-dir', '', ev)
           }
         },
         onContextmenu: (ev: MouseEvent) => {

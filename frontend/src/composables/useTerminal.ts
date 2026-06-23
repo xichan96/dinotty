@@ -15,6 +15,10 @@ export function isTouchDevice(): boolean {
 let tauriDragDropRegistered = false
 let lastFocusedInstance: TerminalInstance | null = null
 
+// Guard for Tauri WKWebView multi-focus: only the active pane should send input.
+let _activePaneId: string | null = null
+export function setActivePaneId(paneId: string | null) { _activePaneId = paneId }
+
 function setupGlobalTauriDragDrop() {
   if (tauriDragDropRegistered) return
   tauriDragDropRegistered = true
@@ -59,6 +63,8 @@ export class TerminalInstance {
   private _refitRaf: number = 0
   private _lastCols = 0
   private _lastRows = 0
+  private _lastInputData = ''
+  private _lastInputTime = 0
   touchMoved = false
   private _visibilityHandler: (() => void) | null = null
   private _dragDropCleanup: (() => void) | null = null
@@ -273,11 +279,17 @@ export class TerminalInstance {
     this.xterm?.focus()
   }
 
+  blur() {
+    this.xterm?.blur()
+  }
+
   fit() {
     this._refit()
   }
 
-  sendData(data: string) {
+  sendData(data: string, force = false) {
+    // Guard: only the active pane sends input (prevents WKWebView multi-focus duplication)
+    if (!force && _activePaneId !== null && _activePaneId !== this.paneId) return
     if (this._transport) {
       this._transport.send({ type: 'input', data })
     } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -360,6 +372,13 @@ export class TerminalInstance {
       this._onDataRegistered = true
       this.xterm!.onData((data) => {
         if (this._compositionGuard && !this._compositionGuard(data)) return
+        // Guard: only the active pane sends input (prevents WKWebView multi-focus duplication)
+        if (_activePaneId !== null && _activePaneId !== this.paneId) return
+        // Deduplicate: WKWebView may fire onData twice for the same keystroke
+        const now = performance.now()
+        if (data === this._lastInputData && now - this._lastInputTime < 5) return
+        this._lastInputData = data
+        this._lastInputTime = now
         this.onInput?.(data)
         this._transport?.send({ type: 'input', data })
       })
@@ -418,6 +437,13 @@ export class TerminalInstance {
       this._onDataRegistered = true
       this.xterm!.onData((data) => {
         if (this._compositionGuard && !this._compositionGuard(data)) return
+        // Guard: only the active pane sends input (prevents WKWebView multi-focus duplication)
+        if (_activePaneId !== null && _activePaneId !== this.paneId) return
+        // Deduplicate: WKWebView may fire onData twice for the same keystroke
+        const now = performance.now()
+        if (data === this._lastInputData && now - this._lastInputTime < 5) return
+        this._lastInputData = data
+        this._lastInputTime = now
         this.onInput?.(data)
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(JSON.stringify({ type: 'input', data } as ClientMsg))

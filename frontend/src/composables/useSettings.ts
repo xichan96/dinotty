@@ -22,6 +22,10 @@ export interface SettingsData {
   }
   text: TextConfig
   bookmarks: CommandBookmark[]
+  workspace_bookmarks: WorkspaceBookmark[]
+  web_bookmarks: WebBookmark[]
+  recent_files: RecentEntry[]
+  recent_urls: RecentEntry[]
   action_keyboard: ActionKeyboardConfig | null
   keyboard_sound: boolean
   show_virtual_keyboard: boolean
@@ -70,6 +74,7 @@ export interface MonitorConfig {
   memory: boolean
   disk: boolean
   network: boolean
+  gpu: boolean
 }
 
 export interface TextConfig {
@@ -87,6 +92,27 @@ export interface CommandBookmark {
   name: string
   command: string
   group: string | null
+}
+
+export interface WorkspaceBookmark {
+  id: string
+  name: string
+  path: string
+  is_dir: boolean
+  group: string | null
+}
+
+export interface WebBookmark {
+  id: string
+  name: string
+  url: string
+  group: string | null
+}
+
+export interface RecentEntry {
+  path_or_url: string
+  name: string
+  visited_at: number
 }
 
 export interface ActionKey {
@@ -141,6 +167,10 @@ export const settings = reactive<SettingsData>({
     scrollback: 10000,
   },
   bookmarks: [],
+  workspace_bookmarks: [],
+  web_bookmarks: [],
+  recent_files: [],
+  recent_urls: [],
   action_keyboard: null,
   keyboard_sound: false,
   show_virtual_keyboard: false,
@@ -153,6 +183,7 @@ export const settings = reactive<SettingsData>({
     memory: true,
     disk: true,
     network: true,
+    gpu: true,
   },
   notification: {
     enabled: true,
@@ -184,10 +215,11 @@ export const settings = reactive<SettingsData>({
 })
 
 let loaded = false
+let loadPromise: Promise<void> | null = null
 
 export function useSettings() {
   if (!loaded) {
-    loadSettings()
+    loadPromise = loadSettings()
     loaded = true
   }
   return { settings, saveSettings, loadSettings, applyCurrentTheme, getCurrentXtermTheme }
@@ -235,6 +267,8 @@ async function loadSettings() {
 
 async function saveSettings() {
   try {
+    // Wait for initial load to complete before saving, to avoid overwriting server data with defaults
+    if (loadPromise) await loadPromise
     // Sync action keyboard to localStorage for static mobile-keyboard.js
     if (settings.action_keyboard) {
       localStorage.setItem('dinotty_action_keyboard', JSON.stringify(settings.action_keyboard))

@@ -1,9 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, State};
 use dinotty_server::pty;
 use dinotty_server::session::{SessionManager, SessionStatus, SyncMsg};
 use reqwest::Method;
+use base64::Engine;
 
 mod embedded_server;
 
@@ -77,6 +78,8 @@ fn pty_spawn(
                 *g = Some(Arc::clone(&exit_cb));
             }
         }
+        // Clear old output forwarders to prevent duplicate output on reconnection
+        session.clear_clients();
         emit_join_sync(&app, &pane_id, &session);
         spawn_tauri_output_forwarder(app.clone(), pane_id.clone(), Arc::clone(&session));
         return Ok(session.shell_type.clone());
@@ -134,7 +137,7 @@ fn pty_resize(
 
 #[tauri::command]
 fn pty_kill(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<(), String> {
-    state.sessions.remove(&pane_id);
+    state.kill_and_remove(&pane_id);
     state.broadcast_sync(&SyncMsg::TabClosed {
         pane_id: pane_id.clone(),
     });
@@ -216,6 +219,63 @@ async fn tauri_fetch(
     Ok(FetchResponse { status, headers, body })
 }
 
+#[derive(Deserialize)]
+struct UploadFile {
+    name: String,
+    path: String,
+    data: String, // base64-encoded
+}
+
+#[tauri::command]
+async fn tauri_read_file(path: String) -> Result<String, String> {
+    let bytes = tokio::fs::read(&path).await.map_err(|e| format!("read {path}: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+#[tauri::command]
+async fn tauri_upload(
+    pane_id: String,
+    dir: String,
+    files: Vec<UploadFile>,
+    token: Option<String>,
+) -> Result<FetchResponse, String> {
+    let port = EMBEDDED_HTTP_PORT.get().copied().unwrap_or(8999);
+    let url = format!(
+        "http://127.0.0.1:{port}/api/workspace/upload?pane_id={}&dir={}",
+        urlencoding::encode(&pane_id),
+        urlencoding::encode(&dir),
+    );
+
+    let client = reqwest::Client::new();
+    let mut form = reqwest::multipart::Form::new();
+
+    for f in &files {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&f.data)
+            .map_err(|e| format!("base64 decode error for {}: {e}", f.name))?;
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(f.name.clone())
+            .mime_str("application/octet-stream")
+            .map_err(|e| e.to_string())?;
+        form = form.part("file", part);
+        form = form.text("path", f.path.clone());
+    }
+
+    let mut req = client.post(&url).multipart(form);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
+    let headers: Vec<(String, String)> = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    Ok(FetchResponse { status, headers, body })
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -272,6 +332,8 @@ fn main() {
             pty_detach,
             embedded_http_origin,
             tauri_fetch,
+            tauri_upload,
+            tauri_read_file,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

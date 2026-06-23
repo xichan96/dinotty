@@ -170,9 +170,9 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                 .and_then(|v| v.get("layout").cloned())
                                 .map(|layout| crate::session::collect_leaf_pane_ids(&layout))
                                 .unwrap_or_default();
-                            // Remove PTY sessions for all leaves in this tab
+                            // Kill and remove PTY sessions for all leaves in this tab
                             for leaf_id in &leaf_ids {
-                                manager.sessions.remove(leaf_id);
+                                manager.kill_and_remove(leaf_id);
                             }
                             manager.remove_tab(&pane_id);
                             // Remove stale pane_id from any parent tab layouts
@@ -180,7 +180,7 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                             manager.broadcast_sync_others(&SyncMsg::TabClosed { pane_id }, &client_id);
                         }
                         SyncClientMsg::ClosePane { pane_id } => {
-                            manager.sessions.remove(&pane_id);
+                            manager.kill_and_remove(&pane_id);
                             // Collect affected layouts before purging
                             let before_layouts: Vec<(String, serde_json::Value)> = manager.tab_layouts.iter()
                                 .map(|e| (e.key().clone(), e.value().clone()))

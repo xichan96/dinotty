@@ -8,6 +8,7 @@ import {
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 import type { SyncClientMsg } from '../types/protocol'
 import { apiSplitPane, apiClosePane } from './useTabApi'
+import { setActivePaneId } from './useTerminal'
 
 export function useSplitPane(opts: {
   tabs: Ref<Tab[]>
@@ -50,9 +51,18 @@ export function useSplitPane(opts: {
       // Update local layout with server response
       tab.layout = ensureSplitRoot(result.layout)
       tab.activePaneId = result.new_pane_id
+      setActivePaneId(result.new_pane_id)
       persist()
       syncTabLayout(tab)
-      nextTick(() => termRefs[result.new_pane_id]?.focus())
+      nextTick(() => {
+        // Blur all other panes first to prevent duplicate input in Tauri WKWebView
+        for (const leaf of getAllLeaves(tab.layout)) {
+          if (leaf.paneId !== result.new_pane_id) {
+            termRefs[leaf.paneId]?.blur()
+          }
+        }
+        termRefs[result.new_pane_id]?.focus()
+      })
     } catch (e) {
       console.error('Failed to split pane:', e)
     }
@@ -84,12 +94,19 @@ export function useSplitPane(opts: {
       }
       if (result.active_pane_id) {
         tab.activePaneId = result.active_pane_id
+        setActivePaneId(result.active_pane_id)
       }
       delete termRefs[paneId]
       persist()
       syncTabLayout(tab)
       nextTick(() => {
         getAllLeaves(tab.layout).forEach(l => termRefs[l.paneId]?.fit())
+        // Blur all other panes first to prevent duplicate input in Tauri WKWebView
+        for (const leaf of getAllLeaves(tab.layout)) {
+          if (leaf.paneId !== tab.activePaneId) {
+            termRefs[leaf.paneId]?.blur()
+          }
+        }
         termRefs[tab.activePaneId]?.focus()
       })
       return true
@@ -104,10 +121,20 @@ export function useSplitPane(opts: {
     const tab = findTabByPaneId(paneId)
     if (tab) {
       tab.activePaneId = paneId
+      // Update immediately so onData guard blocks other panes before nextTick
+      setActivePaneId(paneId)
       clearAllZoom(tab.layout)
       persist()
       syncTabLayout(tab)
-      nextTick(() => termRefs[paneId]?.focus())
+      nextTick(() => {
+        // Blur all other panes first to prevent duplicate input in Tauri WKWebView
+        for (const leaf of getAllLeaves(tab.layout)) {
+          if (leaf.paneId !== paneId) {
+            termRefs[leaf.paneId]?.blur()
+          }
+        }
+        termRefs[paneId]?.focus()
+      })
     }
   }
 
@@ -267,7 +294,7 @@ export function useSplitPane(opts: {
     const leaves = getAllLeaves(tab.layout)
     for (const leaf of leaves) {
       if (leaf.paneId !== sourcePaneId) {
-        termRefs[leaf.paneId]?.sendData(data)
+        termRefs[leaf.paneId]?.sendData(data, true)
       }
     }
     // Increment activity counter to re-trigger broadcast banner

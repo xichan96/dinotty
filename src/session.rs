@@ -37,6 +37,17 @@ pub struct Session {
 }
 
 impl Session {
+    /// Explicitly kill the child process. Safe to call multiple times (idempotent).
+    /// After this, the PTY reader task's `reader.read()` will return Err/Ok(0),
+    /// causing it to exit and drop its `Arc<Session>`, which triggers `Drop`.
+    pub fn kill_child(&self) {
+        let mut child = self.child.lock().unwrap();
+        let pid = child.process_id();
+        let _ = child.kill();
+        let _ = child.wait();
+        info!("Session child killed: pid={:?}", pid);
+    }
+
     pub fn on_pty_output(&self, data: &[u8]) {
         let Some(home) = dirs::home_dir() else {
             return;
@@ -385,6 +396,25 @@ impl SessionManager {
         self.broadcast_sync(&SyncMsg::PluginChanged { plugin_id, change });
     }
 
+    /// Remove a session from the DashMap and explicitly kill its child process.
+    /// Returns true if the session existed.
+    ///
+    /// This is necessary because the PTY reader task holds an `Arc<Session>`,
+    /// preventing `Drop` from firing when we only remove from the DashMap.
+    /// By killing the child first, the reader's `read()` returns Err/Ok(0),
+    /// causing it to exit and release its `Arc`.
+    pub fn kill_and_remove(&self, pane_id: &str) -> bool {
+        if let Some((_, session)) = self.sessions.remove(pane_id) {
+            session.kill_child();
+            // Drop the input channel sender so the writer task's recv() returns
+            // None and the task exits, releasing its Arc<Session>.
+            session.input_tx.lock().unwrap().take();
+            true
+        } else {
+            false
+        }
+    }
+
     /// Remove a pane_id from all parent tab layouts. If removing it causes
     /// a split to have only one child, the split collapses into that child.
     /// Returns the list of tab IDs whose layouts became empty (i.e. the pane
@@ -548,13 +578,30 @@ impl SessionManager {
             loop {
                 interval.tick().await;
                 let timeout = std::time::Duration::from_secs(300);
-                manager.sessions.retain(|_, session| {
-                    let status = session.status.lock().unwrap();
+                // Two-pass: collect stale IDs first, then kill_and_remove.
+                // Can't use retain() because we need to kill child processes.
+                let stale: Vec<String> = manager.sessions.iter().filter_map(|entry| {
+                    let status = entry.value().status.lock().unwrap();
                     match *status {
-                        SessionStatus::Detached { since } => since.elapsed() < timeout,
-                        SessionStatus::Connected => true,
+                        SessionStatus::Detached { since } if since.elapsed() >= timeout => {
+                            Some(entry.key().clone())
+                        }
+                        _ => None,
                     }
-                });
+                }).collect();
+                for pane_id in stale {
+                    // Re-check status before killing — the session may have been
+                    // reconnected between the collect pass and now.
+                    let should_kill = manager.sessions.get(&pane_id).map(|entry| {
+                        let status = entry.value().status.lock().unwrap();
+                        matches!(*status, SessionStatus::Detached { since } if since.elapsed() >= timeout)
+                    }).unwrap_or(false);
+
+                    if should_kill {
+                        info!("Cleanup: removing detached session: pane={}", pane_id);
+                        manager.kill_and_remove(&pane_id);
+                    }
+                }
             }
         });
     }

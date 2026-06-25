@@ -2,7 +2,7 @@
 
 use dinotty_server::{
     agent, audit, auth, file_watcher, history, mcp, monitor, notification, openapi, plugin, proxy,
-    session, settings, tabs, token, webhook, workspace, ws,
+    qr_code, session, settings, tabs, token, webhook, workspace, ws,
 };
 
 use axum::{
@@ -37,13 +37,18 @@ async fn index(
     let content = StaticFiles::get("index.html").expect("index.html must exist in frontend/dist/");
     let html = String::from_utf8_lossy(&content.data);
 
-    // Only embed token if ?token=xxx matches the server token
     let stored_token = state.auth_token.read().await.clone();
-    let token_value = params
-        .get("token")
-        .filter(|t| urlencoding::decode(t).is_ok_and(|d| d == stored_token))
-        .map(|_| stored_token)
-        .unwrap_or_default();
+
+    // Accept either ?code=xxx (one-time QR code) or ?token=xxx (direct token)
+    let token_value = if let Some(code) = params.get("code") {
+        state.qr_codes.consume(code).unwrap_or_default()
+    } else {
+        params
+            .get("token")
+            .filter(|t| urlencoding::decode(t).is_ok_and(|d| d == stored_token))
+            .map(|_| stored_token)
+            .unwrap_or_default()
+    };
 
     let tag = format!("<meta name=\"auth-token\" content=\"{token_value}\">\n</head>");
     let html = html.replace("</head>", &tag);
@@ -99,6 +104,7 @@ pub struct AppState {
     pub webhooks: webhook::WebhookState,
     pub mcp: mcp::transport::McpState,
     pub mcp_sse: Arc<mcp::transport::SseState>,
+    pub qr_codes: Arc<qr_code::QrCodeState>,
 }
 
 // Allow extracting Arc<SessionManager> from AppState for ws handlers
@@ -179,6 +185,12 @@ impl axum::extract::FromRef<AppState> for mcp::transport::McpState {
 impl axum::extract::FromRef<AppState> for Arc<mcp::transport::SseState> {
     fn from_ref(state: &AppState) -> Self {
         state.mcp_sse.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<qr_code::QrCodeState> {
+    fn from_ref(state: &AppState) -> Self {
+        state.qr_codes.clone()
     }
 }
 
@@ -304,6 +316,19 @@ async fn update_token(
     StatusCode::OK.into_response()
 }
 
+async fn generate_qr_code(State(state): State<AppState>) -> impl IntoResponse {
+    let token = state.auth_token.read().await;
+    if token.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "no token configured"})),
+        )
+            .into_response();
+    }
+    let code = state.qr_codes.generate(&token);
+    Json(serde_json::json!({ "code": code })).into_response()
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::registry()
@@ -366,6 +391,8 @@ async fn main() {
 
     let mcp_server = Arc::new(mcp::server::McpServer::new(manager.clone(), settings_state.clone()));
     let mcp_sse = Arc::new(mcp::transport::SseState::new());
+    let qr_codes = Arc::new(qr_code::QrCodeState::new());
+    qr_codes.clone().start_cleanup_task();
 
     let state = AppState {
         manager,
@@ -384,6 +411,7 @@ async fn main() {
         webhooks,
         mcp: mcp_server,
         mcp_sse,
+        qr_codes,
     };
 
     state.plugins.watch_changes(state.manager.clone());
@@ -442,6 +470,7 @@ async fn main() {
             .route("/api/proxy", any(proxy::external_proxy_handler))
             .route("/api/info", get(server_info))
             .route("/api/token", get(get_token).put(update_token))
+            .route("/api/qr-code", post(generate_qr_code))
             // Plugin management
             .route("/api/plugins", get(plugin::list_plugins))
             .route("/api/plugins/market", get(plugin::get_market_registry))

@@ -65,6 +65,10 @@
   --palette-select: #2a2d2e;
   --palette-text: #cccccc;
 
+  /* Scrollbar */
+  --scrollbar-thumb: #4a4a4a;
+  --scrollbar-thumb-hover: #5a5a5a;
+
   /* Misc */
   --radius: 4px;
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -79,33 +83,24 @@
   padding: 0;
 }
 
-/* Global scrollbar styling (exclude xterm viewport — it manages its own) */
-*:not(.xterm-viewport) {
+/* Global scrollbar styling (thin, theme-aware) */
+* {
   scrollbar-width: thin;
-  scrollbar-color: #4a4a4a transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
-*:not(.xterm-viewport)::-webkit-scrollbar {
+*::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-*:not(.xterm-viewport)::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
 }
-*:not(.xterm-viewport)::-webkit-scrollbar-thumb {
-  background: #4a4a4a;
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
-*:not(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
-  background: #5a5a5a;
-}
-
-/* xterm viewport — hide native scrollbar (scroll via wheel/keyboard/touch) */
-.xterm-viewport {
-  overflow-y: hidden !important;
-  scrollbar-width: none;
-}
-.xterm-viewport::-webkit-scrollbar {
-  display: none;
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 html,

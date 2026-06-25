@@ -58,6 +58,8 @@ export const themes: ThemeDefinition[] = [
       '--fg': '#333333',
       '--fg-bright': '#111111',
       '--fg-muted': '#999999',
+      '--scrollbar-thumb': '#C0C0C0',
+      '--scrollbar-thumb-hover': '#A0A0A0',
       '--accent': '#2563EB',
       '--accent-hover': '#3B82F6',
       '--tab-bg': '#F5F5F5',

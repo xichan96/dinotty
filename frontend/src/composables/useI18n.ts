@@ -116,6 +116,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.accessUrlHint':
       'Use this URL to access the terminal from other devices on the same network',
     'settings.copyUrl': 'Copy URL',
+    'settings.refreshQrCode': 'Refresh QR code',
     'settings.token': 'Access Token',
     'settings.token.show': 'Show',
     'settings.token.hide': 'Hide',
@@ -470,6 +471,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.accessUrl': '访问地址',
     'settings.accessUrlHint': '使用此 URL 从同一网络的其他设备访问终端',
     'settings.copyUrl': '复制 URL',
+    'settings.refreshQrCode': '刷新二维码',
     'settings.token': '访问令牌',
     'settings.token.show': '显示',
     'settings.token.hide': '隐藏',

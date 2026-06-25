@@ -45,6 +45,9 @@
         </div>
         <div v-if="accessUrl" class="qr-code-wrap">
           <canvas ref="qrCanvasRef"></canvas>
+          <button class="qr-refresh-btn" @click="refreshQrCode" :title="t('settings.refreshQrCode')">
+            <RefreshCw :size="12" />
+          </button>
         </div>
         <p class="settings-hint">{{ t('settings.accessUrlHint') }}</p>
       </div>
@@ -170,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import QRCode from 'qrcode'
 import { Eye, EyeOff, Copy, Check, Pencil, RefreshCw, Save, X } from 'lucide-vue-next'
 import { useSettings } from '../../composables/useSettings'
@@ -191,11 +194,12 @@ const { t } = useI18n()
 const accessUrl = ref('')
 const copied = ref(false)
 const qrCanvasRef = ref<HTMLCanvasElement | null>(null)
+const qrCode = ref('')
 const currentToken = ref('')
 
-watch([accessUrl, qrCanvasRef, currentToken], ([url, canvas, token]) => {
+watch([accessUrl, qrCanvasRef, qrCode], ([url, canvas, code]) => {
   if (url && canvas) {
-    const qrUrl = token ? `${url}/?token=${token}` : url
+    const qrUrl = code ? `${url}/?code=${code}` : url
     QRCode.toCanvas(canvas, qrUrl, {
       width: 160,
       margin: 2,
@@ -203,6 +207,18 @@ watch([accessUrl, qrCanvasRef, currentToken], ([url, canvas, token]) => {
     })
   }
 })
+
+async function refreshQrCode() {
+  try {
+    const res = await authFetch(apiUrl('/api/qr-code'), { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      qrCode.value = data.code
+    }
+  } catch {
+    // QR code generation failed — canvas will show URL without code
+  }
+}
 
 onMounted(async () => {
   try {
@@ -217,6 +233,16 @@ onMounted(async () => {
     accessUrl.value = `http://${host}${port ? ':' + port : ''}`
   }
   currentToken.value = (await fetchServerToken()) || getAuthToken()
+  await refreshQrCode()
+})
+
+// Auto-refresh QR code before the 5-minute TTL expires
+let qrRefreshTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  qrRefreshTimer = setInterval(refreshQrCode, 4 * 60 * 1000)
+})
+onUnmounted(() => {
+  if (qrRefreshTimer) clearInterval(qrRefreshTimer)
 })
 
 async function copyAccessUrl() {
@@ -392,6 +418,8 @@ function removeIp(idx: number) {
 .qr-code-wrap {
   display: flex;
   justify-content: flex-start;
+  align-items: flex-start;
+  gap: 8px;
   margin: 12px 0 8px;
 }
 
@@ -400,5 +428,23 @@ function removeIp(idx: number) {
   background: var(--bg-input, #1a1a1a);
   border: 1px solid var(--border, #333);
   padding: 8px;
+}
+
+.qr-refresh-btn {
+  background: none;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.qr-refresh-btn:hover {
+  color: var(--text-primary, #fff);
+  border-color: var(--text-secondary, #888);
 }
 </style>

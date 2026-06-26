@@ -37,6 +37,7 @@ RUN mkdir -p src && \
 
 # 复制实际源码和前端产物
 COPY src/ src/
+COPY src-tauri/ src-tauri/ 
 COPY build.rs ./
 COPY --from=frontend /app/frontend/dist/ frontend/dist/
 

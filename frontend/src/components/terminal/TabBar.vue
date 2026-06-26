@@ -3,7 +3,7 @@
     <!-- Mobile compact mode -->
     <template v-if="isMobile">
       <button class="mc-trigger" @click="$emit('open-overview')">
-        <LayoutGrid :size="16" />
+        <LayoutDashboard :size="16" />
       </button>
       <span class="current-tab-index">{{ currentTabIndex }}</span>
       <span class="current-tab-name">{{ currentTabTitle }}</span>
@@ -116,7 +116,7 @@
         @click="pluginMenuOpen = !pluginMenuOpen"
         @touchend.prevent="pluginMenuOpen = !pluginMenuOpen"
       >
-        <Blocks :size="16" />
+        <Puzzle :size="16" />
       </button>
       <div v-if="pluginMenuOpen" class="plugin-dropdown" @mouseleave="pluginMenuOpen = false">
         <div
@@ -143,7 +143,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
-import { X, Terminal, Blocks, Columns2, Rows2, Radio, LayoutGrid } from 'lucide-vue-next'
+import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 

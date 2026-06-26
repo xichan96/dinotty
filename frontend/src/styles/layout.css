@@ -171,6 +171,9 @@
   text-align: center;
   flex-shrink: 0;
   opacity: 0.7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .current-tab-name {
@@ -181,6 +184,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 8px;
+  display: flex;
+  align-items: center;
 }
 
 /* ── Tab content ─────────────────────────────────────────── */

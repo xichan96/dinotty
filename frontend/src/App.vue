@@ -9,12 +9,16 @@
       :plugins="pluginList"
       :can-broadcast="canBroadcast"
       :broadcast-active="isBroadcastActive"
+      :is-mobile="isMobile"
+      :current-tab-title="currentTabTitle"
+      :current-tab-index="currentTabIndex"
       @activate="activateTab"
       @close="requestCloseTab"
       @action="onNewMenuAction"
       @reorder="reorderTab"
       @open-plugin="openPlugin"
       @rename="onRenameTab"
+      @open-overview="openOverview"
     >
       <template #left>
         <button
@@ -171,6 +175,15 @@
       :visible="kbVisible"
       @toggle="kbVisible = !kbVisible"
     />
+
+    <TabOverview
+      :visible="overviewOpen"
+      :cards="overviewCards"
+      :active-pane-id="activePaneId"
+      @close="overviewOpen = false"
+      @activate="onOverviewActivate"
+      @close-tab="onOverviewCloseTab"
+    />
   </div>
 </template>
 
@@ -228,6 +241,10 @@ import {
   apiListTabs,
 } from './composables/useTabApi'
 import { Settings, Bell, Monitor, Plus, X, Star, AppWindow, Radar } from 'lucide-vue-next'
+import TabOverview from './components/overview/TabOverview.vue'
+import type { TabCard } from './composables/useTabPreview'
+import { useTabPreview } from './composables/useTabPreview'
+import { useIsMobile } from './composables/useIsMobile'
 // formatCloseTabMessage moved to ConfirmCloseDialog component
 import LoginPage from './components/LoginPage.vue'
 import SetupPage from './components/SetupPage.vue'
@@ -264,8 +281,50 @@ const { t } = useI18n()
 const { getBinding, formatBinding } = useKeybindings()
 const notif = useNotification()
 const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = usePluginLoader()
+const { isMobile } = useIsMobile()
+const tabPreview = useTabPreview()
 
 const isLandscape = ref(window.innerWidth > window.innerHeight)
+
+// Mission Control
+const overviewOpen = ref(false)
+const overviewCards = ref<TabCard[]>([])
+const currentTabIndex = computed(() =>
+  tabs.value.findIndex((t) => t.paneId === activePaneId.value) + 1
+)
+const currentTabTitle = computed(() => {
+  const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+  if (!tab) return ''
+  if (tab.type === 'terminal') return tab.customTitle ?? findLeaf(tab.layout, tab.activePaneId)?.title ?? 'Terminal'
+  return tab.title
+})
+
+function openOverview() {
+  overviewCards.value = tabPreview.captureAll(tabs.value, termRefs, notif.unreadByPane)
+  overviewOpen.value = true
+}
+
+function onOverviewActivate(paneId: string) {
+  activateTab(paneId)
+  overviewOpen.value = false
+  nextTick(() => {
+    const ref = termRefs[paneId]
+    ref?.focus()
+  })
+}
+
+function onOverviewCloseTab(tabId: string) {
+  requestCloseTab(tabId)
+}
+
+watch(
+  () => tabs.value.length,
+  () => {
+    if (overviewOpen.value) {
+      overviewCards.value = tabPreview.captureAll(tabs.value, termRefs, notif.unreadByPane)
+    }
+  }
+)
 
 const resolvedPosition = computed(() => {
   const pos = appSettings.panel_position ?? 'auto'
@@ -936,6 +995,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
       if (!tab || tab.type !== 'terminal') return
       termRefs[tab.activePaneId]?.toggleSearch()
     },
+    missionControl: () => openOverview(),
   }
 
   for (const [id, action] of Object.entries(keyActions)) {

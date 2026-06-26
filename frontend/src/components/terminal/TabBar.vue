@@ -1,6 +1,15 @@
 <template>
   <div id="tab-bar">
-    <div id="tabs-list">
+    <!-- Mobile compact mode -->
+    <template v-if="isMobile">
+      <button class="mc-trigger" @click="$emit('open-overview')">
+        <LayoutGrid :size="16" />
+      </button>
+      <span class="current-tab-index">{{ currentTabIndex }}</span>
+      <span class="current-tab-name">{{ currentTabTitle }}</span>
+    </template>
+    <!-- Desktop mode: full tab list -->
+    <div v-else id="tabs-list">
       <div
         v-for="tab in tabs"
         :key="tab.paneId"
@@ -134,7 +143,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
-import { X, Terminal, Blocks, Columns2, Rows2, Radio } from 'lucide-vue-next'
+import { X, Terminal, Blocks, Columns2, Rows2, Radio, LayoutGrid } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 
@@ -168,12 +177,18 @@ withDefaults(
     plugins?: PluginInfo[]
     canBroadcast?: boolean
     broadcastActive?: boolean
+    isMobile?: boolean
+    currentTabTitle?: string
+    currentTabIndex?: number
   }>(),
   {
     indicators: () => ({}),
     plugins: () => [],
     canBroadcast: false,
     broadcastActive: false,
+    isMobile: false,
+    currentTabTitle: '',
+    currentTabIndex: 0,
   }
 )
 
@@ -184,6 +199,7 @@ const emit = defineEmits<{
   reorder: [fromId: string, toId: string]
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
+  'open-overview': []
 }>()
 
 const editingPaneId = ref<string | null>(null)

@@ -145,6 +145,44 @@
   }
 }
 
+/* ── Mobile compact tab bar (styled unconditionally; v-if controls visibility) ── */
+.mc-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+  transition: color 0.1s;
+}
+.mc-trigger:active {
+  color: var(--fg-bright);
+}
+
+.current-tab-index {
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  min-width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.current-tab-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--fg-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px;
+}
+
 /* ── Tab content ─────────────────────────────────────────── */
 #tab-content {
   flex: 1;

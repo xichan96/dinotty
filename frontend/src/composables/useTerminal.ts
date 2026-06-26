@@ -2,11 +2,209 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
 import { isTauri, createTransport, type Transport } from './useTransport'
 import { onThemeChange, settings, onTextChange } from './useSettings'
 import { wsUrlWithToken } from './apiBase'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Renderer resilience: WKWebView on macOS may drop the WebGL context under
+// sustained GPU pressure (e.g. frantic scroll → many viewport redraws).
+//
+// Before this module, the lost context simply disposed the WebGL addon and
+// left xterm without a working renderer — output kept flowing into the buffer
+// but nothing was drawn, so the terminal appeared frozen.
+//
+// The state machine below tries to reinitialise the WebGL renderer
+// (debounced), then falls back to the Canvas renderer as a permanent
+// stable baseline. The terminal must never end up unrendered.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type RendererKind = 'webgl' | 'canvas' | 'none'
+
+export interface RendererResilienceHooks {
+  /** Fired when the active WebGL renderer reports context loss. */
+  onRendererLost?: (info: { from: 'webgl'; reason: string }) => void
+  /** Fired after a renderer transition completes (webgl→webgl or webgl→canvas). */
+  onRendererRestored?: (info: { to: RendererKind }) => void
+}
+
+export interface RendererResilienceOptions {
+  /** Max WebGL reinit attempts before falling back to Canvas. Default 3. */
+  maxAttempts?: number
+  /** Debounce window for collapsing context-loss events. Default 500ms. */
+  debounceMs?: number
+  /** Injectable clock for tests. Defaults to Date.now. */
+  now?: () => number
+  /** Injectable scheduler (returns a cancel function). Defaults to setTimeout. */
+  schedule?: (cb: () => void, delay: number) => () => void
+  /** Injectable addon factories for tests. */
+  factories?: {
+    createWebgl?: () => WebglAddon | null
+    createCanvas?: () => CanvasAddon | null
+  }
+}
+
+export interface RendererResilienceState {
+  renderer: RendererKind
+  /** WebGL reinit attempts since the last successful attach. */
+  attempts: number
+  /** True while a debounce timer is pending. */
+  debouncing: boolean
+}
+
+export interface RendererResilienceController {
+  /** Try to load WebGL renderer. Returns true on success. */
+  attachInitial(): boolean
+  /** Hook to wire to the active WebGL addon's context-loss event. */
+  onContextLoss(): void
+  /** Force fallback to Canvas (or no-op if already there). Returns whether fallback applied. */
+  forceFallback(): boolean
+  /** Tear down timers and active renderer. */
+  dispose(): void
+  getState(): Readonly<RendererResilienceState>
+}
+
+/**
+ * Factory: build a renderer-resilience controller. The controller is a pure
+ * state machine — xterm interaction happens via the supplied `attach`/`detach`
+ * callbacks, which makes it straightforward to unit-test.
+ *
+ * @param attach    callback invoked with a freshly-created addon; the caller
+ *                  should call `xterm.loadAddon(addon)` here.
+ * @param detach    callback invoked with the addon to unload; the caller should
+ *                  call `addon.dispose()` here (and any extra cleanup).
+ * @param hooks     optional callbacks for telemetry / UI.
+ * @param options   tuning knobs (debounce, max attempts, injectable factories).
+ */
+export function createRendererResilience(
+  attach: (addon: WebglAddon | CanvasAddon) => void,
+  detach: (addon: WebglAddon | CanvasAddon) => void,
+  hooks?: RendererResilienceHooks,
+  options?: RendererResilienceOptions,
+): RendererResilienceController {
+  const maxAttempts = options?.maxAttempts ?? 3
+  const debounceMs = options?.debounceMs ?? 500
+  const now = options?.now ?? Date.now
+  const schedule = options?.schedule ?? ((cb, d) => {
+    const id = setTimeout(cb, d)
+    return () => clearTimeout(id)
+  })
+  const createWebgl = options?.factories?.createWebgl ?? ((): WebglAddon | null => {
+    try { return new WebglAddon() } catch { return null }
+  })
+  const createCanvas = options?.factories?.createCanvas ?? ((): CanvasAddon | null => {
+    try { return new CanvasAddon() } catch { return null }
+  })
+
+  const state: RendererResilienceState = { renderer: 'none', attempts: 0, debouncing: false }
+  let activeAddon: WebglAddon | CanvasAddon | null = null
+  let cancelDebounce: (() => void) | null = null
+  let disposed = false
+
+  function disposeActive() {
+    if (activeAddon) {
+      try { detach(activeAddon) } catch { /* addon already disposed */ }
+      activeAddon = null
+    }
+    state.renderer = 'none'
+  }
+
+  function tryAttachWebgl(): boolean {
+    const w = createWebgl()
+    if (!w) return false
+    try {
+      attach(w)
+      activeAddon = w
+      state.renderer = 'webgl'
+      state.attempts = 0
+      return true
+    } catch {
+      // attach threw — treat as failure
+      return false
+    }
+  }
+
+  function tryAttachCanvas(): boolean {
+    const c = createCanvas()
+    if (!c) return false
+    try {
+      attach(c)
+      activeAddon = c
+      state.renderer = 'canvas'
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function scheduleReinit() {
+    if (cancelDebounce) cancelDebounce()
+    state.debouncing = true
+    cancelDebounce = schedule(() => {
+      state.debouncing = false
+      cancelDebounce = null
+      if (disposed) return
+      const ok = tryAttachWebgl()
+      if (ok) {
+        hooks?.onRendererRestored?.({ to: 'webgl' })
+        return
+      }
+      // WebGL reinit failed this round. If we've exhausted retries,
+      // permanently fall back to Canvas. If canvas also fails, the
+      // terminal continues with xterm.js's built-in DOM renderer.
+      if (state.attempts >= maxAttempts) {
+        if (tryAttachCanvas()) {
+          hooks?.onRendererRestored?.({ to: 'canvas' })
+        }
+      }
+    }, debounceMs)
+  }
+
+  return {
+    attachInitial(): boolean {
+      if (disposed) return false
+      return tryAttachWebgl()
+    },
+    onContextLoss() {
+      if (disposed) return
+      hooks?.onRendererLost?.({ from: 'webgl', reason: 'webglcontextlost' })
+      disposeActive()
+      state.attempts += 1
+      // Cancel any pending reinit — we're handling this loss directly,
+      // either by scheduling a fresh attempt or going straight to Canvas.
+      if (cancelDebounce) {
+        cancelDebounce()
+        cancelDebounce = null
+      }
+      state.debouncing = false
+      if (state.attempts > maxAttempts) {
+        if (tryAttachCanvas()) {
+          hooks?.onRendererRestored?.({ to: 'canvas' })
+        }
+        return
+      }
+      scheduleReinit()
+    },
+    forceFallback(): boolean {
+      if (disposed || state.renderer === 'canvas') return false
+      disposeActive()
+      return tryAttachCanvas()
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      if (cancelDebounce) { cancelDebounce(); cancelDebounce = null }
+      state.debouncing = false
+      disposeActive()
+    },
+    getState(): Readonly<RendererResilienceState> {
+      return { ...state }
+    },
+  }
+}
 
 export function isTouchDevice(): boolean {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0
@@ -105,6 +303,7 @@ export class TerminalInstance {
   selStartCol = 0
   private _visibilityHandler: (() => void) | null = null
   private _dragDropCleanup: (() => void) | null = null
+  private _renderer: RendererResilienceController | null = null
   private _initialResizeTimer: ReturnType<typeof setInterval> | null = null
 
   onTitleChange: ((title: string) => void) | null = null
@@ -181,13 +380,24 @@ export class TerminalInstance {
     this.xterm.loadAddon(unicode11)
     this.xterm.unicode.activeVersion = '11'
 
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
-      this.xterm.loadAddon(webgl)
-    } catch {
-      /* DOM renderer fallback */
-    }
+    // Resilient renderer: WebGL by default; auto-reinit on context loss;
+    // Canvas fallback after repeated failures (prevents "frozen terminal"
+    // when WKWebView drops the WebGL context under GPU pressure, e.g.
+    // frantic scroll on macOS desktop).
+    this._renderer = createRendererResilience(
+      (addon) => {
+        this.xterm!.loadAddon(addon)
+        // Wire the addon's context-loss event (only WebGL has one) into
+        // the controller. Canvas never fires this.
+        if (addon instanceof WebglAddon) {
+          addon.onContextLoss(() => this._renderer?.onContextLoss())
+        }
+      },
+      (addon) => {
+        try { addon.dispose() } catch { /* already disposed */ }
+      },
+    )
+    this._renderer.attachInitial()
 
     this.searchAddon = new SearchAddon()
     this.xterm.loadAddon(this.searchAddon)
@@ -386,6 +596,8 @@ export class TerminalInstance {
     if (this._visibilityHandler) {
       document.removeEventListener('visibilitychange', this._visibilityHandler)
     }
+    this._renderer?.dispose()
+    this._renderer = null
     this._touchCleanup?.()
     this._focusinCleanup?.()
     this._compositionCleanup?.()

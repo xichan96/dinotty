@@ -111,6 +111,41 @@
   box-sizing: border-box;
 }
 
+/* Plugin placeholder when no preview available */
+.mc-plugin-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+  color: var(--text-muted, #858585);
+}
+.mc-plugin-label {
+  font-size: 11px;
+  opacity: 0.8;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Split-pane preview layout */
+.mc-split-node {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  gap: 1px;
+  background: var(--border);
+}
+.mc-split-leaf {
+  overflow: hidden;
+  background: var(--bg);
+}
+.mc-split-leaf .mc-card-text {
+  height: 100%;
+}
+
 /* iPad 竖屏 / 小平板 3 列 */
 @media (min-width: 480px) {
   .mc-grid {

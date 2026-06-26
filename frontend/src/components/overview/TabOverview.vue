@@ -44,8 +44,14 @@
           </div>
           <div class="mc-card-preview">
             <img v-if="card.previewImage" :src="card.previewImage" />
+            <SplitPreviewNode v-else-if="isSplitPreview(card.htmlContent)" :node="card.htmlContent" />
             <pre v-else-if="card.htmlContent" class="mc-card-text" v-html="card.htmlContent"></pre>
-            <pre v-else class="mc-card-text">{{ card.textContent }}</pre>
+            <pre v-else-if="card.textContent" class="mc-card-text">{{ card.textContent }}</pre>
+            <div v-else-if="card.type === 'plugin'" class="mc-plugin-placeholder">
+              <Puzzle :size="32" />
+              <span class="mc-plugin-label">{{ card.title }}</span>
+            </div>
+            <pre v-else class="mc-card-text"></pre>
           </div>
         </Motion>
       </Motion>
@@ -56,8 +62,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Motion, AnimatePresence } from 'motion-v'
-import { X } from 'lucide-vue-next'
-import type { TabCard } from '../../composables/useTabPreview'
+import { X, Puzzle } from 'lucide-vue-next'
+import type { TabCard, PanePreviewNode } from '../../composables/useTabPreview'
+import SplitPreviewNode from './SplitPreviewNode.vue'
+
+function isSplitPreview(content: string | PanePreviewNode): content is PanePreviewNode {
+  return typeof content === 'object' && content !== null && 'direction' in content
+}
 
 const props = defineProps<{
   visible: boolean

@@ -132,6 +132,7 @@
         </template>
         <PluginView
           v-else-if="tab.type === 'plugin'"
+          :data-plugin-pane-id="tab.paneId"
           :plugin="loadedPlugins.get(tab.pluginId)!"
           :api="getPluginContext(tab.pluginId)"
         />
@@ -243,7 +244,7 @@ import {
 import { Settings, Bell, Monitor, Plus, X, Star, AppWindow, Radar } from 'lucide-vue-next'
 import TabOverview from './components/overview/TabOverview.vue'
 import type { TabCard } from './composables/useTabPreview'
-import { useTabPreview } from './composables/useTabPreview'
+import { useTabPreview, refreshPluginPreview, invalidatePluginPreview } from './composables/useTabPreview'
 import { useIsMobile } from './composables/useIsMobile'
 // formatCloseTabMessage moved to ConfirmCloseDialog component
 import LoginPage from './components/LoginPage.vue'
@@ -322,6 +323,17 @@ watch(
   () => {
     if (overviewOpen.value) {
       overviewCards.value = tabPreview.captureAll(tabs.value, termRefs, notif.unreadByPane)
+    }
+  }
+)
+
+// Capture plugin preview when active tab changes to a plugin tab (handles initial load)
+watch(
+  activePaneId,
+  (paneId) => {
+    const tab = tabs.value.find((t) => t.paneId === paneId)
+    if (tab?.type === 'plugin') {
+      nextTick(() => refreshPluginPreview(tab.paneId))
     }
   }
 )
@@ -539,6 +551,10 @@ async function activateTab(tabId: string) {
       console.error('Failed to activate pane:', e)
     }
   }
+  // Capture plugin preview when switching to a plugin tab
+  if (tab?.type === 'plugin') {
+    nextTick(() => refreshPluginPreview(tab.paneId))
+  }
   persist()
   nextTick(() => focusActive())
 }
@@ -612,6 +628,11 @@ async function onConfirmClose(tabId: string, paneId: string | null) {
 async function closeTab(tabId: string) {
   const tab = tabs.value.find((t) => t.paneId === tabId)
   if (!tab) return
+
+  // Invalidate plugin preview cache when closing a plugin tab
+  if (tab.type === 'plugin') {
+    invalidatePluginPreview(tab.paneId)
+  }
 
   if (tab.type === 'terminal') {
     // Clean up local term refs

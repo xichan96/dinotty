@@ -1,9 +1,17 @@
-import type { Tab } from '../types/pane'
+import type { Tab, PaneLayout } from '../types/pane'
 import { getAllLeaves, findLeaf } from '../types/pane'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 import type { TerminalInstance } from './useTerminal'
 
 const MAX_PREVIEW_ROWS = 28
+
+/** Recursive node for split-pane preview layout */
+export interface PanePreviewNode {
+  html: string
+  direction: 'horizontal' | 'vertical'
+  children: PanePreviewNode[]
+  ratio: number
+}
 
 export interface TabCard {
   paneId: string
@@ -12,7 +20,7 @@ export interface TabCard {
   type: 'terminal' | 'plugin'
   previewImage: string | null
   textContent: string
-  htmlContent: string
+  htmlContent: string | PanePreviewNode
   pluginIcon?: string
   splitCount: number
   hasNotification: boolean
@@ -152,6 +160,125 @@ function capturePreview(terminal: TerminalInstance | null): {
   return { image, html }
 }
 
+/** Recursively capture a single pane node (leaf or split) */
+function capturePaneNode(
+  node: PaneLayout,
+  termRefs: Record<string, InstanceType<typeof TerminalPane>>,
+): PanePreviewNode {
+  if (node.type === 'leaf') {
+    const termRef = termRefs[node.paneId]
+    const terminal = termRef?.getTerminal()
+    return {
+      html: terminal ? captureColoredHtml(terminal) : '',
+      direction: 'horizontal',
+      children: [],
+      ratio: node.ratio,
+    }
+  }
+  // SplitPane — recursively capture children
+  return {
+    html: '',
+    ratio: 1,
+    direction: node.direction,
+    children: node.children.map((child, i) => ({
+      ...capturePaneNode(child, termRefs),
+      ratio: node.ratios[i] ?? 1 / node.children.length,
+    })),
+  }
+}
+
+/** Capture the full pane layout tree for a tab, collapsing single-pane to string */
+function capturePaneLayout(
+  layout: PaneLayout,
+  termRefs: Record<string, InstanceType<typeof TerminalPane>>,
+): string | PanePreviewNode {
+  const leaves = getAllLeaves(layout)
+  if (leaves.length <= 1) {
+    // Single pane — return plain HTML string (no split layout needed)
+    const termRef = termRefs[leaves[0]?.paneId]
+    const terminal = termRef?.getTerminal()
+    return terminal ? captureColoredHtml(terminal) : ''
+  }
+  return capturePaneNode(layout, termRefs)
+}
+
+/** Cache for plugin preview images to avoid re-capturing */
+const pluginPreviewCache = new Map<string, string>()
+
+/** Capture a plugin DOM element as a preview image using native Canvas API */
+function capturePluginPreview(paneId: string): Promise<string | null> {
+  try {
+    const el = document.querySelector<HTMLElement>(`[data-plugin-pane-id="${paneId}"]`)
+    if (!el) return Promise.resolve(null)
+
+    const rect = el.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return Promise.resolve(null)
+
+    // Clone the element and inline computed styles for foreignObject
+    const clone = el.cloneNode(true) as HTMLElement
+    const inlineStyles = (source: Element, target: Element) => {
+      const computed = window.getComputedStyle(source)
+      let cssText = ''
+      for (let i = 0; i < computed.length; i++) {
+        const prop = computed[i]
+        cssText += `${prop}:${computed.getPropertyValue(prop)};`
+      }
+      ;(target as HTMLElement).style.cssText = cssText
+      const srcChildren = source.children
+      const tgtChildren = target.children
+      for (let i = 0; i < srcChildren.length && i < tgtChildren.length; i++) {
+        inlineStyles(srcChildren[i], tgtChildren[i])
+      }
+    }
+    inlineStyles(el, clone)
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${rect.width}" height="${rect.height}">
+      <foreignObject width="100%" height="100%">
+        ${new XMLSerializer().serializeToString(clone)}
+      </foreignObject>
+    </svg>`
+
+    const canvas = document.createElement('canvas')
+    const scale = 400 / rect.width
+    canvas.width = 400
+    canvas.height = Math.round(rect.height * scale)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return Promise.resolve(null)
+
+    const img = new Image()
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+
+    return new Promise<string | null>((resolve) => {
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        URL.revokeObjectURL(url)
+        resolve(canvas.toDataURL('image/jpeg', 0.6))
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        resolve(null)
+      }
+      img.src = url
+    })
+  } catch {
+    return Promise.resolve(null)
+  }
+}
+
+/** Refresh the cached preview for a plugin tab (call when tab becomes active) */
+export async function refreshPluginPreview(paneId: string): Promise<void> {
+  const preview = await capturePluginPreview(paneId)
+  if (preview) {
+    pluginPreviewCache.set(paneId, preview)
+  }
+}
+
+/** Remove a plugin preview from cache (call when plugin tab is closed) */
+export function invalidatePluginPreview(paneId: string): void {
+  pluginPreviewCache.delete(paneId)
+}
+
 export function useTabPreview() {
   function captureAll(
     tabs: Tab[],
@@ -165,7 +292,7 @@ export function useTabPreview() {
           index: index + 1,
           title: tab.title,
           type: 'plugin',
-          previewImage: null,
+          previewImage: pluginPreviewCache.get(tab.paneId) ?? null,
           textContent: '',
           htmlContent: '',
           splitCount: 0,
@@ -176,10 +303,12 @@ export function useTabPreview() {
       // Terminal tab
       const leaves = getAllLeaves(tab.layout)
       const activeLeaf = findLeaf(tab.layout, tab.activePaneId) ?? leaves[0]
-      const termRef = termRefs[activeLeaf.paneId]
-      const { image, html } = termRef
-        ? capturePreview(termRef.getTerminal())
-        : { image: null, html: '' }
+      const activeTermRef = termRefs[activeLeaf.paneId]
+      const activeTerminal = activeTermRef?.getTerminal()
+      const image = activeTerminal && ENABLE_CANVAS_PREVIEW
+        ? captureCanvasPreview(activeTerminal)
+        : null
+      const htmlContent = capturePaneLayout(tab.layout, termRefs)
 
       return {
         paneId: tab.paneId,
@@ -188,7 +317,7 @@ export function useTabPreview() {
         type: 'terminal',
         previewImage: image,
         textContent: '',
-        htmlContent: html,
+        htmlContent,
         splitCount: leaves.length,
         hasNotification: !!(indicators?.[tab.paneId]),
       }

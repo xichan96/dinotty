@@ -21,6 +21,17 @@
     >
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
+    <div v-if="showScrollbar" ref="scrollbarTrackRef" class="terminal-scrollbar" :class="{ 'is-active': scrollbarVisible }">
+      <div
+        ref="scrollbarThumbRef"
+        class="terminal-scrollbar-thumb"
+        :style="{ height: `${thumbHeightPct}%`, top: `${thumbTopPct}%` }"
+        @touchstart.stop.prevent="onScrollbarTouchStart"
+        @touchmove.stop.prevent="onScrollbarTouchMove"
+        @touchend.stop="onScrollbarTouchEnd"
+        @touchcancel.stop="onScrollbarTouchEnd"
+      ></div>
+    </div>
     <div v-if="uploadInProgress" class="terminal-upload-progress">
       <div class="terminal-upload-progress-track">
         <div class="terminal-upload-progress-fill" :style="{ width: `${uploadProgress}%` }"></div>
@@ -64,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Terminal } from '@xterm/xterm'
 import { TerminalInstance } from '../../composables/useTerminal'
 import { copyToClipboard } from '../../utils/clipboard'
@@ -78,6 +89,7 @@ import { POSITION, useToast } from 'vue-toastification'
 import { useI18n } from '../../composables/useI18n'
 import { formatMB, useUpload, type UploadProgress } from '../../composables/useUpload'
 import { useScrollPosition, type ScrollPositionHandle } from '../../composables/useScrollPosition'
+import { useIsMobile } from '../../composables/useIsMobile'
 
 const props = defineProps<{
   paneId: string
@@ -102,7 +114,51 @@ const emit = defineEmits<{
 
 const wrapperRef = ref<HTMLElement>()
 const containerRef = ref<HTMLElement>()
+const scrollbarTrackRef = ref<HTMLElement>()
+const scrollbarThumbRef = ref<HTMLElement>()
 const scrollPos = shallowRef<ScrollPositionHandle | null>(null)
+const { isMobile } = useIsMobile()
+
+// F2 — mobile-web custom scrollbar (scrollback only). Reuses the step-0 observer.
+const scrollbarVisible = ref(false)
+let scrollbarIdleTimer: ReturnType<typeof setTimeout> | null = null
+let scrollbarDragging = false
+
+const showScrollbar = computed(() => {
+  const h = scrollPos.value
+  if (!h) return false
+  const s = h.state
+  return isMobile.value && !s.isAltScreen && s.length > s.rows
+})
+const thumbHeightPct = computed(() => {
+  const s = scrollPos.value?.state
+  if (!s || s.length <= 0) return 100
+  return Math.max(12, (s.rows / s.length) * 100)
+})
+const thumbTopPct = computed(() => {
+  const s = scrollPos.value?.state
+  if (!s) return 0
+  return (s.viewportY / Math.max(1, s.baseY)) * (100 - thumbHeightPct.value)
+})
+
+function bumpScrollbarActivity() {
+  scrollbarVisible.value = true
+  if (scrollbarIdleTimer) clearTimeout(scrollbarIdleTimer)
+  scrollbarIdleTimer = setTimeout(() => {
+    scrollbarVisible.value = false
+  }, 1200)
+}
+
+// Reveal the bar on any position change (onScroll is unreliable, so this tracks the
+// observer's viewportY), then fade on idle.
+watch(
+  () => scrollPos.value?.state.viewportY,
+  () => {
+    if (!showScrollbar.value || scrollbarDragging) return
+    bumpScrollbarActivity()
+  }
+)
+
 let terminal: TerminalInstance | null = null
 let pendingFocus = false
 let paneAlive = true
@@ -244,6 +300,44 @@ function toggleSearch() {
 function scrollToBottom() {
   terminal?.xterm?.scrollToBottom()
   scrollPos.value?.kick()
+}
+
+// F2 thumb drag → scrollToLine. Maps the thumb-center under the finger to a buffer line.
+// Measures the ACTUAL rendered track + thumb rects so the drag matches what the user sees
+// (the track is inset by top/bottom padding, and the thumb has a min-height clamp + border).
+function scrollbarLineFromClientY(clientY: number): number | null {
+  const track = scrollbarTrackRef.value
+  const thumb = scrollbarThumbRef.value
+  const state = scrollPos.value?.state
+  if (!track || !thumb || !state) return null
+  const trackRect = track.getBoundingClientRect()
+  const thumbH = thumb.getBoundingClientRect().height
+  const range = Math.max(1, trackRect.height - thumbH)
+  const thumbTop = clientY - trackRect.top - thumbH / 2
+  const ratio = Math.min(1, Math.max(0, thumbTop / range))
+  return Math.round(ratio * state.baseY)
+}
+
+function onScrollbarDragTo(clientY: number) {
+  const line = scrollbarLineFromClientY(clientY)
+  if (line === null) return
+  terminal?.xterm?.scrollToLine(line)
+  scrollPos.value?.kick()
+  scrollbarVisible.value = true
+  if (scrollbarIdleTimer) clearTimeout(scrollbarIdleTimer)
+}
+
+function onScrollbarTouchStart(e: TouchEvent) {
+  scrollbarDragging = true
+  onScrollbarDragTo(e.touches[0].clientY)
+}
+function onScrollbarTouchMove(e: TouchEvent) {
+  if (!scrollbarDragging) return
+  onScrollbarDragTo(e.touches[0].clientY)
+}
+function onScrollbarTouchEnd() {
+  scrollbarDragging = false
+  bumpScrollbarActivity()
 }
 
 function adjustFontSize(delta: number) {
@@ -939,6 +1033,10 @@ onBeforeUnmount(() => {
   stopAutoScroll()
   scrollPos.value?.dispose()
   scrollPos.value = null
+  if (scrollbarIdleTimer) {
+    clearTimeout(scrollbarIdleTimer)
+    scrollbarIdleTimer = null
+  }
   terminal?.destroy()
   terminal = null
 })
@@ -1014,5 +1112,38 @@ defineExpose({ getTerminal, focus, blur, fit, sendData, setOutputListener, toggl
 
 .back-to-bottom-pill:hover {
   background: rgba(38, 38, 42, 0.95);
+}
+
+.terminal-scrollbar {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  bottom: 4px;
+  width: 8px;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.terminal-scrollbar.is-active {
+  opacity: 1;
+}
+
+/* Rail never captures touches (would swallow terminal scroll / trigger long-press on the
+   dead strip); only the visible thumb is targetable. */
+.terminal-scrollbar-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  min-height: 24px;
+  border-radius: 999px;
+  background: rgba(180, 180, 190, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+.terminal-scrollbar.is-active .terminal-scrollbar-thumb {
+  pointer-events: auto;
 }
 </style>

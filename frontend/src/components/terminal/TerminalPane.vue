@@ -9,6 +9,18 @@
     @touchcancel="onTouchCancel"
   >
     <div ref="wrapperRef" class="terminal-pane"></div>
+    <button
+      v-if="scrollPos && !scrollPos.state.isAltScreen && !scrollPos.state.atBottom"
+      class="back-to-bottom-pill"
+      type="button"
+      aria-label="Scroll to bottom"
+      tabindex="-1"
+      @click.stop="scrollToBottom"
+      @mousedown.prevent
+      @touchstart.stop
+    >
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     <div v-if="uploadInProgress" class="terminal-upload-progress">
       <div class="terminal-upload-progress-track">
         <div class="terminal-upload-progress-fill" :style="{ width: `${uploadProgress}%` }"></div>
@@ -52,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, shallowRef, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Terminal } from '@xterm/xterm'
 import { TerminalInstance } from '../../composables/useTerminal'
 import { copyToClipboard } from '../../utils/clipboard'
@@ -65,6 +77,7 @@ import { shellEscapePath } from '../../utils/shell'
 import { POSITION, useToast } from 'vue-toastification'
 import { useI18n } from '../../composables/useI18n'
 import { formatMB, useUpload, type UploadProgress } from '../../composables/useUpload'
+import { useScrollPosition, type ScrollPositionHandle } from '../../composables/useScrollPosition'
 
 const props = defineProps<{
   paneId: string
@@ -89,6 +102,7 @@ const emit = defineEmits<{
 
 const wrapperRef = ref<HTMLElement>()
 const containerRef = ref<HTMLElement>()
+const scrollPos = shallowRef<ScrollPositionHandle | null>(null)
 let terminal: TerminalInstance | null = null
 let pendingFocus = false
 let paneAlive = true
@@ -225,6 +239,11 @@ function setOutputListener(cb: ((data: string) => void) | null) {
 
 function toggleSearch() {
   searchVisible.value = !searchVisible.value
+}
+
+function scrollToBottom() {
+  terminal?.xterm?.scrollToBottom()
+  scrollPos.value?.kick()
 }
 
 function adjustFontSize(delta: number) {
@@ -906,6 +925,7 @@ onMounted(() => {
   requestAnimationFrame(() => {
     if (wrapperRef.value) {
       terminal!.attach(wrapperRef.value)
+      if (terminal!.xterm) scrollPos.value = useScrollPosition(terminal!.xterm)
       if (pendingFocus) {
         pendingFocus = false
         terminal!.focus()
@@ -917,6 +937,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   paneAlive = false
   stopAutoScroll()
+  scrollPos.value?.dispose()
+  scrollPos.value = null
   terminal?.destroy()
   terminal = null
 })
@@ -968,5 +990,29 @@ defineExpose({ getTerminal, focus, blur, fit, sendData, setOutputListener, toggl
   border-radius: inherit;
   background: #4da3ff;
   transition: width 0.16s ease;
+}
+
+.back-to-bottom-pill {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  pointer-events: auto;
+  background: rgba(22, 22, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #d8d8d8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.back-to-bottom-pill:hover {
+  background: rgba(38, 38, 42, 0.95);
 }
 </style>

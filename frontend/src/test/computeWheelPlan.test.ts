@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { computeWheelPlan, type WheelPlanInput } from '../composables/computeWheelPlan'
+import {
+  computeWheelPlan,
+  type TrackingWheelState,
+  type WheelPlanInput,
+} from '../composables/computeWheelPlan'
 
 function input(overrides: Partial<WheelPlanInput> = {}): WheelPlanInput {
   return {
@@ -26,6 +30,15 @@ describe('computeWheelPlan', () => {
       count: 0,
     })
     expect(computeWheelPlan(input({ velocity: 100 }), 1, 0)).toEqual({
+      action: 'native',
+      deltaMode: 1,
+      deltaY: 3,
+      count: 0,
+    })
+  })
+
+  it('keeps TUI wheels native at identity settings', () => {
+    expect(computeWheelPlan(input({ isAltScreen: true, isMouseTracking: true }), 1, 0)).toEqual({
       action: 'native',
       deltaMode: 1,
       deltaY: 3,
@@ -120,12 +133,100 @@ describe('computeWheelPlan', () => {
     expect(computeWheelPlan(input({ deltaMode: 2, deltaY: 1 }), 3, 0).action).toBe('native')
   })
 
-  it('passes through alt-screen wheels natively', () => {
-    expect(computeWheelPlan(input({ isAltScreen: true }), 2, 1).action).toBe('native')
+  it('amplifies non-tracking alt-screen wheels through the scaled-delta path', () => {
+    expect(computeWheelPlan(input({ isAltScreen: true }), 2, 1)).toEqual({
+      action: 'amplify',
+      deltaMode: 1,
+      deltaY: 6,
+      count: 1,
+    })
   })
 
-  it('passes through mouse-tracking wheels natively', () => {
-    expect(computeWheelPlan(input({ isMouseTracking: true }), 2, 1).action).toBe('native')
+  it('uses count-based amplification for mouse-tracking wheels', () => {
+    expect(computeWheelPlan(input({ isAltScreen: true, isMouseTracking: true }), 2, 1)).toEqual({
+      action: 'amplify',
+      deltaMode: 1,
+      deltaY: 3,
+      count: 2,
+      nextTrackingState: { remainder: 0, direction: 1 },
+    })
+  })
+
+  it('returns intercepted mouse-tracking plans with counts 0, 1, and 4', () => {
+    const zero = computeWheelPlan(input({ isMouseTracking: true, deltaY: 7 }), 0.4, 0)
+    const one = computeWheelPlan(
+      input({ isMouseTracking: true, deltaY: 7 }),
+      0.7,
+      0,
+      zero.nextTrackingState
+    )
+    const four = computeWheelPlan(input({ isMouseTracking: true, deltaY: 7 }), 4, 0)
+
+    expect(zero.action).toBe('amplify')
+    expect(zero.deltaY).toBe(7)
+    expect(zero.count).toBe(0)
+    expect(zero.nextTrackingState?.remainder).toBeCloseTo(0.4)
+    expect(one.count).toBe(1)
+    expect(one.deltaY).toBe(7)
+    expect(one.nextTrackingState?.remainder).toBeCloseTo(0.1)
+    expect(four.count).toBe(4)
+    expect(four.nextTrackingState).toEqual({ remainder: 0, direction: 1 })
+  })
+
+  it('resets the tracking remainder when wheel direction reverses', () => {
+    const prior: TrackingWheelState = { remainder: 0.8, direction: 1 }
+    const plan = computeWheelPlan(
+      input({ isMouseTracking: true, deltaY: -3 }),
+      0.4,
+      0,
+      prior
+    )
+
+    expect(plan.count).toBe(0)
+    expect(plan.deltaY).toBe(-3)
+    expect(plan.nextTrackingState?.remainder).toBeCloseTo(0.4)
+    expect(plan.nextTrackingState?.direction).toBe(-1)
+  })
+
+  it('carries fractional tracking credit across a sequence of events', () => {
+    const first = computeWheelPlan(input({ isMouseTracking: true }), 0.4, 0)
+    const second = computeWheelPlan(
+      input({ isMouseTracking: true }),
+      0.4,
+      0,
+      first.nextTrackingState
+    )
+    const third = computeWheelPlan(
+      input({ isMouseTracking: true }),
+      0.4,
+      0,
+      second.nextTrackingState
+    )
+
+    expect([first.count, second.count, third.count]).toEqual([0, 0, 1])
+    expect(first.nextTrackingState?.remainder).toBeCloseTo(0.4)
+    expect(second.nextTrackingState?.remainder).toBeCloseTo(0.8)
+    expect(third.nextTrackingState?.remainder).toBeCloseTo(0.2)
+  })
+
+  it('discards whole-credit overflow above the tracking flood cap', () => {
+    const capped = computeWheelPlan(
+      input({ isMouseTracking: true }),
+      4,
+      0,
+      { remainder: 2.75, direction: 1 }
+    )
+    const next = computeWheelPlan(
+      input({ isMouseTracking: true }),
+      0.5,
+      0,
+      capped.nextTrackingState
+    )
+
+    expect(capped.count).toBe(4)
+    expect(capped.nextTrackingState?.remainder).toBeCloseTo(0.75)
+    expect(next.count).toBe(1)
+    expect(next.nextTrackingState?.remainder).toBeCloseTo(0.25)
   })
 
   it('amplifies base line wheels', () => {

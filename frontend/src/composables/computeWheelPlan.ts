@@ -11,11 +11,17 @@ export interface WheelPlanInput {
   isMouseTracking: boolean
 }
 
+export interface TrackingWheelState {
+  remainder: number
+  direction: number
+}
+
 export interface WheelPlan {
   action: 'native' | 'amplify'
   deltaMode: number
   deltaY: number
   count: number
+  nextTrackingState?: TrackingWheelState
 }
 
 export const WHEEL_ACCEL_K = 0.05
@@ -40,7 +46,8 @@ function native(input: WheelPlanInput): WheelPlan {
 export function computeWheelPlan(
   input: WheelPlanInput,
   sensitivity: number,
-  acceleration: number
+  acceleration: number,
+  trackingState?: TrackingWheelState | null
 ): WheelPlan {
   // Identity fast-path: exact current behavior — native for ALL inputs (incl. non-finite velocity).
   if (sensitivity === 1 && acceleration === 0) return native(input)
@@ -52,13 +59,30 @@ export function computeWheelPlan(
   // Only PIXEL (0) and LINE (1) modes are eligible; PAGE (2) stays native.
   if (input.deltaMode !== 0 && input.deltaMode !== 1) return native(input)
 
-  if (input.isAltScreen || input.isMouseTracking) return native(input)
-
   const velocity = Number.isFinite(input.velocity) ? input.velocity : 0
   const level = clamp(Math.round(acceleration), 0, 5)
   const coeff = WHEEL_ACCEL_COEFFS[level]
   // Floor 0.1 allows a sub-native slow band (sensitivity < 1); ceiling 4 is the speed cap.
   const scale = clamp(sensitivity * (1 + coeff * (velocity / WHEEL_ACCEL_K)), 0.1, 4)
+
+  if (input.isMouseTracking) {
+    const direction = Math.sign(input.deltaY)
+    const remainder = trackingState?.direction === direction ? trackingState.remainder : 0
+    const credit = remainder + scale
+    const wholeCredit = Math.floor(credit)
+
+    return {
+      action: 'amplify',
+      deltaMode: input.deltaMode,
+      deltaY: input.deltaY,
+      count: Math.min(wholeCredit, 4),
+      nextTrackingState: {
+        remainder: credit - wholeCredit,
+        direction,
+      },
+    }
+  }
+
   if (scale === 1) return native(input)
 
   // LINE mode rounds to whole lines; PIXEL mode passes the scaled float through —

@@ -219,6 +219,7 @@ export class TerminalInstance {
   private _wheelBypass = false
   private _lastWheelTime = 0
   private _trackingWheelState: TrackingWheelState | null = null
+  private _wheelRowHeightWarned = false
   private _symCredits: Array<{ data: string; src: 0 | 1; at: number }> = []
   private _writeQueue: string[] = []
   private _writing = false
@@ -1226,7 +1227,6 @@ export class TerminalInstance {
         altKey: e.altKey,
         metaKey: e.metaKey,
         velocity,
-        isAltScreen: this.xterm.buffer.active.type !== 'normal',
         isMouseTracking,
       }
       const plan = computeWheelPlan(
@@ -1255,10 +1255,17 @@ export class TerminalInstance {
       const h = Number(
         (this.xterm as any)?._core?._renderService?.dimensions?.css?.cell?.height
       )
-      return Number.isFinite(h) && h > 0 ? h : 0
+      if (Number.isFinite(h) && h > 0) return h
     } catch {
-      return 0
+      // fall through to the one-time warning below
     }
+    if (!this._wheelRowHeightWarned) {
+      this._wheelRowHeightWarned = true
+      console.warn(
+        '[useTerminal] xterm private cell-height API (_core._renderService.dimensions.css.cell.height) unavailable or invalid; wheel-scroll acceleration (velocity term) is disabled, sensitivity still applies. xterm.js internals may have changed.'
+      )
+    }
+    return 0
   }
 
   isMouseModeEnabled(): boolean {

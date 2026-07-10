@@ -96,7 +96,7 @@ pub fn rewrite_js_imports(js: &str, mode: &RewriteMode) -> String {
     };
     JS_IMPORT_RE
         .replace_all(js, |caps: &regex::Captures| {
-            format!("{}{}{}/{}", &caps[1], &caps[2], &prefix, &caps[3])
+            format!("{}{}{}/{}", &caps[1], &caps[2], prefix, &caps[3])
         })
         .into_owned()
 }

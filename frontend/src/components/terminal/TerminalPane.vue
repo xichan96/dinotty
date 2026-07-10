@@ -21,7 +21,13 @@
     >
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <div v-if="showScrollbar" ref="scrollbarTrackRef" class="terminal-scrollbar" :class="{ 'is-active': scrollbarVisible }">
+    <div
+      v-if="showScrollbar"
+      ref="scrollbarTrackRef"
+      class="terminal-scrollbar"
+      :class="{ 'is-active': scrollbarVisible }"
+      :style="{ '--terminal-scrollbar-width': scrollbarWidthPx }"
+    >
       <div
         ref="scrollbarThumbRef"
         class="terminal-scrollbar-thumb"
@@ -90,6 +96,7 @@ import { useI18n } from '../../composables/useI18n'
 import { formatMB, useUpload, type UploadProgress } from '../../composables/useUpload'
 import { useScrollPosition, type ScrollPositionHandle } from '../../composables/useScrollPosition'
 import { useIsMobile } from '../../composables/useIsMobile'
+import { useSettings } from '../../composables/useSettings'
 
 const props = defineProps<{
   paneId: string
@@ -118,11 +125,13 @@ const scrollbarTrackRef = ref<HTMLElement>()
 const scrollbarThumbRef = ref<HTMLElement>()
 const scrollPos = shallowRef<ScrollPositionHandle | null>(null)
 const { isMobile } = useIsMobile()
+const { settings } = useSettings()
 
 // F2 — mobile-web custom scrollbar (scrollback only). Reuses the step-0 observer.
 const scrollbarVisible = ref(false)
 let scrollbarIdleTimer: ReturnType<typeof setTimeout> | null = null
 let scrollbarDragging = false
+const scrollbarWidthPx = computed(() => `${settings.text.scrollbar_width ?? 8}px`)
 
 const showScrollbar = computed(() => {
   const h = scrollPos.value
@@ -1119,7 +1128,7 @@ defineExpose({ getTerminal, focus, blur, fit, sendData, setOutputListener, toggl
   top: 4px;
   right: 2px;
   bottom: 4px;
-  width: 8px;
+  width: var(--terminal-scrollbar-width, 8px);
   z-index: 5;
   opacity: 0;
   pointer-events: none;

@@ -6,6 +6,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
 import { isTauri, createTransport, type Transport } from './useTransport'
 import { onThemeChange, saveSettings, settings, onTextChange } from './useSettings'
+import { computeWheelPlan, type WheelPlanInput } from './computeWheelPlan'
 import { wsUrlWithToken } from './apiBase'
 import { terminalKeyBindingDefs, useKeybindings, type KeyBinding } from './useKeybindings'
 import { isWindowsClient } from '../utils/clientPlatform'
@@ -211,6 +212,8 @@ export class TerminalInstance {
   private _resizeDebounce: number = 0
   private _lastInputData = ''
   private _lastInputTime = 0
+  private _wheelBypass = false
+  private _lastWheelTime = 0
   private _symCredits: Array<{ data: string; src: 0 | 1; at: number }> = []
   private _writeQueue: string[] = []
   private _writing = false
@@ -518,7 +521,10 @@ export class TerminalInstance {
       setTouchMoved: (v) => {
         this.touchMoved = v
       },
+      sendWheelEvent: (deltaY, clientX, clientY) =>
+        this._sendWheelEvent(deltaY, clientX, clientY),
     })
+    this._setupAdaptiveWheel()
 
     this._resizeObserver = new ResizeObserver(() => this._refit())
     this._resizeObserver.observe(wrapper)
@@ -1142,6 +1148,91 @@ export class TerminalInstance {
       prevCleanup?.()
       target.removeEventListener('paste', pasteHandler, true)
       target.removeEventListener('keydown', keydownHandler, true)
+    }
+  }
+
+  private _sendWheelEvent(
+    deltaY: number,
+    clientX: number,
+    clientY: number,
+    deltaMode = 0
+  ) {
+    if (!this.xterm || deltaY === 0) return
+
+    const xtermEl = this.xterm.element
+    if (!xtermEl) return
+
+    // Synthetic dispatches must never re-enter the adaptive-wheel planner.
+    this._wheelBypass = true
+    try {
+      xtermEl.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY,
+          deltaX: 0,
+          deltaZ: 0,
+          deltaMode,
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+        })
+      )
+    } finally {
+      this._wheelBypass = false
+    }
+  }
+
+  private _setupAdaptiveWheel() {
+    this.xterm?.attachCustomWheelEventHandler((e: WheelEvent): boolean => {
+      if (this._wheelBypass) return true
+      if (!this.xterm) return true
+
+      const now = Date.now()
+      const dt = now - this._lastWheelTime || 1
+      const rowHeight = this._getWheelRowHeight()
+      const lines =
+        e.deltaMode === 1
+          ? Math.abs(e.deltaY)
+          : e.deltaMode === 0 && rowHeight > 0
+            ? Math.abs(e.deltaY) / rowHeight
+            : 0
+      const velocity = lines / dt
+      this._lastWheelTime = now
+
+      const sensitivity = settings.text.scroll_sensitivity ?? 1
+      const acceleration = settings.text.scroll_acceleration ?? 0
+      const input: WheelPlanInput = {
+        deltaY: e.deltaY,
+        deltaX: e.deltaX,
+        deltaMode: e.deltaMode,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        metaKey: e.metaKey,
+        velocity,
+        isAltScreen: this.xterm.buffer.active.type !== 'normal',
+        isMouseTracking: this.isMouseModeEnabled(),
+      }
+      const plan = computeWheelPlan(input, sensitivity, acceleration)
+      if (plan.action === 'native') return true
+
+      e.preventDefault()
+      e.stopPropagation()
+      for (let i = 0; i < plan.count; i++) {
+        this._sendWheelEvent(plan.deltaY, e.clientX, e.clientY, plan.deltaMode)
+      }
+      return false
+    })
+  }
+
+  private _getWheelRowHeight(): number {
+    try {
+      const h = Number(
+        (this.xterm as any)?._core?._renderService?.dimensions?.css?.cell?.height
+      )
+      return Number.isFinite(h) && h > 0 ? h : 0
+    } catch {
+      return 0
     }
   }
 

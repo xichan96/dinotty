@@ -236,6 +236,51 @@
         </div>
       </div>
 
+      <div class="settings-row">
+        <label>{{ t('settings.text.scrollSensitivity') }}</label>
+        <div class="range-wrap">
+          <input
+            type="range"
+            v-model.number="settings.text.scroll_sensitivity"
+            min="0.1"
+            max="2"
+            step="0.1"
+            @input="onTextSettingChange"
+          />
+          <span class="range-val">{{ settings.text.scroll_sensitivity.toFixed(1) }}</span>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <label>{{ t('settings.text.scrollAcceleration') }}</label>
+        <div class="range-wrap">
+          <input
+            type="range"
+            v-model.number="settings.text.scroll_acceleration"
+            min="0"
+            max="5"
+            step="1"
+            @input="onTextSettingChange"
+          />
+          <span class="range-val">{{ settings.text.scroll_acceleration.toFixed(0) }}</span>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <label>{{ t('settings.text.scrollbarWidth') }}</label>
+        <div class="range-wrap">
+          <input
+            type="range"
+            v-model.number="settings.text.scrollbar_width"
+            min="4"
+            max="16"
+            step="1"
+            @input="onTextSettingChange"
+          />
+          <span class="range-val">{{ settings.text.scrollbar_width }}</span>
+        </div>
+      </div>
+
       </details>
     </div>
 

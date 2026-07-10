@@ -17,6 +17,7 @@ export function setupTouchScroll(
     getXterm: () => Terminal | null
     isInTouchSelection: () => boolean
     setTouchMoved: (v: boolean) => void
+    sendWheelEvent?: (deltaY: number, clientX: number, clientY: number) => void
   },
 ): () => void {
   const { getXterm, isInTouchSelection, setTouchMoved } = opts
@@ -54,7 +55,8 @@ export function setupTouchScroll(
   // moves xterm's internal viewport - it never sends data to the PTY. On the alt
   // screen (no scrollback) this was a no-op, so TUI apps like opencode never
   // received scroll input on mobile.
-  const sendWheelEvent = (deltaY: number, clientX: number, clientY: number) => {
+  const sendWheelEvent =
+    opts.sendWheelEvent ?? ((deltaY: number, clientX: number, clientY: number) => {
     const xterm = getXterm()
     if (!xterm || deltaY === 0) return
     const xtermEl = xterm.element
@@ -72,7 +74,7 @@ export function setupTouchScroll(
         }),
       )
     }
-  }
+    })
 
   const onTouchStart = (e: TouchEvent) => {
     clearMomentum()

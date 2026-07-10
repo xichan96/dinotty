@@ -490,6 +490,12 @@ pub struct TextConfig {
     pub cursor_blink: bool,
     #[serde(default = "default_scrollback")]
     pub scrollback: u32,
+    #[serde(default = "default_scroll_sensitivity")]
+    pub scroll_sensitivity: f32,
+    #[serde(default = "default_scroll_acceleration")]
+    pub scroll_acceleration: f32,
+    #[serde(default = "default_scrollbar_width")]
+    pub scrollbar_width: u8,
 }
 
 fn default_font_size() -> u8 {
@@ -507,6 +513,15 @@ fn default_true() -> bool {
 fn default_scrollback() -> u32 {
     10000
 }
+fn default_scroll_sensitivity() -> f32 {
+    1.0
+}
+fn default_scroll_acceleration() -> f32 {
+    0.0
+}
+fn default_scrollbar_width() -> u8 {
+    8
+}
 
 impl Default for TextConfig {
     fn default() -> Self {
@@ -518,8 +533,25 @@ impl Default for TextConfig {
             cursor_style: default_cursor_style(),
             cursor_blink: true,
             scrollback: default_scrollback(),
+            scroll_sensitivity: default_scroll_sensitivity(),
+            scroll_acceleration: default_scroll_acceleration(),
+            scrollbar_width: default_scrollbar_width(),
         }
     }
+}
+
+fn clamp_text_config(t: &mut TextConfig) {
+    t.scroll_sensitivity = if t.scroll_sensitivity.is_finite() {
+        t.scroll_sensitivity.clamp(0.1, 2.0)
+    } else {
+        default_scroll_sensitivity()
+    };
+    t.scroll_acceleration = if t.scroll_acceleration.is_finite() {
+        t.scroll_acceleration.clamp(0.0, 5.0)
+    } else {
+        default_scroll_acceleration()
+    };
+    t.scrollbar_width = t.scrollbar_width.clamp(4, 16);
 }
 
 fn default_mode() -> String {
@@ -677,7 +709,9 @@ pub fn load_settings() -> Settings {
         match std::fs::read_to_string(&path) {
             Ok(data) => match serde_json::from_str::<Settings>(&data) {
                 Ok(mut settings) => {
-                    if migrate_settings(&mut settings) {
+                    let migrated = migrate_settings(&mut settings);
+                    clamp_text_config(&mut settings.text);
+                    if migrated {
                         if let Err(e) = save_settings(&settings) {
                             error!("migrate settings: {}", e);
                         }
@@ -818,6 +852,7 @@ pub async fn put_settings(
     Json(mut new_settings): Json<Settings>,
 ) -> impl IntoResponse {
     new_settings.settings_version = CURRENT_SETTINGS_VERSION;
+    clamp_text_config(&mut new_settings.text);
     match save_settings(&new_settings) {
         Ok(()) => {
             *state.1.write().await = new_settings;

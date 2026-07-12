@@ -60,18 +60,9 @@ pub async fn create_tab(
     let pane_id = uuid::Uuid::new_v4().to_string();
 
     // Resolve CWD: explicit request > configured default workspace root > $HOME.
-    let cwd = if let Some(cwd) = req.cwd.clone() {
-        Some(std::path::PathBuf::from(cwd))
-    } else {
-        settings
-            .read()
-            .await
-            .default_workspace_root
-            .as_deref()
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(std::path::PathBuf::from)
-            .filter(|path| path.is_dir())
+    let cwd = match req.cwd.clone() {
+        Some(cwd) => Some(std::path::PathBuf::from(cwd)),
+        None => settings.read().await.resolved_default_workspace_root(),
     };
 
     // Create PTY session

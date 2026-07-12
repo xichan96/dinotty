@@ -677,15 +677,7 @@ async fn handle_socket(
     }
 
     info!("No existing session found for pane={}, creating new PTY session", pane_id);
-    let cwd = settings
-        .read()
-        .await
-        .default_workspace_root
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.is_dir());
+    let cwd = settings.read().await.resolved_default_workspace_root();
     let (session, shell_type) = match crate::pty::create_session(&manager, &pane_id, None, cwd) {
         Ok(x) => x,
         Err(e) => {

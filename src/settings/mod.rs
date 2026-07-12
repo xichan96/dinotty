@@ -721,6 +721,19 @@ pub struct ActionKeyboardConfig {
     pub rows: Vec<Vec<ActionKey>>,
 }
 
+impl Settings {
+    /// Resolve `default_workspace_root`, returning `None` when unset, empty,
+    /// whitespace-only, or not a directory.
+    pub fn resolved_default_workspace_root(&self) -> Option<std::path::PathBuf> {
+        self.default_workspace_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir())
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {

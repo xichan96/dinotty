@@ -558,6 +558,9 @@ async fn handle_socket(
                     SessionClientEvent::Resize { cols, rows } => {
                         serde_json::to_string(&ServerMsg::Resize { cols, rows })
                     }
+                    SessionClientEvent::SessionExit { pane_id: _ } => {
+                        serde_json::to_string(&ServerMsg::SessionExit)
+                    }
                 }
                 .expect("serialization is infallible");
                 if fwd_ws_out_tx.send(Message::Text(msg)).is_err() {
@@ -678,13 +681,14 @@ async fn handle_socket(
 
     info!("No existing session found for pane={}, creating new PTY session", pane_id);
     let cwd = settings.read().await.resolved_default_workspace_root();
-    let (session, shell_type) = match crate::pty::create_session(&manager, &pane_id, None, cwd) {
-        Ok(x) => x,
-        Err(e) => {
-            error!("{}", e);
-            return;
-        }
-    };
+    let (session, shell_type) =
+        match crate::pty::create_session(&manager, &pane_id, None, None, cwd) {
+            Ok(x) => x,
+            Err(e) => {
+                error!("{}", e);
+                return;
+            }
+        };
 
     let (client_id, mut rx) = session.add_client();
 
@@ -704,6 +708,9 @@ async fn handle_socket(
                 }
                 SessionClientEvent::Resize { cols, rows } => {
                     serde_json::to_string(&ServerMsg::Resize { cols, rows })
+                }
+                SessionClientEvent::SessionExit { pane_id: _ } => {
+                    serde_json::to_string(&ServerMsg::SessionExit)
                 }
             }
             .expect("serialization is infallible");
@@ -979,6 +986,9 @@ pub async fn handle_open_api_ws(socket: WebSocket, manager: Arc<SessionManager>,
                 }
                 SessionClientEvent::Resize { cols, rows } => {
                     serde_json::to_string(&ServerMsg::Resize { cols, rows })
+                }
+                SessionClientEvent::SessionExit { pane_id: _ } => {
+                    serde_json::to_string(&ServerMsg::SessionExit)
                 }
             }
             .expect("serialization is infallible");

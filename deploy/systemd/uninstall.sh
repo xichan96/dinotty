@@ -50,20 +50,41 @@ if id "$SERVICE_USER" &>/dev/null; then
     info "系统用户已删除"
 fi
 
-# 询问是否删除数据
+# 询问是否删除运行时数据（日志、临时文件等）
 echo ""
 if [[ -t 0 ]]; then
-    read -rp "是否删除配置目录 (${CONFIG_DIR}) 和数据目录 (${DATA_DIR})？[y/N] " confirm
+    read -rp "是否删除运行时数据（日志、上传文件等）？[y/N] " confirm_data
 else
-    confirm=""
+    confirm_data=""
 fi
-if [[ "$confirm" =~ ^[Yy]$ ]]; then
-    rm -rf "$CONFIG_DIR" "$DATA_DIR"
-    ok "配置和数据目录已删除"
+if [[ "$confirm_data" =~ ^[Yy]$ ]]; then
+    # 只删除运行时数据，保留用户设置（settings.json、token 等）
+    rm -rf "$DATA_DIR/logs" 2>/dev/null || true
+    rm -rf "$DATA_DIR/.config/dinotty/bg.webp" 2>/dev/null || true
+    # 保留 .config/dinotty/settings.json 和 token
+    info "运行时数据已删除（保留用户设置）"
 else
-    info "保留了配置和数据目录:"
-    echo "  配置: ${CONFIG_DIR}"
-    echo "  数据: ${DATA_DIR}"
+    info "保留了运行时数据"
+fi
+
+# 询问是否删除用户设置（保存的命令、主题、书签等）
+if [[ -t 0 ]]; then
+    echo ""
+    read -rp "是否删除用户设置（保存的命令、主题、书签等）？此操作不可恢复！[y/N] " confirm_settings
+else
+    confirm_settings=""
+fi
+if [[ "$confirm_settings" =~ ^[Yy]$ ]]; then
+    rm -rf "$DATA_DIR/.config/dinotty" 2>/dev/null || true
+    ok "用户设置已删除"
+else
+    info "保留了用户设置"
+fi
+
+# 删除系统配置目录中的 env 文件（保留空目录）
+if [[ -f "${CONFIG_DIR}/env" ]]; then
+    rm -f "${CONFIG_DIR}/env"
+    info "系统配置已删除"
 fi
 
 ok "Dinotty 已完全卸载"

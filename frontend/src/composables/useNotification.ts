@@ -187,12 +187,32 @@ const toastTypeMap: Record<NotificationType, any> = {
   urgent: TYPE.ERROR,
 }
 
+let goToHandler: ((paneId: string) => void) | null = null
+
+export function setGoToPaneHandler(handler: (paneId: string) => void) {
+  goToHandler = handler
+}
+
 function showToast(item: NotificationItem) {
   const toast = useToast()
   const { t } = useI18n()
   const children = [
     item.title ? h('strong', { class: 'notif-toast-title' }, item.title) : null,
     h('span', { class: 'notif-toast-body' }, item.body),
+    h(
+      'button',
+      {
+        class: 'notif-toast-btn',
+        onClick: () => {
+          if (goToHandler) {
+            goToHandler(item.paneId)
+          } else {
+            panelVisible.value = true
+          }
+        },
+      },
+      t('notification.goTo')
+    ),
     h(
       'button',
       {
@@ -251,6 +271,7 @@ export function useNotification() {
     panelVisible,
     unreadByPane,
     unreadCount,
+    setGoToPaneHandler,
     dismissOne(id: string) {
       const item = notifications.value.find((n) => n.id === id)
       notifications.value = notifications.value.filter((n) => n.id !== id)

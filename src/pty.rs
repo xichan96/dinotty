@@ -98,6 +98,35 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
     info!("Broadcast task exited, pane={}", pane_id);
 }
 
+fn cleanup_exited_pty_session(
+    session: &Arc<Session>,
+    pane_id: &str,
+    manager: &Arc<SessionManager>,
+    exit_code: Option<i32>,
+) {
+    if !session.notify_exit_and_mark_exited(pane_id) {
+        return;
+    }
+
+    session.input_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    let _ = session.output_tx.send(Vec::new());
+
+    if manager.sessions.remove(pane_id).is_some() {
+        manager
+            .event_bus
+            .publish(BusEvent::SessionClosed { pane_id: pane_id.to_string(), exit_code });
+        if let Some(tab_pane_id) = manager.on_pty_exited(pane_id) {
+            manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_pane_id });
+        }
+    }
+
+    if let Some(f) =
+        session.tauri_on_exit.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+    {
+        f(pane_id.to_string());
+    }
+}
+
 /// Create a new PTY session and register it with the session manager.
 ///
 /// # Errors
@@ -109,6 +138,7 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
 pub fn create_session(
     manager: &Arc<SessionManager>,
     pane_id: &str,
+    tab_id: Option<&str>,
     tauri_on_exit: Option<Arc<dyn Fn(String) + Send + Sync>>,
     cwd: Option<PathBuf>,
 ) -> Result<(Arc<Session>, String), String> {
@@ -124,6 +154,10 @@ pub fn create_session(
         cmd.arg(arg);
     }
     cmd.env("TERM", "xterm-256color");
+    cmd.env("DINOTTY_PANE_ID", pane_id);
+    if let Some(tid) = tab_id {
+        cmd.env("DINOTTY_TAB_ID", tid);
+    }
     configure_utf8_locale(&mut cmd);
 
     let home_path = shell::home_dir();
@@ -331,25 +365,68 @@ pub fn create_session(
             }
         }
         error!("PTY reader exiting, running cleanup, pane={}", reader_pane);
-        reader_session.notify_exit_and_mark_exited(&reader_pane);
-        if reader_manager.sessions.remove(&reader_pane).is_some() {
-            reader_manager
-                .event_bus
-                .publish(BusEvent::SessionClosed { pane_id: reader_pane.clone(), exit_code: None });
-            let tab_pane_id =
-                reader_manager.on_pty_exited(&reader_pane).unwrap_or_else(|| reader_pane.clone());
-            reader_manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_pane_id });
-        }
+        cleanup_exited_pty_session(&reader_session, &reader_pane, &reader_manager, None);
         info!("PTY exited, session removed: pane={}", reader_pane);
-        let cb = reader_session
-            .tauri_on_exit
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(f) = cb {
-            f(reader_pane);
-        }
     });
+
+    // On Windows ConPTY may leave the reader blocked after the shell process
+    // exits. Poll the child handle so `exit` closes the tab even without EOF.
+    {
+        let watcher_session = Arc::clone(&session);
+        let watcher_manager = Arc::clone(manager);
+        let watcher_pane = pane_id.to_string();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+            loop {
+                interval.tick().await;
+                if watcher_session.is_exited() {
+                    break;
+                }
+
+                let mut should_stop = false;
+                let status = {
+                    let mut backend = watcher_session.backend.lock().await;
+                    let status = match &mut *backend {
+                        SessionBackend::Local { child, .. } => {
+                            match child.try_wait() {
+                                Ok(Some(status)) => Some(status),
+                                Ok(None) => None,
+                                Err(e) => {
+                                    error!("PTY child watcher: try_wait failed: {e}, pane={watcher_pane}");
+                                    should_stop = true;
+                                    None
+                                }
+                            }
+                        }
+                        SessionBackend::Ssh | SessionBackend::Exited => {
+                            should_stop = true;
+                            None
+                        }
+                    };
+                    if status.is_some() {
+                        *backend = SessionBackend::Exited;
+                    }
+                    status
+                };
+
+                if let Some(status) = status {
+                    let exit_code = i32::try_from(status.exit_code()).ok();
+                    info!("PTY child exited: status={status:?}, pane={watcher_pane}");
+                    cleanup_exited_pty_session(
+                        &watcher_session,
+                        &watcher_pane,
+                        &watcher_manager,
+                        exit_code,
+                    );
+                    break;
+                }
+
+                if should_stop {
+                    break;
+                }
+            }
+        });
+    }
 
     // ── Broadcast task: forwards raw PTY data + handles commands ──
     // Reads raw PTY bytes from the output channel and broadcasts to clients

@@ -66,14 +66,18 @@ pub async fn create_tab(
     };
 
     // Create PTY session
-    let (_session, shell_type) = match pty::create_session(&manager, &pane_id, None, cwd) {
-        Ok(x) => x,
-        Err(e) => {
-            tracing::error!("Failed to create PTY: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
-                .into_response();
-        }
-    };
+    let (_session, shell_type) =
+        match pty::create_session(&manager, &pane_id, Some(&tab_id), None, cwd) {
+            Ok(x) => x,
+            Err(e) => {
+                tracing::error!("Failed to create PTY: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": e })),
+                )
+                    .into_response();
+            }
+        };
 
     // Create initial layout with single leaf
     let layout = serde_json::json!({
@@ -197,7 +201,7 @@ pub async fn split_pane(
     let (_session, _shell_type) = if req.force_local {
         // Force local PTY — use explicit cwd if provided, otherwise inherit from source
         let local_cwd = req.cwd.map(std::path::PathBuf::from).or(source_cwd);
-        match pty::create_session(&manager, &new_pane_id, None, local_cwd) {
+        match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, local_cwd) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!("Failed to create PTY for force-local split: {}", e);
@@ -223,7 +227,7 @@ pub async fn split_pane(
         }
     } else {
         // Local PTY — inherit CWD from source pane
-        match pty::create_session(&manager, &new_pane_id, None, source_cwd) {
+        match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, source_cwd) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!("Failed to create PTY for split: {}", e);

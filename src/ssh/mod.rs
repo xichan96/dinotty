@@ -716,13 +716,15 @@ async fn ssh_reader_task(
     // 清理：清除 ssh_cmd_tx 以防止后续发送
     *session.ssh_cmd_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 
-    session.notify_exit_and_mark_exited(&pane_id);
-    manager.sessions.remove(&pane_id);
-    manager
-        .event_bus
-        .publish(BusEvent::SessionClosed { pane_id: pane_id.clone(), exit_code: None });
-    manager.on_pty_exited(&pane_id);
-    manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: pane_id.clone() });
+    if session.notify_exit_and_mark_exited(&pane_id) {
+        manager.sessions.remove(&pane_id);
+        manager
+            .event_bus
+            .publish(BusEvent::SessionClosed { pane_id: pane_id.clone(), exit_code: None });
+        if let Some(tab_pane_id) = manager.on_pty_exited(&pane_id) {
+            manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_pane_id });
+        }
+    }
     if let Some(cb) =
         session.tauri_on_exit.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
     {

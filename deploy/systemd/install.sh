@@ -110,23 +110,16 @@ ok "二进制已安装到 ${INSTALL_DIR}/dinotty-server"
 
 # 创建系统用户
 if ! id "$SERVICE_USER" &>/dev/null; then
-    useradd --system --create-home --shell /bin/bash "$SERVICE_USER"
+    useradd --system --no-create-home --home-dir "$DATA_DIR" --shell /bin/bash "$SERVICE_USER"
     ok "已创建系统用户: $SERVICE_USER"
 else
     info "系统用户 $SERVICE_USER 已存在"
 fi
 
-# 确保 home 目录存在
-USER_HOME=$(eval echo "~$SERVICE_USER")
-if [[ ! -d "$USER_HOME" ]]; then
-    mkdir -p "$USER_HOME"
-    chown "$SERVICE_USER:$SERVICE_USER" "$USER_HOME"
-fi
-
-# 创建数据目录
+# 创建数据目录（同时也是系统用户的 HOME）
 mkdir -p "$DATA_DIR"
 chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
-ok "数据目录: $DATA_DIR"
+ok "数据目录: $DATA_DIR（HOME=$DATA_DIR）"
 
 # 创建配置目录
 mkdir -p "$CONFIG_DIR"

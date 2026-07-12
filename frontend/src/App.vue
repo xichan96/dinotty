@@ -157,7 +157,7 @@
       </div>
     </div>
 
-    <NotificationPanel :pane-labels="paneLabels" @goto-pane="activateTab" />
+    <NotificationPanel :pane-labels="notificationPaneLabels" @goto-pane="activateTab" />
 
     <StatusBar />
 
@@ -307,7 +307,7 @@ import { shellEscapePath } from './utils/shell'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
-const { tabs, activePaneId, tabList, activeTabType, activeTab, isBroadcastActive, canBroadcast, paneLabels } =
+const { tabs, activePaneId, tabList, activeTabType, activeTab, isBroadcastActive, canBroadcast } =
   storeToRefs(session)
 
 const ui = useUiStore()
@@ -343,7 +343,7 @@ const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = us
 const { isMobile } = useIsMobile()
 
 // Workspace filtering
-const { workspaces, activeWorkspaceId, activeWorkspacePath, activeWorkspaceName, matchWorkspace } = useWorkspaces()
+const { workspaces, activeWorkspaceId, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace } = useWorkspaces()
 
 const visibleTabList = computed(() => {
   const list = tabList.value.filter((info) => {
@@ -364,6 +364,32 @@ const visibleTabList = computed(() => {
   })
   // Reindex: workspace-relative 1-based indices
   return list.map((t, i) => ({ ...t, index: i + 1 }))
+})
+
+/** Enriched pane labels with workspace and tab context for notifications */
+const notificationPaneLabels = computed(() => {
+  const result: Record<string, string> = {}
+  for (const tab of tabs.value) {
+    if (tab.type === 'terminal') {
+      const ws = matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)
+      const wsPrefix = ws ? `${ws.name} › ` : ''
+      const leaves = getAllLeaves(tab.layout)
+      const activeLeaf = leaves.find((l) => l.paneId === tab.activePaneId)
+      const tabTitle = tab.customTitle ?? activeLeaf?.title ?? ''
+      for (const leaf of leaves) {
+        if (leaves.length > 1 && tabTitle && tabTitle !== leaf.title) {
+          result[leaf.paneId] = `${wsPrefix}${tabTitle} / ${leaf.title}`
+        } else {
+          result[leaf.paneId] = `${wsPrefix}${leaf.title}`
+        }
+      }
+    } else {
+      // Plugin tab
+      const ws = tab.workspaceId ? workspaces.value.find((w) => w.id === tab.workspaceId) : null
+      result[tab.paneId] = ws ? `${ws.name} › ${tab.title}` : tab.title
+    }
+  }
+  return result
 })
 
 const isLandscape = ref(window.innerWidth > window.innerHeight)
@@ -723,10 +749,30 @@ function onNewMenuAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' |
 }
 
 async function activateTab(tabId: string) {
-  activePaneId.value = tabId
-  const tab = tabs.value.find((t) => t.paneId === tabId)
-  if (tab?.type === 'terminal') {
-    notif.clearPaneUnread(tab.activePaneId)
+  // Try tab-level paneId first, then search by leaf paneId
+  let tab = tabs.value.find((t) => t.paneId === tabId)
+  if (!tab) {
+    tab = tabs.value.find((t) => {
+      if (t.type !== 'terminal') return false
+      return !!findLeaf(t.layout, tabId)
+    })
+  }
+  if (!tab) return
+
+  // Switch workspace if the tab belongs to a different one
+  const targetWs = tab.type === 'terminal'
+    ? matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)
+    : tab.workspaceId ? workspaces.value.find((w) => w.id === tab.workspaceId) ?? null : null
+  if (targetWs && targetWs.id !== activeWorkspaceId.value) {
+    await activateWorkspace(targetWs.id)
+  }
+
+  activePaneId.value = tab.paneId
+  if (tab.type === 'terminal') {
+    // Clear unread for all leaves in this tab
+    for (const leaf of getAllLeaves(tab.layout)) {
+      notif.clearPaneUnread(leaf.paneId)
+    }
     try {
       await apiActivatePane(tab.paneId, tab.activePaneId)
     } catch (e) {
@@ -736,6 +782,9 @@ async function activateTab(tabId: string) {
   persist()
   nextTick(() => focusActive())
 }
+
+// Wire up toast notification direct-jump handler
+notif.setGoToPaneHandler((paneId: string) => activateTab(paneId))
 
 function reorderTab(fromId: string, toId: string) {
   session.reorderTab(fromId, toId)

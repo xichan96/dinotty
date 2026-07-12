@@ -57,7 +57,10 @@ fn spawn_tauri_output_forwarder(
                     loop {
                         match rx.try_recv() {
                             Ok(SessionClientEvent::Output(data)) => batch.push_str(&data),
-                            Ok(event @ SessionClientEvent::Resize { .. }) => {
+                            Ok(
+                                event @ (SessionClientEvent::Resize { .. }
+                                | SessionClientEvent::SessionExit { .. }),
+                            ) => {
                                 pending = Some(event);
                                 break;
                             }
@@ -78,6 +81,10 @@ fn spawn_tauri_output_forwarder(
                     {
                         break;
                     }
+                }
+                SessionClientEvent::SessionExit { pane_id: exit_pane_id } => {
+                    let _ = app.emit("pty-exit", PtyExit { pane_id: exit_pane_id });
+                    break;
                 }
             }
         }
@@ -180,7 +187,7 @@ fn pty_spawn(
     }
 
     let (session, shell_type) =
-        pty::create_session(&manager, &pane_id, Some(Arc::clone(&exit_cb)), None)?;
+        pty::create_session(&manager, &pane_id, None, Some(Arc::clone(&exit_cb)), None)?;
 
     spawn_tauri_output_forwarder(app.clone(), pane_id.clone(), Arc::clone(&session));
     spawn_tauri_write_task(Arc::clone(&session), pane_id.clone());

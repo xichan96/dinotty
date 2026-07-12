@@ -42,6 +42,8 @@ pub enum SessionBackend {
     },
     /// SSH 远程连接 — channel 已移至 reader task，此处仅保留标记
     Ssh,
+    /// Backend resources were already dropped after the child exited.
+    Exited,
 }
 
 /// Commands sent from Session methods to the SSH reader/writer task.
@@ -80,6 +82,7 @@ pub struct PendingCommandResult {
 pub enum SessionClientEvent {
     Output(String),
     Resize { cols: u16, rows: u16 },
+    SessionExit { pane_id: String },
 }
 
 pub struct ClientEndpoint {
@@ -189,6 +192,7 @@ impl Session {
                 self.mark_exited();
                 info!("SSH session marked as exited");
             }
+            SessionBackend::Exited => {}
         }
     }
 
@@ -234,6 +238,7 @@ impl Session {
                 Ok(())
             }
             SessionBackend::Ssh => Err("use write_input_async for SSH sessions".into()),
+            SessionBackend::Exited => Err("session exited".into()),
         }
     }
 
@@ -279,11 +284,14 @@ impl Session {
             }
         } else {
             let mut backend = self.backend.lock().await;
-            if let SessionBackend::Local { master, .. } = &mut *backend {
-                use portable_pty::PtySize;
-                master
-                    .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-                    .map_err(|e| e.to_string())?;
+            match &mut *backend {
+                SessionBackend::Local { master, .. } => {
+                    use portable_pty::PtySize;
+                    master
+                        .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+                        .map_err(|e| e.to_string())?;
+                }
+                SessionBackend::Ssh | SessionBackend::Exited => {}
             }
         }
         *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (cols, rows);
@@ -311,9 +319,13 @@ impl Session {
             return Err("SSH session not initialized".into());
         }
         let mut backend = self.backend.lock().await;
-        if let SessionBackend::Local { writer, .. } = &mut *backend {
-            writer.write_all(data).map_err(|e| e.to_string())?;
-            writer.flush().map_err(|e| e.to_string())?;
+        match &mut *backend {
+            SessionBackend::Local { writer, .. } => {
+                writer.write_all(data).map_err(|e| e.to_string())?;
+                writer.flush().map_err(|e| e.to_string())?;
+            }
+            SessionBackend::Ssh => {}
+            SessionBackend::Exited => return Err("session exited".into()),
         }
         Ok(())
     }
@@ -466,12 +478,27 @@ impl Session {
     }
 
     /// Notify all connected clients that the session is exiting, then mark as exited.
-    pub fn notify_exit_and_mark_exited(&self, pane_id: &str) {
-        let exit_msg = serde_json::json!({"type": "session_exit", "pane_id": pane_id}).to_string();
+    /// Returns false when another cleanup path already handled the exit.
+    pub fn notify_exit_and_mark_exited(&self, pane_id: &str) -> bool {
+        {
+            let mut exited = self.exited.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *exited {
+                return false;
+            }
+            *exited = true;
+        }
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        Self::send_chunk_to_clients(&mut clients, &exit_msg);
-        drop(clients);
-        self.mark_exited();
+        clients.retain(|client| !client.tx.is_closed());
+        for client in clients.iter() {
+            if client
+                .tx
+                .try_send(SessionClientEvent::SessionExit { pane_id: pane_id.to_string() })
+                .is_err()
+            {
+                tracing::debug!("broadcast: client channel full, dropping session_exit");
+            }
+        }
+        true
     }
 
     pub fn has_clients(&self) -> bool {

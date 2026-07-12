@@ -468,6 +468,7 @@ import { Eye, EyeOff, Copy, Check, Pencil, RefreshCw, Save, X, FolderOpen } from
 import { invoke } from '@tauri-apps/api/core'
 import { useSettings } from '../../composables/useSettings'
 import { useI18n } from '../../composables/useI18n'
+import { uiConfirm } from '../../composables/useConfirm'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { copyToClipboard } from '../../utils/clipboard'
 import { useToast } from 'vue-toastification'
@@ -726,7 +727,11 @@ async function saveToken() {
 }
 
 async function regenerateToken() {
-  if (!confirm(t('settings.token.confirmRegenerate'))) return
+  if (!(await uiConfirm(t('settings.token.confirmRegenerate'), {
+    title: t('settings.token.regenerate'),
+    confirmText: t('settings.token.regenerate'),
+    cancelText: t('filePreview.cancel'),
+  }))) return
   const buf = new Uint8Array(32)
   crypto.getRandomValues(buf)
   const token = Array.from(buf)

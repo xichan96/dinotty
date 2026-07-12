@@ -72,6 +72,7 @@ import { ref } from 'vue'
 import { Motion } from 'motion-v'
 import { Plus, Pencil, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
+import { uiConfirm } from '../../composables/useConfirm'
 import { useWorkspaces } from '../../composables/useWorkspaces'
 import type { Workspace } from '../../types/workspace'
 import ContextMenu from '../ui/ContextMenu.vue'
@@ -115,7 +116,11 @@ function showCtx(ws: Workspace, x: number, y: number) {
       icon: Trash2,
       danger: true,
       action: async () => {
-        if (!confirm(t('workspace.confirmDelete').replace('{name}', ws.name))) return
+        if (!(await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
+          title: t('workspace.delete'),
+          confirmText: t('workspace.delete'),
+          cancelText: t('filePreview.cancel'),
+        }))) return
         try {
           await deleteWorkspace(ws.id)
         } catch (err) {

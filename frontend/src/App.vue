@@ -168,6 +168,16 @@
     <ConfirmCloseDialog @confirm="onConfirmClose" />
 
     <ConfirmModal
+      :visible="confirmState.visible"
+      :title="confirmState.title"
+      :message="confirmState.message"
+      :confirm-text="confirmState.confirmText"
+      :cancel-text="confirmState.cancelText"
+      @confirm="confirmResolve"
+      @cancel="confirmCancel"
+    />
+
+    <ConfirmModal
       :visible="windowCloseConfirmVisible"
       :title="t('confirm.closeWindowTitle')"
       :message="t('confirm.closeWindowMessage')"
@@ -241,6 +251,7 @@ import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
+import { confirmState, uiConfirm, confirmResolve, confirmCancel } from './composables/useConfirm'
 import PreviewPanel from './components/preview/PreviewPanel.vue'
 import CommandBookmarks from './components/command/CommandBookmarks.vue'
 import ServerList from './components/ServerList.vue'
@@ -1160,7 +1171,7 @@ window.__dinotty_ui_notify = (message: string, level?: 'info' | 'warn' | 'error'
   if (level === 'error') console.error('[plugin]', message)
   else console.log('[plugin]', message)
 }
-window.__dinotty_ui_confirm = async (message: string) => window.confirm(message)
+window.__dinotty_ui_confirm = (message: string) => uiConfirm(message)
 window.__dinotty_open_plugin = openPlugin
 
 const paletteCommands = computed<Command[]>(() => {

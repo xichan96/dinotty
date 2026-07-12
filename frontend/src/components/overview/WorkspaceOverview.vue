@@ -74,6 +74,7 @@ import { Motion, AnimatePresence } from 'motion-v'
 import { Plus, X } from 'lucide-vue-next'
 import { useWorkspaces } from '../../composables/useWorkspaces'
 import { useI18n } from '../../composables/useI18n'
+import { uiConfirm } from '../../composables/useConfirm'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useNotification } from '../../composables/useNotification'
 import { useTabPreview, type TabCard } from '../../composables/useTabPreview'
@@ -322,8 +323,14 @@ function onKeydown(e: KeyboardEvent) {
         const wsId = selectedWorkspaceId.value
         if (wsId !== null && wsId !== '__all__') {
           const ws = workspaces.value.find((w) => w.id === wsId)
-          if (ws && confirm(`${t('workspace.delete')} "${ws.name}"?`)) {
-            deleteWorkspace(wsId).catch((e) => console.error('Failed to delete workspace:', e))
+          if (ws) {
+            uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
+              title: t('workspace.delete'),
+              confirmText: t('workspace.delete'),
+              cancelText: t('filePreview.cancel'),
+            }).then((ok) => {
+              if (ok) deleteWorkspace(wsId).catch((e) => console.error('Failed to delete workspace:', e))
+            })
           }
         }
       }

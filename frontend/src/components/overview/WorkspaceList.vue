@@ -46,6 +46,7 @@
 import { ref } from 'vue'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
+import { uiConfirm } from '../../composables/useConfirm'
 import { useWorkspaces } from '../../composables/useWorkspaces'
 import type { Workspace } from '../../types/workspace'
 import ContextMenu from '../ui/ContextMenu.vue'
@@ -89,7 +90,11 @@ function openCtx(e: MouseEvent, ws: Workspace) {
       icon: Trash2,
       danger: true,
       action: async () => {
-        if (!confirm(t('workspace.confirmDelete').replace('{name}', ws.name))) return
+        if (!(await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
+          title: t('workspace.delete'),
+          confirmText: t('workspace.delete'),
+          cancelText: t('filePreview.cancel'),
+        }))) return
         try {
           await deleteWorkspace(ws.id)
         } catch (err) {

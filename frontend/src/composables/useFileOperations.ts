@@ -1,5 +1,6 @@
 import { ref, computed, type Ref } from 'vue'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
+import { uiConfirm } from './useConfirm'
 import { isTauri, tauriInvoke } from './useTransport'
 import { isInternalDragActive, getInternalDragRel, clearInternalDrag } from './internalDragState'
 import type { DirEntry } from '../components/workspace/TreeRows'
@@ -357,7 +358,11 @@ export function useFileOperations(opts: {
     opts.inlineCreate.value = null
     const wasDir = opts.selectedIsDir.value
     const msg = wasDir ? t('filePreview.confirmDeleteFolder') : t('filePreview.confirmDeleteFile')
-    if (!skipConfirm && !confirm(msg)) return false
+    if (!skipConfirm && !(await uiConfirm(msg, {
+      title: t('filePreview.delete'),
+      confirmText: t('filePreview.delete'),
+      cancelText: t('filePreview.cancel'),
+    }))) return false
     await getApiBase()
     const q = new URLSearchParams({ pane_id: opts.paneId(), path: rel })
     if (opts.cwdLabel.value) q.set('cwd', opts.cwdLabel.value)

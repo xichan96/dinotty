@@ -99,6 +99,7 @@ pub async fn ws_handler(
     Query(q): Query<WsQuery>,
     State(manager): State<Arc<SessionManager>>,
     State(history): State<HistoryState>,
+    State(settings): State<SettingsState>,
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
     _headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
@@ -113,7 +114,8 @@ pub async fn ws_handler(
     if !manager.is_pane_in_any_tab(&pane_id) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    ws.on_upgrade(move |socket| handle_socket(socket, pane_id, manager, history)).into_response()
+    ws.on_upgrade(move |socket| handle_socket(socket, pane_id, manager, history, settings))
+        .into_response()
 }
 
 #[allow(clippy::unused_async)]
@@ -452,6 +454,7 @@ async fn handle_socket(
     pane_id: String,
     manager: Arc<SessionManager>,
     history: HistoryState,
+    settings: SettingsState,
 ) {
     info!("WebSocket connected: pane={}", pane_id);
     let (ws_tx, mut ws_rx) = socket.split();
@@ -674,7 +677,16 @@ async fn handle_socket(
     }
 
     info!("No existing session found for pane={}, creating new PTY session", pane_id);
-    let (session, shell_type) = match crate::pty::create_session(&manager, &pane_id, None, None) {
+    let cwd = settings
+        .read()
+        .await
+        .default_workspace_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir());
+    let (session, shell_type) = match crate::pty::create_session(&manager, &pane_id, None, cwd) {
         Ok(x) => x,
         Err(e) => {
             error!("{}", e);

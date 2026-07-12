@@ -53,14 +53,26 @@ pub async fn list_tabs(State(manager): State<Arc<SessionManager>>) -> impl IntoR
 
 #[allow(clippy::unused_async)]
 pub async fn create_tab(
-    State(manager): State<Arc<SessionManager>>,
+    State((manager, settings)): State<(Arc<SessionManager>, SettingsState)>,
     Json(req): Json<CreateTabRequest>,
 ) -> impl IntoResponse {
     let tab_id = uuid::Uuid::new_v4().to_string();
     let pane_id = uuid::Uuid::new_v4().to_string();
 
-    // Resolve CWD: explicit from request > $HOME (handled by pty::create_session)
-    let cwd = req.cwd.clone().map(std::path::PathBuf::from);
+    // Resolve CWD: explicit request > configured default workspace root > $HOME.
+    let cwd = if let Some(cwd) = req.cwd.clone() {
+        Some(std::path::PathBuf::from(cwd))
+    } else {
+        settings
+            .read()
+            .await
+            .default_workspace_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_dir())
+    };
 
     // Create PTY session
     let (_session, shell_type) = match pty::create_session(&manager, &pane_id, None, cwd) {

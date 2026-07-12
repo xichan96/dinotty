@@ -266,6 +266,27 @@
           </div>
         </div>
         <div class="settings-row">
+          <label>{{ t('settings.workspace.defaultRoot') }}</label>
+          <div class="upload-dir-control">
+            <input
+              v-model="settings.default_workspace_root"
+              class="shortcut-input upload-dir-input"
+              placeholder="/Users/me/projects"
+              @change="saveSettings()"
+            />
+            <button
+              v-if="isTauri()"
+              class="icon-btn"
+              type="button"
+              @click="pickDefaultWorkspaceRoot"
+            >
+              <FolderOpen :size="14" />
+              {{ t('settings.uploads.pickDir') }}
+            </button>
+          </div>
+        </div>
+        <p class="settings-hint">{{ t('settings.workspace.defaultRootHint') }}</p>
+        <div class="settings-row">
           <label>{{ t('settings.uploads.dir') }}</label>
           <div class="upload-dir-control">
             <input
@@ -571,6 +592,13 @@ async function pickDefaultBaseDir() {
   const dir = await invoke<string | null>('pick_workspace_dir', { base: settings.default_base_dir || undefined })
   if (!dir) return
   settings.default_base_dir = dir
+  await saveSettings()
+}
+
+async function pickDefaultWorkspaceRoot() {
+  const dir = await invoke<string | null>('pick_workspace_dir', { base: settings.default_workspace_root || undefined })
+  if (!dir) return
+  settings.default_workspace_root = dir
   await saveSettings()
 }
 

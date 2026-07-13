@@ -10,8 +10,8 @@
         <button type="button" :disabled="atCap" @click.stop="openImport">
           {{ t('settings.theme.import') }}
         </button>
-        <button type="button" @click.stop="downloadThemeTemplate">
-          {{ t('settings.theme.downloadTemplate') }}
+        <button type="button" @click.stop="exportCurrentTheme">
+          {{ t('settings.theme.exportTheme') }}
         </button>
         <input
           ref="fileInput"
@@ -118,7 +118,7 @@ import {
 } from '../../composables/useDeviceThemeSelection'
 import { randomId } from '../../utils/id'
 import { parseThemeFile } from '../../utils/themeImport'
-import { downloadThemeTemplate } from '../../utils/themeTemplate'
+import { downloadTheme } from '../../utils/themeTemplate'
 import ThemeEditorDialog from './ThemeEditorDialog.vue'
 
 const BASE_NAMES = ['dark', 'light', 'dracula']
@@ -177,6 +177,15 @@ function previewColors(item: ThemeItem): Record<string, string> {
   if (item.kind === 'builtin') return getThemeByName(item.name!).colors
   const saved = settings.custom_themes.find((theme) => theme.uuid === item.uuid)
   return saved ? buildCustomThemeColors(saved) : item.colors
+}
+
+function exportCurrentTheme() {
+  const activeItem = themeItems.value.find((item) => item.active)
+  const name = activeItem ? activeItem.label : themeLabel(settings.theme.preset)
+  const colors = activeItem
+    ? extractColors(previewColors(activeItem))
+    : extractColors(effectiveTheme.value.colors)
+  downloadTheme(name, colors)
 }
 
 const themeItems = computed<ThemeItem[]>(() => {
@@ -420,7 +429,7 @@ async function onFile(event: Event) {
       return
     }
     const fileBaseName = file.name.replace(/\.[^.]+$/, '').trim()
-    const finalName = uniqueName(fileBaseName || 'Imported')
+    const finalName = uniqueName((result.name && result.name.trim()) || fileBaseName || 'Imported')
     const uuid = randomId()
     await commitLibrary(() => {
       settings.custom_themes.push({ uuid, name: finalName, colors: result.colors })

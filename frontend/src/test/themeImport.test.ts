@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeColor, parseThemeFile } from '../utils/themeImport'
-import { buildBlankTemplate } from '../utils/themeTemplate'
+import { serializeTheme } from '../utils/themeTemplate'
 
 const GHOSTTY_FIXTURE = `
 # Some Ghostty theme
@@ -28,6 +28,13 @@ cursor-color = f5e0dc
 const ANSI = Array.from({ length: 16 }, (_, index) =>
   `#${index.toString(16).padStart(6, '0')}`,
 )
+
+const COLORS = {
+  foreground: '#cccccc',
+  background: '#1e1e1e',
+  cursor: '#858585',
+  ansi: ANSI,
+}
 
 describe('normalizeColor', () => {
   it('expands #RGB colors', () => expect(normalizeColor('#abc')).toBe('#aabbcc'))
@@ -66,6 +73,30 @@ describe('parseThemeFile', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('imports a top-level JSON name', () => {
+    const result = parseThemeFile(JSON.stringify({ name: 'JSON Theme', ...COLORS }))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.name).toBe('JSON Theme')
+  })
+
+  it('imports a name from the first matching comment', () => {
+    const result = parseThemeFile(`# name = My Theme\n# name = Other Theme\n${GHOSTTY_FIXTURE}`)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.name).toBe('My Theme')
+  })
+
+  it('leaves the name unset when there is no name line', () => {
+    const result = parseThemeFile(GHOSTTY_FIXTURE)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.name).toBeFalsy()
+  })
+
+  it('does not parse a prose name comment', () => {
+    const result = parseThemeFile(`# name 字段是说明\n${GHOSTTY_FIXTURE}`)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.name).toBeFalsy()
+  })
+
   it.each([
     ['rgb(0,0,0)', 'foreground'],
     ['red', 'background'],
@@ -97,13 +128,13 @@ describe('parseThemeFile', () => {
     expect(parseThemeFile(`${GHOSTTY_FIXTURE}\nfont-family = Menlo`).ok).toBe(true)
   })
 
-  it('produces a blank template that is not yet importable', () => {
-    const template = buildBlankTemplate()
-    const result = parseThemeFile(template)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.errors.every((error) => /^(Missing|Invalid)/.test(error))).toBe(true)
-    expect(template).toContain('palette = 15=')
-    expect(template).toContain('foreground')
+  it('round-trips a serialized theme with its name', () => {
+    const serialized = serializeTheme('RT', COLORS)
+    const result = parseThemeFile(serialized)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.colors).toEqual(COLORS)
+    expect(result.name).toBe('RT')
   })
 
   it('does not hang on a long whitespace line without = (ReDoS guard)', () => {

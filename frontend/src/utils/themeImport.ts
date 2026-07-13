@@ -1,7 +1,7 @@
 import type { ThemeColors } from '../composables/useDeviceThemeSelection'
 
 export type ImportResult =
-  | { ok: true; colors: ThemeColors }
+  | { ok: true; colors: ThemeColors; name?: string }
   | { ok: false; errors: string[] }
 
 export function normalizeColor(raw: string): string | null {
@@ -23,6 +23,7 @@ export function normalizeColor(raw: string): string | null {
 }
 
 interface RawTheme {
+  name?: string
   foreground?: unknown
   background?: unknown
   cursor?: unknown
@@ -48,6 +49,7 @@ function parseJsonTheme(text: string): RawTheme | ImportResult {
   const source =
     typeof nested === 'object' && nested !== null ? (nested as Record<string, unknown>) : root
   const raw = emptyRawTheme()
+  if (typeof root.name === 'string') raw.name = root.name
   if ('foreground' in source) raw.foreground = source.foreground
   if ('background' in source) raw.background = source.background
   if ('cursor' in source) raw.cursor = source.cursor
@@ -75,7 +77,14 @@ function parseGhosttyTheme(text: string): RawTheme {
   for (const sourceLine of text.split('\n')) {
     const line = sourceLine.endsWith('\r') ? sourceLine.slice(0, -1) : sourceLine
     const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
+    if (!trimmed) continue
+    if (trimmed.startsWith('#')) {
+      if (raw.name === undefined) {
+        const match = /^name\s*=\s*(.+)$/.exec(trimmed.slice(1).trim())
+        if (match) raw.name = match[1].trim()
+      }
+      continue
+    }
 
     const separator = trimmed.indexOf('=')
     if (separator < 0) {
@@ -141,7 +150,11 @@ function validateRawTheme(raw: RawTheme): ImportResult {
     return { ok: false, errors }
   }
 
-  return { ok: true, colors: { foreground, background, cursor, ansi: ansi as string[] } }
+  return {
+    ok: true,
+    colors: { foreground, background, cursor, ansi: ansi as string[] },
+    name: raw.name,
+  }
 }
 
 export function parseThemeFile(text: string): ImportResult {

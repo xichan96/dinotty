@@ -4,6 +4,60 @@ export interface ThemeDefinition {
   colors: Record<string, string>
 }
 
+interface RGB {
+  r: number
+  g: number
+  b: number
+}
+
+export function parseHex(hex: string): RGB {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex)
+  if (!match) return { r: 0, g: 0, b: 0 }
+
+  const value = match[1]
+  const expanded = value.length === 3 ? value.replace(/./g, (digit) => digit + digit) : value
+  return {
+    r: Number.parseInt(expanded.slice(0, 2), 16),
+    g: Number.parseInt(expanded.slice(2, 4), 16),
+    b: Number.parseInt(expanded.slice(4, 6), 16),
+  }
+}
+
+export function toHex({ r, g, b }: RGB): string {
+  const channel = (value: number) =>
+    Math.round(Math.min(255, Math.max(0, value)))
+      .toString(16)
+      .padStart(2, '0')
+  return `#${channel(r)}${channel(g)}${channel(b)}`
+}
+
+export function luminance(hex: string): number {
+  const { r, g, b } = parseHex(hex)
+  return 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255)
+}
+
+export function shade(hex: string, amount: number): string {
+  const color = parseHex(hex)
+  const strength = Math.min(1, Math.max(0, Math.abs(amount)))
+  const target = amount >= 0 ? 255 : 0
+  return toHex({
+    r: color.r + (target - color.r) * strength,
+    g: color.g + (target - color.g) * strength,
+    b: color.b + (target - color.b) * strength,
+  })
+}
+
+export function mix(a: string, b: string, t: number): string {
+  const first = parseHex(a)
+  const second = parseHex(b)
+  const amount = Math.min(1, Math.max(0, t))
+  return toHex({
+    r: first.r + (second.r - first.r) * amount,
+    g: first.g + (second.g - first.g) * amount,
+    b: first.b + (second.b - first.b) * amount,
+  })
+}
+
 export const themes: ThemeDefinition[] = [
   {
     name: 'dark',
@@ -496,25 +550,51 @@ export const themes: ThemeDefinition[] = [
 // Fill in derived variables that every theme needs but may not list explicitly.
 // This avoids repeating scrollbar / hover / palette tokens in every theme.
 // Explicit values in the theme always win (spread order).
-function fillDefaults(t: ThemeDefinition): ThemeDefinition {
+export function fillDefaults(t: ThemeDefinition): ThemeDefinition {
   const c = t.colors
-  const defaults: Record<string, string> = {
-    '--bg-hover': c['--bg-input'] || c['--bg-surface'],
-    '--bg-surface-hover': c['--bg-input'] || c['--bg-surface'],
-    '--border-hover': c['--border'],
-    '--scrollbar-thumb': c['--bg-input'] || c['--border'],
-    '--scrollbar-thumb-hover': c['--border'],
-    '--palette-bg': c['--bg'],
-    '--palette-border': c['--border'],
-    '--palette-select': c['--bg-input'] || c['--bg-surface'],
-    '--palette-text': c['--fg'],
+  const bg = c['--bg']
+  const fg = c['--fg']
+  const dark = luminance(bg) < 0.5
+  const lift = (hex: string, amount: number) => shade(hex, dark ? amount : -amount)
+  const blue = c['--color-blue'] || fg
+  const derived: Record<string, string> = {
+    '--bg-surface': lift(bg, 0.06),
+    '--bg-overlay': bg,
+    '--bg-input': lift(bg, 0.09),
+    '--bg-hover': lift(bg, 0.09),
+    '--bg-surface-hover': lift(bg, 0.13),
+    '--border': lift(bg, 0.18),
+    '--border-focus': blue,
+    '--border-hover': lift(bg, 0.26),
+    '--divider': lift(bg, 0.12),
+    '--fg-bright': fg,
+    '--fg-muted': mix(fg, bg, 0.4),
+    '--scrollbar-thumb': lift(bg, 0.18),
+    '--scrollbar-thumb-hover': lift(bg, 0.28),
+    '--accent': blue,
+    '--accent-hover': shade(blue, dark ? 0.12 : -0.12),
+    '--tab-bg': shade(bg, dark ? -0.06 : -0.04),
+    '--tab-active-bg': bg,
+    '--tab-hover-bg': lift(bg, 0.09),
+    '--tab-text': mix(fg, bg, 0.4),
+    '--tab-active-text': fg,
+    '--palette-bg': bg,
+    '--palette-border': lift(bg, 0.18),
+    '--palette-select': lift(bg, 0.09),
+    '--palette-text': fg,
+    '--cursor': c['--fg-muted'] || fg,
   }
-  return { ...t, colors: { ...defaults, ...c } }
+  return { ...t, colors: { ...derived, ...c } }
 }
 
 export function getThemeByName(name: string): ThemeDefinition {
   const raw = themes.find((t) => t.name === name) || themes[0]
   return fillDefaults(raw)
+}
+
+export function getThemeByNameStrict(name: string): ThemeDefinition | null {
+  const raw = themes.find((t) => t.name === name)
+  return raw ? fillDefaults(raw) : null
 }
 
 export function applyThemeToDOM(theme: ThemeDefinition) {
@@ -524,7 +604,7 @@ export function applyThemeToDOM(theme: ThemeDefinition) {
   }
 
   // Sync color-scheme so browser UI (scrollbars, form controls) matches theme
-  const isLight = theme.name === 'light'
+  const isLight = luminance(theme.colors['--bg'] || '#1e1e1e') >= 0.5
   root.style.setProperty('color-scheme', isLight ? 'light' : 'dark')
 
   // Sync theme-color meta tag for iOS status bar and browser chrome
@@ -543,7 +623,7 @@ export function getXtermTheme(theme: ThemeDefinition) {
   return {
     background: c['--bg'],
     foreground: c['--fg'],
-    cursor: c['--fg-muted'],
+    cursor: c['--cursor'] || c['--fg-muted'],
     cursorAccent: c['--color-black'],
     selectionBackground: 'rgba(77,127,255,0.35)',
     black: c['--color-black'],

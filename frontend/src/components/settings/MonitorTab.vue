@@ -110,6 +110,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import { useSettings } from '../../composables/useSettings'
+import { effectiveTheme } from '../../composables/useDeviceThemeSelection'
 import { useI18n } from '../../composables/useI18n'
 import { monitorData } from '../../composables/useMonitor'
 import {
@@ -158,7 +159,7 @@ function cssVar(name: string, fallback: string): string {
 
 // Access theme preset to create a reactive dependency — re-evaluates on theme change.
 const baseOptions = computed(() => {
-  void settings.theme.preset
+  void effectiveTheme.value
   const borderColor = cssVar('--border', '#3C3C3C')
   const fgMuted = cssVar('--fg-muted', '#858585')
   return {

@@ -1,11 +1,13 @@
 import { reactive } from 'vue'
-import { getThemeByName, applyThemeToDOM, getXtermTheme } from '../themes'
+import { applyThemeToDOM, getXtermTheme } from '../themes'
 import { getApiBase, apiUrl, authFetch, hasAuthToken } from './apiBase'
+import { resolveEffectiveTheme } from './useDeviceThemeSelection'
 import ClaudeLogo from '../components/icons/ClaudeLogo.vue'
 import CodexLogo from '../components/icons/CodexLogo.vue'
 import OpencodeLogo from '../components/icons/OpencodeLogo.vue'
 import { isWindowsClient } from '../utils/clientPlatform'
 import type { KeyBinding } from './useKeybindings'
+import type { SavedTheme } from './useDeviceThemeSelection'
 export interface SettingsData {
   theme: {
     preset: string
@@ -16,6 +18,8 @@ export interface SettingsData {
       ansi?: (string | undefined)[]
     } | null
   }
+  custom_themes: SavedTheme[]
+  hidden_builtins: string[]
   background: {
     mode: string
     color: string | null
@@ -207,6 +211,8 @@ export const DEFAULT_ACTION_KEYBOARD: ActionKeyboardConfig = {
 
 export const settings = reactive<SettingsData>({
   theme: { preset: 'dark', custom: null },
+  custom_themes: [],
+  hidden_builtins: [],
   background: { mode: 'solid', color: null, opacity: 1.0, has_image: false },
   text: {
     font_size: 14,
@@ -395,51 +401,13 @@ export function notifyTextChange() {
 }
 
 export function applyCurrentTheme() {
-  const theme = getThemeByName(settings.theme.preset)
-  applyThemeToDOM(theme)
-
-  // Apply custom color overrides
-  const custom = settings.theme.custom
-  if (custom) {
-    if (custom.foreground) {
-      document.documentElement.style.setProperty('--fg', custom.foreground)
-    }
-    if (custom.background) {
-      document.documentElement.style.setProperty('--bg', custom.background)
-    }
-    if (custom.cursor) {
-      document.documentElement.style.setProperty('--fg-muted', custom.cursor)
-    }
-    if (custom.ansi) {
-      const keys = [
-        '--color-black',
-        '--color-red',
-        '--color-green',
-        '--color-yellow',
-        '--color-blue',
-        '--color-magenta',
-        '--color-cyan',
-        '--color-white',
-        '--color-bright-black',
-        '--color-bright-red',
-        '--color-bright-green',
-        '--color-bright-yellow',
-        '--color-bright-blue',
-        '--color-bright-magenta',
-        '--color-bright-cyan',
-        '--color-bright-white',
-      ]
-      custom.ansi.forEach((c, i) => {
-        if (c) document.documentElement.style.setProperty(keys[i], c)
-      })
-    }
-  }
+  const resolved = resolveEffectiveTheme()
+  applyThemeToDOM({ name: 'resolved', label: '', colors: resolved.colors })
 
   if (settings.background.color) {
     document.documentElement.style.setProperty('--bg', settings.background.color)
   }
 
-  // Sync theme-color to final resolved background color (after overrides)
   const finalBg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()
   if (finalBg) {
     let meta = document.querySelector('meta[name="theme-color"]')
@@ -456,37 +424,6 @@ export function applyCurrentTheme() {
 }
 
 export function getCurrentXtermTheme() {
-  const theme = getThemeByName(settings.theme.preset)
-  const xtermTheme = getXtermTheme(theme)
-  // Apply custom color overrides
-  const custom = settings.theme.custom
-  if (custom) {
-    if (custom.foreground) xtermTheme.foreground = custom.foreground
-    if (custom.background) xtermTheme.background = custom.background
-    if (custom.cursor) xtermTheme.cursor = custom.cursor
-    if (custom.ansi) {
-      const keys = [
-        'black',
-        'red',
-        'green',
-        'yellow',
-        'blue',
-        'magenta',
-        'cyan',
-        'white',
-        'brightBlack',
-        'brightRed',
-        'brightGreen',
-        'brightYellow',
-        'brightBlue',
-        'brightMagenta',
-        'brightCyan',
-        'brightWhite',
-      ] as const
-      custom.ansi.forEach((c, i) => {
-        if (c) (xtermTheme as any)[keys[i]] = c
-      })
-    }
-  }
-  return xtermTheme
+  const resolved = resolveEffectiveTheme()
+  return getXtermTheme({ name: 'resolved', label: '', colors: resolved.colors })
 }

@@ -35,6 +35,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, defineAsyncComponent } from 'vue'
 import { useSettings, notifyTextChange } from '../composables/useSettings'
+import { effectiveTheme } from '../composables/useDeviceThemeSelection'
 import { useI18n } from '../composables/useI18n'
 import {
   Settings as SettingsIcon,
@@ -73,7 +74,7 @@ function scheduleSave() {
 }
 
 // Only trigger DOM-heavy theme application when theme fields actually change
-watch(() => [settings.theme.preset, settings.theme.custom], applyCurrentTheme)
+watch(effectiveTheme, applyCurrentTheme)
 
 // Only notify terminal text changes when text settings change
 watch(() => ({ ...settings.text }), notifyTextChange)

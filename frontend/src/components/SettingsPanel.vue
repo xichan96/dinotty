@@ -599,6 +599,24 @@ const tabs = computed(() => [
   min-width: 40px;
   text-align: right;
 }
+.setting-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: color 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+}
+.setting-reset:hover {
+  color: var(--fg);
+  opacity: 1;
+  background: var(--border);
+}
 
 .toggle {
   position: relative;

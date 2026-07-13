@@ -5,7 +5,15 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
 import { isTauri, createTransport, type Transport } from './useTransport'
-import { onThemeChange, saveSettings, settings, onTextChange } from './useSettings'
+import { onThemeChange, settings } from './useSettings'
+import {
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  getEffectiveText,
+  onEffectiveTextChange,
+  resetOverride,
+  setOverride,
+} from './useDeviceTextSettings'
 import {
   computeWheelPlan,
   type TrackingWheelState,
@@ -265,16 +273,17 @@ export class TerminalInstance {
     const s = getComputedStyle(document.documentElement)
     const v = (name: string) => s.getPropertyValue(name).trim()
 
-    const fontFamily = settings.text.font_family || v('--font-mono')
+    const text = getEffectiveText()
+    const fontFamily = text.font_family || v('--font-mono')
 
     this.xterm = new XTerm({
-      cursorBlink: settings.text.cursor_blink,
-      cursorStyle: settings.text.cursor_style as any,
-      scrollback: settings.text.scrollback,
-      fontSize: settings.text.font_size,
+      cursorBlink: text.cursor_blink,
+      cursorStyle: text.cursor_style as any,
+      scrollback: text.scrollback,
+      fontSize: text.font_size,
       fontFamily,
-      lineHeight: settings.text.line_height,
-      letterSpacing: settings.text.letter_spacing,
+      lineHeight: text.line_height,
+      letterSpacing: text.letter_spacing,
       allowProposedApi: true,
       linkHandler: {
         activate: (_event, text) => {
@@ -554,8 +563,21 @@ export class TerminalInstance {
       if (this.xterm) this.xterm.options.theme = xtermTheme
     })
 
-    this._textUnsub = onTextChange((text) => {
+    let lastLayout = {
+      font_size: text.font_size,
+      font_family: text.font_family,
+      line_height: text.line_height,
+      letter_spacing: text.letter_spacing,
+      scrollback: text.scrollback,
+    }
+    this._textUnsub = onEffectiveTextChange((text) => {
       if (!this.xterm) return
+      const layoutChanged =
+        text.font_size !== lastLayout.font_size ||
+        text.font_family !== lastLayout.font_family ||
+        text.line_height !== lastLayout.line_height ||
+        text.letter_spacing !== lastLayout.letter_spacing ||
+        text.scrollback !== lastLayout.scrollback
       this.xterm.options.fontSize = text.font_size
       this.xterm.options.fontFamily =
         text.font_family ||
@@ -565,7 +587,16 @@ export class TerminalInstance {
       this.xterm.options.cursorBlink = text.cursor_blink
       this.xterm.options.cursorStyle = text.cursor_style as any
       this.xterm.options.scrollback = text.scrollback
-      this._refit()
+      if (layoutChanged) {
+        lastLayout = {
+          font_size: text.font_size,
+          font_family: text.font_family,
+          line_height: text.line_height,
+          letter_spacing: text.letter_spacing,
+          scrollback: text.scrollback,
+        }
+        this._refit()
+      }
     })
   }
 
@@ -583,22 +614,17 @@ export class TerminalInstance {
   }
 
   adjustFontSize(delta: number) {
-    const xt = this.xterm
-    if (!xt) return
-    const newSize = Math.max(8, Math.min(72, (xt.options.fontSize ?? 14) + delta))
-    xt.options.fontSize = newSize
-    settings.text.font_size = newSize
-    saveSettings()
-    this._refit()
+    if (!this.xterm) return
+    const newSize = Math.max(
+      FONT_SIZE_MIN,
+      Math.min(FONT_SIZE_MAX, getEffectiveText().font_size + delta),
+    )
+    setOverride('font_size', newSize)
   }
 
   resetFontSize() {
     if (!this.xterm) return
-    const defaultSize = 14
-    this.xterm.options.fontSize = defaultSize
-    settings.text.font_size = defaultSize
-    saveSettings()
-    this._refit()
+    resetOverride('font_size')
   }
 
   sendData(data: string, force = false) {

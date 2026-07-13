@@ -82,13 +82,25 @@
         <div class="range-wrap">
           <input
             type="range"
-            v-model.number="settings.text.font_size"
-            min="8"
-            max="32"
+            v-model.number="fontSize"
+            :min="FONT_SIZE_MIN"
+            :max="FONT_SIZE_MAX"
             step="1"
-            @input="onTextSettingChange"
           />
-          <span class="range-val">{{ settings.text.font_size }}px</span>
+          <span class="range-val">{{ fontSize }}px</span>
+          <button
+            v-if="hasOverride('font_size')"
+            type="button"
+            class="setting-reset"
+            title="reset to default"
+            aria-label="reset to default"
+            @click="resetOverride('font_size')"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -97,7 +109,7 @@
         <div class="font-dropdown">
           <div
             class="font-dropdown-trigger shortcut-input"
-            :style="{ fontFamily: settings.text.font_family || 'inherit' }"
+            :style="{ fontFamily: fontFamily || 'inherit' }"
             @click="toggleFontDropdown"
           >
             <span>{{ currentFontLabel }}</span>
@@ -146,6 +158,19 @@
             <div v-if="addFontError" class="font-add-error">{{ addFontError }}</div>
           </div>
         </div>
+        <button
+          v-if="hasOverride('font_family')"
+          type="button"
+          class="setting-reset"
+          title="reset to default"
+          aria-label="reset to default"
+          @click="resetOverride('font_family')"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+        </button>
       </div>
 
       <div class="settings-row">
@@ -153,13 +178,25 @@
         <div class="range-wrap">
           <input
             type="range"
-            v-model.number="settings.text.line_height"
+            v-model.number="lineHeight"
             min="0.8"
             max="2.0"
             step="0.1"
-            @input="onTextSettingChange"
           />
-          <span class="range-val">{{ settings.text.line_height.toFixed(1) }}</span>
+          <span class="range-val">{{ lineHeight.toFixed(1) }}</span>
+          <button
+            v-if="hasOverride('line_height')"
+            type="button"
+            class="setting-reset"
+            title="reset to default"
+            aria-label="reset to default"
+            @click="resetOverride('line_height')"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -168,13 +205,25 @@
         <div class="range-wrap">
           <input
             type="range"
-            v-model.number="settings.text.letter_spacing"
+            v-model.number="letterSpacing"
             min="0"
             max="4"
             step="0.5"
-            @input="onTextSettingChange"
           />
-          <span class="range-val">{{ settings.text.letter_spacing }}px</span>
+          <span class="range-val">{{ letterSpacing }}px</span>
+          <button
+            v-if="hasOverride('letter_spacing')"
+            type="button"
+            class="setting-reset"
+            title="reset to default"
+            aria-label="reset to default"
+            @click="resetOverride('letter_spacing')"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -292,8 +341,21 @@ import {
   type AddFontError,
 } from '../../utils/fontList'
 import { isFontAvailable, clearNegativeFontCache } from '../../utils/fontAvailability'
+import {
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  useDeviceTextSettings,
+} from '../../composables/useDeviceTextSettings'
 
 const { settings, saveSettings, applyCurrentTheme } = useSettings()
+const {
+  fontSize,
+  fontFamily,
+  lineHeight,
+  letterSpacing,
+  hasOverride,
+  resetOverride,
+} = useDeviceTextSettings()
 const { t, themeLabel } = useI18n()
 
 // ── Theme ──
@@ -422,7 +484,7 @@ const customFonts = computed<string[]>(() => settings.text.custom_fonts ?? [])
 interface DecoratedItem extends FontItem { available: boolean }
 
 const fontList = computed<DecoratedItem[]>(() =>
-  buildFontList(settings.text.font_family || '', customFonts.value).map((it) => {
+  buildFontList(fontFamily.value || '', customFonts.value).map((it) => {
     let available = true
     if (it.kind !== 'default') {
       const id = fontIdentity(it.family)
@@ -433,7 +495,7 @@ const fontList = computed<DecoratedItem[]>(() =>
 )
 
 const currentFontLabel = computed(() =>
-  settings.text.font_family ? primaryFamily(settings.text.font_family) : t('settings.text.fontFamilyDefault'),
+  fontFamily.value ? primaryFamily(fontFamily.value) : t('settings.text.fontFamilyDefault'),
 )
 
 function fontItemLabel(item: FontItem): string {
@@ -453,7 +515,7 @@ async function runProbes() {
   } catch { /* ignore */ }
   clearNegativeFontCache()
   for (const key of Object.keys(availability)) delete availability[key]
-  for (const it of buildFontList(settings.text.font_family || '', customFonts.value)) {
+  for (const it of buildFontList(fontFamily.value || '', customFonts.value)) {
     if (it.kind !== 'default') probe(it.family)
   }
 }
@@ -478,9 +540,8 @@ function closeFontDropdown() {
 }
 
 function selectFontItem(item: FontItem) {
-  settings.text.font_family = item.kind === 'default' ? '' : toFontFamilyStack(item.family)
+  fontFamily.value = item.kind === 'default' ? '' : toFontFamilyStack(item.family)
   fontDropdownOpen.value = false
-  onTextSettingChange()
 }
 
 const ADD_ERR_KEY: Record<Exclude<AddFontError, ''>, string> = {
@@ -510,8 +571,8 @@ function removeFontItem(item: FontItem) {
   if (!item.removable) return
   const id = fontIdentity(item.family)
   settings.text.custom_fonts = normalizeCustomFonts(customFonts.value.filter((c) => fontIdentity(c) !== id))
-  if (fontIdentity(settings.text.font_family || '') === id) {
-    settings.text.font_family = 'monospace'
+  if (fontIdentity(fontFamily.value || '') === id) {
+    fontFamily.value = 'monospace'
   }
   onTextSettingChange()
 }

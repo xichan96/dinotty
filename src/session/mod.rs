@@ -62,6 +62,10 @@ const SYNC_BUFFER_LIMIT: usize = 256 * 1024;
 /// Maximum size of a single chunk sent to clients during flush.
 const FLUSH_CHUNK_SIZE: usize = 64 * 1024;
 
+fn parse_reap_secs(raw: Option<String>) -> u64 {
+    raw.and_then(|v| v.parse::<u64>().ok()).unwrap_or(5_400)
+}
+
 pub enum SessionStatus {
     Connected,
     Detached { since: Instant },
@@ -1205,9 +1209,10 @@ impl SessionManager {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            let reap_secs = parse_reap_secs(std::env::var("DINOTTY_DETACH_REAP_SECS").ok());
+            let timeout = std::time::Duration::from_secs(reap_secs);
             loop {
                 interval.tick().await;
-                let timeout = std::time::Duration::from_mins(5);
                 // Two-pass: collect stale IDs first, then kill_and_remove.
                 // Can't use retain() because we need to kill child processes.
                 let stale: Vec<String> = manager

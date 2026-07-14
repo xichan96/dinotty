@@ -150,6 +150,9 @@ pub fn create_session(
     let shell_spec = shell::default_shell();
     let shell_type = shell_spec.shell_type.clone();
     let mut cmd = CommandBuilder::new(&shell_spec.program);
+    for key in claude_session_env_keys_to_strip() {
+        cmd.env_remove(&key);
+    }
     for arg in &shell_spec.args {
         cmd.arg(arg);
     }
@@ -551,6 +554,24 @@ fn locale_adjustment(
     }
 }
 
+/// Env keys inherited from a parent Claude Code session that must NOT leak into
+/// the spawned terminal — otherwise an interactive `claude` inside the terminal
+/// treats itself as a child session and never persists its transcript.
+pub(crate) fn claude_session_env_keys_to_strip() -> Vec<String> {
+    std::env::vars_os()
+        .filter_map(|(k, _)| k.into_string().ok())
+        .filter(|k| is_claude_session_env_key(k))
+        .collect()
+}
+
+/// True if `key` is a Claude Code SESSION-scoped env var that must be stripped
+/// from spawned child processes (case-insensitive; generic CLAUDE_* like
+/// `CLAUDE_CONFIG_DIR` is preserved).
+fn is_claude_session_env_key(key: &str) -> bool {
+    let ku = key.to_ascii_uppercase();
+    ku.starts_with("CLAUDE_CODE_") || ku == "CLAUDECODE" || ku == "CLAUDE_SESSION_ID"
+}
+
 fn configure_utf8_locale(cmd: &mut CommandBuilder) {
     let lc_all = std::env::var("LC_ALL").ok();
     let lc_ctype = std::env::var("LC_CTYPE").ok();
@@ -583,7 +604,37 @@ pub fn get_shell_args(shell: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{locale_adjustment, LocaleAdjustment};
+    use super::{is_claude_session_env_key, locale_adjustment, LocaleAdjustment};
+
+    #[test]
+    fn strips_claude_session_keys_case_insensitive() {
+        for k in [
+            "CLAUDE_CODE_CHILD_SESSION",
+            "claude_code_child_session",
+            "CLAUDECODE",
+            "claudecode",
+            "CLAUDE_SESSION_ID",
+            "Claude_Session_Id",
+            "CLAUDE_CODE_ENTRYPOINT",
+        ] {
+            assert!(is_claude_session_env_key(k), "should strip {k}");
+        }
+    }
+
+    #[test]
+    fn preserves_generic_and_dinotty_keys() {
+        for k in [
+            "CLAUDE_CONFIG_DIR",
+            "DINOTTY_PANE_ID",
+            "DINOTTY_TAB_ID",
+            "PATH",
+            "HOME",
+            "TERM",
+            "CLAUDECODEX",
+        ] {
+            assert!(!is_claude_session_env_key(k), "should preserve {k}");
+        }
+    }
 
     #[test]
     fn locale_defaults_to_utf8_ctype_when_environment_is_missing() {

@@ -156,6 +156,9 @@ pub async fn plugin_exec(
     if let Some(ref cwd) = body.cwd {
         cmd.current_dir(cwd);
     }
+    for key in crate::pty::claude_session_env_keys_to_strip() {
+        cmd.env_remove(key);
+    }
     if let Some(ref env) = body.env {
         cmd.envs(env);
     }
@@ -219,6 +222,9 @@ pub async fn plugin_spawn_ws(
 
         let bin_path = plugin_dir.join(&bin.entry);
         let mut cmd = Command::new(&bin_path);
+        for key in crate::pty::claude_session_env_keys_to_strip() {
+            cmd.env_remove(key);
+        }
         cmd.no_window().args(&args).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -748,6 +754,9 @@ pub async fn plugin_process_start(
 
     let bin_path = pm.plugin_dir.join(&id).join(&bin.entry);
     let mut cmd = Command::new(&bin_path);
+    for key in crate::pty::claude_session_env_keys_to_strip() {
+        cmd.env_remove(key);
+    }
     cmd.no_window();
     cmd.args(&body.args);
     cmd.stdout(Stdio::piped());

@@ -4,6 +4,8 @@
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Dinotty needs local network access to connect to SSH hosts and other services on your network.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Dinotty allows terminal applications to query Bluetooth device information.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ssh._tcp</string>

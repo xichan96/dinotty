@@ -1202,7 +1202,7 @@ mod csi_dispatch_tests {
 
     #[test]
     fn all_non_question_private_markers_are_not_sgr() {
-        for marker in [b'>', b'<', b'='] {
+        for marker in *b"><=" {
             let sequence = [b"\x1b[".as_slice(), &[marker], b"4;2mX"].concat();
             let mut vs = VirtualScreen::new(20, 5);
             vs.feed(&sequence);

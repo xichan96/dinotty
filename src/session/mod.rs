@@ -9,7 +9,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Instant,
@@ -847,6 +847,7 @@ pub struct SessionManager {
     pub pending_ssh_auth: DashMap<String, PendingSshAuth>,
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
+    notify_port: AtomicU16,
 }
 
 #[derive(Serialize)]
@@ -945,7 +946,17 @@ impl SessionManager {
             tab_order: Mutex::new(Vec::new()),
             pending_ssh_auth: DashMap::new(),
             event_bus: EventBus::new(),
+            notify_port: AtomicU16::new(0),
         }
+    }
+
+    #[must_use]
+    pub fn notify_port(&self) -> u16 {
+        self.notify_port.load(Ordering::Relaxed)
+    }
+
+    pub fn set_notify_port(&self, port: u16) {
+        self.notify_port.store(port, Ordering::Relaxed);
     }
 
     /// Insert a tab layout and record its order position.

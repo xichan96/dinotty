@@ -7,7 +7,7 @@ Dinotty has a built-in notification system supporting terminal bell detection an
 Send notifications via `POST /api/notify`:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8999/api/notify \
+curl -s -X POST ${DINOTTY_URL}/api/notify \
   -H "Content-Type: application/json" \
   -d '{"body": "Task completed", "title": "My Agent", "notification_type": "info"}'
 ```
@@ -38,13 +38,14 @@ Dinotty automatically injects the following environment variables when creating 
 |----------|-------------|
 | `DINOTTY_PANE_ID` | Unique ID of the current pane (leaf pane) |
 | `DINOTTY_TAB_ID` | Tab ID of the current pane |
+| `DINOTTY_URL` | the notify base URL of the dinotty surface that owns this pane (`http://127.0.0.1:<port>`) — use it instead of a hardcoded port. |
 
 Environment variables are **process-level isolated** — each pane is set independently and will not overwrite others.
 
 Send notifications with these IDs for precise jump targeting:
 
 ```bash
-curl -X POST http://127.0.0.1:8999/api/notify \
+curl -X POST ${DINOTTY_URL}/api/notify \
   -H "Content-Type: application/json" \
   -d "{
     \"pane_id\": \"$DINOTTY_PANE_ID\",
@@ -68,7 +69,7 @@ When running Claude Code in a dinotty terminal, you can use hooks to automatical
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:8999/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"Claude needs your input\",\"title\":\"Claude Code\",\"notification_type\":\"warning\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
+            "command": "curl -s -X POST ${DINOTTY_URL}/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"Claude needs your input\",\"title\":\"Claude Code\",\"notification_type\":\"warning\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
           }
         ]
       }
@@ -79,7 +80,7 @@ When running Claude Code in a dinotty terminal, you can use hooks to automatical
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:8999/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"Task completed\",\"title\":\"Claude Code\",\"notification_type\":\"success\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
+            "command": "curl -s -X POST ${DINOTTY_URL}/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"Task completed\",\"title\":\"Claude Code\",\"notification_type\":\"success\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
           }
         ]
       }

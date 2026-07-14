@@ -517,8 +517,10 @@ fn main() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let mgr = Arc::clone(&manager);
         rt.block_on(async move {
+            let listener = embedded_server::bind_listener(port)
+                .unwrap_or_else(|e| panic!("failed to bind embedded server on port {port}: {e}"));
             mgr.start_cleanup_task();
-            embedded_server::run_server(port, mgr).await
+            embedded_server::run_server(listener, mgr).await
         });
         return;
     }
@@ -542,8 +544,25 @@ fn main() {
         .manage(manager.clone())
         .setup(move |app| {
             let mgr = Arc::clone(&manager);
-            tauri::async_runtime::spawn(embedded_server::run_server(port, mgr));
-            tracing::info!("Desktop mode: embedded server on port {}", port);
+            match embedded_server::bind_listener(port) {
+                Ok(listener) => {
+                    let actual = listener.local_addr().expect("bound listener").port();
+                    // Redundant-by-design: run_server() also sets notify_port from its own
+                    // local_addr once its future is first polled. We set it here too — synchronously,
+                    // before spawn — so a Tauri `pty_spawn` IPC that fires before the spawned task's
+                    // first poll still reads the real port (not 0). Do NOT remove either set.
+                    mgr.set_notify_port(actual);
+                    tauri::async_runtime::spawn(embedded_server::run_server(listener, mgr));
+                    tracing::info!("Desktop mode: embedded server on port {}", actual);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to bind embedded server on port {}: {}; notifications disabled",
+                        port,
+                        e
+                    );
+                }
+            }
 
             // Register global shortcut for Quake-mode toggle (Ctrl+Shift+`)
             let win = app.get_webview_window("main").expect("no main window");

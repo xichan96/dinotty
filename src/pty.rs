@@ -127,6 +127,10 @@ fn cleanup_exited_pty_session(
     }
 }
 
+fn notify_url_for(port: u16) -> Option<String> {
+    (port != 0).then(|| format!("http://127.0.0.1:{port}"))
+}
+
 /// Create a new PTY session and register it with the session manager.
 ///
 /// # Errors
@@ -158,6 +162,10 @@ pub fn create_session(
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("DINOTTY_PANE_ID", pane_id);
+    cmd.env_remove("DINOTTY_URL");
+    if let Some(url) = notify_url_for(manager.notify_port()) {
+        cmd.env("DINOTTY_URL", url);
+    }
     if let Some(tid) = tab_id {
         cmd.env("DINOTTY_TAB_ID", tid);
     }
@@ -604,7 +612,13 @@ pub fn get_shell_args(shell: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_claude_session_env_key, locale_adjustment, LocaleAdjustment};
+    use super::{is_claude_session_env_key, locale_adjustment, notify_url_for, LocaleAdjustment};
+
+    #[test]
+    fn builds_notify_url_for_bound_port() {
+        assert_eq!(notify_url_for(8999), Some("http://127.0.0.1:8999".to_string()));
+        assert_eq!(notify_url_for(0), None);
+    }
 
     #[test]
     fn strips_claude_session_keys_case_insensitive() {

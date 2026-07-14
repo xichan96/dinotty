@@ -731,6 +731,7 @@ async fn main() {
     };
 
     state.plugins.watch_changes(state.manager.clone());
+    let notify_manager = state.manager.clone();
 
     let app =
         Router::new()
@@ -914,5 +915,6 @@ async fn main() {
     tracing::info!("Listening on http://0.0.0.0:{}", port);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    notify_manager.set_notify_port(listener.local_addr().expect("bound listener").port());
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }

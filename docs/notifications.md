@@ -7,7 +7,7 @@ dinotty 内建通知系统，支持终端 bell 检测和自定义通知推送，
 通过 `POST /api/notify` 发送通知：
 
 ```bash
-curl -s -X POST http://127.0.0.1:8999/api/notify \
+curl -s -X POST ${DINOTTY_URL}/api/notify \
   -H "Content-Type: application/json" \
   -d '{"body": "任务完成", "title": "My Agent", "notification_type": "info"}'
 ```
@@ -38,13 +38,14 @@ dinotty 在每个终端创建时自动注入以下环境变量：
 |------|------|
 | `DINOTTY_PANE_ID` | 当前终端面板的唯一 ID（叶子 pane） |
 | `DINOTTY_TAB_ID` | 当前面板所属 tab 的唯一 ID |
+| `DINOTTY_URL` | 当前面板所属 dinotty 服务的通知地址（`http://127.0.0.1:<端口>`），发送通知时用它替代硬编码端口 |
 
 环境变量是**进程级别隔离**的，每个 pane 独立设置，多个 pane 之间不会互相覆盖。
 
 发送通知时带上这些 ID，即可实现精准跳转：
 
 ```bash
-curl -X POST http://127.0.0.1:8999/api/notify \
+curl -X POST ${DINOTTY_URL}/api/notify \
   -H "Content-Type: application/json" \
   -d "{
     \"pane_id\": \"$DINOTTY_PANE_ID\",
@@ -68,7 +69,7 @@ curl -X POST http://127.0.0.1:8999/api/notify \
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:8999/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"Claude 需要你的输入\",\"title\":\"Claude Code\",\"notification_type\":\"warning\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
+            "command": "curl -s -X POST ${DINOTTY_URL}/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"Claude 需要你的输入\",\"title\":\"Claude Code\",\"notification_type\":\"warning\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
           }
         ]
       }
@@ -79,7 +80,7 @@ curl -X POST http://127.0.0.1:8999/api/notify \
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -X POST http://127.0.0.1:8999/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"任务已完成\",\"title\":\"Claude Code\",\"notification_type\":\"success\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
+            "command": "curl -s -X POST ${DINOTTY_URL}/api/notify -H 'Content-Type: application/json' -d '{\"body\":\"任务已完成\",\"title\":\"Claude Code\",\"notification_type\":\"success\",\"pane_id\":\"'\"$DINOTTY_PANE_ID\"'\"}'"
           }
         ]
       }

@@ -438,233 +438,276 @@ async fn update_token(
     StatusCode::OK.into_response()
 }
 
-pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
-    let monitor_state = MonitorState::new();
-    monitor_state.clone().start_collector();
-
-    let notifier = Arc::new(NotificationBroadcast::new());
-    let settings_state = settings::create_settings_state();
-    notifier.set_settings(settings_state.clone());
-    let history_state = HistoryState::new();
-    let plugins = Arc::new(PluginManager::new());
-    plugins.scan();
-
-    let initial_token =
-        settings::load_token().or_else(|| std::env::var("DINOTTY_TOKEN").ok()).unwrap_or_default();
-    let initial_token = if initial_token.is_empty() {
-        let token = generate_random_token();
-        if let Err(e) = settings::save_token(&token) {
-            tracing::error!("Failed to persist auto-generated token: {}", e);
-        }
-        tracing::info!("Desktop mode: auto-generated auth token");
-        token
-    } else {
-        tracing::info!("Auth token loaded (length={})", initial_token.len());
-        initial_token
-    };
-    let auth_token = Arc::new(tokio::sync::RwLock::new(initial_token));
-
-    let git_info = read_git_info();
-
-    let session_ttl_days = settings::load_settings().auth.session_ttl_days;
-    let sessions = Arc::new(SessionStore::new(session_ttl_days));
-    sessions.clone().start_cleanup_task();
-
-    let workspaces_state = workspace_mgmt::create_workspaces_state();
-
-    let state = AppState {
-        manager: manager.clone(),
-        settings: settings_state,
-        file_watcher: Arc::new(FileWatcherState::new()),
-        monitor: monitor_state,
-        notifier,
-        history: history_state,
-        auth_token,
-        plugins,
-        port,
-        git_info,
-        sessions,
-        workspaces: workspaces_state,
-    };
-
-    state.plugins.watch_changes(manager);
-
-    let app = Router::new()
-        .route("/ws", get(ws::ws_handler))
-        .route("/ws/sync", get(ws::sync_handler))
-        .route("/ws/watch", get(file_watcher::watch_handler))
-        .route("/ws/monitor", get(monitor::ws_monitor_handler))
-        .route("/ws/notify", get(ws::notification_ws_handler))
-        .route("/ws/history", get(history::ws_history_handler))
-        // Tab/Pane management
-        .route("/api/tabs", get(tabs::list_tabs).post(tabs::create_tab))
-        // SSH tab routes (must be before :tab_id routes)
-        .route("/api/tabs/ssh/quick", post(tabs::create_ssh_quick_tab))
-        .route("/api/tabs/ssh", post(tabs::create_ssh_tab))
-        .route("/api/tabs/:tab_id", delete(tabs::close_tab))
-        .route("/api/tabs/:tab_id/pane", post(tabs::split_pane))
-        .route("/api/tabs/:tab_id/pane/:pane_id", delete(tabs::close_pane))
-        .route("/api/tabs/:tab_id/pane/:pane_id/activate", put(tabs::activate_pane))
-        .route("/api/tabs/:tab_id/layout", put(tabs::update_layout))
-        .route("/api/input", post(ws::post_input))
-        .route("/api/settings", get(settings::get_settings).put(settings::put_settings))
-        .route(
-            "/api/settings/background",
-            post(settings::upload_background).get(settings::get_background),
-        )
-        .route("/api/log", get(settings::get_log))
-        .route("/api/workspace/resolve", get(workspace::workspace_resolve))
-        .route("/api/workspace/list", get(workspace::workspace_list))
-        .route("/api/workspace/meta", get(workspace::workspace_meta))
-        .route("/api/workspace/raw", get(workspace::workspace_raw))
-        .route("/api/workspace/upload", post(workspace::workspace_upload))
-        .merge(
-            Router::new()
-                .route(
-                    "/api/uploads",
-                    post(workspace::workspace_uploads).get(workspace::uploads_status),
-                )
-                .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024 * 1024)),
-        )
-        .route("/api/uploads/clear", post(workspace::uploads_clear))
-        .route("/api/uploads/adopt", post(workspace::uploads_adopt))
-        .route("/api/uploads/default-dir", get(workspace::uploads_default_dir))
-        .route("/api/workspace/create", post(workspace::workspace_create_entry))
-        .route("/api/workspace/file", put(workspace::workspace_put_file))
-        .route("/api/workspace/delete", delete(workspace::workspace_delete))
-        .route("/api/workspace/rename", post(workspace::workspace_rename))
-        .route("/api/workspace/move", post(workspace::workspace_move))
-        .route("/api/workspace/git-status", get(workspace::workspace_git_status))
-        .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
-        .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
-        .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
-        .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
-        // Workspace management
-        .route(
-            "/api/workspaces",
-            get(workspace_mgmt::list_workspaces).post(workspace_mgmt::create_workspace),
-        )
-        .route("/api/workspaces/reorder", put(workspace_mgmt::reorder_workspaces))
-        .route(
-            "/api/workspaces/:id",
-            put(workspace_mgmt::update_workspace).delete(workspace_mgmt::delete_workspace),
-        )
-        .route("/api/workspaces/:id/activate", put(workspace_mgmt::activate_workspace))
-        .route("/api/workspaces/active", delete(workspace_mgmt::deactivate_workspace))
-        .route("/api/notify", post(notification::post_notify))
-        .route("/api/history", get(history::get_history).delete(history::delete_history))
-        .route("/api/info", get(server_info))
-        .route("/api/auth", post(check_auth))
-        .route("/api/auth/check", get(check_auth_session))
-        .route("/api/auth/logout", post(logout))
-        .route("/api/auth/sessions", get(list_sessions_handler).delete(revoke_other_sessions))
-        .route("/api/auth/sessions/:id", delete(revoke_session_handler))
-        .route("/api/token-configured", get(token_configured))
-        .route("/api/auto-token", get(auto_token))
-        .route("/api/token", get(get_token).put(update_token))
-        .route("/api/plugins", get(plugin::list_plugins))
-        .route("/api/plugins/market", get(plugin::get_market_registry))
-        .route("/api/plugins/market/:id/readme", get(plugin::get_market_readme))
-        .route("/api/plugins/dev-link", post(plugin::dev_link_plugin))
-        .merge(
-            Router::new()
-                .route("/api/plugins/install", post(plugin::install_plugin))
-                .route("/api/plugins/install-git", post(plugin::install_from_git))
-                .route("/api/plugins/:id/update", post(plugin::update_plugin))
-                .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
-        )
-        .route("/api/plugins/:id", get(plugin::plugin_detail).delete(plugin::delete_plugin))
-        .route("/api/plugins/:id/exec", post(plugin::plugin_exec))
-        .route("/api/plugins/:id/spawn", get(plugin::plugin_spawn_ws))
-        .route("/api/plugins/:id/process/start", post(plugin::plugin_process_start))
-        .route(
-            "/api/plugins/:id/process",
-            get(plugin::plugin_process_list).delete(plugin::plugin_process_stop_all),
-        )
-        .route("/api/plugins/:id/process/:pid", delete(plugin::plugin_process_stop))
-        .route("/api/plugins/:id/storage", get(plugin::plugin_storage_list))
-        .route(
-            "/api/plugins/:id/storage/:key",
-            get(plugin::plugin_storage_get)
-                .put(plugin::plugin_storage_set)
-                .delete(plugin::plugin_storage_delete),
-        )
-        .route("/api/plugins/:id/*path", get(plugin::plugin_asset))
-        .route("/api/proxy", any(proxy::external_proxy_handler))
-        .route("/preview/:port", any(proxy::proxy_handler_root))
-        .route("/preview/:port/", any(proxy::proxy_handler_root))
-        .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
-        .route("/assets/*path", get(static_handler))
-        .route("/icons/*path", get(icon_handler))
-        .route("/manifest.json", get(manifest_handler))
-        .route(
-            "/logo.png",
-            get(|| async {
-                match StaticFiles::get("logo.png") {
-                    Some(content) => Response::builder()
-                        .header(header::CONTENT_TYPE, "image/png")
-                        .header(header::CACHE_CONTROL, "public, max-age=86400")
-                        .body(Body::from(content.data.into_owned()))
-                        .unwrap(),
-                    None => Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(Body::from("not found"))
-                        .unwrap(),
-                }
-            }),
-        )
-        .route("/", get(index))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            |AxumState(s): AxumState<AppState>,
-             req: axum::extract::Request,
-             next: middleware::Next| async move {
-                let token = s.auth_token.read().await.clone();
-                let client_ip = req
-                    .extensions()
-                    .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                    .map(|ci| ci.ip())
-                    .unwrap_or_else(|| "127.0.0.1".parse().unwrap());
-                auth::auth_middleware(req, next, &token, &s.settings, &s.sessions, client_ip).await
-            },
-        ))
-        .layer(middleware::from_fn(
-            |req: axum::extract::Request, next: middleware::Next| async move {
-                let origin = req
-                    .headers()
-                    .get(header::ORIGIN)
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
-                let is_preflight = req.method() == axum::http::Method::OPTIONS;
-                let mut response =
-                    if is_preflight { Response::new(Body::empty()) } else { next.run(req).await };
-                if let Some(origin) = origin {
-                    let headers = response.headers_mut();
-                    headers.insert(
-                        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-                        axum::http::HeaderValue::from_str(&origin).unwrap(),
-                    );
-                    headers.insert(
-                        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
-                        axum::http::HeaderValue::from_static("true"),
-                    );
-                    headers.insert(
-                        header::ACCESS_CONTROL_ALLOW_METHODS,
-                        axum::http::HeaderValue::from_static("GET, POST, PUT, DELETE, OPTIONS"),
-                    );
-                    headers.insert(
-                        header::ACCESS_CONTROL_ALLOW_HEADERS,
-                        axum::http::HeaderValue::from_static("Content-Type, Authorization"),
-                    );
-                }
-                response
-            },
-        ))
-        .with_state(state);
-
+pub fn bind_listener(port: u16) -> std::io::Result<std::net::TcpListener> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Embedded server listening on http://0.0.0.0:{}", port);
+    let listener = std::net::TcpListener::bind(addr)?;
+    listener.set_nonblocking(true)?;
+    Ok(listener)
+}
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+struct NotifyPortGuard {
+    manager: Arc<SessionManager>,
+}
+
+impl Drop for NotifyPortGuard {
+    fn drop(&mut self) {
+        self.manager.set_notify_port(0);
+    }
+}
+
+pub fn run_server(
+    listener: std::net::TcpListener,
+    manager: Arc<SessionManager>,
+) -> impl std::future::Future<Output = ()> {
+    // Guard is created synchronously and moved into the returned future, so notify_port
+    // resets to 0 on ANY termination of the future — normal exit, panic, task abort, or a
+    // drop before the first poll.
+    let port_guard = NotifyPortGuard { manager: Arc::clone(&manager) };
+    async move {
+        let _port_guard = port_guard;
+        let listener = match tokio::net::TcpListener::from_std(listener) {
+            Ok(listener) => listener,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to register embedded server listener: {}; notifications disabled",
+                    e
+                );
+                return;
+            }
+        };
+        let local_port = listener.local_addr().expect("bound listener").port();
+        manager.set_notify_port(local_port);
+        let monitor_state = MonitorState::new();
+        monitor_state.clone().start_collector();
+
+        let notifier = Arc::new(NotificationBroadcast::new());
+        let settings_state = settings::create_settings_state();
+        notifier.set_settings(settings_state.clone());
+        let history_state = HistoryState::new();
+        let plugins = Arc::new(PluginManager::new());
+        plugins.scan();
+
+        let initial_token = settings::load_token()
+            .or_else(|| std::env::var("DINOTTY_TOKEN").ok())
+            .unwrap_or_default();
+        let initial_token = if initial_token.is_empty() {
+            let token = generate_random_token();
+            if let Err(e) = settings::save_token(&token) {
+                tracing::error!("Failed to persist auto-generated token: {}", e);
+            }
+            tracing::info!("Desktop mode: auto-generated auth token");
+            token
+        } else {
+            tracing::info!("Auth token loaded (length={})", initial_token.len());
+            initial_token
+        };
+        let auth_token = Arc::new(tokio::sync::RwLock::new(initial_token));
+
+        let git_info = read_git_info();
+
+        let session_ttl_days = settings::load_settings().auth.session_ttl_days;
+        let sessions = Arc::new(SessionStore::new(session_ttl_days));
+        sessions.clone().start_cleanup_task();
+
+        let workspaces_state = workspace_mgmt::create_workspaces_state();
+
+        let state = AppState {
+            manager: manager.clone(),
+            settings: settings_state,
+            file_watcher: Arc::new(FileWatcherState::new()),
+            monitor: monitor_state,
+            notifier,
+            history: history_state,
+            auth_token,
+            plugins,
+            port: local_port,
+            git_info,
+            sessions,
+            workspaces: workspaces_state,
+        };
+
+        state.plugins.watch_changes(manager);
+
+        let app = Router::new()
+            .route("/ws", get(ws::ws_handler))
+            .route("/ws/sync", get(ws::sync_handler))
+            .route("/ws/watch", get(file_watcher::watch_handler))
+            .route("/ws/monitor", get(monitor::ws_monitor_handler))
+            .route("/ws/notify", get(ws::notification_ws_handler))
+            .route("/ws/history", get(history::ws_history_handler))
+            // Tab/Pane management
+            .route("/api/tabs", get(tabs::list_tabs).post(tabs::create_tab))
+            // SSH tab routes (must be before :tab_id routes)
+            .route("/api/tabs/ssh/quick", post(tabs::create_ssh_quick_tab))
+            .route("/api/tabs/ssh", post(tabs::create_ssh_tab))
+            .route("/api/tabs/:tab_id", delete(tabs::close_tab))
+            .route("/api/tabs/:tab_id/pane", post(tabs::split_pane))
+            .route("/api/tabs/:tab_id/pane/:pane_id", delete(tabs::close_pane))
+            .route("/api/tabs/:tab_id/pane/:pane_id/activate", put(tabs::activate_pane))
+            .route("/api/tabs/:tab_id/layout", put(tabs::update_layout))
+            .route("/api/input", post(ws::post_input))
+            .route("/api/settings", get(settings::get_settings).put(settings::put_settings))
+            .route(
+                "/api/settings/background",
+                post(settings::upload_background).get(settings::get_background),
+            )
+            .route("/api/log", get(settings::get_log))
+            .route("/api/workspace/resolve", get(workspace::workspace_resolve))
+            .route("/api/workspace/list", get(workspace::workspace_list))
+            .route("/api/workspace/meta", get(workspace::workspace_meta))
+            .route("/api/workspace/raw", get(workspace::workspace_raw))
+            .route("/api/workspace/upload", post(workspace::workspace_upload))
+            .merge(
+                Router::new()
+                    .route(
+                        "/api/uploads",
+                        post(workspace::workspace_uploads).get(workspace::uploads_status),
+                    )
+                    .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024 * 1024)),
+            )
+            .route("/api/uploads/clear", post(workspace::uploads_clear))
+            .route("/api/uploads/adopt", post(workspace::uploads_adopt))
+            .route("/api/uploads/default-dir", get(workspace::uploads_default_dir))
+            .route("/api/workspace/create", post(workspace::workspace_create_entry))
+            .route("/api/workspace/file", put(workspace::workspace_put_file))
+            .route("/api/workspace/delete", delete(workspace::workspace_delete))
+            .route("/api/workspace/rename", post(workspace::workspace_rename))
+            .route("/api/workspace/move", post(workspace::workspace_move))
+            .route("/api/workspace/git-status", get(workspace::workspace_git_status))
+            .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
+            .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
+            .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
+            .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
+            // Workspace management
+            .route(
+                "/api/workspaces",
+                get(workspace_mgmt::list_workspaces).post(workspace_mgmt::create_workspace),
+            )
+            .route("/api/workspaces/reorder", put(workspace_mgmt::reorder_workspaces))
+            .route(
+                "/api/workspaces/:id",
+                put(workspace_mgmt::update_workspace).delete(workspace_mgmt::delete_workspace),
+            )
+            .route("/api/workspaces/:id/activate", put(workspace_mgmt::activate_workspace))
+            .route("/api/workspaces/active", delete(workspace_mgmt::deactivate_workspace))
+            .route("/api/notify", post(notification::post_notify))
+            .route("/api/history", get(history::get_history).delete(history::delete_history))
+            .route("/api/info", get(server_info))
+            .route("/api/auth", post(check_auth))
+            .route("/api/auth/check", get(check_auth_session))
+            .route("/api/auth/logout", post(logout))
+            .route("/api/auth/sessions", get(list_sessions_handler).delete(revoke_other_sessions))
+            .route("/api/auth/sessions/:id", delete(revoke_session_handler))
+            .route("/api/token-configured", get(token_configured))
+            .route("/api/auto-token", get(auto_token))
+            .route("/api/token", get(get_token).put(update_token))
+            .route("/api/plugins", get(plugin::list_plugins))
+            .route("/api/plugins/market", get(plugin::get_market_registry))
+            .route("/api/plugins/market/:id/readme", get(plugin::get_market_readme))
+            .route("/api/plugins/dev-link", post(plugin::dev_link_plugin))
+            .merge(
+                Router::new()
+                    .route("/api/plugins/install", post(plugin::install_plugin))
+                    .route("/api/plugins/install-git", post(plugin::install_from_git))
+                    .route("/api/plugins/:id/update", post(plugin::update_plugin))
+                    .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+            )
+            .route("/api/plugins/:id", get(plugin::plugin_detail).delete(plugin::delete_plugin))
+            .route("/api/plugins/:id/exec", post(plugin::plugin_exec))
+            .route("/api/plugins/:id/spawn", get(plugin::plugin_spawn_ws))
+            .route("/api/plugins/:id/process/start", post(plugin::plugin_process_start))
+            .route(
+                "/api/plugins/:id/process",
+                get(plugin::plugin_process_list).delete(plugin::plugin_process_stop_all),
+            )
+            .route("/api/plugins/:id/process/:pid", delete(plugin::plugin_process_stop))
+            .route("/api/plugins/:id/storage", get(plugin::plugin_storage_list))
+            .route(
+                "/api/plugins/:id/storage/:key",
+                get(plugin::plugin_storage_get)
+                    .put(plugin::plugin_storage_set)
+                    .delete(plugin::plugin_storage_delete),
+            )
+            .route("/api/plugins/:id/*path", get(plugin::plugin_asset))
+            .route("/api/proxy", any(proxy::external_proxy_handler))
+            .route("/preview/:port", any(proxy::proxy_handler_root))
+            .route("/preview/:port/", any(proxy::proxy_handler_root))
+            .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+            .route("/assets/*path", get(static_handler))
+            .route("/icons/*path", get(icon_handler))
+            .route("/manifest.json", get(manifest_handler))
+            .route(
+                "/logo.png",
+                get(|| async {
+                    match StaticFiles::get("logo.png") {
+                        Some(content) => Response::builder()
+                            .header(header::CONTENT_TYPE, "image/png")
+                            .header(header::CACHE_CONTROL, "public, max-age=86400")
+                            .body(Body::from(content.data.into_owned()))
+                            .unwrap(),
+                        None => Response::builder()
+                            .status(StatusCode::NOT_FOUND)
+                            .body(Body::from("not found"))
+                            .unwrap(),
+                    }
+                }),
+            )
+            .route("/", get(index))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                |AxumState(s): AxumState<AppState>,
+                 req: axum::extract::Request,
+                 next: middleware::Next| async move {
+                    let token = s.auth_token.read().await.clone();
+                    let client_ip = req
+                        .extensions()
+                        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                        .map(|ci| ci.ip())
+                        .unwrap_or_else(|| "127.0.0.1".parse().unwrap());
+                    auth::auth_middleware(req, next, &token, &s.settings, &s.sessions, client_ip)
+                        .await
+                },
+            ))
+            .layer(middleware::from_fn(
+                |req: axum::extract::Request, next: middleware::Next| async move {
+                    let origin = req
+                        .headers()
+                        .get(header::ORIGIN)
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    let is_preflight = req.method() == axum::http::Method::OPTIONS;
+                    let mut response = if is_preflight {
+                        Response::new(Body::empty())
+                    } else {
+                        next.run(req).await
+                    };
+                    if let Some(origin) = origin {
+                        let headers = response.headers_mut();
+                        headers.insert(
+                            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                            axum::http::HeaderValue::from_str(&origin).unwrap(),
+                        );
+                        headers.insert(
+                            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                            axum::http::HeaderValue::from_static("true"),
+                        );
+                        headers.insert(
+                            header::ACCESS_CONTROL_ALLOW_METHODS,
+                            axum::http::HeaderValue::from_static("GET, POST, PUT, DELETE, OPTIONS"),
+                        );
+                        headers.insert(
+                            header::ACCESS_CONTROL_ALLOW_HEADERS,
+                            axum::http::HeaderValue::from_static("Content-Type, Authorization"),
+                        );
+                    }
+                    response
+                },
+            ))
+            .with_state(state);
+
+        tracing::info!("Embedded server listening on http://0.0.0.0:{}", local_port);
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap();
+    }
 }

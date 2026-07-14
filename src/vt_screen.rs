@@ -816,12 +816,9 @@ impl Perform for ScreenPerformer<'_> {
 
     #[allow(clippy::too_many_lines)]
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
-        let ps: Vec<u16> = params.iter().flat_map(|s| s.iter().copied()).collect();
-        let p0 = ps.first().copied().unwrap_or(0) as usize;
-        let p1 = ps.get(1).copied().unwrap_or(0) as usize;
-
         // Handle DECSET/DECRST (CSI ? Ps h/l)
         if intermediates == b"?" {
+            let ps: Vec<u16> = params.iter().flat_map(|s| s.iter().copied()).collect();
             match action {
                 'h' => {
                     for &p in &ps {
@@ -843,9 +840,24 @@ impl Perform for ScreenPerformer<'_> {
                     }
                     return;
                 }
-                _ => return,
+                _ => {}
             }
+            return;
         }
+
+        // Only the empty-intermediate (standard) CSI forms below are implemented.
+        // `intermediates` here also carries private-parameter bytes `<=>` and true
+        // intermediate bytes (0x20-0x2f); ignore them all rather than dispatch by
+        // final byte alone — e.g. `\e[>4;2m` (modifyOtherKeys) must not become SGR,
+        // and `CSI Ps SP @` (SL) must not become ICH. If SL/SR/etc. are ever added,
+        // match on (action, intermediates) BEFORE this guard.
+        if !intermediates.is_empty() {
+            return;
+        }
+
+        let ps: Vec<u16> = params.iter().flat_map(|s| s.iter().copied()).collect();
+        let p0 = ps.first().copied().unwrap_or(0) as usize;
+        let p1 = ps.get(1).copied().unwrap_or(0) as usize;
 
         match action {
             'A' => {
@@ -1164,5 +1176,83 @@ impl ScreenPerformer<'_> {
             }
             i += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod csi_dispatch_tests {
+    use super::*;
+
+    fn cell(vs: &VirtualScreen, row: usize, col: usize) -> &Cell {
+        &vs.primary.cells[row][col]
+    }
+
+    // `CSI > 4 ; 2 m` (XTMODKEYS) must NOT be parsed as SGR — regression for the
+    // spurious full-screen underline+dim leak seen when TUIs (e.g. Claude Code)
+    // emit modifyOtherKeys before drawing.
+    #[test]
+    fn private_marker_sgr_is_not_applied() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[>4;2mX");
+        let c = cell(&vs, 0, 0);
+        assert_eq!(c.ch, 'X');
+        assert!(!c.attrs.underline, "private-marker >4;2m leaked underline onto cell");
+        assert!(!c.attrs.dim, "private-marker >4;2m leaked dim onto cell");
+    }
+
+    #[test]
+    fn all_non_question_private_markers_are_not_sgr() {
+        for marker in [b'>', b'<', b'='] {
+            let sequence = [b"\x1b[".as_slice(), &[marker], b"4;2mX"].concat();
+            let mut vs = VirtualScreen::new(20, 5);
+            vs.feed(&sequence);
+            let c = cell(&vs, 0, 0);
+            assert_eq!(c.ch, 'X');
+            assert!(!c.attrs.underline, "private marker {marker:?} leaked underline onto cell");
+            assert!(!c.attrs.dim, "private marker {marker:?} leaked dim onto cell");
+        }
+    }
+
+    // Standard SGR underline (no marker) must still work.
+    #[test]
+    fn standard_sgr_underline_applies() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[4mX");
+        assert!(cell(&vs, 0, 0).attrs.underline, "standard \\e[4m failed to underline");
+    }
+
+    // Colon sub-params stay in `params` (not `intermediates`), so 4:3 (curly) is
+    // still underline-on and 4:0 is off — unaffected by the intermediates guard.
+    #[test]
+    fn colon_subparam_underline_unaffected() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[4:3mA\x1b[4:0mB");
+        assert!(cell(&vs, 0, 0).attrs.underline, "4:3 should be underline-on");
+        assert!(!cell(&vs, 0, 1).attrs.underline, "4:0 should be underline-off");
+    }
+
+    // `CSI > 4 ; 2 f` (XTFMTKEYS) must NOT be treated as HVP cursor move.
+    #[test]
+    fn private_marker_f_does_not_move_cursor() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[>4;2fX");
+        assert_eq!(cell(&vs, 0, 0).ch, 'X', "private-marker >4;2f wrongly moved the cursor");
+    }
+
+    #[test]
+    fn true_intermediate_sl_is_not_dispatched_as_ich() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"XY");
+        vs.feed(b"\x1b[1;1H");
+        vs.feed(b"\x1b[1 @");
+        assert_eq!(cell(&vs, 0, 0).ch, 'X', "CSI Ps SP @ was wrongly dispatched as ICH");
+    }
+
+    #[test]
+    fn decset_1049_enters_alternate_screen() {
+        let mut vs = VirtualScreen::new(20, 5);
+        assert!(!vs.is_using_alternate());
+        vs.feed(b"\x1b[?1049h");
+        assert!(vs.is_using_alternate());
     }
 }

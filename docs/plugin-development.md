@@ -498,6 +498,48 @@ await ctx.storage.delete('providers')
 
 如果插件需要跨平台分发，建议按目标平台打包不同的 CLI 入口，或在 JS 中检测运行结果并给出清晰错误提示。
 
+Native 插件可以让宿主按服务端平台精确选择入口：
+
+```json
+{
+  "bin": {
+    "mode": "cli",
+    "entry": "./bin/legacy-tool",
+    "entries": {
+      "windows-x86_64": "bin/windows-x86_64/tool.exe",
+      "linux-x86_64": "bin/linux-x86_64/tool",
+      "linux-aarch64": "bin/linux-aarch64/tool",
+      "macos-x86_64": "bin/macos-x86_64/tool",
+      "macos-aarch64": "bin/macos-aarch64/tool"
+    },
+    "lifecycle": {
+      "stdinLease": true,
+      "shutdownDeadlineMs": 10000,
+      "forceKillAfterMs": 15000
+    }
+  }
+}
+```
+
+当前目标存在 `entries[target]` 时优先使用它，否则才回退到 legacy `entry`。入口必须是插件目录内的普通文件；绝对路径、`..`、目录外 symlink 和未知平台会 fail closed。`minAppVersion` 会在扫描、安装和运行前实际校验。
+
+宿主运行 Native 命令时默认把工作目录设为插件目录，并注入以下不可由插件请求覆盖的环境变量：
+
+```text
+DINOTTY_PLUGIN_ID
+DINOTTY_PLUGIN_DIR
+DINOTTY_PLUGIN_DATA_DIR
+DINOTTY_HOST_TARGET
+DINOTTY_ORIGIN
+DINOTTY_HOST_VERSION
+DINOTTY_HOST_MODE
+DINOTTY_PARENT_PID
+```
+
+`DINOTTY_ORIGIN` 使用 Dinotty 当前实际监听端口和 IPv4 loopback URL。长运行进程若启用 `stdinLease`，正常停止时会收到一行 `{"type":"shutdown","deadlineMs":...}`；宿主异常退出时 stdin EOF 也必须视为停止信号。stdout/stderr 会被宿主持续消费并只保留有界诊断缓冲，避免 pipe 写满卡死。
+
+`permissions` 中的 Native 权限目前主要用于声明和用户告知，不是操作系统级 sandbox。Native 二进制仍可能以当前用户权限访问其他网络或文件；插件 UI 不得声称宿主已经在 OS 层阻止这些访问。
+
 ### exec.run — 同步调用
 
 ```js

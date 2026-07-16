@@ -48,7 +48,7 @@ curl.exe -X POST http://127.0.0.1:8999/api/plugins/dev-link `
 | `entry` | ❌ | JS 入口文件，默认 `./main.js` |
 | `styles` | ❌ | CSS 文件路径 |
 | `icon` | ❌ | 图标标识符（如 `braces`、`repeat`） |
-| `bin` | ❌ | CLI 二进制配置 `{ "mode": "cli", "entry": "./bin/xxx" }` |
+| `bin` | ❌ | Native CLI 配置；支持 legacy `entry` 或按宿主目标选择的 `entries` |
 | `commands` | ❌ | 注册到命令面板的命令列表 `[{ "id": "...", "title": "..." }]` |
 | `permissions` | ❌ | 声明插件所需权限（如 `["terminal.output"]`） |
 | `description` | ❌ | 插件描述，显示在下拉菜单中 |
@@ -90,6 +90,10 @@ curl.exe -X POST http://127.0.0.1:8999/api/plugins/dev-link `
 | **Text Diff** | 文本差异对比工具，支持逐行对比与高亮显示 |
 
 完整的插件开发文档见 [plugin-development.md](plugin-development.md)。
+
+Native 插件的平台由 Dinotty 后端判断，不使用远程浏览器的平台信息。支持的目标键为 `windows-x86_64`、`linux-x86_64`、`linux-aarch64`、`macos-x86_64` 和 `macos-aarch64`。`entries[当前目标]` 优先于 legacy `entry`；未知目标、缺失入口、目录外路径、symlink 逃逸和非普通文件都会被拒绝。
+
+长运行进程可以声明 `bin.lifecycle.stdinLease`。宿主停止进程时会向 stdin 写入 JSON shutdown frame，等待 `forceKillAfterMs` 后再强制终止。浏览器关闭和插件 UI 热重载不拥有长运行进程生命周期，不会自动停止进程；显式停止、插件更新/卸载以及 Dinotty 退出会停止它们。
 
 ## 插件仓库
 

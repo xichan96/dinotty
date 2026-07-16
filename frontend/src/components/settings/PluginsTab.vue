@@ -1,23 +1,13 @@
 <template>
   <div>
     <div class="plugin-tabs">
-      <button
-        class="plugin-tab"
-        :class="{ active: tab === 'market' }"
-        @click="
-          tab = 'market';
-          detailPlugin = null;
-        "
-      >
+      <button class="plugin-tab" :class="{ active: tab === 'market' }" @click="selectTab('market')">
         {{ t('settings.plugins.market') }}
       </button>
       <button
         class="plugin-tab"
         :class="{ active: tab === 'installed' }"
-        @click="
-          tab = 'installed';
-          detailPlugin = null;
-        "
+        @click="selectTab('installed')"
       >
         {{ t('settings.plugins.installed') }} ({{ settingsPlugins.length }})
       </button>
@@ -215,6 +205,14 @@
         <p v-if="p.description" class="plugin-card-desc">{{ p.description }}</p>
         <div class="plugin-card-actions">
           <button
+            v-if="p.state === 'active'"
+            class="plugin-install-btn"
+            :disabled="isBusy(p.id)"
+            @click="emit('open-plugin', p.id)"
+          >
+            {{ t('settings.plugins.openManagement') }}
+          </button>
+          <button
             v-if="p.marketEntry"
             class="plugin-install-btn"
             @click="onUpdateFromRepo(p.marketEntry!)"
@@ -272,8 +270,11 @@ import { useI18n } from '../../composables/useI18n'
 import { authFetch, apiUrl } from '../../composables/apiBase'
 import { usePluginLoader } from '../../composables/usePluginLoader'
 import { useMarketplace, type MarketPlugin } from '../../composables/useMarketplace'
+import { describeHttpError, describeRequestError } from '../../utils/httpError'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
+
+const emit = defineEmits<{ 'open-plugin': [pluginId: string] }>()
 
 const { t, locale } = useI18n()
 const { loadedPlugins, loadAll, unloadPlugin } = usePluginLoader()
@@ -326,6 +327,11 @@ function setStatus(msg: string, ok: boolean) {
   setTimeout(() => {
     statusMsg.value = ''
   }, 4000)
+}
+
+function selectTab(value: 'market' | 'installed') {
+  tab.value = value
+  detailPlugin.value = null
 }
 
 function isBusy(key: string) {
@@ -430,9 +436,10 @@ async function onInstallFromDir() {
       await loadAll()
       await fetchMarket()
     } else {
-      const err = await res.json().catch(() => ({ error: 'Install failed' }))
-      setStatus(err.error || 'Install failed', false)
+      setStatus(await describeHttpError(res, 'Install failed'), false)
     }
+  } catch (error) {
+    setStatus(describeRequestError(error, 'Install failed'), false)
   } finally {
     unmarkBusy('dir-install')
   }
@@ -454,9 +461,10 @@ async function onUpdateFile(e: Event, id: string) {
       await loadAll()
       await fetchMarket()
     } else {
-      const err = await res.json().catch(() => ({ error: 'Update failed' }))
-      setStatus(err.error || 'Update failed', false)
+      setStatus(await describeHttpError(res, 'Update failed'), false)
     }
+  } catch (error) {
+    setStatus(describeRequestError(error, 'Update failed'), false)
   } finally {
     unmarkBusy(`update:${id}`)
     input.value = ''
@@ -479,6 +487,8 @@ async function doUninstall() {
       const updated = marketPlugins.value.find((p) => p.id === id)
       if (updated) detailPlugin.value = updated
     }
+  } else {
+    setStatus(await describeHttpError(res, 'Uninstall failed'), false)
   }
 }
 

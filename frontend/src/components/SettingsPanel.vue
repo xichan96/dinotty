@@ -25,7 +25,7 @@
         <KeyboardTab v-show="activeTab === 'keyboard'" />
         <MonitorTab v-show="activeTab === 'monitor'" />
         <NotificationTab v-show="activeTab === 'notification'" />
-        <PluginsTab v-show="activeTab === 'plugins'" />
+        <PluginsTab v-show="activeTab === 'plugins'" @open-plugin="openPlugin" />
         <AboutTab v-show="activeTab === 'about'" />
       </div>
     </div>
@@ -56,10 +56,19 @@ import PluginsTab from './settings/PluginsTab.vue'
 import AboutTab from './settings/AboutTab.vue'
 
 const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ close: []; 'token-changed': [] }>()
+const emit = defineEmits<{
+  close: []
+  'token-changed': []
+  'open-plugin': [pluginId: string]
+}>()
 
 const { settings, saveSettings, loadSettings, applyCurrentTheme } = useSettings()
 const { t } = useI18n()
+
+function openPlugin(pluginId: string) {
+  emit('close')
+  emit('open-plugin', pluginId)
+}
 
 const activeTab = ref<
   'general' | 'appearance' | 'keyboard' | 'monitor' | 'notification' | 'plugins' | 'about'
@@ -86,12 +95,22 @@ watch(settings, scheduleSave, { deep: true })
 // Cancel any pending debounced save and suppress the autosave that the
 // remote Object.assign would trigger, so we neither PUT back the fetched
 // value nor let a stale pending timer overwrite it.
-watch(() => props.open, (v) => {
-  if (!v) return
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
-  suppressSave = true
-  void loadSettings().finally(() => nextTick(() => { suppressSave = false }))
-})
+watch(
+  () => props.open,
+  (v) => {
+    if (!v) return
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    suppressSave = true
+    void loadSettings().finally(() =>
+      nextTick(() => {
+        suppressSave = false
+      })
+    )
+  }
+)
 
 const tabs = computed(() => [
   { id: 'general' as const, label: t('settings.tab.general'), icon: SettingsIcon },
@@ -614,7 +633,10 @@ const tabs = computed(() => [
   color: var(--fg-muted);
   cursor: pointer;
   opacity: 0.7;
-  transition: color 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    opacity 0.15s ease,
+    background 0.15s ease;
 }
 .setting-reset:hover {
   color: var(--fg);

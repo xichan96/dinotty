@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 // ─── Core Types ─────────────────────────────────────────────────────────────
 
@@ -24,7 +24,70 @@ pub struct PluginManifest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BinConfig {
     pub mode: String,
-    pub entry: String,
+    #[serde(default)]
+    pub entry: Option<String>,
+    #[serde(default)]
+    pub entries: HashMap<String, String>,
+    #[serde(default)]
+    pub lifecycle: Option<ProcessLifecycleConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessLifecycleConfig {
+    #[serde(default)]
+    pub stdin_lease: bool,
+    #[serde(default = "default_shutdown_deadline_ms")]
+    pub shutdown_deadline_ms: u64,
+    #[serde(default = "default_force_kill_after_ms")]
+    pub force_kill_after_ms: u64,
+}
+
+const fn default_shutdown_deadline_ms() -> u64 {
+    10_000
+}
+
+const fn default_force_kill_after_ms() -> u64 {
+    15_000
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum HostTarget {
+    #[serde(rename = "windows-x86_64")]
+    WindowsX86_64,
+    #[serde(rename = "linux-x86_64")]
+    LinuxX86_64,
+    #[serde(rename = "linux-aarch64")]
+    LinuxAarch64,
+    #[serde(rename = "macos-x86_64")]
+    MacosX86_64,
+    #[serde(rename = "macos-aarch64")]
+    MacosAarch64,
+}
+
+impl HostTarget {
+    #[must_use]
+    pub fn current() -> Option<Self> {
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("windows", "x86_64") => Some(Self::WindowsX86_64),
+            ("linux", "x86_64") => Some(Self::LinuxX86_64),
+            ("linux", "aarch64") => Some(Self::LinuxAarch64),
+            ("macos", "x86_64") => Some(Self::MacosX86_64),
+            ("macos", "aarch64") => Some(Self::MacosAarch64),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WindowsX86_64 => "windows-x86_64",
+            Self::LinuxX86_64 => "linux-x86_64",
+            Self::LinuxAarch64 => "linux-aarch64",
+            Self::MacosX86_64 => "macos-x86_64",
+            Self::MacosAarch64 => "macos-aarch64",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -130,6 +193,7 @@ pub enum ProcessState {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProcessInfo {
     pub pid: u32,
     pub command: String,
@@ -140,7 +204,13 @@ pub struct ProcessInfo {
 
 pub struct ManagedProcess {
     pub info: ProcessInfo,
-    pub child: Arc<TokioMutex<Option<tokio::process::Child>>>,
+    pub control: mpsc::Sender<ProcessControl>,
+    pub stdout: Arc<TokioMutex<std::collections::VecDeque<u8>>>,
+    pub stderr: Arc<TokioMutex<std::collections::VecDeque<u8>>>,
+}
+
+pub enum ProcessControl {
+    Stop { finished: tokio::sync::oneshot::Sender<()> },
 }
 
 // ─── Marketplace Types ──────────────────────────────────────────────────────

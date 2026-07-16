@@ -687,12 +687,16 @@ async fn main() {
     };
     let auth_token = Arc::new(tokio::sync::RwLock::new(initial_token));
 
-    let plugins = Arc::new(plugin::PluginManager::new());
-    plugins.scan();
-    tracing::info!("Loaded {} plugins", plugins.list().len());
-
     let git_info = read_git_info();
     tracing::info!("Git info: {}", git_info.version);
+
+    let plugins = Arc::new(plugin::PluginManager::new(
+        format!("http://127.0.0.1:{port}"),
+        git_info.version.clone(),
+        "server".into(),
+    ));
+    plugins.scan();
+    tracing::info!("Loaded {} plugins", plugins.list().len());
 
     // Initialize new modules
     let tokens = Arc::new(token::TokenManager::new(auth_token.clone()));
@@ -733,7 +737,7 @@ async fn main() {
         history: history_state,
         auth_token: auth_token.clone(),
         port,
-        plugins,
+        plugins: Arc::clone(&plugins),
         git_info,
         tokens,
         audit: audit_logger,
@@ -944,5 +948,33 @@ async fn main() {
     tracing::info!("Listening on http://0.0.0.0:{}", port);
 
     notify_manager.set_notify_port(port);
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
+    let shutdown_plugins = Arc::clone(&plugins);
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            shutdown_plugins.shutdown_all().await;
+        })
+        .await
+        .unwrap();
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
 }

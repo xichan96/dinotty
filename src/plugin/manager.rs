@@ -7,8 +7,13 @@ use std::time::Duration;
 use crate::platform::fs as platform_fs;
 use crate::session::SessionManager;
 
-use super::helpers::{copy_dir_all, extract_tar_gz, set_executable, validate_manifest};
-use super::types::{ManagedProcess, PluginInfo, PluginManifest, PluginStateValue};
+use super::helpers::{
+    copy_dir_all, copy_plugin_dir, extract_tar_gz, resolve_binary, set_executable,
+    validate_manifest, validate_min_app_version,
+};
+use super::types::{
+    HostTarget, ManagedProcess, PluginInfo, PluginManifest, PluginStateValue, ProcessControl,
+};
 
 // ─── PluginManager ──────────────────────────────────────────────────────────
 
@@ -17,37 +22,98 @@ pub struct PluginManager {
     pub data_dir: PathBuf,
     pub registry: DashMap<String, PluginInfo>,
     pub processes: DashMap<String, DashMap<String, ManagedProcess>>,
+    pub host_target: Option<HostTarget>,
+    pub host_origin: String,
+    pub host_version: String,
+    pub host_mode: String,
 }
 
 pub type PluginManagerState = Arc<PluginManager>;
 
-impl Default for PluginManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PluginManager {
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(host_origin: String, host_version: String, host_mode: String) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
         Self {
             plugin_dir: home.join(".dinotty/plugins"),
             data_dir: home.join(".dinotty/plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            host_target: HostTarget::current(),
+            host_origin,
+            host_version,
+            host_mode,
         }
     }
 
     pub async fn kill_plugin_processes(&self, plugin_id: &str) {
         if let Some((_, proc_map)) = self.processes.remove(plugin_id) {
-            for entry in &proc_map {
-                let mut child = entry.value().child.lock().await;
-                if let Some(ref mut c) = *child {
-                    let _ = c.kill().await;
+            let controls: Vec<_> = proc_map.iter().map(|entry| entry.control.clone()).collect();
+            let mut waiters = Vec::with_capacity(controls.len());
+            for control in controls {
+                let (finished, wait) = tokio::sync::oneshot::channel();
+                if control.send(ProcessControl::Stop { finished }).await.is_ok() {
+                    waiters.push(wait);
                 }
             }
+            let _ = tokio::time::timeout(Duration::from_secs(16), async move {
+                for wait in waiters {
+                    let _ = wait.await;
+                }
+            })
+            .await;
         }
+    }
+
+    pub async fn shutdown_all(&self) {
+        let plugin_ids: Vec<String> =
+            self.processes.iter().map(|entry| entry.key().clone()).collect();
+        for plugin_id in plugin_ids {
+            self.kill_plugin_processes(&plugin_id).await;
+        }
+    }
+
+    pub fn request_shutdown_all(&self) {
+        for plugin in &self.processes {
+            for process in plugin.value() {
+                let (finished, _wait) = tokio::sync::oneshot::channel();
+                let _ = process.control.try_send(ProcessControl::Stop { finished });
+            }
+        }
+    }
+
+    /// # Errors
+    /// Returns an error when the host target or selected entry is unsupported or unsafe.
+    pub fn resolve_plugin_binary(
+        &self,
+        plugin_id: &str,
+        manifest: &PluginManifest,
+    ) -> Result<PathBuf, String> {
+        let target = self
+            .host_target
+            .ok_or_else(|| "native plugins are unsupported on this host target".to_string())?;
+        let bin = manifest.bin.as_ref().ok_or_else(|| "plugin has no CLI bin".to_string())?;
+        resolve_binary(&self.plugin_dir.join(plugin_id), bin, target)
+    }
+
+    pub(super) fn validate_for_host(&self, manifest: &PluginManifest) -> Result<(), String> {
+        validate_manifest(manifest)?;
+        validate_min_app_version(manifest, &self.host_version)
+    }
+
+    pub(super) fn prepare_binary(
+        &self,
+        plugin_root: &std::path::Path,
+        manifest: &PluginManifest,
+    ) -> Result<(), String> {
+        if let Some(bin) = &manifest.bin {
+            let target = self
+                .host_target
+                .ok_or_else(|| "native plugins are unsupported on this host target".to_string())?;
+            let path = resolve_binary(plugin_root, bin, target)?;
+            set_executable(&path)?;
+        }
+        Ok(())
     }
 
     pub fn scan(&self) {
@@ -83,13 +149,23 @@ impl PluginManager {
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|d| d.as_secs());
                     let is_dev_link = entry.path().is_symlink();
+                    let validation_error = self.validate_for_host(&manifest).err().or_else(|| {
+                        manifest
+                            .bin
+                            .as_ref()
+                            .and_then(|_| self.prepare_binary(&path, &manifest).err())
+                    });
                     self.registry.insert(
                         manifest.id.clone(),
                         PluginInfo {
                             manifest,
                             install_date,
-                            state: PluginStateValue::Active,
-                            error: None,
+                            state: if validation_error.is_some() {
+                                PluginStateValue::Error
+                            } else {
+                                PluginStateValue::Active
+                            },
+                            error: validation_error,
                             is_dev_link,
                         },
                     );
@@ -194,7 +270,8 @@ impl PluginManager {
         let manifest: PluginManifest =
             serde_json::from_str(&content).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
-        validate_manifest(&manifest)?;
+        self.validate_for_host(&manifest)?;
+        self.prepare_binary(tmp.path(), &manifest)?;
 
         let dest = self.plugin_dir.join(&manifest.id);
         if platform_fs::path_exists_or_symlink(&dest) {
@@ -203,10 +280,6 @@ impl PluginManager {
 
         std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
         std::fs::rename(tmp.path(), &dest).map_err(|e| e.to_string())?;
-
-        if let Some(ref bin) = manifest.bin {
-            set_executable(&dest.join(&bin.entry))?;
-        }
 
         self.registry.insert(
             manifest.id.clone(),
@@ -243,23 +316,29 @@ impl PluginManager {
         let manifest: PluginManifest =
             serde_json::from_str(&content).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
-        validate_manifest(&manifest)?;
+        self.validate_for_host(&manifest)?;
+        self.prepare_binary(src, &manifest)?;
 
         let dest = self.plugin_dir.join(&manifest.id);
         if platform_fs::path_exists_or_symlink(&dest) {
             return Err(format!("plugin '{}' already installed, use update instead", manifest.id));
         }
 
-        std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&self.plugin_dir)
+            .map_err(|e| format!("failed to create plugin directory: {e}"))?;
 
         if dev_link {
-            platform_fs::create_dir_symlink(src, &dest)?;
+            platform_fs::create_dir_symlink(src, &dest)
+                .map_err(|e| format!("failed to create development link: {e}"))?;
         } else {
-            copy_dir_all(src, &dest)?;
-        }
-
-        if let Some(ref bin) = manifest.bin {
-            set_executable(&dest.join(&bin.entry))?;
+            if let Err(error) = copy_plugin_dir(src, &dest) {
+                let _ = platform_fs::remove_plugin_path(&dest);
+                return Err(format!("failed to copy plugin files: {error}"));
+            }
+            if let Err(error) = self.prepare_binary(&dest, &manifest) {
+                let _ = platform_fs::remove_plugin_path(&dest);
+                return Err(format!("failed to validate copied plugin files: {error}"));
+            }
         }
 
         self.registry.insert(
@@ -303,10 +382,11 @@ impl PluginManager {
         )
         .map_err(|e| format!("invalid plugin.json: {e}"))?;
 
-        validate_manifest(&manifest)?;
+        self.validate_for_host(&manifest)?;
         if manifest.id != id {
             return Err("plugin id in archive does not match".into());
         }
+        self.prepare_binary(tmp.path(), &manifest)?;
 
         let plugin_path = self.plugin_dir.join(id);
         let backup = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -323,10 +403,6 @@ impl PluginManager {
                 let _ = std::fs::rename(backup.path(), &plugin_path);
             }
             return Err(format!("failed to install update: {e}"));
-        }
-
-        if let Some(ref bin) = manifest.bin {
-            set_executable(&plugin_path.join(&bin.entry))?;
         }
 
         self.registry.insert(
@@ -378,6 +454,10 @@ mod tests {
             data_dir: root.join("plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            host_target: crate::plugin::HostTarget::current(),
+            host_origin: "http://127.0.0.1:8999".into(),
+            host_version: env!("CARGO_PKG_VERSION").into(),
+            host_mode: "test".into(),
         }
     }
 

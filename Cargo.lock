@@ -1674,6 +1674,7 @@ dependencies = [
  "russh-keys",
  "russh-sftp",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "sha1 0.10.6",

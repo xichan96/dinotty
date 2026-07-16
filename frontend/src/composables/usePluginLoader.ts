@@ -5,6 +5,7 @@ import { usePluginMonitorStore } from '../stores/pluginMonitor'
 import type { MonitorSeries } from '../stores/pluginMonitor'
 import { subscribe as eventSubscribe, emit as eventEmit } from './useEventBridge'
 import type { SyncEvent } from '../types/protocol'
+import { describeHttpError } from '../utils/httpError'
 
 // Bypass Vite's static analysis of import()
 // eslint-disable-next-line no-new-func
@@ -235,6 +236,7 @@ function createPluginContext(pluginId: string): PluginContext {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ args, ...options }),
       })
+      if (!res.ok) throw new Error(await describeHttpError(res, 'Plugin command failed'))
       return res.json()
     },
     spawn(args) {
@@ -291,6 +293,7 @@ function createPluginContext(pluginId: string): PluginContext {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ args, ...options }),
       })
+      if (!res.ok) throw new Error(await describeHttpError(res, 'Unable to start plugin process'))
       const data = await res.json()
       return {
         info: data,
@@ -530,13 +533,6 @@ async function unloadPlugin(id: string) {
   }
   try {
     plugin.exports?.dispose?.()
-  } catch {
-    /* noop */
-  }
-
-  // Kill all managed processes for this plugin
-  try {
-    await authFetch(apiUrl(`/api/plugins/${id}/process`), { method: 'DELETE' })
   } catch {
     /* noop */
   }

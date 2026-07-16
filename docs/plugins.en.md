@@ -48,7 +48,7 @@ Plugins support **hot-reload** — edit plugin files and the browser picks up ch
 | `entry` | ❌ | JS entry file, defaults to `./main.js` |
 | `styles` | ❌ | CSS file path |
 | `icon` | ❌ | Icon identifier (e.g., `braces`, `repeat`) |
-| `bin` | ❌ | CLI binary config `{ "mode": "cli", "entry": "./bin/xxx" }` |
+| `bin` | ❌ | Native CLI config with a legacy `entry` or host-targeted `entries` |
 | `commands` | ❌ | Commands to register in the command palette `[{ "id": "...", "title": "..." }]` |
 | `permissions` | ❌ | Permissions the plugin requires (e.g., `["terminal.output"]`) |
 | `description` | ❌ | Plugin description, shown in the dropdown menu |
@@ -92,6 +92,10 @@ The return value of `activate(context)` may include:
 | **Text Diff** | Text diff comparison tool with line-by-line highlighting |
 
 For the full plugin development guide, see [plugin-development.md](plugin-development.md).
+
+Dinotty selects a native plugin target on the backend; it never trusts the remote browser platform. Supported keys are `windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, and `macos-aarch64`. `entries[current-target]` takes precedence over legacy `entry`. Unknown targets, missing entries, paths outside the plugin directory, escaping symlinks, and non-regular files are rejected.
+
+Long-running processes may declare `bin.lifecycle.stdinLease`. On stop, the host writes a JSON shutdown frame to stdin and force-terminates the process after `forceKillAfterMs`. Closing a browser or hot-reloading plugin UI does not own or stop a long-running process; explicit stop, plugin update/uninstall, and Dinotty shutdown do.
 
 ## Plugin Repository
 

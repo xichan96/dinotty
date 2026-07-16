@@ -171,7 +171,12 @@
 
     <CommandPalette ref="paletteRef" :commands="paletteCommands" />
 
-    <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @token-changed="onTokenChanged" />
+    <SettingsPanel
+      :open="settingsOpen"
+      @close="settingsOpen = false"
+      @token-changed="onTokenChanged"
+      @open-plugin="openPlugin"
+    />
 
     <ConfirmCloseDialog @confirm="onConfirmClose" />
 

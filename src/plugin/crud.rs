@@ -10,7 +10,7 @@ use axum_extra::extract::Multipart;
 
 use crate::platform::fs as platform_fs;
 
-use super::helpers::{plugin_err, validate_manifest};
+use super::helpers::plugin_err;
 use super::manager::PluginManagerState;
 use super::types::{
     DeleteQuery, DevLinkRequest, InstallDirRequest, PluginInfo, PluginManifest, PluginStateValue,
@@ -101,6 +101,7 @@ pub async fn update_plugin(
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &e.to_string()),
     };
 
+    pm.kill_plugin_processes(&id).await;
     match pm.update(&id, &data) {
         Ok(manifest) => Json(manifest).into_response(),
         Err(e) => plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
@@ -137,7 +138,7 @@ pub async fn dev_link_plugin(
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &format!("invalid plugin.json: {e}")),
     };
 
-    if let Err(e) = validate_manifest(&manifest) {
+    if let Err(e) = pm.validate_for_host(&manifest) {
         return plugin_err(StatusCode::BAD_REQUEST, &e);
     }
 
@@ -184,7 +185,20 @@ pub async fn install_from_dir(
 
     match pm.install_from_dir(&src, body.dev_link) {
         Ok(manifest) => Json(manifest).into_response(),
-        Err(e) => plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        Err(e) => {
+            let status = if e.contains("already installed") {
+                StatusCode::CONFLICT
+            } else if e.starts_with("failed to copy")
+                || e.starts_with("failed to validate copied")
+                || e.starts_with("failed to create plugin directory")
+                || e.starts_with("failed to create development link")
+            {
+                StatusCode::INTERNAL_SERVER_ERROR
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            plugin_err(status, &format!("folder install failed: {e}"))
+        }
     }
 }
 
@@ -204,6 +218,10 @@ mod tests {
             data_dir: root.join("plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            host_target: crate::plugin::HostTarget::current(),
+            host_origin: "http://127.0.0.1:8999".into(),
+            host_version: env!("CARGO_PKG_VERSION").into(),
+            host_mode: "test".into(),
         })
     }
 

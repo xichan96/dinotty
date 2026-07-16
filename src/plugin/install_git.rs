@@ -8,9 +8,7 @@ use axum::{
 
 use crate::platform::fs as platform_fs;
 
-use super::helpers::{
-    copy_dir_all, extract_zip, find_plugin_root, plugin_err, set_executable, validate_manifest,
-};
+use super::helpers::{copy_dir_all, extract_zip, find_plugin_root, plugin_err};
 use super::manager::PluginManagerState;
 use super::types::{InstallGitRequest, PluginInfo, PluginManifest, PluginStateValue};
 
@@ -62,7 +60,7 @@ pub async fn install_from_git(
         Ok(m) => m,
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &format!("invalid plugin.json: {e}")),
     };
-    if let Err(e) = validate_manifest(&manifest) {
+    if let Err(e) = pm.validate_for_host(&manifest) {
         return plugin_err(StatusCode::BAD_REQUEST, &e);
     }
 
@@ -71,6 +69,7 @@ pub async fn install_from_git(
         pm.registry.contains_key(&manifest.id) || platform_fs::path_exists_or_symlink(&dest);
 
     if is_update {
+        pm.kill_plugin_processes(&manifest.id).await;
         let old_info = pm.registry.get(&manifest.id).map(|e| e.clone());
         let backup = match tempfile::tempdir() {
             Ok(b) => b,
@@ -89,8 +88,10 @@ pub async fn install_from_git(
             let _ = copy_dir_all(backup.path(), &dest);
             return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("update failed: {e}"));
         }
-        if let Some(ref bin) = manifest.bin {
-            let _ = set_executable(&dest.join(&bin.entry));
+        if let Err(e) = pm.prepare_binary(&dest, &manifest) {
+            let _ = platform_fs::remove_plugin_path(&dest);
+            let _ = copy_dir_all(backup.path(), &dest);
+            return plugin_err(StatusCode::BAD_REQUEST, &e);
         }
         pm.registry.insert(
             manifest.id.clone(),
@@ -110,8 +111,9 @@ pub async fn install_from_git(
         if let Err(e) = copy_dir_all(&plugin_root, &dest) {
             return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
-        if let Some(ref bin) = manifest.bin {
-            let _ = set_executable(&dest.join(&bin.entry));
+        if let Err(e) = pm.prepare_binary(&dest, &manifest) {
+            let _ = platform_fs::remove_plugin_path(&dest);
+            return plugin_err(StatusCode::BAD_REQUEST, &e);
         }
         pm.registry.insert(
             manifest.id.clone(),

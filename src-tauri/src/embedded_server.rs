@@ -460,6 +460,14 @@ impl Drop for NotifyPortGuard {
     }
 }
 
+struct PluginProcessGuard(Arc<PluginManager>);
+
+impl Drop for PluginProcessGuard {
+    fn drop(&mut self) {
+        self.0.request_shutdown_all();
+    }
+}
+
 pub fn run_server(
     listener: std::net::TcpListener,
     manager: Arc<SessionManager>,
@@ -505,8 +513,14 @@ pub fn run_server(
             });
         }
         let history_state = HistoryState::new(Arc::clone(&manager.sync_clients));
-        let plugins = Arc::new(PluginManager::new());
+        let git_info = read_git_info();
+        let plugins = Arc::new(PluginManager::new(
+            format!("http://127.0.0.1:{local_port}"),
+            git_info.version.clone(),
+            "desktop".into(),
+        ));
         plugins.scan();
+        let _plugin_process_guard = PluginProcessGuard(Arc::clone(&plugins));
 
         let initial_token = settings::load_token()
             .or_else(|| std::env::var("DINOTTY_TOKEN").ok())
@@ -523,8 +537,6 @@ pub fn run_server(
             initial_token
         };
         let auth_token = Arc::new(tokio::sync::RwLock::new(initial_token));
-
-        let git_info = read_git_info();
 
         let session_ttl_days = settings::load_settings().auth.session_ttl_days;
         let sessions = Arc::new(SessionStore::new(session_ttl_days));

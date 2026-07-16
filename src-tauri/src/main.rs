@@ -229,7 +229,7 @@ fn pty_spawn(
     }
 
     let (session, shell_type) =
-        pty::create_session(&manager, &pane_id, None, Some(Arc::clone(&exit_cb)), None)?;
+        pty::create_session(&manager, &pane_id, None, Some(Arc::clone(&exit_cb)), None, None)?;
 
     spawn_tauri_output_forwarder(app.clone(), pane_id.clone(), Arc::clone(&session));
     spawn_tauri_write_task(Arc::clone(&session), pane_id.clone());

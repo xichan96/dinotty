@@ -20,6 +20,8 @@ export interface PluginContext {
     activePaneId(): string | null
     onOutput(callback: (paneId: string, data: string) => void): Disposable
     createTab(command?: string): Promise<string>
+    /** Open a terminal tab in cwd and execute argv directly, without an intermediary shell. */
+    createTerminalTab(opts: { cwd: string; argv: string[]; title?: string }): Promise<string>
   }
 
   settings: {

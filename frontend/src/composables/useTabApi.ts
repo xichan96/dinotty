@@ -31,11 +31,15 @@ export async function apiListTabs(): Promise<ListTabsResult> {
   return res.json()
 }
 
-export async function apiCreateTab(cwd?: string): Promise<CreateTabResult> {
+export async function apiCreateTab(
+  cwd?: string,
+  argv?: string[],
+  title?: string
+): Promise<CreateTabResult> {
   const res = await authFetch(apiUrl('/api/tabs'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cwd }),
+    body: JSON.stringify({ cwd, argv, title }),
   })
   if (!res.ok) throw new Error(`create tab failed: ${res.status}`)
   return res.json()

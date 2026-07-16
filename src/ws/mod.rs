@@ -28,6 +28,7 @@ use crate::workspace_mgmt::WorkspacesState;
 pub struct WsQuery {
     #[serde(rename = "paneId")]
     pane_id: Option<String>,
+    argv: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -127,6 +128,11 @@ pub async fn ws_handler(
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
     _headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    // WebSocket connections only attach to panes already created through /api/tabs.
+    // Reject argv explicitly so a reconnect can never silently turn into a spawn request.
+    if q.argv.is_some() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     // paneId must reference a tab created via /api/tabs (or the sync WS
     // CreateTab message); otherwise an authenticated client could spawn
     // unbounded orphan PTYs by connecting with random/empty paneIds. Cookie
@@ -704,7 +710,7 @@ async fn handle_socket(
     info!("No existing session found for pane={}, creating new PTY session", pane_id);
     let cwd = settings.read().await.resolved_default_workspace_root();
     let (session, shell_type) =
-        match crate::pty::create_session(&manager, &pane_id, None, None, cwd) {
+        match crate::pty::create_session(&manager, &pane_id, None, None, cwd, None) {
             Ok(x) => x,
             Err(e) => {
                 error!("{}", e);

@@ -188,20 +188,32 @@ pub fn create_session(
     tab_id: Option<&str>,
     tauri_on_exit: Option<Arc<dyn Fn(String) + Send + Sync>>,
     cwd: Option<PathBuf>,
+    argv: Option<Vec<String>>,
 ) -> Result<(Arc<Session>, String), String> {
+    if argv.as_ref().is_some_and(Vec::is_empty) {
+        return Err("argv must be non-empty when provided".to_string());
+    }
+
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
 
-    let shell_spec = shell::default_shell();
-    let shell_type = shell_spec.shell_type.clone();
-    let mut cmd = CommandBuilder::new(&shell_spec.program);
+    let shell_spec = argv.is_none().then(shell::default_shell);
+    let shell_type =
+        shell_spec.as_ref().map_or_else(|| "command".to_string(), |spec| spec.shell_type.clone());
+    let mut cmd = if let Some(argv) = argv.as_ref() {
+        let mut cmd = CommandBuilder::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        cmd
+    } else {
+        let shell_spec = shell_spec.as_ref().expect("default shell is present without argv");
+        let mut cmd = CommandBuilder::new(&shell_spec.program);
+        cmd.args(&shell_spec.args);
+        cmd
+    };
     for key in claude_session_env_keys_to_strip() {
         cmd.env_remove(&key);
-    }
-    for arg in &shell_spec.args {
-        cmd.arg(arg);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("DINOTTY_PANE_ID", pane_id);
@@ -220,7 +232,7 @@ pub fn create_session(
     cmd.cwd(&effective_cwd);
 
     // Shell-specific hooks depend on HOME-style prompt expansion.
-    if matches!(shell_type.as_str(), "zsh" | "bash") {
+    if argv.is_none() && matches!(shell_type.as_str(), "zsh" | "bash") {
         let home =
             std::env::var("HOME").unwrap_or_else(|_| home_path.to_string_lossy().into_owned());
         if std::env::var_os("HOME").is_none() {

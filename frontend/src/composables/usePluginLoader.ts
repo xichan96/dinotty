@@ -65,6 +65,8 @@ export interface PluginContext {
     listPanes(): Array<{ id: string; title: string; active: boolean }>
     onOutput(callback: (paneId: string, data: string) => void): Disposable
     createTab(command?: string): Promise<string>
+    /** Open a terminal tab in cwd and execute argv directly, without an intermediary shell. */
+    createTerminalTab(opts: { cwd: string; argv: string[]; title?: string }): Promise<string>
   }
 
   settings: {
@@ -312,6 +314,7 @@ function createPluginContext(pluginId: string): PluginContext {
       listPanes: () => [],
       onOutput: () => ({ dispose() {} }),
       createTab: async () => '',
+      createTerminalTab: async () => '',
     },
     settings: {
       get: () => (window as any).__dinotty_settings_data ?? {},

@@ -696,17 +696,19 @@ window.addEventListener('beforeunload', (e) => {
 
 const DEFAULT_PREVIEW_URL = ''
 
-async function newTab(cwd?: string) {
+function newTab(cwd?: string): Promise<void>
+function newTab(cwd: string, argv: string[], title?: string): Promise<string>
+async function newTab(cwd?: string, argv?: string[], title?: string): Promise<string | void> {
   try {
     // Remote workspace: open an SSH terminal and cd into the workspace's remote path.
     const activeWs = workspaces.value.find((w) => w.id === activeWorkspaceId.value)
-    if (activeWs?.connection_id) {
+    if (!argv && activeWs?.connection_id) {
       const result = await apiCreateSshTab(activeWs.connection_id, activeWs.path)
       await onSshConnect(result)
-      return
+      return result.pane_id
     }
     const effectiveCwd = cwd ?? activeWorkspacePath.value
-    const result = await apiCreateTab(effectiveCwd)
+    const result = await apiCreateTab(effectiveCwd, argv, title)
     // Dedup: broadcast_sync echoes back to sender — tab_created handler may
     // have already added this tab if the sync message arrived before the
     // REST response.
@@ -716,10 +718,11 @@ async function newTab(cwd?: string) {
       if (result.cwd && existing.type === 'terminal' && !existing.cwd) {
         existing.cwd = result.cwd
       }
+      if (title && existing.type === 'terminal') existing.customTitle = title
       activePaneId.value = result.tab_id
       persist()
       nextTick(() => focusActive())
-      return
+      return result.pane_id
     }
     const layout = ensureSplitRoot(result.layout)
     tabs.value.push({
@@ -734,13 +737,17 @@ async function newTab(cwd?: string) {
       previewAddress: '',
       previewUrl: '',
       previewKind: 'web',
+      customTitle: title,
       cwd: result.cwd,
     })
     activePaneId.value = result.tab_id
     persist()
     nextTick(() => focusActive())
+    return result.pane_id
   } catch (e) {
     console.error('Failed to create tab:', e)
+    if (argv) throw e
+    return ''
   }
 }
 
@@ -1240,6 +1247,9 @@ window.__dinotty_terminal_api = {
     newTab()
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
     return tab?.type === 'terminal' ? tab.activePaneId : ''
+  },
+  async createTerminalTab(opts: { cwd: string; argv: string[]; title?: string }) {
+    return newTab(opts.cwd, opts.argv, opts.title)
   },
 }
 // Test hooks for P3 verification (focusActive + isComposing guard).

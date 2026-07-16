@@ -4,7 +4,8 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::pty;
@@ -36,6 +37,39 @@ pub struct UpdateLayoutRequest {
 pub struct CreateTabRequest {
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_argv")]
+    pub argv: Option<Vec<String>>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+fn deserialize_optional_argv<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Vec::<String>::deserialize(deserializer).map(Some)
+}
+
+fn validate_create_tab_request(req: &CreateTabRequest) -> Result<Option<PathBuf>, String> {
+    if let Some(argv) = req.argv.as_ref() {
+        if argv.is_empty() {
+            return Err("argv must be a non-empty array".to_string());
+        }
+        if argv.iter().any(String::is_empty) {
+            return Err("argv entries must be non-empty strings".to_string());
+        }
+        if argv.iter().any(|arg| arg.contains('\0')) {
+            return Err("argv entries must not contain NUL bytes".to_string());
+        }
+    }
+
+    req.cwd.as_ref().map(PathBuf::from).map_or(Ok(None), |cwd| {
+        if cwd.is_dir() {
+            Ok(Some(cwd))
+        } else {
+            Err("cwd must exist and be a directory".to_string())
+        }
+    })
 }
 
 // ─── GET /api/tabs ─────────────────────────────────────────────────
@@ -56,18 +90,25 @@ pub async fn create_tab(
     State((manager, settings)): State<(Arc<SessionManager>, SettingsState)>,
     Json(req): Json<CreateTabRequest>,
 ) -> impl IntoResponse {
+    let requested_cwd = match validate_create_tab_request(&req) {
+        Ok(cwd) => cwd,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e })))
+                .into_response();
+        }
+    };
     let tab_id = uuid::Uuid::new_v4().to_string();
     let pane_id = uuid::Uuid::new_v4().to_string();
 
     // Resolve CWD: explicit request > configured default workspace root > $HOME.
-    let cwd = match req.cwd.clone() {
-        Some(cwd) => Some(std::path::PathBuf::from(cwd)),
+    let cwd = match requested_cwd {
+        Some(cwd) => Some(cwd),
         None => settings.read().await.resolved_default_workspace_root(),
     };
 
     // Create PTY session
     let (_session, shell_type) =
-        match pty::create_session(&manager, &pane_id, Some(&tab_id), None, cwd) {
+        match pty::create_session(&manager, &pane_id, Some(&tab_id), None, cwd, req.argv) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!("Failed to create PTY: {}", e);
@@ -80,10 +121,11 @@ pub async fn create_tab(
         };
 
     // Create initial layout with single leaf
+    let title = req.title.as_deref().unwrap_or("Terminal");
     let layout = serde_json::json!({
         "type": "leaf",
         "paneId": pane_id,
-        "title": "Terminal",
+        "title": title,
         "shell_type": shell_type,
         "ratio": 1,
         "zoomed": false,
@@ -118,6 +160,31 @@ pub async fn create_tab(
         "cwd": req.cwd,
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_create_tab_request, CreateTabRequest};
+
+    fn request(argv: Vec<&str>) -> CreateTabRequest {
+        CreateTabRequest {
+            cwd: None,
+            argv: Some(argv.into_iter().map(str::to_string).collect()),
+            title: None,
+        }
+    }
+
+    #[test]
+    fn create_tab_argv_must_be_non_empty() {
+        assert!(validate_create_tab_request(&request(vec![])).is_err());
+        assert!(validate_create_tab_request(&request(vec!["claude", ""])).is_err());
+        assert!(validate_create_tab_request(&request(vec!["claude", "--resume"])).is_ok());
+    }
+
+    #[test]
+    fn create_tab_argv_rejects_nul_bytes() {
+        assert!(validate_create_tab_request(&request(vec!["claude\0", "--resume"])).is_err());
+    }
 }
 
 // ─── DELETE /api/tabs/{tab_id} ─────────────────────────────────────
@@ -201,7 +268,7 @@ pub async fn split_pane(
     let (_session, _shell_type) = if req.force_local {
         // Force local PTY — use explicit cwd if provided, otherwise inherit from source
         let local_cwd = req.cwd.map(std::path::PathBuf::from).or(source_cwd);
-        match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, local_cwd) {
+        match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, local_cwd, None) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!("Failed to create PTY for force-local split: {}", e);
@@ -227,7 +294,7 @@ pub async fn split_pane(
         }
     } else {
         // Local PTY — inherit CWD from source pane
-        match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, source_cwd) {
+        match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, source_cwd, None) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!("Failed to create PTY for split: {}", e);

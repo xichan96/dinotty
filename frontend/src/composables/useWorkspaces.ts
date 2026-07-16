@@ -13,6 +13,7 @@ import {
 
 const workspaces = ref<Workspace[]>([])
 const activeWorkspaceId = ref<string | null>(null)
+let wsNavGen = 0
 
 export function useWorkspaces() {
   async function loadWorkspaces() {
@@ -47,13 +48,20 @@ export function useWorkspaces() {
     }
   }
 
-  async function activateWorkspace(id: string | null) {
+  async function activateWorkspace(id: string | null): Promise<boolean> {
+    const gen = ++wsNavGen
     if (id) {
       await apiActivateWorkspace(id)
     } else {
       await apiDeactivateWorkspace()
     }
+    if (gen !== wsNavGen) return false
     activeWorkspaceId.value = id
+    return true
+  }
+
+  function cancelPendingWorkspaceActivation() {
+    wsNavGen++
   }
 
   async function reorderWorkspaces(ids: string[]) {
@@ -135,6 +143,7 @@ export function useWorkspaces() {
     updateWorkspace,
     deleteWorkspace,
     activateWorkspace,
+    cancelPendingWorkspaceActivation,
     reorderWorkspaces,
     matchWorkspace,
     filterTabs,

@@ -13,7 +13,7 @@
     <button class="mc-trigger desktop-mc" @click="$emit('open-overview')">
       <LayoutDashboard :size="16" />
     </button>
-    <div id="tabs-list">
+    <div id="tabs-list" ref="tabsListRef">
       <div
         v-for="tab in tabs"
         :key="tab.paneId"
@@ -220,6 +220,28 @@ const emit = defineEmits<{
   rename: [paneId: string, title: string]
   'open-overview': []
 }>()
+
+const tabsListRef = ref<HTMLElement | null>(null)
+
+function findTabElement(paneId: string): HTMLElement | undefined {
+  return Array.from(tabsListRef.value?.querySelectorAll<HTMLElement>('.tab[data-pane-id]') ?? [])
+    .find((tab) => tab.dataset.paneId === paneId)
+}
+
+function hasTab(paneId: string): boolean {
+  return !!findTabElement(paneId)
+}
+
+function scrollTabIntoView(paneId: string): boolean {
+  const el = findTabElement(paneId)
+  if (!el) return false
+  if (!dragStarted || dragFromId === null) {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }
+  return true
+}
+
+defineExpose({ hasTab, scrollTabIntoView })
 
 const editingPaneId = ref<string | null>(null)
 const editValue = ref('')

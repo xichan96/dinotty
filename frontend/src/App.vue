@@ -6,6 +6,7 @@
   </div>
   <div v-else id="app-root">
     <TabBar
+      ref="tabBarRef"
       :tabs="visibleTabList"
       :active-pane-id="activePaneId"
       :indicators="tabIndicators"
@@ -157,7 +158,7 @@
       </div>
     </div>
 
-    <NotificationPanel :pane-labels="notificationPaneLabels" @goto-pane="activateTab" />
+    <NotificationPanel :pane-labels="notificationPaneLabels" @goto-pane="revealPane" />
 
     <StatusBar />
 
@@ -326,6 +327,7 @@ let scrollGestureTimer = 0
 
 // ── Template refs (purely UI concerns) ─────────────────────────
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
+const tabBarRef = ref<InstanceType<typeof TabBar> | null>(null)
 const previewPanelRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
 function setPreviewPanelRef(el: any) {
@@ -346,7 +348,7 @@ const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = us
 const { isMobile } = useIsMobile()
 
 // Workspace filtering
-const { workspaces, activeWorkspaceId, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace } = useWorkspaces()
+const { workspaces, activeWorkspaceId, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace, cancelPendingWorkspaceActivation } = useWorkspaces()
 
 const visibleTabList = computed(() => {
   const list = tabList.value.filter((info) => {
@@ -759,7 +761,36 @@ function onNewMenuAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' |
   }
 }
 
+function resolveTab(tabId: string): Tab | undefined {
+  // Try tab-level paneId first, then search by leaf paneId
+  let tab = tabs.value.find((t) => t.paneId === tabId)
+  if (!tab) {
+    tab = tabs.value.find((t) => {
+      if (t.type !== 'terminal') return false
+      return !!findLeaf(t.layout, tabId)
+    })
+  }
+  return tab
+}
+
+function resolveTabWorkspace(tab: Tab) {
+  return tab.type === 'terminal'
+    ? matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)
+    : tab.workspaceId ? workspaces.value.find((w) => w.id === tab.workspaceId) ?? null : null
+}
+
+function clearResolvedTabNotifications(tab: Tab) {
+  // Clear notifications for this tab on activation (terminal: tab-level + all leaves; plugin: tab-level)
+  const activatedPaneIds = tab.type === 'terminal'
+    ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
+    : [tab.paneId]
+  notif.clearForPaneIds(activatedPaneIds)
+}
+
+let revealNavGen = 0
+
 async function activateTab(tabId: string) {
+  const gen = ++revealNavGen
   // Try tab-level paneId first, then search by leaf paneId
   let tab = tabs.value.find((t) => t.paneId === tabId)
   if (!tab) {
@@ -775,7 +806,11 @@ async function activateTab(tabId: string) {
     ? matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)
     : tab.workspaceId ? workspaces.value.find((w) => w.id === tab.workspaceId) ?? null : null
   if (targetWs && targetWs.id !== activeWorkspaceId.value) {
-    await activateWorkspace(targetWs.id)
+    const committed = await activateWorkspace(targetWs.id)
+    if (!committed) return
+    if (gen !== revealNavGen) return
+  } else {
+    cancelPendingWorkspaceActivation()
   }
 
   activePaneId.value = tab.paneId
@@ -797,8 +832,80 @@ async function activateTab(tabId: string) {
   nextTick(() => focusActive())
 }
 
+async function revealPane(paneId: string): Promise<boolean> {
+  const gen = ++revealNavGen
+  let tab = resolveTab(paneId)
+  if (!tab) return false
+
+  const targetWs = resolveTabWorkspace(tab)
+  if (tab.type === 'terminal' && (targetWs?.id ?? null) !== activeWorkspaceId.value) {
+    try {
+      const committed = await activateWorkspace(targetWs?.id ?? null)
+      if (!committed) return false
+    } catch {
+      return false
+    }
+    if (gen !== revealNavGen) return false
+    tab = resolveTab(paneId)
+    if (!tab) return false
+  } else if (tab.type === 'plugin' && targetWs && targetWs.id !== activeWorkspaceId.value) {
+    try {
+      const committed = await activateWorkspace(targetWs.id)
+      if (!committed) return false
+    } catch {
+      return false
+    }
+    if (gen !== revealNavGen) return false
+    tab = resolveTab(paneId)
+    if (!tab) return false
+  } else {
+    cancelPendingWorkspaceActivation()
+  }
+
+  await nextTick()
+  if (gen !== revealNavGen) return false
+
+  let tabElementFound = false
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (tabBarRef.value?.hasTab(tab.paneId)) {
+      tabElementFound = true
+      break
+    }
+    if (attempt < 4) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      if (gen !== revealNavGen) return false
+    }
+  }
+  if (!tabElementFound) return false
+
+  if (gen !== revealNavGen) return false
+  tab = resolveTab(paneId)
+  if (!tab) return false
+
+  if (tab.type === 'terminal') {
+    try {
+      await apiActivatePane(tab.paneId, tab.activePaneId)
+    } catch {
+      return false
+    }
+    // The backend pointer may transiently lag a newer navigation, like rapid activateTab clicks.
+    if (gen !== revealNavGen) return false
+  }
+
+  tab = resolveTab(paneId)
+  if (!tab) return false
+
+  activePaneId.value = tab.paneId
+  clearResolvedTabNotifications(tab)
+  persist()
+  nextTick(() => focusActive())
+
+  tabBarRef.value?.scrollTabIntoView(tab.paneId)
+  return true
+}
+
 // Wire up toast notification direct-jump handler
-notif.setGoToPaneHandler((paneId: string) => activateTab(paneId))
+notif.setGoToPaneHandler((paneId: string) => revealPane(paneId))
 
 function reorderTab(fromId: string, toId: string) {
   session.reorderTab(fromId, toId)

@@ -55,8 +55,8 @@ fn validate_create_tab_request(req: &CreateTabRequest) -> Result<Option<PathBuf>
         if argv.is_empty() {
             return Err("argv must be a non-empty array".to_string());
         }
-        if argv.iter().any(String::is_empty) {
-            return Err("argv entries must be non-empty strings".to_string());
+        if argv[0].is_empty() {
+            return Err("argv[0] must be a non-empty string".to_string());
         }
         if argv.iter().any(|arg| arg.contains('\0')) {
             return Err("argv entries must not contain NUL bytes".to_string());
@@ -105,9 +105,10 @@ pub async fn create_tab(
         Some(cwd) => Some(cwd),
         None => settings.read().await.resolved_default_workspace_root(),
     };
+    let is_argv_command = req.argv.is_some();
 
     // Create PTY session
-    let (_session, shell_type) =
+    let (session, shell_type) =
         match pty::create_session(&manager, &pane_id, Some(&tab_id), None, cwd, req.argv) {
             Ok(x) => x,
             Err(e) => {
@@ -131,27 +132,46 @@ pub async fn create_tab(
         "zoomed": false,
     });
 
-    // Store tab
-    manager.insert_tab(
-        tab_id.clone(),
-        serde_json::json!({
-            "layout": layout,
-            "active_pane_id": pane_id,
-        }),
-    );
+    let publish_tab = || {
+        manager.insert_tab(
+            tab_id.clone(),
+            serde_json::json!({
+                "layout": layout,
+                "active_pane_id": pane_id,
+            }),
+        );
 
-    // Set as active tab
-    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(pane_id.clone());
+        *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(pane_id.clone());
 
-    // Broadcast to all sync clients
-    manager.broadcast_sync(&SyncMsg::TabCreated {
-        tab_id: tab_id.clone(),
-        pane_id: pane_id.clone(),
-        layout: Some(layout.clone()),
-        cwd: req.cwd.clone(),
-        connection_id: None,
-    });
+        manager.broadcast_sync(&SyncMsg::TabCreated {
+            tab_id: tab_id.clone(),
+            pane_id: pane_id.clone(),
+            layout: Some(layout.clone()),
+            cwd: req.cwd.clone(),
+            connection_id: None,
+        });
+    };
+
+    if is_argv_command {
+        // Fast commands can exit as soon as their PTY starts. Synchronize with
+        // exit cleanup so it either wins before we publish, or observes the
+        // registered tab and removes it after publication.
+        let exited = session.exited.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *exited {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    serde_json::json!({ "error": "command exited before tab creation completed" }),
+                ),
+            )
+                .into_response();
+        }
+        publish_tab();
+        drop(exited);
+    } else {
+        publish_tab();
+    }
 
     Json(serde_json::json!({
         "tab_id": tab_id,
@@ -175,15 +195,17 @@ mod tests {
     }
 
     #[test]
-    fn create_tab_argv_must_be_non_empty() {
+    fn create_tab_argv_requires_non_empty_program() {
         assert!(validate_create_tab_request(&request(vec![])).is_err());
-        assert!(validate_create_tab_request(&request(vec!["claude", ""])).is_err());
+        assert!(validate_create_tab_request(&request(vec![""])).is_err());
+        assert!(validate_create_tab_request(&request(vec!["claude", ""])).is_ok());
         assert!(validate_create_tab_request(&request(vec!["claude", "--resume"])).is_ok());
     }
 
     #[test]
     fn create_tab_argv_rejects_nul_bytes() {
         assert!(validate_create_tab_request(&request(vec!["claude\0", "--resume"])).is_err());
+        assert!(validate_create_tab_request(&request(vec!["claude", "--resume\0"])).is_err());
     }
 }
 

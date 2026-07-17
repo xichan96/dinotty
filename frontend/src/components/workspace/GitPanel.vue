@@ -2,9 +2,20 @@
   <section class="git-panel" :aria-label="t('gitPanel.sourceControl')">
     <header class="git-panel-header">
       <GitBranch :size="15" aria-hidden="true" />
-      <span data-testid="git-branch-name" class="git-panel-branch">
-        {{ branch || t('gitPanel.detachedHead') }}
-      </span>
+      <button
+        type="button"
+        data-testid="git-branch-button"
+        class="git-panel-branch-button"
+        :title="t('gitPanel.manageBranches')"
+        :aria-label="t('gitPanel.manageBranches')"
+        :disabled="!isGitRepo || busy"
+        @click="branchMenuVisible = !branchMenuVisible"
+      >
+        <span data-testid="git-branch-name" class="git-panel-branch">
+          {{ branch || t('gitPanel.detachedHead') }}
+        </span>
+        <ChevronDown :size="12" />
+      </button>
       <button
         type="button"
         class="git-icon-button"
@@ -16,6 +27,15 @@
         <RefreshCw :size="14" :class="{ spinning: loading }" />
       </button>
     </header>
+
+    <GitBranchMenu
+      :visible="branchMenuVisible"
+      :pane-id="paneId"
+      :current-branch="branch"
+      @close="branchMenuVisible = false"
+      @refresh="emit('refresh')"
+      @result="handleBranchResult"
+    />
 
     <div v-if="loading && !files.length" class="git-panel-state">
       {{ t('gitPanel.loading') }}
@@ -75,6 +95,24 @@
             <ArrowDownToLine v-else :size="14" />
           </button>
           <button
+            v-if="!upstream && primaryRemote && branch"
+            type="button"
+            data-testid="git-publish-button"
+            class="git-icon-button"
+            :title="t('gitPanel.publishBranch')"
+            :aria-label="t('gitPanel.publishBranch')"
+            :disabled="busy"
+            @click="publishBranch"
+          >
+            <LoaderCircle
+              v-if="activeAction === 'git-branch-publish'"
+              :size="14"
+              class="spinning"
+            />
+            <CloudUpload v-else :size="14" />
+          </button>
+          <button
+            v-else
             type="button"
             data-testid="git-push-button"
             class="git-icon-button"
@@ -253,8 +291,10 @@ import {
   ArrowUp,
   ArrowUpFromLine,
   Check,
+  ChevronDown,
   CircleCheck,
   CloudDownload,
+  CloudUpload,
   GitBranch,
   LoaderCircle,
   Minus,
@@ -272,6 +312,7 @@ import {
   type GitRemoteEntry,
 } from '../../utils/gitPanel'
 import ConfirmModal from '../ui/ConfirmModal.vue'
+import GitBranchMenu from './GitBranchMenu.vue'
 
 const props = defineProps<{
   paneId: string
@@ -298,6 +339,7 @@ const errorMessage = ref('')
 const statusMessage = ref('')
 const discardFile = ref<GitFileEntry | null>(null)
 const activeAction = ref('')
+const branchMenuVisible = ref(false)
 
 const primaryRemote = computed(function computePrimaryRemote() {
   // 步骤1：优先使用上游分支所属 remote，其次选择 origin，最后使用第一个 remote。
@@ -421,6 +463,27 @@ async function runRemoteAction(endpoint: 'git-fetch' | 'git-pull' | 'git-push'):
   await postGitAction(endpoint, {})
 }
 
+async function publishBranch(): Promise<void> {
+  // 步骤1：使用当前 remote 与本地分支发布并建立 upstream。
+  const remote = primaryRemote.value
+  if (!remote || !props.branch) return
+  await postGitAction('git-branch-publish', {
+    remote: remote.name,
+    branch: props.branch,
+  })
+}
+
+function handleBranchResult(result: { ok: boolean; message: string }): void {
+  // 步骤1：把分支弹层的操作结果显示在主 Git 面板反馈区。
+  if (result.ok) {
+    errorMessage.value = ''
+    statusMessage.value = result.message
+  } else {
+    statusMessage.value = ''
+    errorMessage.value = result.message
+  }
+}
+
 async function stagePaths(paths: string[]): Promise<void> {
   // 步骤1：暂存指定文件列表。
   await postGitAction('git-stage', { paths })
@@ -486,6 +549,7 @@ async function commitChanges(): Promise<void> {
 
 <style scoped>
 .git-panel {
+  position: relative;
   height: 100%;
   min-height: 0;
   display: flex;
@@ -493,6 +557,33 @@ async function commitChanges(): Promise<void> {
   overflow: auto;
   color: var(--fg);
   background: var(--tab-bg);
+}
+
+.git-panel-branch-button {
+  min-width: 0;
+  flex: 1;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 3px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.git-panel-branch-button:hover:not(:disabled),
+.git-panel-branch-button:focus-visible {
+  background: var(--bg-hover);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.git-panel-branch-button:disabled {
+  cursor: default;
 }
 
 .git-panel-header,

@@ -837,6 +837,27 @@ async fn main() {
             .route("/api/workspace/git-fetch", post(workspace::workspace_git_fetch))
             .route("/api/workspace/git-pull", post(workspace::workspace_git_pull))
             .route("/api/workspace/git-push", post(workspace::workspace_git_push))
+            .route("/api/workspace/git-branches", get(workspace::workspace_git_branches))
+            .route(
+                "/api/workspace/git-branch-switch",
+                post(workspace::workspace_git_branch_switch),
+            )
+            .route(
+                "/api/workspace/git-branch-create",
+                post(workspace::workspace_git_branch_create),
+            )
+            .route(
+                "/api/workspace/git-branch-delete",
+                post(workspace::workspace_git_branch_delete),
+            )
+            .route(
+                "/api/workspace/git-branch-rename",
+                post(workspace::workspace_git_branch_rename),
+            )
+            .route(
+                "/api/workspace/git-branch-publish",
+                post(workspace::workspace_git_branch_publish),
+            )
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))

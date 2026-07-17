@@ -25,12 +25,15 @@ mod remote;
 mod syntax;
 
 pub use git::{
+    workspace_git_branch_create, workspace_git_branch_delete, workspace_git_branch_publish,
+    workspace_git_branch_rename, workspace_git_branch_switch, workspace_git_branches,
     workspace_git_commit, workspace_git_diff, workspace_git_discard, workspace_git_fetch,
     workspace_git_pull, workspace_git_push, workspace_git_revert_lines, workspace_git_stage,
     workspace_git_stage_lines, workspace_git_status, workspace_git_unified_diff,
-    workspace_git_unstage, GitChange, GitCommitBody, GitDiffResponse, GitDiscardBody,
-    GitFileStatus, GitPathsBody, GitRemote, GitRevertBody, GitStageBody, GitStatusResponse,
-    GitUnifiedDiffQuery,
+    workspace_git_unstage, GitBranchInfo, GitBranchNameBody, GitBranchPublishBody,
+    GitBranchRenameBody, GitBranchesResponse, GitBranchSwitchBody, GitChange, GitCommitBody,
+    GitDiffResponse, GitDiscardBody, GitFileStatus, GitPathsBody, GitRemote, GitRevertBody,
+    GitStageBody, GitStatusResponse, GitUnifiedDiffQuery,
 };
 pub use syntax::{workspace_syntax_check, SyntaxCheckBody, SyntaxCheckResponse, SyntaxDiagnostic};
 

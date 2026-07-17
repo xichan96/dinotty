@@ -54,6 +54,19 @@ pub struct GitRemote {
     pub push_url: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct GitBranchInfo {
+    pub name: String,
+    pub upstream: Option<String>,
+    pub current: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitBranchesResponse {
+    pub local: Vec<GitBranchInfo>,
+    pub remote: Vec<GitBranchInfo>,
+}
+
 #[derive(Serialize)]
 pub struct GitStatusResponse {
     pub is_git_repo: bool,
@@ -230,6 +243,31 @@ fn parse_remote_output(output: &str) -> Vec<GitRemote> {
         }
     }
     remotes
+}
+
+fn parse_branch_output(output: &str) -> GitBranchesResponse {
+    // 步骤1：按 NUL 分隔字段读取完整引用、短名称、上游和当前分支标记。
+    let mut local = Vec::new();
+    let mut remote = Vec::new();
+    for line in output.lines() {
+        let columns: Vec<&str> = line.split('\0').collect();
+        if columns.len() < 4 {
+            continue;
+        }
+        let full_name = columns[0];
+        let name = columns[1];
+        let upstream = if columns[2].is_empty() { None } else { Some(columns[2].to_string()) };
+        let current = columns[3].trim() == "*";
+        let branch = GitBranchInfo { name: name.to_string(), upstream, current };
+
+        // 步骤2：本地与远程引用分组，并忽略 origin/HEAD 之类的指针引用。
+        if full_name.starts_with("refs/heads/") {
+            local.push(branch);
+        } else if full_name.starts_with("refs/remotes/") && !full_name.ends_with("/HEAD") {
+            remote.push(branch);
+        }
+    }
+    GitBranchesResponse { local, remote }
 }
 
 pub async fn workspace_git_status(
@@ -568,6 +606,30 @@ pub struct GitCommitBody {
 }
 
 #[derive(Deserialize)]
+pub struct GitBranchSwitchBody {
+    pub name: String,
+    #[serde(default)]
+    pub remote: bool,
+}
+
+#[derive(Deserialize)]
+pub struct GitBranchNameBody {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitBranchRenameBody {
+    pub old_name: String,
+    pub new_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitBranchPublishBody {
+    pub remote: String,
+    pub branch: String,
+}
+
+#[derive(Deserialize)]
 pub struct GitUnifiedDiffQuery {
     pub pane_id: String,
     pub path: String,
@@ -758,6 +820,99 @@ async fn run_git_remote_command(
     }
 }
 
+fn validate_git_name(value: &str, label: &str) -> Result<String, Response> {
+    // 步骤1：拒绝空名称和控制字符，Git 会继续校验具体引用命名规则。
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return Err(json_err(StatusCode::BAD_REQUEST, &format!("{label} required")));
+    }
+    Ok(value.to_string())
+}
+
+pub async fn workspace_git_branches(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取本地与远程引用，使用 NUL 分隔避免分支名称解析歧义。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let arguments = vec![
+        "for-each-ref".to_string(),
+        "--sort=refname".to_string(),
+        "--format=%(refname)%00%(refname:short)%00%(upstream:short)%00%(HEAD)".to_string(),
+        "refs/heads".to_string(),
+        "refs/remotes".to_string(),
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Json(parse_branch_output(&stdout)).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_branch_switch(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitBranchSwitchBody>,
+) -> Response {
+    // 步骤1：校验目标引用，并区分本地切换与远程跟踪分支创建。
+    let name = try_res!(validate_git_name(&body.name, "branch"));
+    let arguments = if body.remote {
+        vec!["switch".to_string(), "--track".to_string(), name]
+    } else {
+        vec!["switch".to_string(), name]
+    };
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_branch_create(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitBranchNameBody>,
+) -> Response {
+    // 步骤1：创建新分支并立即切换，保持面板与工作区分支一致。
+    let name = try_res!(validate_git_name(&body.name, "branch"));
+    let arguments = vec!["switch".to_string(), "-c".to_string(), name];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_branch_delete(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitBranchNameBody>,
+) -> Response {
+    // 步骤1：只删除已合并的本地分支，未合并分支由 Git 拒绝并返回明确提示。
+    let name = try_res!(validate_git_name(&body.name, "branch"));
+    let arguments = vec!["branch".to_string(), "-d".to_string(), name];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_branch_rename(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitBranchRenameBody>,
+) -> Response {
+    // 步骤1：同时校验旧名称与新名称，再交给 Git 原子重命名。
+    let old_name = try_res!(validate_git_name(&body.old_name, "old branch"));
+    let new_name = try_res!(validate_git_name(&body.new_name, "new branch"));
+    let arguments = vec!["branch".to_string(), "-m".to_string(), old_name, new_name];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_branch_publish(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitBranchPublishBody>,
+) -> Response {
+    // 步骤1：推送当前本地分支并建立 upstream，后续可直接 Pull 和 Push。
+    let remote = try_res!(validate_git_name(&body.remote, "remote"));
+    let branch = try_res!(validate_git_name(&body.branch, "branch"));
+    let arguments = vec!["push".to_string(), "-u".to_string(), remote, branch];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
 pub async fn workspace_git_fetch(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
@@ -846,7 +1001,10 @@ pub async fn workspace_git_unified_diff(
 
 #[cfg(test)]
 mod tests {
-    use super::{git_command, parse_remote_output, parse_status_output, unstage_git_paths};
+    use super::{
+        git_command, parse_branch_output, parse_remote_output, parse_status_output,
+        unstage_git_paths,
+    };
     use std::path::Path;
 
     fn run_test_git(root: &Path, arguments: &[&str]) {
@@ -913,6 +1071,21 @@ mod tests {
         assert_eq!(remotes[0].fetch_url, "https://example.com/team/project.git");
         assert_eq!(remotes[0].push_url, "git@example.com:team/project.git");
         assert_eq!(remotes[1].name, "backup");
+    }
+
+    #[test]
+    fn parses_local_and_remote_branches() {
+        // 步骤1：准备本地分支、当前分支、远程分支和远程 HEAD 引用。
+        let output = "refs/heads/feature\0feature\0origin/feature\0 \nrefs/heads/main\0main\0origin/main\0*\nrefs/remotes/origin/HEAD\0origin/HEAD\0\0 \nrefs/remotes/origin/main\0origin/main\0\0 \n";
+
+        // 步骤2：确认本地与远程分组正确，并忽略 remote HEAD 占位引用。
+        let branches = parse_branch_output(output);
+        assert_eq!(branches.local.len(), 2);
+        assert_eq!(branches.remote.len(), 1);
+        assert_eq!(branches.local[0].name, "feature");
+        assert_eq!(branches.local[0].upstream.as_deref(), Some("origin/feature"));
+        assert!(branches.local[1].current);
+        assert_eq!(branches.remote[0].name, "origin/main");
     }
 
     #[test]

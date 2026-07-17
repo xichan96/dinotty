@@ -158,6 +158,40 @@ describe('GitPanel', function gitPanelSuite() {
     )
   })
 
+  it('publishes a branch when no upstream is configured', async function publishesBranch() {
+    // 步骤1：挂载有 remote 但尚未设置 upstream 的当前分支。
+    const wrapper = mount(GitPanel, {
+      props: {
+        paneId: 'pane-1',
+        branch: 'feature/new-panel',
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        remotes: [
+          {
+            name: 'origin',
+            fetchUrl: 'https://example.com/team/project.git',
+            pushUrl: 'https://example.com/team/project.git',
+          },
+        ],
+        isGitRepo: true,
+        loading: false,
+        files,
+      },
+    })
+
+    // 步骤2：发布按钮应推送当前分支并建立 origin upstream。
+    await wrapper.get('[data-testid="git-publish-button"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-branch-publish?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ remote: 'origin', branch: 'feature/new-panel' }),
+      })
+    )
+  })
+
   it('stages and unstages individual files through workspace Git APIs', async function changesStage() {
     // 步骤1：暂存一个工作区文件并核对请求内容。
     const wrapper = mountGitPanel()

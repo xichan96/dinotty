@@ -161,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   Cherry,
   ChevronDown,
@@ -174,6 +174,7 @@ import {
 } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
+import { appendGitRepository } from '../../utils/gitPanel'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 
 interface GitTagEntry {
@@ -185,6 +186,7 @@ interface GitTagEntry {
 
 const props = defineProps<{
   paneId: string
+  repository?: string
 }>()
 
 const emit = defineEmits<{
@@ -227,6 +229,7 @@ async function getJson(endpoint: string): Promise<Record<string, unknown>> {
   // 步骤1：读取当前仓库的高级操作辅助数据。
   await getApiBase()
   const query = new URLSearchParams({ pane_id: props.paneId })
+  appendGitRepository(query, props.repository)
   const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${query}`))
   if (!response.ok) return {}
   return response.json().catch(function emptyAdvancedResult() {
@@ -284,6 +287,7 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${query}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -371,10 +375,16 @@ async function deleteTag(): Promise<void> {
   await loadTags()
 }
 
-onMounted(function loadAdvancedData() {
-  // 步骤1：组件挂载后并行读取分支、标签和进行中操作。
-  void refreshAuxiliaryData()
-})
+watch(
+  function watchAdvancedRepository() {
+    return [props.paneId, props.repository]
+  },
+  function loadAdvancedData() {
+    // 步骤1：组件挂载或仓库切换后并行读取分支、标签和进行中操作。
+    void refreshAuxiliaryData()
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

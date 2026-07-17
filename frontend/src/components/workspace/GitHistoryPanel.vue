@@ -96,6 +96,7 @@ import { computed, ref, watch } from 'vue'
 import { GitCompareArrows, Search, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
+import { appendGitRepository } from '../../utils/gitPanel'
 import {
   mapGitCommitEntry,
   type GitCommitEntry,
@@ -109,6 +110,7 @@ interface BranchEntry {
 const props = defineProps<{
   paneId: string
   currentBranch: string | null
+  repository?: string
 }>()
 
 const emit = defineEmits<{
@@ -154,6 +156,7 @@ async function loadBranches(): Promise<void> {
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/git-branches?${query}`))
     const result = await response.json().catch(function emptyBranchResult() {
       return {}
@@ -198,6 +201,7 @@ async function loadHistory(append: boolean): Promise<void> {
       skip: String(skip),
       limit: String(pageSize),
     })
+    appendGitRepository(query, props.repository)
     if (activePath.value) query.set('path', activePath.value)
     const response = await authFetch(apiUrl(`/api/workspace/git-log?${query}`))
     const result = await response.json().catch(function emptyHistoryResult() {
@@ -279,7 +283,7 @@ function formatDate(value: string): string {
 
 watch(
   function watchHistoryRepository() {
-    return [props.paneId, props.currentBranch]
+    return [props.paneId, props.currentBranch, props.repository]
   },
   function reloadHistoryRepository() {
     void loadBranches()

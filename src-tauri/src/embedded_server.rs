@@ -594,6 +594,7 @@ pub fn run_server(
             .route("/api/workspace/rename", post(workspace::workspace_rename))
             .route("/api/workspace/move", post(workspace::workspace_move))
             .route("/api/workspace/git-status", get(workspace::workspace_git_status))
+            .route("/api/workspace/git-repositories", get(workspace::workspace_git_repositories))
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
             .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
             .route("/api/workspace/git-stage", post(workspace::workspace_git_stage))
@@ -808,6 +809,7 @@ mod tests {
         let production_source = server_source.split("#[cfg(test)]").next().unwrap_or(server_source);
         let required_routes = [
             "/api/workspace/git-unified-diff",
+            "/api/workspace/git-repositories",
             "/api/workspace/git-stage",
             "/api/workspace/git-stage-all",
             "/api/workspace/git-unstage",

@@ -94,10 +94,13 @@
             :files="gitFiles"
             :total-files="gitTotalFiles"
             :status-truncated="gitStatusTruncated"
+            :repository="gitRepository"
+            :repositories="gitRepositories"
             :selected-diff="gitDiffSelection"
             @refresh="refreshGitPanel"
             @view-diff="showGitDiff"
             @view-history="showGitHistory"
+            @select-repository="selectGitRepository"
           />
         </div>
       </div>
@@ -120,6 +123,7 @@
           v-if="gitHistorySelection"
           :pane-id="paneId"
           :selection="gitHistorySelection"
+          :repository="gitRepository"
           @close="gitHistorySelection = null"
         />
         <GitDiffViewer
@@ -129,6 +133,7 @@
           :file-path="gitDiffSelection.filePath"
           :staged="gitDiffSelection.staged"
           :untracked="gitDiffSelection.untracked"
+          :repository="gitRepository"
           @close="gitDiffSelection = null"
           @open-source="openGitSource"
         />
@@ -306,10 +311,13 @@
               :files="gitFiles"
               :total-files="gitTotalFiles"
               :status-truncated="gitStatusTruncated"
+              :repository="gitRepository"
+              :repositories="gitRepositories"
               :selected-diff="gitDiffSelection"
               @refresh="refreshGitPanel"
               @view-diff="showGitDiff"
               @view-history="showGitHistory"
+              @select-repository="selectGitRepository"
             />
           </div>
         </div>
@@ -332,6 +340,7 @@
             v-if="gitHistorySelection"
             :pane-id="paneId"
             :selection="gitHistorySelection"
+            :repository="gitRepository"
             @close="gitHistorySelection = null"
           />
           <GitDiffViewer
@@ -341,6 +350,7 @@
             :file-path="gitDiffSelection.filePath"
             :staged="gitDiffSelection.staged"
             :untracked="gitDiffSelection.untracked"
+            :repository="gitRepository"
             @close="gitDiffSelection = null"
             @open-source="openGitSource"
           />
@@ -498,11 +508,13 @@ import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
 import { Files, GitBranch, Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import {
+  appendGitRepository,
   mapGitFileEntry,
   mapGitRemoteEntry,
   type GitDiffSelection,
   type GitFileEntry,
   type GitRemoteEntry,
+  type GitRepositoryEntry,
 } from '../../utils/gitPanel'
 import type { GitHistorySelection } from '../../utils/gitHistory'
 
@@ -529,6 +541,9 @@ const gitStatusMap = ref<Record<string, string>>({})
 const gitFiles = ref<GitFileEntry[]>([])
 const gitTotalFiles = ref(0)
 const gitStatusTruncated = ref(false)
+const gitRepositories = ref<GitRepositoryEntry[]>([])
+const gitRepository = ref('')
+const gitRepositoriesLoaded = ref(false)
 const gitBranch = ref<string | null>(null)
 const gitUpstream = ref<string | null>(null)
 const gitAhead = ref(0)
@@ -764,7 +779,8 @@ function showGitHistory(selection: GitHistorySelection): void {
 async function openGitSource(path: string): Promise<void> {
   // 步骤1：关闭差异视图并在当前编辑窗格打开源文件。
   gitDiffSelection.value = null
-  await onSelectFile(path)
+  const workspacePath = gitRepository.value ? `${gitRepository.value}/${path}` : path
+  await onSelectFile(workspacePath)
 }
 
 async function refreshGitPanel(): Promise<void> {
@@ -867,12 +883,67 @@ async function fetchList(rel: string): Promise<DirEntry[]> {
   return data.entries || []
 }
 
+async function fetchGitRepositories(): Promise<void> {
+  // 步骤1：读取文件导航根目录下可用的 Git 仓库。
+  try {
+    await getApiBase()
+    const query = new URLSearchParams({ pane_id: props.paneId })
+    const response = await authFetch(apiUrl(`/api/workspace/git-repositories?${query}`))
+    if (!response.ok) {
+      gitRepositories.value = []
+      gitRepository.value = ''
+      return
+    }
+    const data = await response.json()
+    const nextRepositories: GitRepositoryEntry[] = []
+    if (Array.isArray(data.repositories)) {
+      for (const rawRepository of data.repositories) {
+        if (!rawRepository || typeof rawRepository !== 'object') continue
+        const repository = rawRepository as Record<string, unknown>
+        const path = String(repository.path || '')
+        const name = String(repository.name || path || t('gitPanel.repository'))
+        nextRepositories.push({ path, name })
+      }
+    }
+    gitRepositories.value = nextRepositories
+
+    // 步骤2：保留仍有效的当前选择，否则默认选择列表第一项。
+    let selectionIsValid = false
+    for (const repository of nextRepositories) {
+      if (repository.path === gitRepository.value) {
+        selectionIsValid = true
+        break
+      }
+    }
+    if (!selectionIsValid) {
+      gitRepository.value = nextRepositories[0]?.path || ''
+    }
+  } catch {
+    gitRepositories.value = []
+    gitRepository.value = ''
+  } finally {
+    gitRepositoriesLoaded.value = true
+  }
+}
+
+function selectGitRepository(repository: string): void {
+  // 步骤1：切换仓库时关闭旧仓库的差异和历史，再读取新仓库状态。
+  gitRepository.value = repository
+  gitDiffSelection.value = null
+  gitHistorySelection.value = null
+  void fetchGitStatus()
+}
+
 async function fetchGitStatus(): Promise<void> {
   // 步骤1：标记加载状态并读取当前终端工作区的 Git 状态。
   gitStatusLoading.value = true
   try {
     await getApiBase()
+    if (!gitRepositoriesLoaded.value) {
+      await fetchGitRepositories()
+    }
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, gitRepository.value)
     const response = await authFetch(apiUrl(`/api/workspace/git-status?${query}`))
     if (!response.ok) {
       isGitRepo.value = false
@@ -912,7 +983,10 @@ async function fetchGitStatus(): Promise<void> {
         const file = mapGitFileEntry(rawFile)
         if (!file.path) continue
         nextFiles.push(file)
-        nextStatusMap[file.path] = file.status
+        const workspacePath = gitRepository.value
+          ? `${gitRepository.value}/${file.path}`
+          : file.path
+        nextStatusMap[workspacePath] = file.status
       }
     }
     gitFiles.value = nextFiles
@@ -1134,6 +1208,10 @@ async function expandFirstLevelDirs() {
 }
 
 async function boot() {
+  // 步骤1：切换 pane 后重新发现该文件导航根目录下的仓库。
+  gitRepositoriesLoaded.value = false
+  gitRepositories.value = []
+  gitRepository.value = ''
   selectedRel.value = null
   selectedIsDir.value = false
   meta.value = null

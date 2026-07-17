@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref, watch } from 'vue'
 import {
   Archive,
   ArchiveRestore,
@@ -113,6 +113,7 @@ import {
 } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
+import { appendGitRepository } from '../../utils/gitPanel'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 
 interface GitStashEntry {
@@ -124,6 +125,7 @@ interface GitStashEntry {
 
 const props = defineProps<{
   paneId: string
+  repository?: string
 }>()
 
 const emit = defineEmits<{
@@ -147,6 +149,7 @@ async function loadStashes(): Promise<void> {
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/git-stashes?${query}`))
     const result = await response.json().catch(function emptyStashResult() {
       return {}
@@ -183,6 +186,7 @@ async function postStashAction(endpoint: string, body: Record<string, unknown>):
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${query}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -239,10 +243,16 @@ function formatDate(value: string): string {
   return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 }
 
-onMounted(function loadInitialStashes() {
-  // 步骤1：组件显示后立即读取 stash 列表。
-  void loadStashes()
-})
+watch(
+  function watchStashRepository() {
+    return [props.paneId, props.repository]
+  },
+  function loadSelectedRepositoryStashes() {
+    // 步骤1：组件显示或仓库切换后读取对应 stash 列表。
+    void loadStashes()
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>

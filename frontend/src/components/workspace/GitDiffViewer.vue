@@ -68,7 +68,7 @@ import { computed, ref, watch } from 'vue'
 import { FileCode2, Pilcrow, RefreshCw, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
-import { getGitFileName } from '../../utils/gitPanel'
+import { appendGitRepository, getGitFileName } from '../../utils/gitPanel'
 import GitPatchContent from './GitPatchContent.vue'
 
 const props = defineProps<{
@@ -76,6 +76,7 @@ const props = defineProps<{
   filePath: string
   staged: boolean
   untracked: boolean
+  repository?: string
 }>()
 
 const emit = defineEmits<{
@@ -108,6 +109,7 @@ async function loadDiff(): Promise<void> {
       untracked: String(props.untracked),
       ignore_whitespace: String(ignoreWhitespace.value),
     })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/git-unified-diff?${query}`))
     const result = await response.json().catch(function emptyDiffResult() {
       return {}
@@ -128,7 +130,14 @@ async function loadDiff(): Promise<void> {
 
 watch(
   function watchDiffTarget() {
-    return [props.paneId, props.filePath, props.staged, props.untracked, ignoreWhitespace.value]
+    return [
+      props.paneId,
+      props.repository,
+      props.filePath,
+      props.staged,
+      props.untracked,
+      ignoreWhitespace.value,
+    ]
   },
   function reloadDiffForTarget() {
     void loadDiff()

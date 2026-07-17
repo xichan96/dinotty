@@ -19,6 +19,8 @@ use super::{
 
 const MAX_GIT_DIFF_OUTPUT: usize = 2 * 1024 * 1024;
 const MAX_GIT_STATUS_FILES: usize = 2000;
+const MAX_DISCOVERED_REPOSITORIES: usize = 100;
+const MAX_REPOSITORY_SCAN_DEPTH: usize = 4;
 
 macro_rules! try_res {
     ($e:expr) => {
@@ -123,6 +125,118 @@ pub struct GitTagsResponse {
 #[derive(Debug, Serialize)]
 pub struct GitOperationStateResponse {
     pub operation: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitRepositoryEntry {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitRepositoriesResponse {
+    pub repositories: Vec<GitRepositoryEntry>,
+}
+
+fn discover_git_repositories(root: &Path) -> Vec<GitRepositoryEntry> {
+    // 步骤1：使用显式栈限制扫描深度，并跳过常见的大型生成目录。
+    let skipped_directories = [".git", "node_modules", "target", ".venv", "dist", "build"];
+    let mut repositories = Vec::new();
+    let mut pending_directories = vec![(root.to_path_buf(), 0usize)];
+    while let Some((directory, depth)) = pending_directories.pop() {
+        if repositories.len() >= MAX_DISCOVERED_REPOSITORIES {
+            break;
+        }
+        if directory.join(".git").exists() {
+            let relative_path = directory.strip_prefix(root).unwrap_or(Path::new(""));
+            let path = relative_path.to_string_lossy().replace('\\', "/");
+            let name = if path.is_empty() {
+                root.file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("repository")
+                    .to_string()
+            } else {
+                directory.file_name().and_then(|value| value.to_str()).unwrap_or(&path).to_string()
+            };
+            repositories.push(GitRepositoryEntry { path, name });
+            if depth > 0 {
+                continue;
+            }
+        }
+        if depth >= MAX_REPOSITORY_SCAN_DEPTH {
+            continue;
+        }
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry_result in entries {
+            let entry = match entry_result {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if skipped_directories.contains(&name.as_str()) {
+                continue;
+            }
+            pending_directories.push((entry.path(), depth + 1));
+        }
+    }
+
+    // 步骤2：按仓库相对路径排序，根仓库稳定排在第一项。
+    repositories.sort_by(compare_repository_paths);
+    repositories
+}
+
+fn compare_repository_paths(
+    first: &GitRepositoryEntry,
+    second: &GitRepositoryEntry,
+) -> std::cmp::Ordering {
+    // 步骤1：使用相对路径字典序生成稳定列表。
+    first.path.cmp(&second.path)
+}
+
+fn get_git_root(
+    manager: &SessionManager,
+    pane_id: &str,
+    repository: Option<&str>,
+) -> Result<PathBuf, Response> {
+    // 步骤1：空仓库路径继续使用当前文件导航根目录。
+    let workspace_root = get_root(manager, pane_id)?;
+    let repository = repository.unwrap_or("").trim();
+    if repository.is_empty() {
+        return Ok(workspace_root);
+    }
+
+    // 步骤2：验证选择的仓库位于导航根目录内，并实际包含 .git。
+    let repository_root = normalize_join(&workspace_root, repository)?;
+    if repository_root == workspace_root || !repository_root.starts_with(&workspace_root) {
+        return Err(json_err(StatusCode::FORBIDDEN, "repository outside workspace"));
+    }
+    if !repository_root.is_dir() || !repository_root.join(".git").exists() {
+        return Err(json_err(StatusCode::BAD_REQUEST, "invalid repository"));
+    }
+    Ok(repository_root)
+}
+
+pub async fn workspace_git_repositories(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：在阻塞线程中扫描当前文件导航根目录下的仓库。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let result = tokio::task::spawn_blocking(move || discover_git_repositories(&root)).await;
+    match result {
+        Ok(repositories) => Json(GitRepositoriesResponse { repositories }).into_response(),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    }
 }
 
 #[derive(Serialize)]
@@ -412,7 +526,7 @@ pub async fn workspace_git_status(
     State(manager): State<Arc<SessionManager>>,
     Query(q): Query<PaneQuery>,
 ) -> impl IntoResponse {
-    let root = try_res!(get_root(&manager, &q.pane_id));
+    let root = try_res!(get_git_root(&manager, &q.pane_id, q.repository.as_deref()));
     let outputs = match tokio::task::spawn_blocking(move || {
         let status_output = git_command()
             .args([
@@ -837,6 +951,8 @@ pub struct GitBranchPublishBody {
 #[derive(Deserialize)]
 pub struct GitUnifiedDiffQuery {
     pub pane_id: String,
+    #[serde(default)]
+    pub repository: Option<String>,
     pub path: String,
     #[serde(default)]
     pub staged: bool,
@@ -854,6 +970,8 @@ fn default_git_log_limit() -> usize {
 pub struct GitLogQuery {
     pub pane_id: String,
     #[serde(default)]
+    pub repository: Option<String>,
+    #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
     pub skip: usize,
@@ -864,6 +982,8 @@ pub struct GitLogQuery {
 #[derive(Deserialize)]
 pub struct GitCommitDiffQuery {
     pub pane_id: String,
+    #[serde(default)]
+    pub repository: Option<String>,
     pub commit: String,
     #[serde(default)]
     pub path: Option<String>,
@@ -872,6 +992,8 @@ pub struct GitCommitDiffQuery {
 #[derive(Deserialize)]
 pub struct GitCompareQuery {
     pub pane_id: String,
+    #[serde(default)]
+    pub repository: Option<String>,
     pub base: String,
     pub target: String,
 }
@@ -957,7 +1079,7 @@ pub async fn workspace_git_stage(
     Json(body): Json<GitPathsBody>,
 ) -> Response {
     // 步骤1：验证文件路径并构造只作用于这些文件的 git add 命令。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let paths = try_res!(validate_git_paths(&root, &body.paths));
     let mut arguments = vec!["add".to_string(), "--".to_string()];
     for path in paths {
@@ -977,7 +1099,7 @@ pub async fn workspace_git_unstage(
     Json(body): Json<GitPathsBody>,
 ) -> Response {
     // 步骤1：验证需要取消暂存的文件路径。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let paths = try_res!(validate_git_paths(&root, &body.paths));
 
     // 步骤2：执行取消暂存并返回操作结果。
@@ -992,7 +1114,7 @@ pub async fn workspace_git_stage_all(
     Query(query): Query<PaneQuery>,
 ) -> Response {
     // 步骤1：用户选择“全部暂存”时由 Git 直接处理整个当前仓库。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let arguments = vec!["add".to_string(), "--all".to_string()];
     match run_git_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
@@ -1005,7 +1127,7 @@ pub async fn workspace_git_unstage_all(
     Query(query): Query<PaneQuery>,
 ) -> Response {
     // 步骤1：判断仓库是否已有 HEAD，分别恢复完整索引或清空新仓库索引。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let head_arguments = vec!["rev-parse".to_string(), "--verify".to_string(), "HEAD".to_string()];
     let head_output = match run_git_output(root.clone(), head_arguments).await {
         Ok(output) => output,
@@ -1034,7 +1156,7 @@ pub async fn workspace_git_discard(
     Json(body): Json<GitDiscardBody>,
 ) -> Response {
     // 步骤1：验证单个目标路径，防止丢弃操作越出工作区。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let paths = try_res!(validate_git_paths(&root, &[body.path]));
     let path = paths[0].clone();
 
@@ -1070,7 +1192,7 @@ pub async fn workspace_git_commit(
     if message.is_empty() {
         return json_err(StatusCode::BAD_REQUEST, "commit message required");
     }
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
 
     // 步骤2：把提交选项和说明作为独立参数传递，避免经过 shell 解释。
     let arguments = build_commit_arguments(message, body.amend, body.signoff);
@@ -1114,7 +1236,7 @@ pub async fn workspace_git_stashes(
     Query(query): Query<PaneQuery>,
 ) -> Response {
     // 步骤1：使用稳定分隔符读取当前仓库全部 stash。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let arguments = vec![
         "stash".to_string(),
         "list".to_string(),
@@ -1137,7 +1259,7 @@ pub async fn workspace_git_stash_save(
     Json(body): Json<GitStashSaveBody>,
 ) -> Response {
     // 步骤1：构造 stash push，可选包含未跟踪文件和用户说明。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let mut arguments = vec!["stash".to_string(), "push".to_string()];
     if body.include_untracked {
         arguments.push("--include-untracked".to_string());
@@ -1162,7 +1284,7 @@ async fn run_stash_reference_action(
     reference: &str,
 ) -> Response {
     // 步骤1：验证仓库和 stash 引用，再执行单一 stash 操作。
-    let root = match get_root(manager, &query.pane_id) {
+    let root = match get_git_root(manager, &query.pane_id, query.repository.as_deref()) {
         Ok(root) => root,
         Err(response) => return response,
     };
@@ -1210,7 +1332,7 @@ pub async fn workspace_git_conflict_resolve(
     Json(body): Json<GitConflictResolveBody>,
 ) -> Response {
     // 步骤1：验证冲突文件路径和界面允许的三种解决方式。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let paths = try_res!(validate_git_paths(&root, &[body.path]));
     let path = paths[0].clone();
     let resolution = body.resolution.as_str();
@@ -1241,7 +1363,7 @@ async fn run_git_action(
     arguments: Vec<String>,
 ) -> Response {
     // 步骤1：在当前仓库执行已完成参数校验的高级 Git 操作。
-    let root = match get_root(manager, &query.pane_id) {
+    let root = match get_git_root(manager, &query.pane_id, query.repository.as_deref()) {
         Ok(root) => root,
         Err(response) => return response,
     };
@@ -1318,7 +1440,7 @@ pub async fn workspace_git_operation_state(
     Query(query): Query<PaneQuery>,
 ) -> Response {
     // 步骤1：读取真实 Git 目录，兼容普通仓库和 worktree。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let git_dir_arguments = vec!["rev-parse".to_string(), "--git-dir".to_string()];
     let output = match run_git_output(root.clone(), git_dir_arguments).await {
         Ok(output) if output.status.success() => output,
@@ -1369,7 +1491,7 @@ pub async fn workspace_git_tags(
     Query(query): Query<PaneQuery>,
 ) -> Response {
     // 步骤1：按创建时间倒序读取本地标签的稳定字段。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let arguments = vec![
         "for-each-ref".to_string(),
         "--sort=-creatordate".to_string(),
@@ -1431,7 +1553,7 @@ async fn run_git_remote_command(
     arguments: Vec<String>,
 ) -> Response {
     // 步骤1：读取当前 pane 的真实工作目录，确保远程操作作用于正在查看的仓库。
-    let root = match get_root(manager, &query.pane_id) {
+    let root = match get_git_root(manager, &query.pane_id, query.repository.as_deref()) {
         Ok(root) => root,
         Err(response) => return response,
     };
@@ -1457,7 +1579,7 @@ pub async fn workspace_git_branches(
     Query(query): Query<PaneQuery>,
 ) -> Response {
     // 步骤1：读取本地与远程引用，使用 NUL 分隔避免分支名称解析歧义。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let arguments = vec![
         "for-each-ref".to_string(),
         "--sort=refname".to_string(),
@@ -1551,7 +1673,7 @@ pub async fn workspace_git_log(
     Query(query): Query<GitLogQuery>,
 ) -> Response {
     // 步骤1：限制单页数量，并构造字段稳定的 Git Log 格式。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let limit = query.limit.clamp(1, 200);
     let requested_count = limit + 1;
     let mut arguments = vec![
@@ -1588,7 +1710,7 @@ pub async fn workspace_git_commit_diff(
     Query(query): Query<GitCommitDiffQuery>,
 ) -> Response {
     // 步骤1：校验提交 ID，并生成包含提交元数据和文件 Patch 的参数。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let commit = try_res!(validate_commit_hash(&query.commit));
     let mut arguments = vec![
         "show".to_string(),
@@ -1625,7 +1747,7 @@ pub async fn workspace_git_compare(
     Query(query): Query<GitCompareQuery>,
 ) -> Response {
     // 步骤1：校验两个引用并统计各自独有的提交数量。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let base = try_res!(validate_git_name(&query.base, "base"));
     let target = try_res!(validate_git_name(&query.target, "target"));
     let comparison = format!("{base}...{target}");
@@ -1706,7 +1828,7 @@ pub async fn workspace_git_unified_diff(
     Query(query): Query<GitUnifiedDiffQuery>,
 ) -> Response {
     // 步骤1：验证目标文件，并为未跟踪文本直接生成新增文件 diff。
-    let root = try_res!(get_root(&manager, &query.pane_id));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let paths = try_res!(validate_git_paths(&root, &[query.path]));
     let file_path = paths[0].clone();
     if query.untracked {
@@ -1753,9 +1875,9 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_commit_arguments, git_command, parse_branch_output, parse_log_output,
-        parse_remote_output, parse_stash_output, parse_status_output, parse_tag_output,
-        unstage_git_paths,
+        build_commit_arguments, discover_git_repositories, git_command, parse_branch_output,
+        parse_log_output, parse_remote_output, parse_stash_output, parse_status_output,
+        parse_tag_output, unstage_git_paths,
     };
     use std::path::Path;
 
@@ -1894,6 +2016,22 @@ mod tests {
         assert_eq!(tags[0].name, "v1.2.0");
         assert_eq!(tags[0].target, "aaaaaaaa");
         assert_eq!(tags[1].subject, "Release 1.1.0");
+    }
+
+    #[test]
+    fn discovers_nested_repositories_and_skips_dependency_directories() {
+        // 步骤1：创建根仓库、嵌套仓库和应跳过的 node_modules 仓库。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary_directory.path().join(".git")).unwrap();
+        std::fs::create_dir_all(temporary_directory.path().join("packages/app/.git")).unwrap();
+        std::fs::create_dir_all(temporary_directory.path().join("node_modules/vendor/.git"))
+            .unwrap();
+
+        // 步骤2：确认只返回根仓库和正常嵌套仓库。
+        let repositories = discover_git_repositories(temporary_directory.path());
+        assert_eq!(repositories.len(), 2);
+        assert_eq!(repositories[0].path, "");
+        assert_eq!(repositories[1].path, "packages/app");
     }
 
     #[test]

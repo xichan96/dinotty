@@ -141,6 +141,32 @@ describe('GitPanel', function gitPanelSuite() {
     expect(wrapper.findAll('[data-testid="git-change-row"]')).toHaveLength(3)
   })
 
+  it('switches between repositories discovered in the workspace', async function switchesRepository() {
+    // 步骤1：挂载包含两个仓库的 Git 面板并选择第二个仓库。
+    const wrapper = mount(GitPanel, {
+      props: {
+        paneId: 'pane-1',
+        branch: 'main',
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        remotes: [],
+        isGitRepo: true,
+        loading: false,
+        files: [],
+        repository: 'apps/web',
+        repositories: [
+          { path: 'apps/web', name: 'web' },
+          { path: 'services/api', name: 'api' },
+        ],
+      },
+    })
+    await wrapper.get('[data-testid="git-repository-select"]').setValue('services/api')
+
+    // 步骤2：确认父级收到新的仓库相对路径。
+    expect(wrapper.emitted('select-repository')).toEqual([['services/api']])
+  })
+
   it('shows upstream sync state and runs remote actions', async function synchronizesRemote() {
     // 步骤1：显示当前上游分支以及待推送、待拉取提交数量。
     const wrapper = mountGitPanel()

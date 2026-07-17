@@ -58,11 +58,13 @@ import { ArrowLeft, ArrowRight, RefreshCw, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import type { GitHistorySelection } from '../../utils/gitHistory'
+import { appendGitRepository } from '../../utils/gitPanel'
 import GitPatchContent from './GitPatchContent.vue'
 
 const props = defineProps<{
   paneId: string
   selection: GitHistorySelection
+  repository?: string
 }>()
 
 const emit = defineEmits<{
@@ -108,6 +110,7 @@ async function loadSelection(): Promise<void> {
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     let endpoint = 'git-commit-diff'
     if (props.selection.kind === 'commit') {
       query.set('commit', props.selection.hash)
@@ -143,7 +146,7 @@ async function loadSelection(): Promise<void> {
 
 watch(
   function watchHistorySelection() {
-    return [props.paneId, JSON.stringify(props.selection)]
+    return [props.paneId, props.repository, JSON.stringify(props.selection)]
   },
   function reloadHistorySelection() {
     void loadSelection()

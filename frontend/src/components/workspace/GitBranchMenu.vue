@@ -168,6 +168,7 @@ import { computed, ref, watch } from 'vue'
 import { Check, Cloud, GitBranch, Pencil, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
+import { appendGitRepository } from '../../utils/gitPanel'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 
 interface BranchEntry {
@@ -180,6 +181,7 @@ const props = defineProps<{
   visible: boolean
   paneId: string
   currentBranch: string | null
+  repository?: string
 }>()
 
 const emit = defineEmits<{
@@ -248,6 +250,7 @@ async function loadBranches(): Promise<void> {
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/git-branches?${query}`))
     const result = await response.json().catch(function emptyBranchResult() {
       return {}
@@ -272,6 +275,7 @@ async function postBranchAction(endpoint: string, body: Record<string, unknown>)
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${query}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -363,7 +367,7 @@ async function confirmDelete(): Promise<void> {
 
 watch(
   function watchMenuVisibility() {
-    return [props.visible, props.paneId]
+    return [props.visible, props.paneId, props.repository]
   },
   function reloadVisibleMenu() {
     if (props.visible) {

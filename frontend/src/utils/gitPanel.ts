@@ -20,6 +20,16 @@ export interface GitRemoteEntry {
   pushUrl: string
 }
 
+export interface GitRepositoryEntry {
+  path: string
+  name: string
+}
+
+export function appendGitRepository(query: URLSearchParams, repository?: string): void {
+  // 步骤1：只有选择了嵌套仓库时才添加参数，保持根仓库请求向后兼容。
+  if (repository) query.set('repository', repository)
+}
+
 export function getGitFileName(path: string): string {
   // 步骤1：统一路径分隔符后返回最后一段文件名。
   const normalizedPath = path.replace(/\\/g, '/')

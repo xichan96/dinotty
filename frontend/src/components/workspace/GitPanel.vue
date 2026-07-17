@@ -28,10 +28,28 @@
       </button>
     </header>
 
+    <label v-if="repositories && repositories.length > 1" class="git-repository-bar">
+      <span>{{ t('gitPanel.repository') }}</span>
+      <select
+        data-testid="git-repository-select"
+        :value="repository || ''"
+        @change="emit('select-repository', ($event.target as HTMLSelectElement).value)"
+      >
+        <option
+          v-for="repositoryEntry in repositories"
+          :key="repositoryEntry.path"
+          :value="repositoryEntry.path"
+        >
+          {{ repositoryEntry.name }}
+        </option>
+      </select>
+    </label>
+
     <GitBranchMenu
       :visible="branchMenuVisible"
       :pane-id="paneId"
       :current-branch="branch"
+      :repository="repository"
       @close="branchMenuVisible = false"
       @refresh="emit('refresh')"
       @result="handleBranchResult"
@@ -71,6 +89,7 @@
         v-if="panelMode === 'history'"
         :pane-id="paneId"
         :current-branch="branch"
+        :repository="repository"
         @view-history="emit('view-history', $event)"
       />
       <template v-else>
@@ -195,8 +214,8 @@
           {{ statusMessage }}
         </p>
 
-        <GitStashSection :pane-id="paneId" @refresh="emit('refresh')" />
-        <GitAdvancedActions :pane-id="paneId" @refresh="emit('refresh')" />
+        <GitStashSection :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
+        <GitAdvancedActions :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
 
         <label class="git-file-search">
           <Search :size="13" aria-hidden="true" />
@@ -421,9 +440,11 @@ import { useI18n } from '../../composables/useI18n'
 import {
   getGitDirectory,
   getGitFileName,
+  appendGitRepository,
   type GitDiffSelection,
   type GitFileEntry,
   type GitRemoteEntry,
+  type GitRepositoryEntry,
 } from '../../utils/gitPanel'
 import type { GitHistorySelection } from '../../utils/gitHistory'
 import ConfirmModal from '../ui/ConfirmModal.vue'
@@ -445,12 +466,15 @@ const props = defineProps<{
   selectedDiff?: GitDiffSelection | null
   totalFiles?: number
   statusTruncated?: boolean
+  repository?: string
+  repositories?: GitRepositoryEntry[]
 }>()
 
 const emit = defineEmits<{
   refresh: []
   'view-diff': [selection: GitDiffSelection]
   'view-history': [selection: GitHistorySelection]
+  'select-repository': [repository: string]
 }>()
 
 const { t } = useI18n()
@@ -581,6 +605,7 @@ async function postGitAction(endpoint: string, body: Record<string, unknown>): P
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
     const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${query}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -747,6 +772,29 @@ async function resolveConflict(
 
 .git-panel-header {
   color: var(--fg-muted);
+}
+
+.git-repository-bar {
+  min-height: 31px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 3px 7px 3px 9px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.git-repository-bar select {
+  min-width: 0;
+  height: 25px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 9px;
 }
 
 .git-panel-tabs {

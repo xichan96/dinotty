@@ -136,6 +136,7 @@
           :repository="gitRepository"
           @close="gitDiffSelection = null"
           @open-source="openGitSource"
+          @refresh="refreshGitPanel"
         />
         <EditorSplitContainer
           v-else
@@ -353,6 +354,7 @@
             :repository="gitRepository"
             @close="gitDiffSelection = null"
             @open-source="openGitSource"
+            @refresh="refreshGitPanel"
           />
           <EditorSplitContainer
             v-else

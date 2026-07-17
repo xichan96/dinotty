@@ -49,6 +49,10 @@
       </button>
     </header>
 
+    <p v-if="actionErrorMessage" class="git-diff-action-message" role="alert">
+      {{ actionErrorMessage }}
+    </p>
+
     <GitPatchContent
       :loading="loading"
       :error="errorMessage"
@@ -59,6 +63,16 @@
       :search-placeholder="t('gitPanel.searchDiff')"
       :load-more-text="t('gitPanel.loadMoreDiffLines')"
       :wrap-text="t('gitPanel.wrapDiffLines')"
+      :inline-view-text="t('gitPanel.inlineDiffView')"
+      :split-view-text="t('gitPanel.splitDiffView')"
+      :stage-hunk-text="t('gitPanel.stageHunk')"
+      :unstage-hunk-text="t('gitPanel.unstageHunk')"
+      :discard-hunk-text="t('gitPanel.discardHunk')"
+      :can-stage-hunks="!staged"
+      :can-unstage-hunks="staged"
+      :can-discard-hunks="!staged && !untracked"
+      :hunk-action-busy="hunkActionBusy"
+      @hunk-action="runHunkAction"
     />
   </section>
 </template>
@@ -82,13 +96,16 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   'open-source': [path: string]
+  refresh: []
 }>()
 
 const { t } = useI18n()
 const loading = ref(false)
 const errorMessage = ref('')
+const actionErrorMessage = ref('')
 const patch = ref('')
 const ignoreWhitespace = ref(false)
+const hunkActionBusy = ref(false)
 
 const fileName = computed(function computeFileName() {
   // 步骤1：只在主标题显示文件名，完整路径保留为辅助信息。
@@ -125,6 +142,51 @@ async function loadDiff(): Promise<void> {
     errorMessage.value = t('gitPanel.diffFailed')
   } finally {
     loading.value = false
+  }
+}
+
+async function runHunkAction(
+  hunkIndex: number,
+  action: 'stage' | 'unstage' | 'discard'
+): Promise<void> {
+  // 步骤1：把当前文件分组、hunk 序号和固定动作发送给仓库接口。
+  if (hunkActionBusy.value) return
+  hunkActionBusy.value = true
+  actionErrorMessage.value = ''
+  try {
+    await getApiBase()
+    const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
+    const requestBody: Record<string, unknown> = {
+      path: props.filePath,
+      staged: props.staged,
+      untracked: props.untracked,
+      hunk_index: hunkIndex,
+      action,
+    }
+    if (ignoreWhitespace.value) {
+      requestBody.ignore_whitespace = true
+    }
+    const response = await authFetch(apiUrl(`/api/workspace/git-hunk-action?${query}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    })
+    const result = await response.json().catch(function emptyHunkActionResult() {
+      return {}
+    })
+    if (!response.ok) {
+      actionErrorMessage.value = result.error || t('gitPanel.hunkActionFailed')
+      return
+    }
+
+    // 步骤2：成功后同时刷新差异和侧栏状态，避免显示已经失效的 hunk。
+    emit('refresh')
+    await loadDiff()
+  } catch {
+    actionErrorMessage.value = t('gitPanel.hunkActionFailed')
+  } finally {
+    hunkActionBusy.value = false
   }
 }
 
@@ -165,6 +227,15 @@ watch(
   padding: 0 7px 0 12px;
   border-bottom: 1px solid var(--border);
   background: var(--tab-bg);
+}
+
+.git-diff-action-message {
+  margin: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-red, #e06c75) 45%, var(--border));
+  color: var(--color-red, #e06c75);
+  background: color-mix(in srgb, var(--color-red, #e06c75) 10%, var(--bg));
+  font-size: 11px;
 }
 
 .git-diff-title-wrap {

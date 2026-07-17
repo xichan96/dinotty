@@ -831,6 +831,7 @@ async fn main() {
             .route("/api/workspace/git-repositories", get(workspace::workspace_git_repositories))
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
             .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
+            .route("/api/workspace/git-hunk-action", post(workspace::workspace_git_hunk_action))
             .route("/api/workspace/git-stage", post(workspace::workspace_git_stage))
             .route("/api/workspace/git-stage-all", post(workspace::workspace_git_stage_all))
             .route("/api/workspace/git-unstage", post(workspace::workspace_git_unstage))

@@ -962,6 +962,19 @@ pub struct GitUnifiedDiffQuery {
     pub ignore_whitespace: bool,
 }
 
+#[derive(Deserialize)]
+pub struct GitHunkActionBody {
+    pub path: String,
+    #[serde(default)]
+    pub staged: bool,
+    #[serde(default)]
+    pub untracked: bool,
+    #[serde(default)]
+    pub ignore_whitespace: bool,
+    pub hunk_index: usize,
+    pub action: String,
+}
+
 fn default_git_log_limit() -> usize {
     50
 }
@@ -1814,13 +1827,167 @@ fn build_untracked_patch(path: &str, content: &str) -> String {
     // 步骤1：生成与 Git unified diff 一致的新增文件头部。
     let mut diff_text = format!("diff --git a/{path} b/{path}\n--- /dev/null\n+++ b/{path}\n");
 
-    // 步骤2：给每一行添加新增标记，供前端统一渲染。
+    // 步骤2：补充标准 hunk 头，确保新增文件也能执行局部暂存。
+    let line_count = content.lines().count();
+    if line_count == 0 {
+        return diff_text;
+    }
+    diff_text.push_str(&format!("@@ -0,0 +1,{line_count} @@\n"));
+
+    // 步骤3：给每一行添加新增标记，供前端统一渲染。
     for line in content.lines() {
         diff_text.push('+');
         diff_text.push_str(line);
         diff_text.push('\n');
     }
     diff_text
+}
+
+fn extract_unified_diff_hunk(patch: &str, hunk_index: usize) -> Result<String, String> {
+    // 步骤1：保留第一个 hunk 之前的文件头，Git 应用单个 hunk 时仍需要这些字段。
+    let mut file_header = String::new();
+    let mut selected_hunk = String::new();
+    let mut current_hunk_index: Option<usize> = None;
+    for line in patch.split_inclusive('\n') {
+        if line.starts_with("@@ ") {
+            let next_hunk_index = match current_hunk_index {
+                Some(index) => index + 1,
+                None => 0,
+            };
+            current_hunk_index = Some(next_hunk_index);
+            if next_hunk_index > hunk_index {
+                break;
+            }
+        }
+
+        // 步骤2：只复制文件头和用户选择的 hunk，其他修改不能进入应用 Patch。
+        match current_hunk_index {
+            None => file_header.push_str(line),
+            Some(index) if index == hunk_index => selected_hunk.push_str(line),
+            Some(_) => {}
+        }
+    }
+    if selected_hunk.is_empty() {
+        return Err("hunk not found".to_string());
+    }
+    Ok(format!("{file_header}{selected_hunk}"))
+}
+
+async fn apply_unified_diff_hunk(
+    root: PathBuf,
+    patch: String,
+    action: &str,
+) -> Result<std::process::Output, String> {
+    // 步骤1：把界面动作转换为固定 Git 参数，不接受任意命令选项。
+    let mut arguments = vec![
+        "apply".to_string(),
+        "--recount".to_string(),
+        "--whitespace=nowarn".to_string(),
+    ];
+    if action == "stage" || action == "unstage" {
+        arguments.push("--cached".to_string());
+    }
+    if action == "unstage" || action == "discard" {
+        arguments.push("--reverse".to_string());
+    }
+    if action != "stage" && action != "unstage" && action != "discard" {
+        return Err("invalid hunk action".to_string());
+    }
+
+    // 步骤2：通过标准输入把选中的 Patch 交给 Git，避免 shell 解释文件内容。
+    let result = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut child = git_command()
+            .args(arguments)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .current_dir(root)
+            .spawn()?;
+        let mut child_stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("git stdin unavailable"))?;
+        child_stdin.write_all(patch.as_bytes())?;
+        drop(child_stdin);
+        child.wait_with_output()
+    })
+    .await;
+    match result {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+pub async fn workspace_git_hunk_action(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitHunkActionBody>,
+) -> Response {
+    // 步骤1：验证仓库、文件路径和动作与当前差异分组一致。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let paths = try_res!(validate_git_paths(&root, &[body.path]));
+    let file_path = paths[0].clone();
+    if body.action == "stage" && body.staged {
+        return json_err(StatusCode::BAD_REQUEST, "cannot stage a staged hunk");
+    }
+    if body.action == "unstage" && !body.staged {
+        return json_err(StatusCode::BAD_REQUEST, "cannot unstage a working tree hunk");
+    }
+    if body.action == "discard" && (body.staged || body.untracked) {
+        return json_err(StatusCode::BAD_REQUEST, "cannot discard this hunk");
+    }
+
+    // 步骤2：从当前仓库重新生成完整 Patch，避免客户端提交任意文件内容。
+    let full_patch = if body.untracked {
+        let target = try_res!(normalize_join(&root, &file_path));
+        let metadata = match std::fs::metadata(&target) {
+            Ok(metadata) => metadata,
+            Err(error) => return json_err(StatusCode::NOT_FOUND, &error.to_string()),
+        };
+        if metadata.len() > MAX_TEXT_PREVIEW as u64 {
+            return json_err(StatusCode::BAD_REQUEST, "file too large for diff");
+        }
+        match std::fs::read_to_string(&target) {
+            Ok(content) => build_untracked_patch(&file_path, &content),
+            Err(error) => return json_err(StatusCode::BAD_REQUEST, &error.to_string()),
+        }
+    } else {
+        let mut arguments = vec![
+            "diff".to_string(),
+            "--no-ext-diff".to_string(),
+            "--no-color".to_string(),
+        ];
+        if body.staged {
+            arguments.push("--cached".to_string());
+        }
+        if body.ignore_whitespace {
+            arguments.push("--ignore-all-space".to_string());
+        }
+        arguments.push("--".to_string());
+        arguments.push(file_path);
+        match run_git_output(root.clone(), arguments).await {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).into_owned()
+            }
+            Ok(output) => return git_command_response(&output),
+            Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+        }
+    };
+    if full_patch.len() > MAX_GIT_DIFF_OUTPUT {
+        return json_err(StatusCode::BAD_REQUEST, "diff too large to apply");
+    }
+
+    // 步骤3：只提取指定 hunk，并按暂存、取消暂存或撤销动作应用。
+    let selected_patch = match extract_unified_diff_hunk(&full_patch, body.hunk_index) {
+        Ok(patch) => patch,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    match apply_unified_diff_hunk(root, selected_patch, &body.action).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
 }
 
 pub async fn workspace_git_unified_diff(
@@ -1875,9 +2042,10 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_commit_arguments, discover_git_repositories, git_command, parse_branch_output,
-        parse_log_output, parse_remote_output, parse_stash_output, parse_status_output,
-        parse_tag_output, unstage_git_paths,
+        apply_unified_diff_hunk, build_commit_arguments, discover_git_repositories,
+        extract_unified_diff_hunk, git_command, parse_branch_output, parse_log_output,
+        parse_remote_output, parse_stash_output, parse_status_output, parse_tag_output,
+        unstage_git_paths,
     };
     use std::path::Path;
 
@@ -1885,6 +2053,165 @@ mod tests {
         // 步骤1：在临时仓库执行 Git 命令，并在失败时输出真实 stderr。
         let output = git_command().args(arguments).current_dir(root).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    #[test]
+    fn extracts_only_the_selected_unified_diff_hunk() {
+        // 步骤1：准备包含两个修改区块的完整文件 Patch。
+        let patch = "diff --git a/example.txt b/example.txt\nindex 1111111..2222222 100644\n--- a/example.txt\n+++ b/example.txt\n@@ -1,2 +1,2 @@\n-old one\n+new one\n context\n@@ -10,2 +10,2 @@\n-old two\n+new two\n context\n";
+
+        // 步骤2：提取第二个区块，确认文件头被保留且第一个区块没有混入。
+        let selected_patch = extract_unified_diff_hunk(patch, 1).unwrap();
+        assert!(selected_patch.contains("diff --git a/example.txt b/example.txt"));
+        assert!(selected_patch.contains("@@ -10,2 +10,2 @@"));
+        assert!(selected_patch.contains("+new two"));
+        assert!(!selected_patch.contains("+new one"));
+    }
+
+    #[test]
+    fn rejects_missing_unified_diff_hunk() {
+        // 步骤1：请求不存在的区块序号，避免后端把空 Patch 当成成功操作。
+        let patch = "diff --git a/example.txt b/example.txt\n--- a/example.txt\n+++ b/example.txt\n@@ -1 +1 @@\n-old\n+new\n";
+        let result = extract_unified_diff_hunk(patch, 2);
+
+        // 步骤2：确认调用方能收到明确错误并停止 Git 操作。
+        assert_eq!(result.unwrap_err(), "hunk not found");
+    }
+
+    #[tokio::test]
+    async fn stages_only_the_selected_hunk_in_a_real_repository() {
+        // 步骤1：创建包含足够间隔行的临时仓库和基准提交。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        run_test_git(temporary_directory.path(), &["init"]);
+        run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
+        run_test_git(
+            temporary_directory.path(),
+            &["config", "user.email", "test@example.com"],
+        );
+        let mut original_lines = Vec::new();
+        for line_number in 1..=20 {
+            original_lines.push(format!("line {line_number}"));
+        }
+        std::fs::write(
+            temporary_directory.path().join("example.txt"),
+            format!("{}\n", original_lines.join("\n")),
+        )
+        .unwrap();
+        run_test_git(temporary_directory.path(), &["add", "example.txt"]);
+        run_test_git(temporary_directory.path(), &["commit", "-m", "initial"]);
+
+        // 步骤2：修改两个相距较远的位置，确保 Git 生成两个独立 hunk。
+        let mut modified_lines = original_lines.clone();
+        modified_lines[0] = "first changed".to_string();
+        modified_lines[19] = "last changed".to_string();
+        std::fs::write(
+            temporary_directory.path().join("example.txt"),
+            format!("{}\n", modified_lines.join("\n")),
+        )
+        .unwrap();
+        let diff_output = git_command()
+            .args(["diff", "--", "example.txt"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let full_patch = String::from_utf8_lossy(&diff_output.stdout).into_owned();
+
+        // 步骤3：只暂存第一个 hunk，并检查暂存区与工作区分别保留正确修改。
+        let selected_patch = extract_unified_diff_hunk(&full_patch, 0).unwrap();
+        let apply_output = apply_unified_diff_hunk(
+            temporary_directory.path().to_path_buf(),
+            selected_patch,
+            "stage",
+        )
+        .await
+        .unwrap();
+        assert!(apply_output.status.success());
+        let staged_output = git_command()
+            .args(["diff", "--cached", "--", "example.txt"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let staged_patch = String::from_utf8_lossy(&staged_output.stdout);
+        assert!(staged_patch.contains("first changed"));
+        assert!(!staged_patch.contains("last changed"));
+        let working_output = git_command()
+            .args(["diff", "--", "example.txt"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let working_patch = String::from_utf8_lossy(&working_output.stdout);
+        assert!(!working_patch.contains("first changed"));
+        assert!(working_patch.contains("last changed"));
+    }
+
+    #[tokio::test]
+    async fn unstages_and_discards_only_the_selected_hunks() {
+        // 步骤1：建立包含两个独立修改区块的临时仓库，并先暂存全部修改。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        run_test_git(temporary_directory.path(), &["init"]);
+        run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
+        run_test_git(
+            temporary_directory.path(),
+            &["config", "user.email", "test@example.com"],
+        );
+        let mut original_lines = Vec::new();
+        for line_number in 1..=20 {
+            original_lines.push(format!("line {line_number}"));
+        }
+        let file_path = temporary_directory.path().join("example.txt");
+        std::fs::write(&file_path, format!("{}\n", original_lines.join("\n"))).unwrap();
+        run_test_git(temporary_directory.path(), &["add", "example.txt"]);
+        run_test_git(temporary_directory.path(), &["commit", "-m", "initial"]);
+        let mut modified_lines = original_lines.clone();
+        modified_lines[0] = "first changed".to_string();
+        modified_lines[19] = "last changed".to_string();
+        std::fs::write(&file_path, format!("{}\n", modified_lines.join("\n"))).unwrap();
+        run_test_git(temporary_directory.path(), &["add", "example.txt"]);
+
+        // 步骤2：从暂存区反向应用第一个 hunk，确认只把第一处修改移回工作区。
+        let staged_output = git_command()
+            .args(["diff", "--cached", "--", "example.txt"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let staged_patch = String::from_utf8_lossy(&staged_output.stdout).into_owned();
+        let selected_staged_patch = extract_unified_diff_hunk(&staged_patch, 0).unwrap();
+        let unstage_output = apply_unified_diff_hunk(
+            temporary_directory.path().to_path_buf(),
+            selected_staged_patch,
+            "unstage",
+        )
+        .await
+        .unwrap();
+        assert!(unstage_output.status.success());
+        let remaining_staged_output = git_command()
+            .args(["diff", "--cached", "--", "example.txt"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let remaining_staged_patch = String::from_utf8_lossy(&remaining_staged_output.stdout);
+        assert!(!remaining_staged_patch.contains("first changed"));
+        assert!(remaining_staged_patch.contains("last changed"));
+
+        // 步骤3：撤销工作区中的第一个 hunk，确认文件恢复第一行但保留已暂存的末行修改。
+        let working_output = git_command()
+            .args(["diff", "--", "example.txt"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let working_patch = String::from_utf8_lossy(&working_output.stdout).into_owned();
+        let selected_working_patch = extract_unified_diff_hunk(&working_patch, 0).unwrap();
+        let discard_output = apply_unified_diff_hunk(
+            temporary_directory.path().to_path_buf(),
+            selected_working_patch,
+            "discard",
+        )
+        .await
+        .unwrap();
+        assert!(discard_output.status.success());
+        let final_content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(final_content.lines().next(), Some("line 1"));
+        assert_eq!(final_content.lines().last(), Some("last changed"));
     }
 
     #[test]

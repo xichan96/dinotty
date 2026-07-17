@@ -409,4 +409,47 @@ describe('GitDiffViewer', function gitDiffViewerSuite() {
       gitPanelMocks.authFetch.mock.calls[gitPanelMocks.authFetch.mock.calls.length - 1]
     expect(String(lastCall[0])).toContain('ignore_whitespace=true')
   })
+
+  it('stages a working tree hunk and refreshes repository status', async function stagesHunk() {
+    // 步骤1：让首次差异读取、hunk 操作和操作后的差异刷新依次成功。
+    gitPanelMocks.authFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            patch: 'diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old value\n+new value',
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ patch: '' }), { status: 200 }))
+    const wrapper = mount(GitDiffViewer, {
+      props: {
+        paneId: 'pane-1',
+        filePath: 'src/a.ts',
+        staged: false,
+        untracked: false,
+        repository: 'apps/web',
+      },
+    })
+    await flushPromises()
+
+    // 步骤2：暂存第一个 hunk，确认仓库路径、文件路径和 hunk 序号完整传给后端。
+    await wrapper.get('[data-testid="git-diff-stage-hunk"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-hunk-action?pane_id=pane-1&repository=apps%2Fweb',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          path: 'src/a.ts',
+          staged: false,
+          untracked: false,
+          hunk_index: 0,
+          action: 'stage',
+        }),
+      })
+    )
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
 })

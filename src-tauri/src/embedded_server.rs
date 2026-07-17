@@ -597,6 +597,7 @@ pub fn run_server(
             .route("/api/workspace/git-repositories", get(workspace::workspace_git_repositories))
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
             .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
+            .route("/api/workspace/git-hunk-action", post(workspace::workspace_git_hunk_action))
             .route("/api/workspace/git-stage", post(workspace::workspace_git_stage))
             .route("/api/workspace/git-stage-all", post(workspace::workspace_git_stage_all))
             .route("/api/workspace/git-unstage", post(workspace::workspace_git_unstage))
@@ -809,6 +810,7 @@ mod tests {
         let production_source = server_source.split("#[cfg(test)]").next().unwrap_or(server_source);
         let required_routes = [
             "/api/workspace/git-unified-diff",
+            "/api/workspace/git-hunk-action",
             "/api/workspace/git-repositories",
             "/api/workspace/git-stage",
             "/api/workspace/git-stage-all",

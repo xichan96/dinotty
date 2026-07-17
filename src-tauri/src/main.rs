@@ -585,13 +585,20 @@ fn close_window(app: AppHandle, state: State<'_, Arc<SessionManager>>) {
     quit_desktop_app(&app, state.inner().as_ref());
 }
 
-/// GUI-launched macOS apps inherit LaunchServices' minimal PATH, so argv tabs
-/// (e.g. `claude --resume`) fail to spawn. Import the user's login-shell PATH
-/// once at startup, before any PTY spawn or thread exists.
+/// macOS-specific: GUI-launched apps inherit LaunchServices' minimal PATH, so
+/// argv tabs (e.g. `claude --resume`) fail to spawn. Import the user's
+/// login-shell PATH once at startup, before any PTY spawn or thread exists.
+#[cfg(target_os = "macos")]
 fn import_login_shell_path() {
+    const START_MARKER: &[u8] = b"__DINOTTY_PATH_START__";
+    const END_MARKER: &[u8] = b"__DINOTTY_PATH_END__";
+
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let Ok(out) = std::process::Command::new(&shell)
-        .args(["-lc", "printf %s \"$PATH\""])
+        .args([
+            "-lc",
+            "printf '__DINOTTY_PATH_START__%s__DINOTTY_PATH_END__' \"$PATH\"",
+        ])
         .output()
     else {
         return;
@@ -599,7 +606,23 @@ fn import_login_shell_path() {
     if !out.status.success() {
         return;
     }
-    if let Ok(path) = String::from_utf8(out.stdout) {
+
+    let Some(start) = out
+        .stdout
+        .windows(START_MARKER.len())
+        .position(|window| window == START_MARKER)
+    else {
+        return;
+    };
+    let value_start = start + START_MARKER.len();
+    let Some(end) = out.stdout[value_start..]
+        .windows(END_MARKER.len())
+        .position(|window| window == END_MARKER)
+    else {
+        return;
+    };
+
+    if let Ok(path) = std::str::from_utf8(&out.stdout[value_start..value_start + end]) {
         let path = path.trim();
         if !path.is_empty() {
             std::env::set_var("PATH", path);
@@ -608,6 +631,7 @@ fn import_login_shell_path() {
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
     import_login_shell_path();
     let _log_guard = dinotty_server::settings::init_logging();
 

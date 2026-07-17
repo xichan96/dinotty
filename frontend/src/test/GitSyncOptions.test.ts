@@ -115,6 +115,7 @@ describe('GitSyncOptions', function gitSyncOptionsSuite() {
           remote_branch: 'release',
           push_tags: true,
           force_with_lease: true,
+          confirm_force_with_lease: true,
         }),
       })
     )

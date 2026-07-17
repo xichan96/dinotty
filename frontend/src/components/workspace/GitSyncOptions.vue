@@ -250,6 +250,7 @@ async function pushRemote(): Promise<void> {
     remote_branch: remoteBranch,
     push_tags: pushTags.value,
     force_with_lease: forceWithLease.value,
+    confirm_force_with_lease: forceWithLease.value,
   })
 }
 

@@ -286,12 +286,23 @@
           :files="files"
           @refresh="emit('refresh')"
         />
-        <GitAdvancedActions :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
+        <GitAdvancedActions
+          :pane-id="paneId"
+          :repository="repository"
+          :remotes="remotes"
+          @refresh="emit('refresh')"
+        />
         <GitConfiguration :pane-id="paneId" :repository="repository" />
         <GitCommandLog :pane-id="paneId" :repository="repository" />
         <GitRepositoryMaintenance
           :pane-id="paneId"
           :repository="repository"
+          @refresh="emit('refresh')"
+        />
+        <GitExtendedWorkflows
+          :pane-id="paneId"
+          :repository="repository"
+          :remotes="remotes"
           @refresh="emit('refresh')"
         />
 
@@ -531,6 +542,7 @@ import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitAdvancedActions from './GitAdvancedActions.vue'
 import GitConfiguration from './GitConfiguration.vue'
 import GitCommandLog from './GitCommandLog.vue'
+import GitExtendedWorkflows from './GitExtendedWorkflows.vue'
 import GitRepositoryMaintenance from './GitRepositoryMaintenance.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'

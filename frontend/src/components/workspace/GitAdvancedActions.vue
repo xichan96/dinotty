@@ -201,6 +201,11 @@
 
       <div class="git-advanced-group">
         <h3>{{ t('gitPanel.tags') }}</h3>
+        <select v-if="remotes.length" v-model="selectedTagRemote" data-testid="git-tag-remote">
+          <option v-for="remote in remotes" :key="remote.name" :value="remote.name">
+            {{ remote.name }}
+          </option>
+        </select>
         <div class="git-tag-create">
           <input v-model="tagName" type="text" :placeholder="t('gitPanel.tagName')" />
           <input v-model="tagTarget" type="text" :placeholder="t('gitPanel.tagTarget')" />
@@ -233,6 +238,18 @@
             >
               <Trash2 :size="13" />
             </button>
+            <button
+              v-if="remotes.length"
+              type="button"
+              data-testid="git-remote-tag-delete-button"
+              class="git-advanced-icon-button danger"
+              :disabled="busy || !activeTagRemote"
+              :title="t('gitPanel.deleteRemoteTag')"
+              :aria-label="t('gitPanel.deleteRemoteTag')"
+              @click="remoteTagPendingDelete = tag.name"
+            >
+              <CloudOff :size="13" />
+            </button>
           </div>
         </div>
       </div>
@@ -256,6 +273,15 @@
       @confirm="deleteTag"
       @cancel="tagPendingDelete = null"
     />
+    <ConfirmModal
+      :visible="!!remoteTagPendingDelete"
+      :title="t('gitPanel.deleteRemoteTag')"
+      :message="remoteTagDeleteMessage"
+      :confirm-text="t('gitPanel.deleteRemoteTag')"
+      :cancel-text="t('filePreview.cancel')"
+      @confirm="deleteRemoteTag"
+      @cancel="remoteTagPendingDelete = null"
+    />
   </section>
 </template>
 
@@ -264,6 +290,7 @@ import { computed, ref, watch } from 'vue'
 import {
   Cherry,
   ChevronDown,
+  CloudOff,
   GitBranchPlus,
   GitMerge,
   GitPullRequestArrow,
@@ -275,7 +302,7 @@ import {
 } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
-import { appendGitRepository } from '../../utils/gitPanel'
+import { appendGitRepository, type GitRemoteEntry } from '../../utils/gitPanel'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 
 interface GitTagEntry {
@@ -297,6 +324,7 @@ interface GitReflogEntry {
 const props = defineProps<{
   paneId: string
   repository?: string
+  remotes?: GitRemoteEntry[]
 }>()
 
 const emit = defineEmits<{
@@ -327,6 +355,31 @@ const tagTarget = ref('HEAD')
 const annotatedTag = ref(false)
 const tagMessage = ref('')
 const tagPendingDelete = ref<string | null>(null)
+const remoteTagPendingDelete = ref<string | null>(null)
+const selectedTagRemote = ref('')
+
+const remotes = computed(function computeRemotes() {
+  // 步骤1：兼容旧调用方没有传入 remotes 的情况。
+  return props.remotes || []
+})
+
+const activeTagRemote = computed(function computeActiveTagRemote() {
+  // 步骤1：优先使用当前选择，否则回退到 origin 或第一个 Remote。
+  for (const remote of remotes.value) {
+    if (remote.name === selectedTagRemote.value) {
+      return remote.name
+    }
+  }
+  for (const remote of remotes.value) {
+    if (remote.name === 'origin') {
+      return remote.name
+    }
+  }
+  if (remotes.value.length) {
+    return remotes.value[0].name
+  }
+  return ''
+})
 
 const canCreateTag = computed(function computeCanCreateTag() {
   // 步骤1：标签名和目标必须存在，附注标签还必须填写说明。
@@ -339,6 +392,13 @@ const resetConfirmationMessage = computed(function computeResetConfirmationMessa
   // 步骤1：hard 模式明确提示会丢弃工作区更改，其他模式说明目标和模式。
   const key = resetMode.value === 'hard' ? 'gitPanel.hardResetMessage' : 'gitPanel.resetMessage'
   return t(key).replace('{target}', resetTarget.value).replace('{mode}', resetMode.value)
+})
+
+const remoteTagDeleteMessage = computed(function computeRemoteTagDeleteMessage() {
+  // 步骤1：确认框同时展示 Remote 和标签名，避免误删远程引用。
+  const tag = remoteTagPendingDelete.value || ''
+  const target = `${activeTagRemote.value}/${tag}`
+  return t('gitPanel.deleteRemoteTagMessage').replace('{tag}', target)
 })
 
 const operationProgress = computed(function computeOperationProgress() {
@@ -557,6 +617,16 @@ async function deleteTag(): Promise<void> {
   await loadTags()
 }
 
+async function deleteRemoteTag(): Promise<void> {
+  // 步骤1：读取并清除待删除标签，确认后删除选中 Remote 上的同名标签。
+  const tag = remoteTagPendingDelete.value
+  const remote = activeTagRemote.value
+  remoteTagPendingDelete.value = null
+  if (!tag || !remote) return
+  await postAction('git-remote-tag-delete', { remote, tag })
+  await loadTags()
+}
+
 watch(
   function watchAdvancedRepository() {
     return [props.paneId, props.repository]
@@ -564,6 +634,35 @@ watch(
   function loadAdvancedData() {
     // 步骤1：组件挂载或仓库切换后并行读取分支、标签和进行中操作。
     void refreshAuxiliaryData()
+  },
+  { immediate: true }
+)
+
+watch(
+  function watchTagRemotes() {
+    return remotes.value
+  },
+  function synchronizeTagRemote() {
+    // 步骤1：保留仍然存在的 Remote，否则优先使用 origin，再退回第一个 Remote。
+    let selectionExists = false
+    for (const remote of remotes.value) {
+      if (remote.name === selectedTagRemote.value) {
+        selectionExists = true
+        break
+      }
+    }
+    if (selectionExists) return
+
+    selectedTagRemote.value = ''
+    for (const remote of remotes.value) {
+      if (remote.name === 'origin') {
+        selectedTagRemote.value = remote.name
+        break
+      }
+    }
+    if (!selectedTagRemote.value && remotes.value.length) {
+      selectedTagRemote.value = remotes.value[0].name
+    }
   },
   { immediate: true }
 )

@@ -44,7 +44,6 @@ fn git_command() -> std::process::Command {
     command.no_window();
     command.env("LC_ALL", "C");
     command.env("GIT_TERMINAL_PROMPT", "0");
-    command.env("GCM_INTERACTIVE", "never");
     command.env("GIT_EDITOR", "true");
     command.env("GIT_SEQUENCE_EDITOR", "true");
     command
@@ -264,6 +263,78 @@ pub struct GitCleanPreviewResponse {
 #[derive(Debug, Deserialize)]
 pub struct GitCleanBody {
     pub paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitWorktreeEntry {
+    pub path: String,
+    pub head: String,
+    pub branch: String,
+    pub detached: bool,
+    pub locked: bool,
+    pub prunable: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitWorktreesResponse {
+    pub worktrees: Vec<GitWorktreeEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitWorktreeCreateBody {
+    pub directory: String,
+    #[serde(default)]
+    pub branch: String,
+    #[serde(default)]
+    pub start_point: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitWorktreeRemoveBody {
+    pub path: String,
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitSubmoduleEntry {
+    pub path: String,
+    pub commit: String,
+    pub status: String,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitSubmodulesResponse {
+    pub submodules: Vec<GitSubmoduleEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitSubmoduleUpdateBody {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub initialize: bool,
+    #[serde(default)]
+    pub recursive: bool,
+    #[serde(default)]
+    pub remote: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitLfsTrackResponse {
+    pub patterns: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitLfsTrackBody {
+    pub pattern: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitRemoteTagDeleteBody {
+    pub remote: String,
+    pub tag: String,
 }
 
 struct GitCommandCancellation {
@@ -1788,6 +1859,8 @@ pub struct GitPushBody {
     pub push_tags: bool,
     #[serde(default)]
     pub force_with_lease: bool,
+    #[serde(default)]
+    pub confirm_force_with_lease: bool,
 }
 
 #[derive(Deserialize)]
@@ -2195,6 +2268,231 @@ fn build_git_clean_arguments(paths: &[String]) -> Vec<String> {
     arguments
 }
 
+fn parse_git_worktree_output(output: &str) -> Vec<GitWorktreeEntry> {
+    // 步骤1：按 porcelain 空行分组，每组代表一个 worktree。
+    let mut worktrees = Vec::new();
+    let mut path = String::new();
+    let mut head = String::new();
+    let mut branch = String::new();
+    let mut detached = false;
+    let mut locked = false;
+    let mut prunable = false;
+
+    // 步骤2：逐行识别 Git 固定字段，并在空行处提交当前记录。
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            if !path.is_empty() {
+                worktrees.push(GitWorktreeEntry {
+                    path: path.clone(),
+                    head: head.clone(),
+                    branch: branch.clone(),
+                    detached,
+                    locked,
+                    prunable,
+                });
+            }
+            path.clear();
+            head.clear();
+            branch.clear();
+            detached = false;
+            locked = false;
+            prunable = false;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("worktree ") {
+            path = value.to_string();
+        } else if let Some(value) = line.strip_prefix("HEAD ") {
+            head = value.to_string();
+        } else if let Some(value) = line.strip_prefix("branch ") {
+            branch = value.strip_prefix("refs/heads/").unwrap_or(value).to_string();
+        } else if line == "detached" {
+            detached = true;
+        } else if line.starts_with("locked") {
+            locked = true;
+        } else if line.starts_with("prunable") {
+            prunable = true;
+        }
+    }
+
+    // 步骤3：兼容没有尾随空行的最后一组记录。
+    if !path.is_empty() {
+        worktrees.push(GitWorktreeEntry { path, head, branch, detached, locked, prunable });
+    }
+    worktrees
+}
+fn validate_worktree_directory(value: &str) -> Result<String, Response> {
+    // 步骤1：只允许相对目录名，避免界面把 worktree 创建到不可预期的位置。
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') {
+        return Err(json_err(StatusCode::BAD_REQUEST, "worktree directory required"));
+    }
+    let path = Path::new(value);
+    if path.is_absolute() || value.contains("..") {
+        return Err(json_err(StatusCode::BAD_REQUEST, "invalid worktree directory"));
+    }
+    Ok(value.replace('\\', "/"))
+}
+
+fn build_worktree_create_arguments(
+    directory: &str,
+    branch: Option<&str>,
+    start_point: Option<&str>,
+) -> Vec<String> {
+    // 步骤1：按 Git 固定参数顺序创建 worktree，可选新建分支和起点引用。
+    let mut arguments = vec!["worktree".to_string(), "add".to_string()];
+    if let Some(branch) = branch {
+        arguments.push("-b".to_string());
+        arguments.push(branch.to_string());
+    }
+    arguments.push(directory.to_string());
+    if let Some(start_point) = start_point {
+        arguments.push(start_point.to_string());
+    }
+    arguments
+}
+
+fn build_worktree_remove_arguments(path: &str, force: bool) -> Vec<String> {
+    // 步骤1：删除 worktree 时只传入明确路径，强制删除必须由界面显式传入。
+    let mut arguments = vec!["worktree".to_string(), "remove".to_string()];
+    if force {
+        arguments.push("--force".to_string());
+    }
+    arguments.push(path.to_string());
+    arguments
+}
+
+fn normalize_worktree_path_for_compare(path: &str) -> String {
+    // 步骤1：只用于比较 Git 输出和界面回传路径，不改变实际传给 Git 的原始路径。
+    path.trim().replace('\\', "/").trim_end_matches('/').to_string()
+}
+
+fn canonical_or_original(path: &Path) -> PathBuf {
+    // 步骤1：已存在路径用规范化路径比较，已损坏或可修剪 worktree 保留原路径比较。
+    match path.canonicalize() {
+        Ok(canonical_path) => canonical_path,
+        Err(_) => path.to_path_buf(),
+    }
+}
+
+fn select_removable_worktree_path(
+    root: &Path,
+    worktrees: &[GitWorktreeEntry],
+    requested_path: &str,
+) -> Result<String, Response> {
+    // 步骤1：请求路径必须来自当前仓库的 worktree 列表，避免手写路径误删。
+    let requested_path_for_compare = normalize_worktree_path_for_compare(requested_path);
+    let mut selected_path = String::new();
+    for worktree in worktrees {
+        let worktree_path_for_compare = normalize_worktree_path_for_compare(&worktree.path);
+        if worktree_path_for_compare == requested_path_for_compare {
+            selected_path = worktree.path.clone();
+            break;
+        }
+    }
+    if selected_path.is_empty() {
+        return Err(json_err(StatusCode::BAD_REQUEST, "unknown worktree path"));
+    }
+
+    // 步骤2：禁止删除当前仓库根 worktree，避免把正在管理的主工作区移除。
+    let root_path = canonical_or_original(root);
+    let selected_path_buf = PathBuf::from(&selected_path);
+    let selected_canonical_path = canonical_or_original(&selected_path_buf);
+    if selected_canonical_path == root_path {
+        return Err(json_err(StatusCode::BAD_REQUEST, "cannot remove current worktree"));
+    }
+    Ok(selected_path)
+}
+
+fn parse_git_submodule_status_output(output: &str) -> Vec<GitSubmoduleEntry> {
+    // 步骤1：逐行解析 git submodule status 的状态字符、提交和路径。
+    let mut submodules = Vec::new();
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let status_character = line.chars().next().unwrap_or(' ');
+        let rest = line.get(1..).unwrap_or("").trim();
+        let mut parts = rest.split_whitespace();
+        let commit = parts.next().unwrap_or("").to_string();
+        let path = parts.next().unwrap_or("").to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let mut description_parts = Vec::new();
+        for part in parts {
+            description_parts.push(part);
+        }
+        let description = description_parts.join(" ");
+        let status = match status_character {
+            '-' => "uninitialized",
+            '+' => "changed",
+            'U' => "conflict",
+            _ => "clean",
+        }
+        .to_string();
+        submodules.push(GitSubmoduleEntry { path, commit, status, description });
+    }
+    submodules
+}
+
+fn build_submodule_update_arguments(
+    path: Option<&str>,
+    initialize: bool,
+    recursive: bool,
+    remote: bool,
+) -> Vec<String> {
+    // 步骤1：把界面选项映射为 Git submodule update 的固定参数。
+    let mut arguments = vec!["submodule".to_string(), "update".to_string()];
+    if initialize {
+        arguments.push("--init".to_string());
+    }
+    if recursive {
+        arguments.push("--recursive".to_string());
+    }
+    if remote {
+        arguments.push("--remote".to_string());
+    }
+    if let Some(path) = path {
+        arguments.push("--".to_string());
+        arguments.push(path.to_string());
+    }
+    arguments
+}
+
+fn parse_git_lfs_track_output(output: &str) -> Vec<String> {
+    // 步骤1：提取 git lfs track 输出中的模式部分，忽略标题行。
+    let mut patterns = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("Listing tracked patterns") {
+            continue;
+        }
+        let pattern = match line.split_once(" (") {
+            Some((value, _)) => value.trim(),
+            None => line,
+        };
+        if !pattern.is_empty() {
+            patterns.push(pattern.to_string());
+        }
+    }
+    patterns
+}
+
+fn build_lfs_track_arguments(pattern: &str) -> Vec<String> {
+    // 步骤1：LFS 跟踪模式作为独立参数传递，避免 shell 展开通配符。
+    vec!["lfs".to_string(), "track".to_string(), pattern.to_string()]
+}
+
+fn build_lfs_sync_arguments(action: &str, remote: Option<&str>) -> Vec<String> {
+    // 步骤1：支持 pull 和 push 两种 LFS 同步动作，可选指定 Remote。
+    let mut arguments = vec!["lfs".to_string(), action.to_string()];
+    if let Some(remote) = remote {
+        arguments.push(remote.to_string());
+    }
+    arguments
+}
 async fn git_clean_preview_paths(root: PathBuf) -> Result<Vec<String>, String> {
     // 步骤1：dry-run 默认遵守 .gitignore，并要求 Git 输出可读的非 ASCII 路径。
     let arguments = vec![
@@ -2250,7 +2548,12 @@ pub async fn workspace_git_clean(
         }
     }
 
-    // 步骤3：执行受路径约束的清理，并记录为可查看的 Git 命令。
+    // 步骤3：清理前先备份当前内容，避免误删后完全无法找回。
+    if let Err(error) = backup_git_paths(root.clone(), &paths, "clean").await {
+        return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error);
+    }
+
+    // 步骤4：执行受路径约束的清理，并记录为可查看的 Git 命令。
     let arguments = build_git_clean_arguments(&paths);
     match run_git_tracked_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
@@ -2258,6 +2561,172 @@ pub async fn workspace_git_clean(
     }
 }
 
+pub async fn workspace_git_worktrees(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取 worktree porcelain 输出，避免人工解析对齐列。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let arguments = vec!["worktree".to_string(), "list".to_string(), "--porcelain".to_string()];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let worktrees = parse_git_worktree_output(&stdout);
+            Json(GitWorktreesResponse { worktrees }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_worktree_create(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitWorktreeCreateBody>,
+) -> Response {
+    // 步骤1：验证目录、分支和起点后创建 worktree。
+    let directory = try_res!(validate_worktree_directory(&body.directory));
+    let branch = try_res!(validate_optional_git_name(
+        if body.branch.trim().is_empty() { None } else { Some(body.branch.as_str()) },
+        "branch",
+    ));
+    let start_point = try_res!(validate_optional_git_name(
+        if body.start_point.trim().is_empty() { None } else { Some(body.start_point.as_str()) },
+        "start point",
+    ));
+    let arguments =
+        build_worktree_create_arguments(&directory, branch.as_deref(), start_point.as_deref());
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_worktree_remove(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitWorktreeRemoveBody>,
+) -> Response {
+    // 步骤1：删除用户从 worktree 列表中明确选择的路径。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let path = body.path.trim();
+    if path.is_empty() || path.starts_with('-') || path.chars().any(char::is_control) {
+        return json_err(StatusCode::BAD_REQUEST, "worktree path required");
+    }
+
+    // 步骤2：重新读取 worktree 列表，确认目标仍然存在且不是当前仓库根。
+    let list_arguments =
+        vec!["worktree".to_string(), "list".to_string(), "--porcelain".to_string()];
+    let list_output = match run_git_output(root.clone(), list_arguments).await {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => return git_command_response(&output),
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+    let worktrees = parse_git_worktree_output(&list_stdout);
+    let selected_path = try_res!(select_removable_worktree_path(&root, &worktrees, path));
+
+    // 步骤3：只把 Git 列表里的原始路径传给 remove，避免路径展示与实际删除不一致。
+    let arguments = build_worktree_remove_arguments(&selected_path, body.force);
+    match run_git_tracked_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_submodules(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取子模块状态；没有子模块时 Git 返回空列表。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let arguments = vec!["submodule".to_string(), "status".to_string(), "--recursive".to_string()];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let submodules = parse_git_submodule_status_output(&stdout);
+            Json(GitSubmodulesResponse { submodules }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_submodule_update(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitSubmoduleUpdateBody>,
+) -> Response {
+    // 步骤1：可选校验单个子模块路径，再执行 update。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let path = if body.path.trim().is_empty() {
+        None
+    } else {
+        let paths = try_res!(validate_git_paths(&root, &[body.path]));
+        Some(paths[0].clone())
+    };
+    let arguments = build_submodule_update_arguments(
+        path.as_deref(),
+        body.initialize,
+        body.recursive,
+        body.remote,
+    );
+    match run_git_tracked_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_lfs_tracks(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取 LFS 跟踪模式，Git LFS 不存在时返回真实错误。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let arguments = vec!["lfs".to_string(), "track".to_string()];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let patterns = parse_git_lfs_track_output(&stdout);
+            Json(GitLfsTrackResponse { patterns }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_lfs_track(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitLfsTrackBody>,
+) -> Response {
+    // 步骤1：添加单个 LFS 跟踪模式。
+    let pattern = body.pattern.trim();
+    if pattern.is_empty() || pattern.starts_with('-') || pattern.chars().any(char::is_control) {
+        return json_err(StatusCode::BAD_REQUEST, "lfs pattern required");
+    }
+    let arguments = build_lfs_track_arguments(pattern);
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_lfs_pull(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitFetchBody>,
+) -> Response {
+    // 步骤1：拉取 LFS 对象，可选指定 Remote。
+    let remote = try_res!(validate_optional_git_name(body.remote.as_deref(), "remote"));
+    let arguments = build_lfs_sync_arguments("pull", remote.as_deref());
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_lfs_push(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitFetchBody>,
+) -> Response {
+    // 步骤1：推送 LFS 对象，可选指定 Remote。
+    let remote = try_res!(validate_optional_git_name(body.remote.as_deref(), "remote"));
+    let arguments = build_lfs_sync_arguments("push", remote.as_deref());
+    run_git_remote_command(&manager, &query, arguments).await
+}
 async fn run_git_output(
     root: PathBuf,
     arguments: Vec<String>,
@@ -2276,6 +2745,88 @@ async fn run_git_output(
     }
 }
 
+async fn git_common_directory(root: PathBuf) -> Result<PathBuf, String> {
+    // 步骤1：读取 Git 公共目录，兼容普通仓库和 worktree。
+    let arguments = vec!["rev-parse".to_string(), "--git-common-dir".to_string()];
+    let output = run_git_output(root.clone(), arguments).await?;
+    if !output.status.success() {
+        return Err(git_command_error_message(&output.stdout, &output.stderr));
+    }
+    let raw_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if raw_path.is_empty() {
+        return Err("git common directory not found".to_string());
+    }
+    let path = PathBuf::from(&raw_path);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(root.join(path))
+    }
+}
+
+fn copy_path_recursively(source: &Path, destination: &Path) -> Result<(), String> {
+    // 步骤1：目录递归复制，文件直接复制。
+    let metadata = std::fs::metadata(source).map_err(|error| error.to_string())?;
+    if metadata.is_dir() {
+        std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+        let entries = std::fs::read_dir(source).map_err(|error| error.to_string())?;
+        for entry_result in entries {
+            let entry = entry_result.map_err(|error| error.to_string())?;
+            let child_source = entry.path();
+            let child_destination = destination.join(entry.file_name());
+            copy_path_recursively(&child_source, &child_destination)?;
+        }
+        return Ok(());
+    }
+
+    // 步骤2：普通文件复制前先创建父目录。
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::copy(source, destination).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+async fn backup_git_paths(
+    root: PathBuf,
+    paths: &[String],
+    reason: &str,
+) -> Result<PathBuf, String> {
+    // 步骤1：在 Git 公共目录下建立 Dinotty 备份目录，避免被 git clean 清理。
+    let common_directory = git_common_directory(root.clone()).await?;
+    let backup_directory = common_directory
+        .join("dinotty-backups")
+        .join(format!("{reason}-{}", git_command_timestamp()));
+    std::fs::create_dir_all(&backup_directory).map_err(|error| error.to_string())?;
+
+    // 步骤2：逐个复制存在的仓库相对路径，不存在的路径跳过。
+    for path in paths {
+        let source = normalize_join(&root, path).map_err(response_to_string)?;
+        if !source.exists() {
+            continue;
+        }
+        let relative_destination = Path::new(path);
+        let destination = backup_directory.join(relative_destination);
+        copy_path_recursively(&source, &destination)?;
+    }
+    Ok(backup_directory)
+}
+
+fn response_to_string(response: Response) -> String {
+    // 步骤1：内部备份只需要简短错误，避免把 Axum 响应结构泄露到日志。
+    format!("request failed with status {}", response.status())
+}
+
+async fn create_safety_branch(root: PathBuf, reason: &str) -> Result<String, String> {
+    // 步骤1：破坏性历史操作前保存当前 HEAD 引用。
+    let branch = format!("dinotty-safety/{reason}-{}", git_command_timestamp());
+    let arguments = vec!["branch".to_string(), branch.clone(), "HEAD".to_string()];
+    let output = run_git_tracked_output(root, arguments).await?;
+    if !output.status.success() {
+        return Err(git_command_error_message(&output.stdout, &output.stderr));
+    }
+    Ok(branch)
+}
 fn git_command_tracker() -> &'static Mutex<GitCommandTracker> {
     // 步骤1：所有 Web 与桌面请求共享同一份进程记录和取消状态。
     GIT_COMMAND_TRACKER.get_or_init(|| Mutex::new(GitCommandTracker::default()))
@@ -2640,9 +3191,45 @@ fn git_command_error_message(stdout: &[u8], stderr: &[u8]) -> String {
     if message.is_empty() {
         return "git command failed".to_string();
     }
-    message
+    append_git_error_hint(message)
 }
 
+fn append_git_error_hint(mut message: String) -> String {
+    // 步骤1：按常见 Git 失败文本追加中文处理建议，保留原始输出方便排查。
+    let lower_message = message.to_lowercase();
+    let hint = if lower_message.contains("authentication failed")
+        || lower_message.contains("could not read username")
+        || lower_message.contains("permission denied")
+        || lower_message.contains("repository not found")
+    {
+        Some("Dinotty 提示：远程认证失败，请检查凭据助手、SSH key、仓库地址或账号权限。")
+    } else if lower_message.contains("no upstream branch")
+        || lower_message.contains("no tracking information")
+    {
+        Some("Dinotty 提示：当前分支没有 upstream，请先发布分支或在远程管理里设置跟踪分支。")
+    } else if lower_message.contains("non-fast-forward")
+        || lower_message.contains("fetch first")
+        || lower_message.contains("rejected")
+    {
+        Some("Dinotty 提示：远程有本地没有的提交，请先 Fetch/Pull 并处理冲突后再 Push。")
+    } else if lower_message.contains("local changes")
+        || lower_message.contains("would be overwritten")
+        || lower_message.contains("working tree clean")
+    {
+        Some("Dinotty 提示：工作区状态不满足该操作，请先提交、暂存、储藏或丢弃相关改动。")
+    } else {
+        None
+    };
+
+    // 步骤2：避免重复追加同一提示。
+    if let Some(hint) = hint {
+        if !message.contains(hint) {
+            message.push('\n');
+            message.push_str(hint);
+        }
+    }
+    message
+}
 pub async fn workspace_git_stage(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
@@ -2730,7 +3317,12 @@ pub async fn workspace_git_discard(
     let paths = try_res!(validate_git_paths(&root, &[body.path]));
     let path = paths[0].clone();
 
-    // 步骤2：未跟踪文件直接删除，已跟踪文件交给 Git 恢复工作区版本。
+    // 步骤2：丢弃前先备份当前内容，降低误操作造成的不可逆损失。
+    if let Err(error) = backup_git_paths(root.clone(), &[path.clone()], "discard").await {
+        return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error);
+    }
+
+    // 步骤3：未跟踪文件直接删除，已跟踪文件交给 Git 恢复工作区版本。
     if body.untracked {
         let target = try_res!(normalize_join(&root, &path));
         try_res!(path_must_be_under(&root, &target));
@@ -2745,13 +3337,13 @@ pub async fn workspace_git_discard(
         };
     }
 
+    // 步骤4：恢复已跟踪文件的工作区版本。
     let arguments = vec!["restore".to_string(), "--worktree".to_string(), "--".to_string(), path];
     match run_git_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
 }
-
 pub async fn workspace_git_commit(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
@@ -3540,8 +4132,17 @@ pub async fn workspace_git_reset(
         return json_err(StatusCode::BAD_REQUEST, "hard reset confirmation required");
     }
     let target = try_res!(validate_git_name(&body.target, "target"));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    if mode == "hard" {
+        if let Err(error) = create_safety_branch(root.clone(), "reset").await {
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error);
+        }
+    }
     let arguments = vec!["reset".to_string(), format!("--{mode}"), target];
-    run_git_action(&manager, &query, arguments).await
+    match run_git_tracked_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
 }
 
 pub async fn workspace_git_operation_state(
@@ -4399,6 +5000,10 @@ fn build_remote_branch_delete_arguments(remote: &str, branch: &str) -> Vec<Strin
     vec!["push".to_string(), remote.to_string(), "--delete".to_string(), branch.to_string()]
 }
 
+fn build_remote_tag_delete_arguments(remote: &str, tag: &str) -> Vec<String> {
+    // 步骤1：远程标签删除使用完整 refs/tags 路径，避免和分支名混淆。
+    vec!["push".to_string(), remote.to_string(), "--delete".to_string(), format!("refs/tags/{tag}")]
+}
 fn validate_optional_git_name(
     value: Option<&str>,
     label: &str,
@@ -4453,6 +5058,9 @@ pub async fn workspace_git_push(
     if remote.is_none() && (branch.is_some() || remote_branch.is_some()) {
         return json_err(StatusCode::BAD_REQUEST, "remote required for branch");
     }
+    if body.force_with_lease && !body.confirm_force_with_lease {
+        return json_err(StatusCode::BAD_REQUEST, "force-with-lease confirmation required");
+    }
     let arguments = build_push_arguments(
         remote.as_deref(),
         branch.as_deref(),
@@ -4475,6 +5083,17 @@ pub async fn workspace_git_remote_branch_delete(
     run_git_remote_command(&manager, &query, arguments).await
 }
 
+pub async fn workspace_git_remote_tag_delete(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitRemoteTagDeleteBody>,
+) -> Response {
+    // 步骤1：验证 Remote 和标签名后删除远程标签。
+    let remote = try_res!(validate_git_name(&body.remote, "remote"));
+    let tag = try_res!(validate_git_name(&body.tag, "tag"));
+    let arguments = build_remote_tag_delete_arguments(&remote, &tag);
+    run_git_remote_command(&manager, &query, arguments).await
+}
 fn build_untracked_patch(path: &str, content: &str) -> String {
     // 步骤1：生成与 Git unified diff 一致的新增文件头部。
     let mut diff_text = format!("diff --git a/{path} b/{path}\n--- /dev/null\n+++ b/{path}\n");
@@ -4690,24 +5309,29 @@ mod tests {
         build_branch_delete_arguments, build_branch_switch_arguments, build_cherry_pick_arguments,
         build_commit_arguments, build_fetch_arguments, build_git_clean_arguments,
         build_git_config_update_commands, build_git_log_arguments,
-        build_git_sync_preview_arguments, build_pull_arguments, build_push_arguments,
-        build_remote_add_arguments, build_remote_branch_delete_arguments,
-        build_remote_delete_arguments, build_remote_update_arguments,
+        build_git_sync_preview_arguments, build_lfs_sync_arguments, build_lfs_track_arguments,
+        build_pull_arguments, build_push_arguments, build_remote_add_arguments,
+        build_remote_branch_delete_arguments, build_remote_delete_arguments,
+        build_remote_tag_delete_arguments, build_remote_update_arguments,
         build_revert_commit_arguments, build_reverted_content, build_stash_save_arguments,
-        build_upstream_set_arguments, build_upstream_unset_arguments, cleanup_incomplete_clone,
-        clone_git_repository, contains_conflict_markers, discover_git_repositories,
-        extract_unified_diff_hunk, git_clean_preview_paths, git_command, git_command_error_message,
+        build_submodule_update_arguments, build_upstream_set_arguments,
+        build_upstream_unset_arguments, build_worktree_create_arguments,
+        build_worktree_remove_arguments, cleanup_incomplete_clone, clone_git_repository,
+        contains_conflict_markers, discover_git_repositories, extract_unified_diff_hunk,
+        git_clean_preview_paths, git_command, git_command_error_message,
         git_command_records_for_root, git_command_tracker, git_commit_matches_search,
         git_content_version, git_ignore_literal_pattern, git_revert_has_no_changes,
         initialize_git_repository, parse_branch_output, parse_git_blame_output,
-        parse_git_clean_preview_output, parse_git_config_output, parse_log_output,
+        parse_git_clean_preview_output, parse_git_config_output, parse_git_lfs_track_output,
+        parse_git_submodule_status_output, parse_git_worktree_output, parse_log_output,
         parse_reflog_output, parse_remote_output, parse_stash_output, parse_status_output,
         parse_tag_output, read_conflict_stage, read_sequencer_operation,
         request_git_command_cancellation, run_cherry_pick_sequence, run_git_output,
-        run_rebase_plan, sanitize_git_command, unstage_git_paths,
+        run_rebase_plan, sanitize_git_command, select_removable_worktree_path, unstage_git_paths,
         update_running_git_command_output, validate_clone_directory, validate_clone_url,
         validate_git_candidate_path, validate_initial_branch, GitCommandCancellation,
         GitCommandRecord, GitCommandTracker, GitConfigUpdateBody, GitRebasePlanEntry,
+        GitWorktreeEntry,
     };
     use std::{
         path::{Path, PathBuf},
@@ -5794,5 +6418,116 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&status_output.stdout), "?? README.md\n");
+    }
+
+    #[test]
+    fn parses_worktrees_and_builds_worktree_commands() {
+        // 步骤1：解析 Git worktree porcelain 输出。
+        let output = concat!(
+            "worktree C:/repo\n",
+            "HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "branch refs/heads/main\n",
+            "\n",
+            "worktree C:/repo-feature\n",
+            "HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "detached\n",
+            "locked reason\n",
+            "\n",
+        );
+        let worktrees = parse_git_worktree_output(output);
+        assert_eq!(worktrees.len(), 2);
+        assert_eq!(worktrees[0].branch, "main");
+        assert!(worktrees[1].detached);
+        assert!(worktrees[1].locked);
+
+        // 步骤2：确认创建和删除命令只由固定参数组成。
+        assert_eq!(
+            build_worktree_create_arguments("../feature", Some("feature/ui"), Some("main")),
+            vec!["worktree", "add", "-b", "feature/ui", "../feature", "main"]
+        );
+        assert_eq!(
+            build_worktree_remove_arguments("C:/repo-feature", true),
+            vec!["worktree", "remove", "--force", "C:/repo-feature"]
+        );
+
+        // 步骤3：删除前必须从当前 worktree 列表中选择，并拒绝当前仓库根。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        let root = temporary_directory.path().join("repo");
+        let linked = temporary_directory.path().join("repo-feature");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&linked).unwrap();
+        let root_text = root.to_string_lossy().into_owned();
+        let linked_text = linked.to_string_lossy().into_owned();
+        let removable_worktrees = vec![
+            GitWorktreeEntry {
+                path: root_text.clone(),
+                head: "aaaaaaaa".to_string(),
+                branch: "main".to_string(),
+                detached: false,
+                locked: false,
+                prunable: false,
+            },
+            GitWorktreeEntry {
+                path: linked_text.clone(),
+                head: "bbbbbbbb".to_string(),
+                branch: "feature".to_string(),
+                detached: false,
+                locked: false,
+                prunable: false,
+            },
+        ];
+        let selected =
+            select_removable_worktree_path(&root, &removable_worktrees, &linked_text).unwrap();
+        assert_eq!(selected, linked_text);
+        assert!(select_removable_worktree_path(&root, &removable_worktrees, &root_text).is_err());
+        assert!(select_removable_worktree_path(&root, &removable_worktrees, "missing").is_err());
+    }
+
+    #[test]
+    fn parses_submodules_and_builds_submodule_update_commands() {
+        // 步骤1：覆盖未初始化、已变更和冲突三类子模块状态。
+        let output = concat!(
+            "-aaaaaaaa libs/empty (heads/main)\n",
+            "+bbbbbbbb libs/changed (v1.0.0)\n",
+            "Ucccccccc libs/conflict\n",
+        );
+        let submodules = parse_git_submodule_status_output(output);
+        assert_eq!(submodules.len(), 3);
+        assert_eq!(submodules[0].status, "uninitialized");
+        assert_eq!(submodules[1].status, "changed");
+        assert_eq!(submodules[2].status, "conflict");
+
+        // 步骤2：确认更新命令按界面选项追加参数和路径。
+        assert_eq!(
+            build_submodule_update_arguments(Some("libs/empty"), true, true, false),
+            vec!["submodule", "update", "--init", "--recursive", "--", "libs/empty"]
+        );
+    }
+
+    #[test]
+    fn parses_lfs_tracks_and_builds_lfs_commands() {
+        // 步骤1：解析 git lfs track 输出中的模式。
+        let output =
+            "Listing tracked patterns\n*.psd (.gitattributes)\nassets/** (.gitattributes)\n";
+        let patterns = parse_git_lfs_track_output(output);
+        assert_eq!(patterns, vec!["*.psd", "assets/**"]);
+
+        // 步骤2：确认 track 和同步命令不会经过 shell 展开。
+        assert_eq!(build_lfs_track_arguments("*.zip"), vec!["lfs", "track", "*.zip"]);
+        assert_eq!(build_lfs_sync_arguments("pull", Some("origin")), vec!["lfs", "pull", "origin"]);
+    }
+
+    #[test]
+    fn builds_remote_tag_delete_and_explains_common_errors() {
+        // 步骤1：远程标签删除使用完整标签引用。
+        assert_eq!(
+            build_remote_tag_delete_arguments("origin", "v1.0.0"),
+            vec!["push", "origin", "--delete", "refs/tags/v1.0.0"]
+        );
+
+        // 步骤2：常见远程错误保留原文并追加中文提示。
+        let message = git_command_error_message(b"", b"fatal: Authentication failed");
+        assert!(message.contains("Authentication failed"));
+        assert!(message.contains("远程认证失败"));
     }
 }

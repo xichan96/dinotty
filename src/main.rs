@@ -832,18 +832,9 @@ async fn main() {
             .route("/api/workspace/git-init", post(workspace::workspace_git_initialize))
             .route("/api/workspace/git-clone", post(workspace::workspace_git_clone))
             .route("/api/workspace/git-remote-add", post(workspace::workspace_git_remote_add))
-            .route(
-                "/api/workspace/git-remote-update",
-                post(workspace::workspace_git_remote_update),
-            )
-            .route(
-                "/api/workspace/git-remote-delete",
-                post(workspace::workspace_git_remote_delete),
-            )
-            .route(
-                "/api/workspace/git-upstream-set",
-                post(workspace::workspace_git_upstream_set),
-            )
+            .route("/api/workspace/git-remote-update", post(workspace::workspace_git_remote_update))
+            .route("/api/workspace/git-remote-delete", post(workspace::workspace_git_remote_delete))
+            .route("/api/workspace/git-upstream-set", post(workspace::workspace_git_upstream_set))
             .route(
                 "/api/workspace/git-upstream-unset",
                 post(workspace::workspace_git_upstream_unset),
@@ -865,31 +856,16 @@ async fn main() {
             .route("/api/workspace/git-pull", post(workspace::workspace_git_pull))
             .route("/api/workspace/git-push", post(workspace::workspace_git_push))
             .route("/api/workspace/git-branches", get(workspace::workspace_git_branches))
-            .route(
-                "/api/workspace/git-branch-switch",
-                post(workspace::workspace_git_branch_switch),
-            )
-            .route(
-                "/api/workspace/git-branch-create",
-                post(workspace::workspace_git_branch_create),
-            )
-            .route(
-                "/api/workspace/git-branch-delete",
-                post(workspace::workspace_git_branch_delete),
-            )
-            .route(
-                "/api/workspace/git-branch-rename",
-                post(workspace::workspace_git_branch_rename),
-            )
+            .route("/api/workspace/git-branch-switch", post(workspace::workspace_git_branch_switch))
+            .route("/api/workspace/git-branch-create", post(workspace::workspace_git_branch_create))
+            .route("/api/workspace/git-branch-delete", post(workspace::workspace_git_branch_delete))
+            .route("/api/workspace/git-branch-rename", post(workspace::workspace_git_branch_rename))
             .route(
                 "/api/workspace/git-branch-publish",
                 post(workspace::workspace_git_branch_publish),
             )
             .route("/api/workspace/git-log", get(workspace::workspace_git_log))
-            .route(
-                "/api/workspace/git-sync-preview",
-                get(workspace::workspace_git_sync_preview),
-            )
+            .route("/api/workspace/git-sync-preview", get(workspace::workspace_git_sync_preview))
             .route("/api/workspace/git-commit-diff", get(workspace::workspace_git_commit_diff))
             .route("/api/workspace/git-compare", get(workspace::workspace_git_compare))
             .route("/api/workspace/git-stashes", get(workspace::workspace_git_stashes))
@@ -898,7 +874,10 @@ async fn main() {
             .route("/api/workspace/git-stash-apply", post(workspace::workspace_git_stash_apply))
             .route("/api/workspace/git-stash-pop", post(workspace::workspace_git_stash_pop))
             .route("/api/workspace/git-stash-drop", post(workspace::workspace_git_stash_drop))
-            .route("/api/workspace/git-conflict-content", get(workspace::workspace_git_conflict_content))
+            .route(
+                "/api/workspace/git-conflict-content",
+                get(workspace::workspace_git_conflict_content),
+            )
             .route("/api/workspace/git-conflict-save", post(workspace::workspace_git_conflict_save))
             .route(
                 "/api/workspace/git-conflict-resolve",
@@ -910,10 +889,7 @@ async fn main() {
                 "/api/workspace/git-rebase-candidates",
                 get(workspace::workspace_git_rebase_candidates),
             )
-            .route(
-                "/api/workspace/git-rebase-plan",
-                post(workspace::workspace_git_rebase_plan),
-            )
+            .route("/api/workspace/git-rebase-plan", post(workspace::workspace_git_rebase_plan))
             .route("/api/workspace/git-cherry-pick", post(workspace::workspace_git_cherry_pick))
             .route("/api/workspace/git-revert-commit", post(workspace::workspace_git_revert_commit))
             .route("/api/workspace/git-reset", post(workspace::workspace_git_reset))
@@ -923,18 +899,9 @@ async fn main() {
             )
             .route("/api/workspace/git-reflog", get(workspace::workspace_git_reflog))
             .route("/api/workspace/git-config", get(workspace::workspace_git_config))
-            .route(
-                "/api/workspace/git-config-update",
-                post(workspace::workspace_git_config_update),
-            )
-            .route(
-                "/api/workspace/git-diagnostics",
-                get(workspace::workspace_git_diagnostics),
-            )
-            .route(
-                "/api/workspace/git-command-log",
-                get(workspace::workspace_git_command_log),
-            )
+            .route("/api/workspace/git-config-update", post(workspace::workspace_git_config_update))
+            .route("/api/workspace/git-diagnostics", get(workspace::workspace_git_diagnostics))
+            .route("/api/workspace/git-command-log", get(workspace::workspace_git_command_log))
             .route(
                 "/api/workspace/git-command-cancel",
                 post(workspace::workspace_git_command_cancel),
@@ -944,15 +911,27 @@ async fn main() {
                 "/api/workspace/git-ignore",
                 get(workspace::workspace_git_ignore).post(workspace::workspace_git_ignore_update),
             )
-            .route(
-                "/api/workspace/git-ignore-add",
-                post(workspace::workspace_git_ignore_add),
-            )
-            .route(
-                "/api/workspace/git-clean-preview",
-                get(workspace::workspace_git_clean_preview),
-            )
+            .route("/api/workspace/git-ignore-add", post(workspace::workspace_git_ignore_add))
+            .route("/api/workspace/git-clean-preview", get(workspace::workspace_git_clean_preview))
             .route("/api/workspace/git-clean", post(workspace::workspace_git_clean))
+            .route("/api/workspace/git-worktrees", get(workspace::workspace_git_worktrees))
+            .route(
+                "/api/workspace/git-worktree-create",
+                post(workspace::workspace_git_worktree_create),
+            )
+            .route(
+                "/api/workspace/git-worktree-remove",
+                post(workspace::workspace_git_worktree_remove),
+            )
+            .route("/api/workspace/git-submodules", get(workspace::workspace_git_submodules))
+            .route(
+                "/api/workspace/git-submodule-update",
+                post(workspace::workspace_git_submodule_update),
+            )
+            .route("/api/workspace/git-lfs-tracks", get(workspace::workspace_git_lfs_tracks))
+            .route("/api/workspace/git-lfs-track", post(workspace::workspace_git_lfs_track))
+            .route("/api/workspace/git-lfs-pull", post(workspace::workspace_git_lfs_pull))
+            .route("/api/workspace/git-lfs-push", post(workspace::workspace_git_lfs_push))
             .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),
@@ -960,6 +939,10 @@ async fn main() {
             .route("/api/workspace/git-tags", get(workspace::workspace_git_tags))
             .route("/api/workspace/git-tag-create", post(workspace::workspace_git_tag_create))
             .route("/api/workspace/git-tag-delete", post(workspace::workspace_git_tag_delete))
+            .route(
+                "/api/workspace/git-remote-tag-delete",
+                post(workspace::workspace_git_remote_tag_delete),
+            )
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))

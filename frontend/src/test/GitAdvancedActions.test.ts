@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import ConfirmModal from '../components/ui/ConfirmModal.vue'
 import GitAdvancedActions from '../components/workspace/GitAdvancedActions.vue'
 
 const advancedMocks = vi.hoisted(function createAdvancedMocks() {
@@ -93,6 +94,43 @@ describe('GitAdvancedActions', function gitAdvancedActionsSuite() {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ commit: 'abcdef12' }),
+      })
+    )
+  })
+
+  it('deletes a remote tag from the selected remote', async function deletesRemoteTag() {
+    // 步骤1：传入远程仓库列表并展开标签区域。
+    const wrapper = mount(GitAdvancedActions, {
+      props: {
+        paneId: 'pane-1',
+        remotes: [
+          {
+            name: 'origin',
+            fetchUrl: 'https://example.com/team/project.git',
+            pushUrl: 'git@example.com:team/project.git',
+          },
+        ],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.git-advanced-heading').trigger('click')
+
+    // 步骤2：确认后删除 origin 上的同名远程标签。
+    await wrapper.get('[data-testid="git-tag-remote"]').setValue('origin')
+    await wrapper.get('[data-testid="git-remote-tag-delete-button"]').trigger('click')
+    await flushPromises()
+    const confirmModals = wrapper.findAllComponents(ConfirmModal)
+    const remoteTagConfirmModal = confirmModals.find(function findRemoteTagConfirmModal(modal) {
+      return String(modal.props('message')).includes('origin/v1.0.0')
+    })
+    expect(remoteTagConfirmModal?.props('visible')).toBe(true)
+    remoteTagConfirmModal?.vm.$emit('confirm')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-remote-tag-delete?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ remote: 'origin', tag: 'v1.0.0' }),
       })
     )
   })

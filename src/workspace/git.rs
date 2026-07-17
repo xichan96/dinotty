@@ -465,13 +465,17 @@ async fn clone_git_repository(
     destination: PathBuf,
 ) -> Result<std::process::Output, String> {
     // 步骤1：使用 -- 结束选项解析，并让 Git 在工作区内创建目标目录。
+    let destination_argument = match destination.strip_prefix(&workspace_root) {
+        Ok(relative_destination) => relative_destination.to_string_lossy().into_owned(),
+        Err(_) => destination.to_string_lossy().into_owned(),
+    };
     let arguments = vec![
         "clone".to_string(),
         "--".to_string(),
         url,
-        destination.to_string_lossy().into_owned(),
+        destination_argument,
     ];
-    run_git_output(workspace_root, arguments).await
+    run_git_tracked_output(workspace_root, arguments).await
 }
 
 fn repository_setup_response(output: &std::process::Output, repository: &str) -> Response {
@@ -2204,11 +2208,27 @@ pub async fn workspace_git_command_cancel(
 fn sanitize_git_command(arguments: &[String]) -> String {
     // 步骤1：逐参数生成展示命令，Remote URL 和提交说明始终脱敏。
     let mut sanitized_arguments = Vec::new();
+    let clone_command = arguments.first().map(String::as_str) == Some("clone");
+    let mut clone_url_index: Option<usize> = None;
+    if clone_command {
+        // 步骤2：克隆 URL 是选项结束标记后的首个位置参数，不能按固定索引判断。
+        let mut options_ended = false;
+        for (index, argument) in arguments.iter().enumerate().skip(1) {
+            if argument == "--" {
+                options_ended = true;
+                continue;
+            }
+            if options_ended || !argument.starts_with('-') {
+                clone_url_index = Some(index);
+                break;
+            }
+        }
+    }
     let remote_command = arguments.first().map(String::as_str) == Some("remote");
     let remote_action = arguments.get(1).map(String::as_str).unwrap_or("");
     let mut redact_next_message = false;
     for (index, argument) in arguments.iter().enumerate() {
-        let redacts_clone_url = arguments.first().map(String::as_str) == Some("clone") && index == 1;
+        let redacts_clone_url = clone_url_index == Some(index);
         let redacts_remote_url = remote_command
             && ((remote_action == "add" && index >= 3)
                 || (remote_action == "set-url" && index == arguments.len() - 1));
@@ -4370,7 +4390,7 @@ mod tests {
         build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
         build_git_clean_arguments, build_git_config_update_commands,
         build_git_sync_preview_arguments, git_clean_preview_paths,
-        git_command_records_for_root, git_ignore_literal_pattern,
+        git_command_records_for_root, git_command_tracker, git_ignore_literal_pattern,
         request_git_command_cancellation, sanitize_git_command,
         build_remote_add_arguments, build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
@@ -4749,6 +4769,17 @@ mod tests {
             "private message".to_string(),
         ];
         assert_eq!(sanitize_git_command(&commit_arguments), "git commit -m [redacted-message]");
+
+        let clone_arguments = vec![
+            "clone".to_string(),
+            "--".to_string(),
+            "https://user:secret@example.com/repository.git".to_string(),
+            "repository".to_string(),
+        ];
+        assert_eq!(
+            sanitize_git_command(&clone_arguments),
+            "git clone -- [redacted-url] repository"
+        );
 
         // 步骤2：不含敏感值的同步命令保留完整参数，便于排查。
         let fetch_arguments = vec![
@@ -5131,6 +5162,13 @@ mod tests {
         assert!(cloned_root.join(".git").is_dir());
         let cloned_content = std::fs::read_to_string(cloned_root.join("README.md")).unwrap();
         assert_eq!(cloned_content.trim(), "source");
+
+        // 步骤3：克隆必须写入工作区命令日志，并隐藏源仓库地址。
+        let tracker = git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+        let records = git_command_records_for_root(&tracker, workspace_directory.path());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].command, "git clone -- [redacted-url] cloned");
+        assert_eq!(records[0].status, "success");
     }
 
     #[test]

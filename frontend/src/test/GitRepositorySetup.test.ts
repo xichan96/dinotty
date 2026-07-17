@@ -47,6 +47,7 @@ describe('GitRepositorySetup', function gitRepositorySetupSuite() {
   it('clones a repository into a workspace subdirectory', async function clonesRepo() {
     // 步骤1：切换克隆模式并填写远程地址和目标目录。
     const wrapper = mount(GitRepositorySetup, { props: { paneId: 'pane-1' } })
+    expect(wrapper.find('[data-testid="git-command-log-heading"]').exists()).toBe(true)
     await wrapper.get('[data-testid="git-setup-clone-tab"]').trigger('click')
     await wrapper.get('[data-testid="git-clone-url"]').setValue('https://example.com/team/app.git')
     await wrapper.get('[data-testid="git-clone-directory"]').setValue('app')

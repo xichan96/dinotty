@@ -95,6 +95,7 @@
     </form>
 
     <p v-if="errorMessage" class="git-setup-error" role="alert">{{ errorMessage }}</p>
+    <GitCommandLog :pane-id="paneId" />
   </section>
 </template>
 
@@ -103,6 +104,7 @@ import { ref } from 'vue'
 import { Download, GitBranch, GitBranchPlus, LoaderCircle } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
+import GitCommandLog from './GitCommandLog.vue'
 
 const props = defineProps<{
   paneId: string

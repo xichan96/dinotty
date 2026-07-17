@@ -918,6 +918,15 @@ async fn main() {
                 get(workspace::workspace_git_operation_state),
             )
             .route("/api/workspace/git-reflog", get(workspace::workspace_git_reflog))
+            .route("/api/workspace/git-config", get(workspace::workspace_git_config))
+            .route(
+                "/api/workspace/git-config-update",
+                post(workspace::workspace_git_config_update),
+            )
+            .route(
+                "/api/workspace/git-diagnostics",
+                get(workspace::workspace_git_diagnostics),
+            )
             .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),

@@ -272,6 +272,7 @@
           @refresh="emit('refresh')"
         />
         <GitAdvancedActions :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
+        <GitConfiguration :pane-id="paneId" :repository="repository" />
 
         <label class="git-file-search">
           <Search :size="13" aria-hidden="true" />
@@ -507,6 +508,7 @@ import {
 import type { GitHistorySelection } from '../../utils/gitHistory'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitAdvancedActions from './GitAdvancedActions.vue'
+import GitConfiguration from './GitConfiguration.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'
 import GitRepositorySetup from './GitRepositorySetup.vue'

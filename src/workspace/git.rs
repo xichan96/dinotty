@@ -7,7 +7,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
+    process::Stdio,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use crate::{platform::process::CommandNoWindowExt, session::SessionManager};
@@ -144,6 +146,45 @@ pub struct GitReflogEntry {
 #[derive(Debug, Serialize)]
 pub struct GitReflogResponse {
     pub entries: Vec<GitReflogEntry>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct GitConfigValues {
+    pub user_name: String,
+    pub user_email: String,
+    pub credential_helper: String,
+    pub default_branch: String,
+    pub gpg_sign: bool,
+    pub signing_key: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitConfigResponse {
+    pub local: GitConfigValues,
+    pub global: GitConfigValues,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitConfigUpdateBody {
+    pub scope: String,
+    pub user_name: String,
+    pub user_email: String,
+    pub credential_helper: String,
+    pub default_branch: String,
+    pub gpg_sign: bool,
+    pub signing_key: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitDiagnosticTool {
+    pub name: String,
+    pub available: bool,
+    pub version: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitDiagnosticsResponse {
+    pub tools: Vec<GitDiagnosticTool>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -691,6 +732,192 @@ fn parse_reflog_output(output: &str) -> Vec<GitReflogEntry> {
         });
     }
     entries
+}
+
+fn parse_git_config_output(output: &str) -> GitConfigValues {
+    // 步骤1：Git 的 --null --list 输出按 key、value 交替排列，逐对读取白名单字段。
+    let fields: Vec<&str> = output.split('\0').collect();
+    let mut configuration = GitConfigValues::default();
+    let mut index = 0;
+    while index + 1 < fields.len() {
+        let key = fields[index].trim().to_lowercase();
+        let value = fields[index + 1].trim().to_string();
+        if key == "user.name" {
+            configuration.user_name = value;
+        } else if key == "user.email" {
+            configuration.user_email = value;
+        } else if key == "credential.helper" {
+            configuration.credential_helper = value;
+        } else if key == "init.defaultbranch" {
+            configuration.default_branch = value;
+        } else if key == "commit.gpgsign" {
+            configuration.gpg_sign = value.eq_ignore_ascii_case("true");
+        } else if key == "user.signingkey" {
+            configuration.signing_key = value;
+        }
+        index += 2;
+    }
+    configuration
+}
+
+fn validate_git_config_text(value: &str, label: &str) -> Result<String, String> {
+    // 步骤1：配置值允许空白以表示取消，但拒绝控制字符和过长内容。
+    let value = value.trim();
+    if value.len() > 500 || value.chars().any(char::is_control) {
+        return Err(format!("invalid {label}"));
+    }
+    Ok(value.to_string())
+}
+
+fn build_git_config_command(scope_argument: &str, key: &str, value: &str) -> Vec<String> {
+    // 步骤1：空值转换为取消配置，非空值替换该白名单键的全部旧值。
+    if value.is_empty() {
+        return vec![
+            "config".to_string(),
+            scope_argument.to_string(),
+            "--unset-all".to_string(),
+            key.to_string(),
+        ];
+    }
+    vec![
+        "config".to_string(),
+        scope_argument.to_string(),
+        "--replace-all".to_string(),
+        key.to_string(),
+        value.to_string(),
+    ]
+}
+
+fn build_git_config_update_commands(
+    body: &GitConfigUpdateBody,
+) -> Result<Vec<Vec<String>>, String> {
+    // 步骤1：把明确作用域转换为固定参数，拒绝任意 scope 注入。
+    let scope_argument = if body.scope == "local" {
+        "--local"
+    } else if body.scope == "global" {
+        "--global"
+    } else {
+        return Err("invalid git config scope".to_string());
+    };
+
+    // 步骤2：逐个校验界面管理的固定配置值。
+    let user_name = validate_git_config_text(&body.user_name, "user name")?;
+    let user_email = validate_git_config_text(&body.user_email, "user email")?;
+    let credential_helper =
+        validate_git_config_text(&body.credential_helper, "credential helper")?;
+    let default_branch = if body.default_branch.trim().is_empty() {
+        String::new()
+    } else {
+        validate_initial_branch(&body.default_branch)?
+    };
+    let signing_key = validate_git_config_text(&body.signing_key, "signing key")?;
+
+    // 步骤3：只生成六个白名单键的命令，布尔值始终显式写入。
+    let mut commands = Vec::new();
+    commands.push(build_git_config_command(scope_argument, "user.name", &user_name));
+    commands.push(build_git_config_command(scope_argument, "user.email", &user_email));
+    commands.push(build_git_config_command(
+        scope_argument,
+        "credential.helper",
+        &credential_helper,
+    ));
+    commands.push(build_git_config_command(
+        scope_argument,
+        "init.defaultbranch",
+        &default_branch,
+    ));
+    commands.push(build_git_config_command(
+        scope_argument,
+        "commit.gpgsign",
+        if body.gpg_sign { "true" } else { "false" },
+    ));
+    commands.push(build_git_config_command(
+        scope_argument,
+        "user.signingkey",
+        &signing_key,
+    ));
+    Ok(commands)
+}
+
+async fn read_git_config_scope(
+    root: PathBuf,
+    scope_argument: &str,
+) -> Result<GitConfigValues, String> {
+    // 步骤1：读取指定作用域的原始 NUL 配置，再转换为固定响应结构。
+    let arguments = vec![
+        "config".to_string(),
+        scope_argument.to_string(),
+        "--null".to_string(),
+        "--list".to_string(),
+    ];
+    let output = run_git_output(root, arguments).await?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_git_config_output(&stdout))
+}
+
+fn run_git_diagnostic_tool(
+    root: &Path,
+    name: &str,
+    program: &str,
+    arguments: &[&str],
+) -> GitDiagnosticTool {
+    // 步骤1：禁用窗口并捕获版本输出，缺失程序直接标记为不可用。
+    let mut command = std::process::Command::new(program);
+    command.no_window();
+    command
+        .args(arguments)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(_) => {
+            return GitDiagnosticTool {
+                name: name.to_string(),
+                available: false,
+                version: String::new(),
+            };
+        }
+    };
+
+    // 步骤2：版本命令最多等待三秒，避免损坏的外部工具卡住面板。
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return GitDiagnosticTool {
+                    name: name.to_string(),
+                    available: false,
+                    version: String::new(),
+                };
+            }
+        }
+    }
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(_) => {
+            return GitDiagnosticTool {
+                name: name.to_string(),
+                available: false,
+                version: String::new(),
+            };
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let version_text = if stdout.trim().is_empty() { stderr.trim() } else { stdout.trim() };
+    let version = version_text.lines().next().unwrap_or("").to_string();
+    GitDiagnosticTool { name: name.to_string(), available: output.status.success(), version }
 }
 
 fn read_git_state_text(path: &Path) -> Option<String> {
@@ -2429,6 +2656,76 @@ pub async fn workspace_git_reflog(
     }
 }
 
+pub async fn workspace_git_config(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：并行读取仓库级与全局配置，界面据此明确展示当前作用域。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let local_future = read_git_config_scope(root.clone(), "--local");
+    let global_future = read_git_config_scope(root, "--global");
+    let (local_result, global_result) = tokio::join!(local_future, global_future);
+    let local = match local_result {
+        Ok(configuration) => configuration,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let global = match global_result {
+        Ok(configuration) => configuration,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    Json(GitConfigResponse { local, global }).into_response()
+}
+
+pub async fn workspace_git_config_update(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitConfigUpdateBody>,
+) -> Response {
+    // 步骤1：验证作用域和值，并生成固定白名单命令。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let commands = match build_git_config_update_commands(&body) {
+        Ok(commands) => commands,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+
+    // 步骤2：逐项写入配置；取消一个原本不存在的键视为成功。
+    for arguments in commands {
+        let unsets_value = arguments.iter().any(|argument| argument == "--unset-all");
+        let output = match run_git_output(root.clone(), arguments).await {
+            Ok(output) => output,
+            Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+        };
+        let missing_unset_value = unsets_value && output.status.code() == Some(5);
+        if !output.status.success() && !missing_unset_value {
+            return git_command_response(&output);
+        }
+    }
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+pub async fn workspace_git_diagnostics(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：在阻塞线程依次检查常用 Git 生态工具，避免占用异步请求线程。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let result = tokio::task::spawn_blocking(move || {
+        let mut tools = Vec::new();
+        tools.push(run_git_diagnostic_tool(&root, "git", "git", &["--version"]));
+        tools.push(run_git_diagnostic_tool(&root, "ssh", "ssh", &["-V"]));
+        tools.push(run_git_diagnostic_tool(&root, "gpg", "gpg", &["--version"]));
+        tools.push(run_git_diagnostic_tool(&root, "lfs", "git", &["lfs", "version"]));
+        tools.push(run_git_diagnostic_tool(&root, "gh", "gh", &["--version"]));
+        tools.push(run_git_diagnostic_tool(&root, "glab", "glab", &["--version"]));
+        tools
+    })
+    .await;
+    match result {
+        Ok(tools) => Json(GitDiagnosticsResponse { tools }).into_response(),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    }
+}
+
 pub async fn workspace_git_tags(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
@@ -3304,17 +3601,19 @@ mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_delete_arguments,
         build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
+        build_git_config_update_commands,
         build_remote_add_arguments, build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
         build_remote_branch_delete_arguments, build_remote_update_arguments,
         build_stash_save_arguments, build_upstream_set_arguments,
         build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
-        initialize_git_repository, parse_branch_output, parse_log_output, parse_reflog_output,
-        parse_remote_output, parse_stash_output, parse_status_output, parse_tag_output,
+        initialize_git_repository, parse_branch_output, parse_git_config_output, parse_log_output,
+        parse_reflog_output, parse_remote_output, parse_stash_output, parse_status_output,
+        parse_tag_output,
         read_conflict_stage,
         run_rebase_plan, unstage_git_paths, validate_clone_directory, validate_clone_url,
-        validate_initial_branch, GitRebasePlanEntry,
+        validate_initial_branch, GitConfigUpdateBody, GitRebasePlanEntry,
     };
     use std::path::Path;
 
@@ -3619,6 +3918,37 @@ mod tests {
         assert_eq!(entries[0].message, "add feature");
         assert_eq!(entries[1].action, "reset");
         assert_eq!(entries[1].message, "moving to HEAD~1");
+    }
+
+    #[test]
+    fn parses_and_builds_whitelisted_git_configuration() {
+        // 步骤1：解析 Git 的 NUL 配置输出，忽略界面不管理的其他键。
+        let output = "user.name\0Alice\0user.email\0alice@example.com\0credential.helper\0manager-core\0commit.gpgsign\0true\0core.autocrlf\0true\0";
+        let configuration = parse_git_config_output(output);
+        assert_eq!(configuration.user_name, "Alice");
+        assert_eq!(configuration.user_email, "alice@example.com");
+        assert_eq!(configuration.credential_helper, "manager-core");
+        assert!(configuration.gpg_sign);
+
+        // 步骤2：更新命令只能包含固定配置键，空签名密钥转换为取消配置。
+        let body = GitConfigUpdateBody {
+            scope: "local".to_string(),
+            user_name: "Alice New".to_string(),
+            user_email: "new@example.com".to_string(),
+            credential_helper: "manager-core".to_string(),
+            default_branch: "main".to_string(),
+            gpg_sign: false,
+            signing_key: String::new(),
+        };
+        let commands = build_git_config_update_commands(&body).unwrap();
+        assert_eq!(
+            commands[0],
+            vec!["config", "--local", "--replace-all", "user.name", "Alice New"]
+        );
+        assert_eq!(
+            commands[5],
+            vec!["config", "--local", "--unset-all", "user.signingkey"]
+        );
     }
 
     #[test]

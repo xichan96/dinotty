@@ -6,10 +6,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     path::{Path, PathBuf},
     process::Stdio,
-    sync::Arc,
-    time::{Duration, Instant},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{platform::process::CommandNoWindowExt, session::SessionManager};
@@ -186,6 +190,42 @@ pub struct GitDiagnosticTool {
 pub struct GitDiagnosticsResponse {
     pub tools: Vec<GitDiagnosticTool>,
 }
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitCommandRecord {
+    pub id: String,
+    pub command: String,
+    pub status: String,
+    pub started_at: u64,
+    pub finished_at: Option<u64>,
+    pub output: String,
+    #[serde(skip)]
+    root: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitCommandLogResponse {
+    pub commands: Vec<GitCommandRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitCommandCancelBody {
+    pub id: String,
+}
+
+struct GitCommandCancellation {
+    id: String,
+    root: PathBuf,
+    requested: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct GitCommandTracker {
+    records: VecDeque<GitCommandRecord>,
+    cancellations: Vec<GitCommandCancellation>,
+}
+
+static GIT_COMMAND_TRACKER: OnceLock<Mutex<GitCommandTracker>> = OnceLock::new();
 
 #[derive(Clone, Debug, Serialize)]
 pub struct GitRepositoryEntry {
@@ -1681,6 +1721,276 @@ async fn run_git_output(
     }
 }
 
+fn git_command_tracker() -> &'static Mutex<GitCommandTracker> {
+    // 步骤1：所有 Web 与桌面请求共享同一份进程记录和取消状态。
+    GIT_COMMAND_TRACKER.get_or_init(|| Mutex::new(GitCommandTracker::default()))
+}
+
+fn git_command_timestamp() -> u64 {
+    // 步骤1：用 Unix 毫秒记录开始和结束时间，便于前端稳定排序。
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn git_command_records_for_root(
+    tracker: &GitCommandTracker,
+    root: &Path,
+) -> Vec<GitCommandRecord> {
+    // 步骤1：只复制当前仓库的记录，避免多仓库面板互相泄露操作信息。
+    let mut records = Vec::new();
+    for record in &tracker.records {
+        if record.root == root {
+            records.push(record.clone());
+        }
+    }
+    records
+}
+
+fn request_git_command_cancellation(
+    tracker: &mut GitCommandTracker,
+    root: &Path,
+    id: &str,
+) -> bool {
+    // 步骤1：命令 ID 和仓库都匹配时才设置取消标记。
+    for cancellation in &tracker.cancellations {
+        if cancellation.id == id && cancellation.root == root {
+            cancellation.requested.store(true, Ordering::SeqCst);
+            return true;
+        }
+    }
+    false
+}
+
+pub async fn workspace_git_command_log(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：确认当前面板仓库，再读取该仓库最近的命令记录。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let tracker = git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+    let commands = git_command_records_for_root(&tracker, &root);
+    Json(GitCommandLogResponse { commands }).into_response()
+}
+
+pub async fn workspace_git_command_cancel(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitCommandCancelBody>,
+) -> Response {
+    // 步骤1：确认仓库和命令 ID，不允许跨仓库取消进程。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    if body.id.trim().is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "command id required");
+    }
+    let mut tracker = git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+    if !request_git_command_cancellation(&mut tracker, &root, body.id.trim()) {
+        return json_err(StatusCode::NOT_FOUND, "running command not found");
+    }
+
+    // 步骤2：实际进程由执行线程结束，接口立即确认取消请求已送达。
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+fn sanitize_git_command(arguments: &[String]) -> String {
+    // 步骤1：逐参数生成展示命令，Remote URL 和提交说明始终脱敏。
+    let mut sanitized_arguments = Vec::new();
+    let remote_command = arguments.first().map(String::as_str) == Some("remote");
+    let remote_action = arguments.get(1).map(String::as_str).unwrap_or("");
+    let mut redact_next_message = false;
+    for (index, argument) in arguments.iter().enumerate() {
+        let redacts_clone_url = arguments.first().map(String::as_str) == Some("clone") && index == 1;
+        let redacts_remote_url = remote_command
+            && ((remote_action == "add" && index >= 3)
+                || (remote_action == "set-url" && index == arguments.len() - 1));
+        if redacts_clone_url || redacts_remote_url {
+            sanitized_arguments.push("[redacted-url]".to_string());
+        } else if redact_next_message {
+            sanitized_arguments.push("[redacted-message]".to_string());
+            redact_next_message = false;
+        } else {
+            sanitized_arguments.push(argument.to_string());
+            if argument == "-m" || argument == "--message" {
+                redact_next_message = true;
+            }
+        }
+    }
+    let mut command = String::from("git");
+    for argument in sanitized_arguments {
+        command.push(' ');
+        command.push_str(&argument);
+    }
+    command
+}
+
+fn truncate_git_command_output(value: &str) -> String {
+    // 步骤1：最多保留两千个字符，避免长期日志无限占用内存。
+    let mut output = String::new();
+    let mut character_count = 0;
+    for character in value.chars() {
+        if character_count >= 2_000 {
+            output.push_str("\n[output truncated]");
+            break;
+        }
+        output.push(character);
+        character_count += 1;
+    }
+    output
+}
+
+fn finish_tracked_git_command(
+    id: &str,
+    status: &str,
+    output: &str,
+    cancellation_requested: &Arc<AtomicBool>,
+) {
+    // 步骤1：更新匹配记录并移除活动取消令牌。
+    let mut tracker = git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+    for record in &mut tracker.records {
+        if record.id == id {
+            record.status = status.to_string();
+            record.finished_at = Some(git_command_timestamp());
+            record.output = truncate_git_command_output(output);
+            break;
+        }
+    }
+    let mut cancellation_index = 0;
+    while cancellation_index < tracker.cancellations.len() {
+        if Arc::ptr_eq(
+            &tracker.cancellations[cancellation_index].requested,
+            cancellation_requested,
+        ) {
+            tracker.cancellations.remove(cancellation_index);
+            break;
+        }
+        cancellation_index += 1;
+    }
+}
+
+fn terminate_git_process_tree(child: &mut std::process::Child) {
+    // 步骤1：Windows 终止整个 Git/SSH 子进程树，其他平台终止当前 Git 进程。
+    if cfg!(windows) {
+        let process_id = child.id().to_string();
+        let mut command = std::process::Command::new("taskkill");
+        command.no_window();
+        let _ = command.args(["/PID", &process_id, "/T", "/F"]).output();
+    } else {
+        let _ = child.kill();
+    }
+}
+
+async fn run_git_tracked_output(
+    root: PathBuf,
+    arguments: Vec<String>,
+) -> Result<std::process::Output, String> {
+    // 步骤1：命令执行前写入运行记录和取消令牌。
+    let command_id = uuid::Uuid::new_v4().to_string();
+    let cancellation_requested = Arc::new(AtomicBool::new(false));
+    {
+        let mut tracker =
+            git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+        tracker.records.push_front(GitCommandRecord {
+            id: command_id.clone(),
+            command: sanitize_git_command(&arguments),
+            status: "running".to_string(),
+            started_at: git_command_timestamp(),
+            finished_at: None,
+            output: String::new(),
+            root: root.clone(),
+        });
+        while tracker.records.len() > 100 {
+            tracker.records.pop_back();
+        }
+        tracker.cancellations.push(GitCommandCancellation {
+            id: command_id.clone(),
+            root: root.clone(),
+            requested: cancellation_requested.clone(),
+        });
+    }
+
+    // 步骤2：把输出写入临时文件并轮询进程，使取消请求可以及时生效。
+    let worker_cancellation = cancellation_requested.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let stdout_file = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+        let stderr_file = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+        let stdout_handle = stdout_file.reopen().map_err(|error| error.to_string())?;
+        let stderr_handle = stderr_file.reopen().map_err(|error| error.to_string())?;
+        let mut child = git_command()
+            .args(arguments)
+            .current_dir(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout_handle))
+            .stderr(Stdio::from(stderr_handle))
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        let status = loop {
+            if worker_cancellation.load(Ordering::SeqCst) {
+                terminate_git_process_tree(&mut child);
+                break child.wait().map_err(|error| error.to_string())?;
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(error) => return Err(error.to_string()),
+            }
+        };
+        let stdout = std::fs::read(stdout_file.path()).map_err(|error| error.to_string())?;
+        let stderr = std::fs::read(stderr_file.path()).map_err(|error| error.to_string())?;
+        Ok(std::process::Output { status, stdout, stderr })
+    })
+    .await;
+
+    // 步骤3：统一更新成功、失败或取消状态，并返回原始 Git 输出。
+    match result {
+        Ok(Ok(output)) => {
+            let cancelled = cancellation_requested.load(Ordering::SeqCst);
+            let status = if cancelled {
+                "cancelled"
+            } else if output.status.success() {
+                "success"
+            } else {
+                "failed"
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let mut display_output = stdout.trim().to_string();
+            if !stderr.trim().is_empty() {
+                if !display_output.is_empty() {
+                    display_output.push('\n');
+                }
+                display_output.push_str(stderr.trim());
+            }
+            finish_tracked_git_command(
+                &command_id,
+                status,
+                &display_output,
+                &cancellation_requested,
+            );
+            Ok(output)
+        }
+        Ok(Err(error)) => {
+            finish_tracked_git_command(
+                &command_id,
+                "failed",
+                &error,
+                &cancellation_requested,
+            );
+            Err(error)
+        }
+        Err(error) => {
+            let error_message = error.to_string();
+            finish_tracked_git_command(
+                &command_id,
+                "failed",
+                &error_message,
+                &cancellation_requested,
+            );
+            Err(error_message)
+        }
+    }
+}
+
 async fn unstage_git_paths(
     root: PathBuf,
     paths: &[String],
@@ -2208,7 +2518,7 @@ async fn run_git_action(
         Ok(root) => root,
         Err(response) => return response,
     };
-    match run_git_output(root, arguments).await {
+    match run_git_tracked_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
@@ -2799,7 +3109,7 @@ async fn run_git_remote_command(
     };
 
     // 步骤2：执行不经过 shell 的 Git 参数，并把远程端真实结果返回给面板。
-    match run_git_output(root, arguments).await {
+    match run_git_tracked_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
@@ -3601,7 +3911,8 @@ mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_delete_arguments,
         build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
-        build_git_config_update_commands,
+        build_git_config_update_commands, git_command_records_for_root,
+        request_git_command_cancellation, sanitize_git_command,
         build_remote_add_arguments, build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
         build_remote_branch_delete_arguments, build_remote_update_arguments,
@@ -3613,9 +3924,16 @@ mod tests {
         parse_tag_output,
         read_conflict_stage,
         run_rebase_plan, unstage_git_paths, validate_clone_directory, validate_clone_url,
-        validate_initial_branch, GitConfigUpdateBody, GitRebasePlanEntry,
+        validate_initial_branch, GitCommandCancellation, GitCommandRecord, GitCommandTracker,
+        GitConfigUpdateBody, GitRebasePlanEntry,
     };
-    use std::path::Path;
+    use std::{
+        path::{Path, PathBuf},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+    };
 
     fn run_test_git(root: &Path, arguments: &[&str]) {
         // 步骤1：在临时仓库执行 Git 命令，并在失败时输出真实 stderr。
@@ -3949,6 +4267,94 @@ mod tests {
             commands[5],
             vec!["config", "--local", "--unset-all", "user.signingkey"]
         );
+    }
+
+    #[test]
+    fn sanitizes_sensitive_git_command_log_values() {
+        // 步骤1：Remote URL 和提交说明必须脱敏，避免日志泄露凭据或正文。
+        let remote_arguments = vec![
+            "remote".to_string(),
+            "add".to_string(),
+            "origin".to_string(),
+            "https://user:secret@example.com/repository.git".to_string(),
+        ];
+        assert_eq!(
+            sanitize_git_command(&remote_arguments),
+            "git remote add origin [redacted-url]"
+        );
+        let commit_arguments = vec![
+            "commit".to_string(),
+            "-m".to_string(),
+            "private message".to_string(),
+        ];
+        assert_eq!(sanitize_git_command(&commit_arguments), "git commit -m [redacted-message]");
+
+        // 步骤2：不含敏感值的同步命令保留完整参数，便于排查。
+        let fetch_arguments = vec![
+            "fetch".to_string(),
+            "--prune".to_string(),
+            "origin".to_string(),
+        ];
+        assert_eq!(sanitize_git_command(&fetch_arguments), "git fetch --prune origin");
+    }
+
+    #[test]
+    fn filters_git_command_records_by_repository() {
+        // 步骤1：构造两个仓库的命令记录，模拟多仓库工作区。
+        let first_root = PathBuf::from("first-repository");
+        let second_root = PathBuf::from("second-repository");
+        let mut tracker = GitCommandTracker::default();
+        tracker.records.push_back(GitCommandRecord {
+            id: "first-command".to_string(),
+            command: "git fetch origin".to_string(),
+            status: "running".to_string(),
+            started_at: 1,
+            finished_at: None,
+            output: String::new(),
+            root: first_root.clone(),
+        });
+        tracker.records.push_back(GitCommandRecord {
+            id: "second-command".to_string(),
+            command: "git push origin main".to_string(),
+            status: "success".to_string(),
+            started_at: 2,
+            finished_at: Some(3),
+            output: "done".to_string(),
+            root: second_root,
+        });
+
+        // 步骤2：查询第一个仓库时不得泄露第二个仓库的记录。
+        let records = git_command_records_for_root(&tracker, &first_root);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "first-command");
+    }
+
+    #[test]
+    fn requests_git_command_cancellation_only_in_same_repository() {
+        // 步骤1：构造一个运行中命令及其取消令牌。
+        let first_root = PathBuf::from("first-repository");
+        let second_root = PathBuf::from("second-repository");
+        let requested = Arc::new(AtomicBool::new(false));
+        let mut tracker = GitCommandTracker::default();
+        tracker.cancellations.push(GitCommandCancellation {
+            id: "command-id".to_string(),
+            root: first_root.clone(),
+            requested: requested.clone(),
+        });
+
+        // 步骤2：其他仓库不能取消该命令，所属仓库可以发出取消请求。
+        assert!(!request_git_command_cancellation(
+            &mut tracker,
+            &second_root,
+            "command-id"
+        ));
+        assert!(!requested.load(Ordering::SeqCst));
+        assert!(request_git_command_cancellation(
+            &mut tracker,
+            &first_root,
+            "command-id"
+        ));
+        assert!(requested.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -694,6 +694,14 @@ pub fn run_server(
                 get(workspace::workspace_git_diagnostics),
             )
             .route(
+                "/api/workspace/git-command-log",
+                get(workspace::workspace_git_command_log),
+            )
+            .route(
+                "/api/workspace/git-command-cancel",
+                post(workspace::workspace_git_command_cancel),
+            )
+            .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),
             )
@@ -903,6 +911,8 @@ mod tests {
             "/api/workspace/git-config",
             "/api/workspace/git-config-update",
             "/api/workspace/git-diagnostics",
+            "/api/workspace/git-command-log",
+            "/api/workspace/git-command-cancel",
             "/api/workspace/git-operation-action",
             "/api/workspace/git-tags",
             "/api/workspace/git-tag-create",

@@ -232,17 +232,6 @@ function hasTab(paneId: string): boolean {
   return !!findTabElement(paneId)
 }
 
-function scrollTabIntoView(paneId: string): boolean {
-  const el = findTabElement(paneId)
-  if (!el) return false
-  if (!dragStarted || dragFromId === null) {
-    el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
-  }
-  return true
-}
-
-defineExpose({ hasTab, scrollTabIntoView })
-
 const editingPaneId = ref<string | null>(null)
 const editValue = ref('')
 const editInputRef = ref<HTMLInputElement | null>(null)
@@ -334,6 +323,16 @@ let isTouchDrag = false
 let suppressClick = false
 const DRAG_THRESHOLD = 5
 
+function scrollTabIntoView(paneId: string): boolean {
+  const el = findTabElement(paneId)
+  if (!el) return false
+  if (!dragStarted || dragFromId === null) {
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }
+  return true
+}
+
+defineExpose({ hasTab, scrollTabIntoView })
 function getPointerPos(e: MouseEvent | TouchEvent): { clientX: number; clientY: number } {
   if ('touches' in e) {
     const t = e.touches[0]

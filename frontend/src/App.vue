@@ -791,35 +791,32 @@ let revealNavGen = 0
 
 async function activateTab(tabId: string) {
   const gen = ++revealNavGen
-  // Try tab-level paneId first, then search by leaf paneId
-  let tab = tabs.value.find((t) => t.paneId === tabId)
-  if (!tab) {
-    tab = tabs.value.find((t) => {
-      if (t.type !== 'terminal') return false
-      return !!findLeaf(t.layout, tabId)
-    })
-  }
+  let tab = resolveTab(tabId)
   if (!tab) return
 
-  // Switch workspace if the tab belongs to a different one
-  const targetWs = tab.type === 'terminal'
-    ? matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)
-    : tab.workspaceId ? workspaces.value.find((w) => w.id === tab.workspaceId) ?? null : null
-  if (targetWs && targetWs.id !== activeWorkspaceId.value) {
-    const committed = await activateWorkspace(targetWs.id)
-    if (!committed) return
+  // Switch workspace if the tab belongs to a different one. Terminal tabs
+  // force a switch when filtered out of the current view; plugin tabs stay
+  // visible regardless, so only switch when the tab carries an explicit ws.
+  const targetWs = resolveTabWorkspace(tab)
+  const needsSwitch = tab.type === 'terminal'
+    ? (targetWs?.id ?? null) !== activeWorkspaceId.value
+    : targetWs && targetWs.id !== activeWorkspaceId.value
+  if (needsSwitch) {
+    try {
+      const committed = await activateWorkspace(targetWs?.id ?? null)
+      if (!committed) return
+    } catch {
+      return
+    }
     if (gen !== revealNavGen) return
+    tab = resolveTab(tabId)
+    if (!tab) return
   } else {
     cancelPendingWorkspaceActivation()
   }
 
   activePaneId.value = tab.paneId
-
-  // Clear notifications for this tab on activation (terminal: tab-level + all leaves; plugin: tab-level)
-  const activatedPaneIds = tab.type === 'terminal'
-    ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
-    : [tab.paneId]
-  notif.clearForPaneIds(activatedPaneIds)
+  clearResolvedTabNotifications(tab)
 
   if (tab.type === 'terminal') {
     try {
@@ -827,6 +824,7 @@ async function activateTab(tabId: string) {
     } catch (e) {
       console.error('Failed to activate pane:', e)
     }
+    if (gen !== revealNavGen) return
   }
   persist()
   nextTick(() => focusActive())
@@ -837,20 +835,16 @@ async function revealPane(paneId: string): Promise<boolean> {
   let tab = resolveTab(paneId)
   if (!tab) return false
 
+  // Terminal tabs force a switch when filtered out of the current view
+  // (targetWs may be null → deactivate). Plugin tabs stay visible regardless,
+  // so only switch when they carry an explicit workspace id.
   const targetWs = resolveTabWorkspace(tab)
-  if (tab.type === 'terminal' && (targetWs?.id ?? null) !== activeWorkspaceId.value) {
+  const needsSwitch = tab.type === 'terminal'
+    ? (targetWs?.id ?? null) !== activeWorkspaceId.value
+    : targetWs && targetWs.id !== activeWorkspaceId.value
+  if (needsSwitch) {
     try {
       const committed = await activateWorkspace(targetWs?.id ?? null)
-      if (!committed) return false
-    } catch {
-      return false
-    }
-    if (gen !== revealNavGen) return false
-    tab = resolveTab(paneId)
-    if (!tab) return false
-  } else if (tab.type === 'plugin' && targetWs && targetWs.id !== activeWorkspaceId.value) {
-    try {
-      const committed = await activateWorkspace(targetWs.id)
       if (!committed) return false
     } catch {
       return false

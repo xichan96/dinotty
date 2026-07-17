@@ -9,6 +9,11 @@ export interface GitCommitEntry {
   subject: string
 }
 
+export interface GitHistoryPathRequest {
+  path: string
+  requestId: number
+}
+
 export interface GitGraphSegment {
   fromLane: number
   toLane: number

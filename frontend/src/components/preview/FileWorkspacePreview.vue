@@ -97,6 +97,7 @@
             :repository="gitRepository"
             :repositories="gitRepositories"
             :selected-diff="gitDiffSelection"
+            :history-path-request="gitHistoryPathRequest"
             @refresh="refreshGitPanel"
             @view-diff="showGitDiff"
             @view-history="showGitHistory"
@@ -334,6 +335,7 @@
               :repository="gitRepository"
               :repositories="gitRepositories"
               :selected-diff="gitDiffSelection"
+              :history-path-request="gitHistoryPathRequest"
               @refresh="refreshGitPanel"
               @view-diff="showGitDiff"
               @view-history="showGitHistory"
@@ -467,6 +469,16 @@
           <span class="tree-ctx-label">{{ t('filePreview.ctxRunCode') }}</span>
         </button>
         <button
+          v-if="canViewContextFileHistory"
+          type="button"
+          class="tree-ctx-item"
+          data-testid="tree-context-git-file-history"
+          role="menuitem"
+          @click="openContextFileHistory"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxGitFileHistory') }}</span>
+        </button>
+        <button
           v-if="canBlameContextFile"
           type="button"
           class="tree-ctx-item"
@@ -588,7 +600,7 @@ import {
   type GitRemoteEntry,
   type GitRepositoryEntry,
 } from '../../utils/gitPanel'
-import type { GitHistorySelection } from '../../utils/gitHistory'
+import type { GitHistoryPathRequest, GitHistorySelection } from '../../utils/gitHistory'
 
 const props = withDefaults(
   defineProps<{ visible: boolean; paneId: string; embedded?: boolean }>(),
@@ -628,6 +640,8 @@ const sidebarMode = ref<'files' | 'git'>('files')
 const gitDiffSelection = ref<GitDiffSelection | null>(null)
 const gitHistorySelection = ref<GitHistorySelection | null>(null)
 const gitBlamePath = ref<string | null>(null)
+const gitHistoryPathRequest = ref<GitHistoryPathRequest | null>(null)
+let gitHistoryRequestId = 0
 const inlineCreate = ref<{ parentRel: string; kind: 'file' | 'dir' } | null>(null)
 const inlineRename = ref<{ rel: string; isDir: boolean } | null>(null)
 const recentDropdownOpen = ref(false)
@@ -776,6 +790,18 @@ const canBlameContextFile = computed(function computeCanBlameContextFile() {
   return repositoryPathForWorkspaceFile(targetRel) !== null
 })
 
+const canViewContextFileHistory = computed(function computeCanViewContextFileHistory() {
+  // 步骤1：仓库内的已跟踪文件才显示文件历史入口。
+  if (!isGitRepo.value) return false
+  const menu = ctxMenu.contextMenu.value
+  if (!menu) return false
+  const targetRel = menu.rel || selectedRel.value
+  const targetIsDirectory = menu.rel ? menu.isDir : selectedIsDir.value
+  if (!targetRel || targetIsDirectory) return false
+  if (gitStatusMap.value[targetRel] === 'untracked') return false
+  return repositoryPathForWorkspaceFile(targetRel) !== null
+})
+
 const canIgnoreContextPath = computed(function computeCanIgnoreContextPath() {
   // 步骤1：目录可以整体忽略，文件仅在未跟踪时显示入口。
   if (!isGitRepo.value) return false
@@ -814,6 +840,25 @@ function openContextFileBlame(): void {
   gitBlamePath.value = repositoryPath
   gitDiffSelection.value = null
   gitHistorySelection.value = null
+}
+
+function openContextFileHistory(): void {
+  // 步骤1：把文件导航路径转换为当前仓库相对路径。
+  const menu = ctxMenu.contextMenu.value
+  if (!menu) return
+  const targetRel = menu.rel || selectedRel.value
+  if (!targetRel) return
+  const repositoryPath = repositoryPathForWorkspaceFile(targetRel)
+  if (!repositoryPath) return
+
+  // 步骤2：切换 Git 侧栏并发送带唯一 ID 的文件历史请求。
+  ctxMenu.closeContextMenu()
+  sidebarMode.value = 'git'
+  gitHistoryRequestId += 1
+  gitHistoryPathRequest.value = {
+    path: repositoryPath,
+    requestId: gitHistoryRequestId,
+  }
 }
 
 async function addContextPathToGitIgnore(): Promise<void> {

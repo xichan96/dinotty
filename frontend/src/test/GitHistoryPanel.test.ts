@@ -102,6 +102,32 @@ describe('GitHistoryPanel', function gitHistoryPanelSuite() {
     expect(String(historyCalls[historyCalls.length - 1][0])).toContain('path=src%2Fmain.rs')
   })
 
+  it('applies a file-history navigation request', async function appliesRequestedFileHistory() {
+    // 步骤1：先按普通历史加载，再从文件树发送一次文件历史请求。
+    const wrapper = mount(GitHistoryPanel, {
+      props: { paneId: 'pane-1', currentBranch: 'feature/git-panel' },
+    })
+    await flushPromises()
+    await wrapper.setProps({
+      requestedPath: { path: 'src/file history.ts', requestId: 1 },
+    })
+    await flushPromises()
+
+    // 步骤2：输入框和实际请求都应切换为仓库相对路径。
+    expect(wrapper.get('[data-testid="git-history-path-input"]').element).toHaveProperty(
+      'value',
+      'src/file history.ts'
+    )
+    const historyCalls = historyPanelMocks.authFetch.mock.calls.filter(
+      function isHistoryCall(call) {
+        return String(call[0]).startsWith('/api/workspace/git-log?')
+      }
+    )
+    expect(String(historyCalls[historyCalls.length - 1][0])).toContain(
+      'path=src%2Ffile+history.ts'
+    )
+  })
+
   it('searches history and displays graph references', async function searchesHistory() {
     // 步骤1：确认提交图谱和当前提交的分支、标签装饰已经显示。
     const wrapper = mount(GitHistoryPanel, {

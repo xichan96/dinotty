@@ -118,6 +118,7 @@
         :pane-id="paneId"
         :current-branch="branch"
         :repository="repository"
+        :requested-path="historyPathRequest"
         @refresh="emit('refresh')"
         @view-history="emit('view-history', $event)"
       />
@@ -477,7 +478,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   ArrowDown,
   ArrowDownToLine,
@@ -511,7 +512,7 @@ import {
   type GitRemoteEntry,
   type GitRepositoryEntry,
 } from '../../utils/gitPanel'
-import type { GitHistorySelection } from '../../utils/gitHistory'
+import type { GitHistoryPathRequest, GitHistorySelection } from '../../utils/gitHistory'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitAdvancedActions from './GitAdvancedActions.vue'
 import GitConfiguration from './GitConfiguration.vue'
@@ -539,6 +540,7 @@ const props = defineProps<{
   statusTruncated?: boolean
   repository?: string
   repositories?: GitRepositoryEntry[]
+  historyPathRequest?: GitHistoryPathRequest | null
 }>()
 
 const emit = defineEmits<{
@@ -564,6 +566,16 @@ const syncOptionsVisible = ref(false)
 const panelMode = ref<'changes' | 'history'>('changes')
 const fileSearch = ref('')
 const selectedRemoteName = ref('')
+
+watch(
+  function watchHistoryPathRequest() {
+    return props.historyPathRequest?.requestId
+  },
+  function openRequestedHistoryPath() {
+    // 步骤1：文件树发起历史请求时自动切换到历史页。
+    if (props.historyPathRequest) panelMode.value = 'history'
+  }
+)
 
 const primaryRemote = computed(function computePrimaryRemote() {
   // 步骤1：优先使用用户选择的 Remote，再回退到上游、origin 和首个 Remote。

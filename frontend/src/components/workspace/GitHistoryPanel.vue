@@ -252,6 +252,7 @@ import {
   buildGitGraphRows,
   mapGitCommitEntry,
   type GitCommitEntry,
+  type GitHistoryPathRequest,
   type GitHistorySelection,
 } from '../../utils/gitHistory'
 
@@ -263,6 +264,7 @@ const props = defineProps<{
   paneId: string
   currentBranch: string | null
   repository?: string
+  requestedPath?: GitHistoryPathRequest | null
 }>()
 
 const emit = defineEmits<{
@@ -274,8 +276,9 @@ const { t } = useI18n()
 const pageSize = 50
 const commits = ref<GitCommitEntry[]>([])
 const branchNames = ref<string[]>([])
-const pathInput = ref('')
-const activePath = ref('')
+const initialRequestedPath = props.requestedPath?.path.trim() || ''
+const pathInput = ref(initialRequestedPath)
+const activePath = ref(initialRequestedPath)
 const searchInput = ref('')
 const activeSearch = ref('')
 const compareBase = ref('')
@@ -591,6 +594,21 @@ watch(
     void loadHistory(false)
   },
   { immediate: true }
+)
+
+watch(
+  function watchRequestedHistoryPath() {
+    return props.requestedPath?.requestId
+  },
+  function applyRequestedHistoryPath() {
+    // 步骤1：文件树请求到达时同步输入值和生效路径，并从第一页加载。
+    const request = props.requestedPath
+    if (!request) return
+    const requestedPath = request.path.trim()
+    pathInput.value = requestedPath
+    activePath.value = requestedPath
+    void loadHistory(false)
+  }
 )
 </script>
 

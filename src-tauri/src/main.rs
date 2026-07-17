@@ -595,10 +595,7 @@ fn import_login_shell_path() {
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let Ok(out) = std::process::Command::new(&shell)
-        .args([
-            "-lc",
-            "printf '__DINOTTY_PATH_START__%s__DINOTTY_PATH_END__' \"$PATH\"",
-        ])
+        .args(["-lc", "printf '__DINOTTY_PATH_START__%s__DINOTTY_PATH_END__' \"$PATH\""])
         .output()
     else {
         return;
@@ -607,17 +604,14 @@ fn import_login_shell_path() {
         return;
     }
 
-    let Some(start) = out
-        .stdout
-        .windows(START_MARKER.len())
-        .position(|window| window == START_MARKER)
+    let Some(start) =
+        out.stdout.windows(START_MARKER.len()).position(|window| window == START_MARKER)
     else {
         return;
     };
     let value_start = start + START_MARKER.len();
-    let Some(end) = out.stdout[value_start..]
-        .windows(END_MARKER.len())
-        .position(|window| window == END_MARKER)
+    let Some(end) =
+        out.stdout[value_start..].windows(END_MARKER.len()).position(|window| window == END_MARKER)
     else {
         return;
     };

@@ -199,18 +199,19 @@ pub fn create_session(
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
 
-    let shell_spec = argv.is_none().then(shell::default_shell);
-    let shell_type =
-        shell_spec.as_ref().map_or_else(|| "command".to_string(), |spec| spec.shell_type.clone());
-    let mut cmd = if let Some(argv) = argv.as_ref() {
-        let mut cmd = CommandBuilder::new(&argv[0]);
-        cmd.args(&argv[1..]);
-        cmd
-    } else {
-        let shell_spec = shell_spec.as_ref().expect("default shell is present without argv");
-        let mut cmd = CommandBuilder::new(&shell_spec.program);
-        cmd.args(&shell_spec.args);
-        cmd
+    #[allow(clippy::single_match_else)]
+    let (mut cmd, shell_type) = match argv {
+        Some(argv) => {
+            let mut cmd = CommandBuilder::new(&argv[0]);
+            cmd.args(&argv[1..]);
+            (cmd, "command".to_string())
+        }
+        None => {
+            let shell_spec = shell::default_shell();
+            let mut cmd = CommandBuilder::new(&shell_spec.program);
+            cmd.args(&shell_spec.args);
+            (cmd, shell_spec.shell_type.clone())
+        }
     };
     for key in claude_session_env_keys_to_strip() {
         cmd.env_remove(&key);
@@ -232,7 +233,7 @@ pub fn create_session(
     cmd.cwd(&effective_cwd);
 
     // Shell-specific hooks depend on HOME-style prompt expansion.
-    if argv.is_none() && matches!(shell_type.as_str(), "zsh" | "bash") {
+    if matches!(shell_type.as_str(), "zsh" | "bash") {
         let home =
             std::env::var("HOME").unwrap_or_else(|_| home_path.to_string_lossy().into_owned());
         if std::env::var_os("HOME").is_none() {

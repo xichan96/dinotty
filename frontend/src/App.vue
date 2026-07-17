@@ -1249,6 +1249,9 @@ window.__dinotty_terminal_api = {
     return tab?.type === 'terminal' ? tab.activePaneId : ''
   },
   async createTerminalTab(opts: { cwd: string; argv: string[]; title?: string }) {
+    const ws = matchWorkspace(opts.cwd)
+    const targetId = ws?.id ?? null
+    if (targetId !== activeWorkspaceId.value) await activateWorkspace(targetId)
     return newTab(opts.cwd, opts.argv, opts.title)
   },
 }

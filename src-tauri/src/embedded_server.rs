@@ -719,6 +719,51 @@ pub fn run_server(
                 get(workspace::workspace_git_clean_preview),
             )
             .route("/api/workspace/git-clean", post(workspace::workspace_git_clean))
+            .route("/api/workspace/git-backups", get(workspace::workspace_git_backups))
+            .route(
+                "/api/workspace/git-backup-restore",
+                post(workspace::workspace_git_backup_restore),
+            )
+            .route("/api/workspace/git-backup-delete", post(workspace::workspace_git_backup_delete))
+            .route("/api/workspace/git-worktrees", get(workspace::workspace_git_worktrees))
+            .route(
+                "/api/workspace/git-worktree-create",
+                post(workspace::workspace_git_worktree_create),
+            )
+            .route(
+                "/api/workspace/git-worktree-remove",
+                post(workspace::workspace_git_worktree_remove),
+            )
+            .route(
+                "/api/workspace/git-worktree-action",
+                post(workspace::workspace_git_worktree_action),
+            )
+            .route("/api/workspace/git-submodules", get(workspace::workspace_git_submodules))
+            .route(
+                "/api/workspace/git-submodule-update",
+                post(workspace::workspace_git_submodule_update),
+            )
+            .route("/api/workspace/git-submodule-add", post(workspace::workspace_git_submodule_add))
+            .route(
+                "/api/workspace/git-submodule-sync",
+                post(workspace::workspace_git_submodule_sync),
+            )
+            .route(
+                "/api/workspace/git-submodule-deinit",
+                post(workspace::workspace_git_submodule_deinit),
+            )
+            .route(
+                "/api/workspace/git-submodule-remove",
+                post(workspace::workspace_git_submodule_remove),
+            )
+            .route("/api/workspace/git-lfs-tracks", get(workspace::workspace_git_lfs_tracks))
+            .route("/api/workspace/git-lfs-track", post(workspace::workspace_git_lfs_track))
+            .route("/api/workspace/git-lfs-untrack", post(workspace::workspace_git_lfs_untrack))
+            .route("/api/workspace/git-lfs-locks", get(workspace::workspace_git_lfs_locks))
+            .route("/api/workspace/git-lfs-lock", post(workspace::workspace_git_lfs_lock))
+            .route("/api/workspace/git-lfs-unlock", post(workspace::workspace_git_lfs_unlock))
+            .route("/api/workspace/git-lfs-pull", post(workspace::workspace_git_lfs_pull))
+            .route("/api/workspace/git-lfs-push", post(workspace::workspace_git_lfs_push))
             .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),
@@ -726,6 +771,17 @@ pub fn run_server(
             .route("/api/workspace/git-tags", get(workspace::workspace_git_tags))
             .route("/api/workspace/git-tag-create", post(workspace::workspace_git_tag_create))
             .route("/api/workspace/git-tag-delete", post(workspace::workspace_git_tag_delete))
+            .route(
+                "/api/workspace/git-remote-tag-delete",
+                post(workspace::workspace_git_remote_tag_delete),
+            )
+            .route("/api/workspace/git-remote-tags", get(workspace::workspace_git_remote_tags))
+            .route(
+                "/api/workspace/git-remote-tag-push",
+                post(workspace::workspace_git_remote_tag_push),
+            )
+            .route("/api/workspace/git-bisect", post(workspace::workspace_git_bisect))
+            .route("/api/workspace/git-patch-apply", post(workspace::workspace_git_patch_apply))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
@@ -873,6 +929,21 @@ pub fn run_server(
 
 #[cfg(test)]
 mod tests {
+    fn collect_git_routes(source: &str) -> Vec<&str> {
+        // 步骤1：从 Rust 字符串字面量中提取 Git 接口路径。
+        let mut routes = Vec::new();
+        for value in source.split('"') {
+            if value.starts_with("/api/workspace/git-") {
+                routes.push(value);
+            }
+        }
+
+        // 步骤2：排序并去重，确保两套路由可以直接比较。
+        routes.sort_unstable();
+        routes.dedup();
+        routes
+    }
+
     #[test]
     fn embedded_server_registers_git_management_routes() {
         // 步骤1：读取桌面内嵌服务器的路由定义。
@@ -936,11 +1007,37 @@ mod tests {
             "/api/workspace/git-ignore-add",
             "/api/workspace/git-clean-preview",
             "/api/workspace/git-clean",
+            "/api/workspace/git-backups",
+            "/api/workspace/git-backup-restore",
+            "/api/workspace/git-backup-delete",
+            "/api/workspace/git-worktrees",
+            "/api/workspace/git-worktree-create",
+            "/api/workspace/git-worktree-remove",
+            "/api/workspace/git-worktree-action",
+            "/api/workspace/git-submodules",
+            "/api/workspace/git-submodule-update",
+            "/api/workspace/git-submodule-add",
+            "/api/workspace/git-submodule-sync",
+            "/api/workspace/git-submodule-deinit",
+            "/api/workspace/git-submodule-remove",
+            "/api/workspace/git-lfs-tracks",
+            "/api/workspace/git-lfs-track",
+            "/api/workspace/git-lfs-untrack",
+            "/api/workspace/git-lfs-locks",
+            "/api/workspace/git-lfs-lock",
+            "/api/workspace/git-lfs-unlock",
+            "/api/workspace/git-lfs-pull",
+            "/api/workspace/git-lfs-push",
             "/api/workspace/git-sync-preview",
             "/api/workspace/git-operation-action",
             "/api/workspace/git-tags",
             "/api/workspace/git-tag-create",
             "/api/workspace/git-tag-delete",
+            "/api/workspace/git-remote-tag-delete",
+            "/api/workspace/git-remote-tags",
+            "/api/workspace/git-remote-tag-push",
+            "/api/workspace/git-bisect",
+            "/api/workspace/git-patch-apply",
         ];
 
         // 步骤2：确认 Git 管理面板使用的每个接口都已在桌面版注册。
@@ -950,5 +1047,28 @@ mod tests {
                 "desktop route is missing: {required_route}"
             );
         }
+    }
+
+    #[test]
+    fn embedded_server_matches_main_git_routes() {
+        // 步骤1：只比较普通服务端和桌面内嵌服务的生产路由定义。
+        let embedded_source = include_str!("embedded_server.rs");
+        let embedded_production_source =
+            embedded_source.split("#[cfg(test)]").next().unwrap_or(embedded_source);
+        let main_source = include_str!("../../src/main.rs");
+        let main_production_source =
+            main_source.split("#[cfg(test)]").next().unwrap_or(main_source);
+
+        // 步骤2：逐项检查普通服务端的 Git 路由是否已同步到桌面版。
+        let embedded_routes = collect_git_routes(embedded_production_source);
+        let main_routes = collect_git_routes(main_production_source);
+        let mut missing_routes = Vec::new();
+        for route in main_routes {
+            if !embedded_routes.contains(&route) {
+                missing_routes.push(route);
+            }
+        }
+
+        assert!(missing_routes.is_empty(), "desktop routes are missing: {missing_routes:?}");
     }
 }

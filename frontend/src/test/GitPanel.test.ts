@@ -128,6 +128,19 @@ describe('GitPanel', function gitPanelSuite() {
     )
   })
 
+  it('filters visible changes without changing the source list', async function filtersChanges() {
+    // 步骤1：输入文件名片段，只显示匹配的暂存和工作区项目。
+    const wrapper = mountGitPanel()
+    await wrapper.get('[data-testid="git-file-search"]').setValue('both')
+    expect(wrapper.findAll('[data-testid="git-staged-row"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="git-change-row"]')).toHaveLength(1)
+
+    // 步骤2：清空搜索后恢复全部文件。
+    await wrapper.get('[data-testid="git-file-search"]').setValue('')
+    expect(wrapper.findAll('[data-testid="git-staged-row"]')).toHaveLength(3)
+    expect(wrapper.findAll('[data-testid="git-change-row"]')).toHaveLength(3)
+  })
+
   it('shows upstream sync state and runs remote actions', async function synchronizesRemote() {
     // 步骤1：显示当前上游分支以及待推送、待拉取提交数量。
     const wrapper = mountGitPanel()
@@ -218,6 +231,25 @@ describe('GitPanel', function gitPanelSuite() {
       })
     )
     expect(wrapper.emitted('refresh')).toHaveLength(2)
+  })
+
+  it('stages and unstages the complete repository through dedicated APIs', async function changesAllStages() {
+    // 步骤1：点击全部暂存，确认不依赖前端当前显示的路径列表。
+    const wrapper = mountGitPanel()
+    await wrapper.get('[data-testid="git-stage-all-button"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-stage-all?pane_id=pane-1',
+      expect.objectContaining({ method: 'POST', body: '{}' })
+    )
+
+    // 步骤2：点击全部取消暂存，确认使用对应仓库级接口。
+    await wrapper.get('[data-testid="git-unstage-all-button"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-unstage-all?pane_id=pane-1',
+      expect.objectContaining({ method: 'POST', body: '{}' })
+    )
   })
 
   it('commits staged changes with the entered message', async function commitsChanges() {
@@ -330,5 +362,25 @@ describe('GitDiffViewer', function gitDiffViewerSuite() {
     expect(wrapper.get('.git-diff-line-added').text()).toContain('+new value')
     await wrapper.get('[data-testid="git-diff-open-source"]').trigger('click')
     expect(wrapper.emitted('open-source')).toEqual([['src/a.ts']])
+  })
+
+  it('reloads the diff when whitespace changes are ignored', async function ignoresWhitespace() {
+    // 步骤1：挂载差异查看器并切换忽略空白。
+    const wrapper = mount(GitDiffViewer, {
+      props: {
+        paneId: 'pane-1',
+        filePath: 'src/a.ts',
+        staged: false,
+        untracked: false,
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="git-diff-ignore-whitespace"]').trigger('click')
+    await flushPromises()
+
+    // 步骤2：确认新请求显式携带忽略空白参数。
+    const lastCall =
+      gitPanelMocks.authFetch.mock.calls[gitPanelMocks.authFetch.mock.calls.length - 1]
+    expect(String(lastCall[0])).toContain('ignore_whitespace=true')
   })
 })

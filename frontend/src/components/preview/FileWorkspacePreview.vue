@@ -49,7 +49,7 @@
             >
               <GitBranch :size="14" />
               <span>{{ t('gitPanel.sourceControl') }}</span>
-              <span v-if="gitFiles.length" class="workspace-side-badge">{{ gitFiles.length }}</span>
+              <span v-if="gitTotalFiles" class="workspace-side-badge">{{ gitTotalFiles }}</span>
             </button>
           </div>
           <div v-if="sidebarMode === 'files'" class="workspace-tree-content">
@@ -92,6 +92,8 @@
             :is-git-repo="isGitRepo"
             :loading="gitStatusLoading"
             :files="gitFiles"
+            :total-files="gitTotalFiles"
+            :status-truncated="gitStatusTruncated"
             :selected-diff="gitDiffSelection"
             @refresh="refreshGitPanel"
             @view-diff="showGitDiff"
@@ -262,9 +264,7 @@
               >
                 <GitBranch :size="14" />
                 <span>{{ t('gitPanel.sourceControl') }}</span>
-                <span v-if="gitFiles.length" class="workspace-side-badge">{{
-                  gitFiles.length
-                }}</span>
+                <span v-if="gitTotalFiles" class="workspace-side-badge">{{ gitTotalFiles }}</span>
               </button>
             </div>
             <div v-if="sidebarMode === 'files'" class="workspace-tree-content">
@@ -304,6 +304,8 @@
               :is-git-repo="isGitRepo"
               :loading="gitStatusLoading"
               :files="gitFiles"
+              :total-files="gitTotalFiles"
+              :status-truncated="gitStatusTruncated"
               :selected-diff="gitDiffSelection"
               @refresh="refreshGitPanel"
               @view-diff="showGitDiff"
@@ -525,6 +527,8 @@ const expanded = ref<Set<string>>(new Set())
 const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
 const gitFiles = ref<GitFileEntry[]>([])
+const gitTotalFiles = ref(0)
+const gitStatusTruncated = ref(false)
 const gitBranch = ref<string | null>(null)
 const gitUpstream = ref<string | null>(null)
 const gitAhead = ref(0)
@@ -878,6 +882,8 @@ async function fetchGitStatus(): Promise<void> {
       gitBehind.value = 0
       gitRemotes.value = []
       gitFiles.value = []
+      gitTotalFiles.value = 0
+      gitStatusTruncated.value = false
       gitStatusMap.value = {}
       return
     }
@@ -910,6 +916,8 @@ async function fetchGitStatus(): Promise<void> {
       }
     }
     gitFiles.value = nextFiles
+    gitTotalFiles.value = typeof data.total_files === 'number' ? data.total_files : nextFiles.length
+    gitStatusTruncated.value = data.truncated === true
     gitStatusMap.value = nextStatusMap
     gitStatusVersion.value += 1
   } catch {
@@ -920,6 +928,8 @@ async function fetchGitStatus(): Promise<void> {
     gitBehind.value = 0
     gitRemotes.value = []
     gitFiles.value = []
+    gitTotalFiles.value = 0
+    gitStatusTruncated.value = false
     gitStatusMap.value = {}
   } finally {
     gitStatusLoading.value = false

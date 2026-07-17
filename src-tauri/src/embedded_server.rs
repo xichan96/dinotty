@@ -597,7 +597,9 @@ pub fn run_server(
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
             .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
             .route("/api/workspace/git-stage", post(workspace::workspace_git_stage))
+            .route("/api/workspace/git-stage-all", post(workspace::workspace_git_stage_all))
             .route("/api/workspace/git-unstage", post(workspace::workspace_git_unstage))
+            .route("/api/workspace/git-unstage-all", post(workspace::workspace_git_unstage_all))
             .route("/api/workspace/git-discard", post(workspace::workspace_git_discard))
             .route("/api/workspace/git-commit", post(workspace::workspace_git_commit))
             .route("/api/workspace/git-fetch", post(workspace::workspace_git_fetch))
@@ -791,7 +793,9 @@ mod tests {
         let required_routes = [
             "/api/workspace/git-unified-diff",
             "/api/workspace/git-stage",
+            "/api/workspace/git-stage-all",
             "/api/workspace/git-unstage",
+            "/api/workspace/git-unstage-all",
             "/api/workspace/git-discard",
             "/api/workspace/git-commit",
             "/api/workspace/git-fetch",

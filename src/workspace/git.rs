@@ -18,6 +18,7 @@ use super::{
 };
 
 const MAX_GIT_DIFF_OUTPUT: usize = 2 * 1024 * 1024;
+const MAX_GIT_STATUS_FILES: usize = 2000;
 
 macro_rules! try_res {
     ($e:expr) => {
@@ -113,6 +114,8 @@ pub struct GitStatusResponse {
     pub behind: usize,
     pub remotes: Vec<GitRemote>,
     pub files: Vec<GitFileStatus>,
+    pub total_files: usize,
+    pub truncated: bool,
 }
 
 struct ParsedGitStatus {
@@ -121,6 +124,8 @@ struct ParsedGitStatus {
     ahead: usize,
     behind: usize,
     files: Vec<GitFileStatus>,
+    total_files: usize,
+    truncated: bool,
 }
 
 struct ParsedBranchStatus {
@@ -210,6 +215,7 @@ fn parse_status_output(output: &str) -> ParsedGitStatus {
     let mut ahead = 0;
     let mut behind = 0;
     let mut files = Vec::new();
+    let mut total_files = 0;
     for line in output.lines() {
         if line.starts_with("## ") {
             let branch_status = parse_branch_line(line);
@@ -238,17 +244,21 @@ fn parse_status_output(output: &str) -> ParsedGitStatus {
         let staged = index_status != ' ' && index_status != '?';
         let unstaged = worktree_status != ' ' || (index_status == '?' && worktree_status == '?');
         let status = status_name(index_status, worktree_status, conflict).to_string();
-        files.push(GitFileStatus {
-            path,
-            status,
-            index_status: index_status.to_string(),
-            worktree_status: worktree_status.to_string(),
-            staged,
-            unstaged,
-            conflict,
-        });
+        total_files += 1;
+        if files.len() < MAX_GIT_STATUS_FILES {
+            files.push(GitFileStatus {
+                path,
+                status,
+                index_status: index_status.to_string(),
+                worktree_status: worktree_status.to_string(),
+                staged,
+                unstaged,
+                conflict,
+            });
+        }
     }
-    ParsedGitStatus { branch, upstream, ahead, behind, files }
+    let truncated = total_files > files.len();
+    ParsedGitStatus { branch, upstream, ahead, behind, files, total_files, truncated }
 }
 
 fn parse_remote_output(output: &str) -> Vec<GitRemote> {
@@ -394,6 +404,8 @@ pub async fn workspace_git_status(
                 behind: 0,
                 remotes: vec![],
                 files: vec![],
+                total_files: 0,
+                truncated: false,
             })
             .into_response()
         }
@@ -415,6 +427,8 @@ pub async fn workspace_git_status(
         behind: parsed.behind,
         remotes,
         files: parsed.files,
+        total_files: parsed.total_files,
+        truncated: parsed.truncated,
     })
     .into_response()
 }
@@ -750,6 +764,8 @@ pub struct GitUnifiedDiffQuery {
     pub staged: bool,
     #[serde(default)]
     pub untracked: bool,
+    #[serde(default)]
+    pub ignore_whitespace: bool,
 }
 
 fn default_git_log_limit() -> usize {
@@ -888,6 +904,47 @@ pub async fn workspace_git_unstage(
 
     // 步骤2：执行取消暂存并返回操作结果。
     match unstage_git_paths(root, &paths).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_stage_all(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：用户选择“全部暂存”时由 Git 直接处理整个当前仓库。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let arguments = vec!["add".to_string(), "--all".to_string()];
+    match run_git_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_unstage_all(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：判断仓库是否已有 HEAD，分别恢复完整索引或清空新仓库索引。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let head_arguments = vec!["rev-parse".to_string(), "--verify".to_string(), "HEAD".to_string()];
+    let head_output = match run_git_output(root.clone(), head_arguments).await {
+        Ok(output) => output,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let arguments = if head_output.status.success() {
+        vec!["restore".to_string(), "--staged".to_string(), "--".to_string(), ":/".to_string()]
+    } else {
+        vec![
+            "rm".to_string(),
+            "--cached".to_string(),
+            "-r".to_string(),
+            "--".to_string(),
+            ".".to_string(),
+        ]
+    };
+    match run_git_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
@@ -1407,6 +1464,9 @@ pub async fn workspace_git_unified_diff(
     if query.staged {
         arguments.push("--cached".to_string());
     }
+    if query.ignore_whitespace {
+        arguments.push("--ignore-all-space".to_string());
+    }
     arguments.push("--".to_string());
     arguments.push(file_path);
     match run_git_output(root, arguments).await {
@@ -1480,6 +1540,21 @@ mod tests {
         let conflict = &parsed.files[5];
         assert!(conflict.conflict);
         assert_eq!(conflict.status, "conflict");
+    }
+
+    #[test]
+    fn truncates_large_status_lists_but_keeps_total_count() {
+        // 步骤1：构造超过界面安全上限的文件状态输出。
+        let mut output = String::from("## main\n");
+        for index in 0..2005 {
+            output.push_str(&format!(" M src/file-{index}.txt\n"));
+        }
+
+        // 步骤2：确认返回列表被截断，同时总数和截断标记保持准确。
+        let parsed = parse_status_output(&output);
+        assert_eq!(parsed.files.len(), 2000);
+        assert_eq!(parsed.total_files, 2005);
+        assert!(parsed.truncated);
     }
 
     #[test]

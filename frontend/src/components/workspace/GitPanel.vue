@@ -197,17 +197,43 @@
 
         <GitStashSection :pane-id="paneId" @refresh="emit('refresh')" />
 
+        <label class="git-file-search">
+          <Search :size="13" aria-hidden="true" />
+          <input
+            v-model="fileSearch"
+            data-testid="git-file-search"
+            type="search"
+            :placeholder="t('gitPanel.searchChanges')"
+          />
+        </label>
+
+        <p v-if="statusTruncated" class="git-panel-message warning" role="status">
+          {{ t('gitPanel.statusTruncated').replace('{count}', String(totalFiles || files.length)) }}
+        </p>
+
         <div v-if="!files.length" class="git-panel-state clean">
           <CircleCheck :size="22" aria-hidden="true" />
           <span>{{ t('gitPanel.clean') }}</span>
         </div>
 
-        <section v-if="stagedFiles.length" data-testid="git-staged-section" class="git-section">
+        <div
+          v-if="files.length && !filteredStagedFiles.length && !filteredWorkingFiles.length"
+          class="git-panel-state search-empty"
+        >
+          {{ t('gitPanel.noMatchingChanges') }}
+        </div>
+
+        <section
+          v-if="filteredStagedFiles.length"
+          data-testid="git-staged-section"
+          class="git-section"
+        >
           <div class="git-section-header">
             <span>{{ t('gitPanel.stagedChanges') }}</span>
-            <span class="git-section-count">{{ stagedFiles.length }}</span>
+            <span class="git-section-count">{{ filteredStagedFiles.length }}</span>
             <button
               type="button"
+              data-testid="git-unstage-all-button"
               class="git-icon-button"
               :title="t('gitPanel.unstageAll')"
               :aria-label="t('gitPanel.unstageAll')"
@@ -219,7 +245,7 @@
           </div>
           <div class="git-file-list">
             <div
-              v-for="file in stagedFiles"
+              v-for="file in filteredStagedFiles"
               :key="`staged:${file.path}`"
               data-testid="git-staged-row"
               :data-path="file.path"
@@ -288,12 +314,17 @@
           </div>
         </section>
 
-        <section v-if="workingFiles.length" data-testid="git-changes-section" class="git-section">
+        <section
+          v-if="filteredWorkingFiles.length"
+          data-testid="git-changes-section"
+          class="git-section"
+        >
           <div class="git-section-header">
             <span>{{ t('gitPanel.changes') }}</span>
-            <span class="git-section-count">{{ workingFiles.length }}</span>
+            <span class="git-section-count">{{ filteredWorkingFiles.length }}</span>
             <button
               type="button"
+              data-testid="git-stage-all-button"
               class="git-icon-button"
               :title="t('gitPanel.stageAll')"
               :aria-label="t('gitPanel.stageAll')"
@@ -305,7 +336,7 @@
           </div>
           <div class="git-file-list">
             <div
-              v-for="file in workingFiles"
+              v-for="file in filteredWorkingFiles"
               :key="`working:${file.path}`"
               data-testid="git-change-row"
               :data-path="file.path"
@@ -381,6 +412,7 @@ import {
   Minus,
   Plus,
   RefreshCw,
+  Search,
   Undo2,
 } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
@@ -409,6 +441,8 @@ const props = defineProps<{
   loading: boolean
   files: GitFileEntry[]
   selectedDiff?: GitDiffSelection | null
+  totalFiles?: number
+  statusTruncated?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -428,6 +462,7 @@ const discardFile = ref<GitFileEntry | null>(null)
 const activeAction = ref('')
 const branchMenuVisible = ref(false)
 const panelMode = ref<'changes' | 'history'>('changes')
+const fileSearch = ref('')
 
 const primaryRemote = computed(function computePrimaryRemote() {
   // 步骤1：优先使用上游分支所属 remote，其次选择 origin，最后使用第一个 remote。
@@ -473,6 +508,29 @@ const workingFiles = computed(function computeWorkingFiles() {
   }
   return result
 })
+
+const filteredStagedFiles = computed(function computeFilteredStagedFiles() {
+  // 步骤1：只过滤界面显示，保留 stagedFiles 供全部操作使用。
+  return filterFiles(stagedFiles.value, fileSearch.value)
+})
+
+const filteredWorkingFiles = computed(function computeFilteredWorkingFiles() {
+  // 步骤1：只过滤界面显示，保留 workingFiles 供全部操作使用。
+  return filterFiles(workingFiles.value, fileSearch.value)
+})
+
+function filterFiles(sourceFiles: GitFileEntry[], searchText: string): GitFileEntry[] {
+  // 步骤1：空搜索返回完整列表，其他情况按仓库相对路径不区分大小写匹配。
+  const search = searchText.trim().toLocaleLowerCase()
+  if (!search) return sourceFiles
+  const result: GitFileEntry[] = []
+  for (const file of sourceFiles) {
+    if (file.path.toLocaleLowerCase().includes(search)) {
+      result.push(file)
+    }
+  }
+  return result
+}
 
 const canCommit = computed(function computeCanCommit() {
   // 步骤1：只有存在暂存内容、提交说明非空且没有其他操作时才允许提交。
@@ -584,25 +642,13 @@ async function unstagePaths(paths: string[]): Promise<void> {
 }
 
 async function stageAll(): Promise<void> {
-  // 步骤1：收集当前工作区分组中的唯一文件路径。
-  const paths: string[] = []
-  for (const file of workingFiles.value) {
-    if (!paths.includes(file.path)) {
-      paths.push(file.path)
-    }
-  }
-  await stagePaths(paths)
+  // 步骤1：由后端直接暂存仓库全部更改，避免大仓库截断列表漏掉文件。
+  await postGitAction('git-stage-all', {})
 }
 
 async function unstageAll(): Promise<void> {
-  // 步骤1：收集当前暂存分组中的唯一文件路径。
-  const paths: string[] = []
-  for (const file of stagedFiles.value) {
-    if (!paths.includes(file.path)) {
-      paths.push(file.path)
-    }
-  }
-  await unstagePaths(paths)
+  // 步骤1：由后端直接取消整个仓库的暂存，保证“全部”语义准确。
+  await postGitAction('git-unstage-all', {})
 }
 
 function requestDiscard(file: GitFileEntry): void {
@@ -913,6 +959,31 @@ async function resolveConflict(
   color: var(--color-green, #62b478);
 }
 
+.git-panel-message.warning {
+  color: var(--color-orange, #d7a148);
+}
+
+.git-file-search {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.git-file-search input {
+  min-width: 0;
+  flex: 1;
+  height: 25px;
+  border: 0;
+  color: var(--fg);
+  background: transparent;
+  font-size: 10px;
+  outline: none;
+}
+
 .git-panel-state {
   min-height: 120px;
   display: flex;
@@ -928,6 +999,10 @@ async function resolveConflict(
 
 .git-panel-state.clean {
   color: var(--color-green, #62b478);
+}
+
+.git-panel-state.search-empty {
+  min-height: 72px;
 }
 
 .git-section {

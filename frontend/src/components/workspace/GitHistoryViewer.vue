@@ -45,6 +45,9 @@
       :loading-text="t('gitPanel.loadingHistoryDetail')"
       :empty-text="t('gitPanel.noHistoryDiff')"
       :diff-label="t('gitPanel.historyDiff')"
+      :search-placeholder="t('gitPanel.searchDiff')"
+      :load-more-text="t('gitPanel.loadMoreDiffLines')"
+      :wrap-text="t('gitPanel.wrapDiffLines')"
     />
   </section>
 </template>

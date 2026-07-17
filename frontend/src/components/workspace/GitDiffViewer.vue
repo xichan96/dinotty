@@ -10,6 +10,17 @@
       </span>
       <button
         type="button"
+        data-testid="git-diff-ignore-whitespace"
+        class="git-diff-icon-button"
+        :class="{ active: ignoreWhitespace }"
+        :title="t('gitPanel.ignoreWhitespace')"
+        :aria-label="t('gitPanel.ignoreWhitespace')"
+        @click="ignoreWhitespace = !ignoreWhitespace"
+      >
+        <Pilcrow :size="14" />
+      </button>
+      <button
+        type="button"
         class="git-diff-icon-button"
         :title="t('gitPanel.refresh')"
         :aria-label="t('gitPanel.refresh')"
@@ -45,13 +56,16 @@
       :loading-text="t('gitPanel.loadingDiff')"
       :empty-text="t('gitPanel.noDiff')"
       :diff-label="t('gitPanel.diff')"
+      :search-placeholder="t('gitPanel.searchDiff')"
+      :load-more-text="t('gitPanel.loadMoreDiffLines')"
+      :wrap-text="t('gitPanel.wrapDiffLines')"
     />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { FileCode2, RefreshCw, X } from 'lucide-vue-next'
+import { FileCode2, Pilcrow, RefreshCw, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { getGitFileName } from '../../utils/gitPanel'
@@ -73,6 +87,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const errorMessage = ref('')
 const patch = ref('')
+const ignoreWhitespace = ref(false)
 
 const fileName = computed(function computeFileName() {
   // 步骤1：只在主标题显示文件名，完整路径保留为辅助信息。
@@ -91,6 +106,7 @@ async function loadDiff(): Promise<void> {
       path: props.filePath,
       staged: String(props.staged),
       untracked: String(props.untracked),
+      ignore_whitespace: String(ignoreWhitespace.value),
     })
     const response = await authFetch(apiUrl(`/api/workspace/git-unified-diff?${query}`))
     const result = await response.json().catch(function emptyDiffResult() {
@@ -112,7 +128,7 @@ async function loadDiff(): Promise<void> {
 
 watch(
   function watchDiffTarget() {
-    return [props.paneId, props.filePath, props.staged, props.untracked]
+    return [props.paneId, props.filePath, props.staged, props.untracked, ignoreWhitespace.value]
   },
   function reloadDiffForTarget() {
     void loadDiff()
@@ -192,7 +208,8 @@ watch(
 }
 
 .git-diff-icon-button:hover,
-.git-diff-icon-button:focus-visible {
+.git-diff-icon-button:focus-visible,
+.git-diff-icon-button.active {
   color: var(--fg-bright);
   background: var(--bg-hover);
   outline: 1px solid var(--accent);
@@ -214,7 +231,6 @@ watch(
   .git-diff-scope {
     display: none;
   }
-
 }
 
 @media (prefers-reduced-motion: reduce) {

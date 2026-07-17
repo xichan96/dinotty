@@ -870,6 +870,8 @@ async fn main() {
             .route("/api/workspace/git-stash-apply", post(workspace::workspace_git_stash_apply))
             .route("/api/workspace/git-stash-pop", post(workspace::workspace_git_stash_pop))
             .route("/api/workspace/git-stash-drop", post(workspace::workspace_git_stash_drop))
+            .route("/api/workspace/git-conflict-content", get(workspace::workspace_git_conflict_content))
+            .route("/api/workspace/git-conflict-save", post(workspace::workspace_git_conflict_save))
             .route(
                 "/api/workspace/git-conflict-resolve",
                 post(workspace::workspace_git_conflict_resolve),

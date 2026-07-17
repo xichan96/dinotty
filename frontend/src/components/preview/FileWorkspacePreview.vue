@@ -126,6 +126,16 @@
           :repository="gitRepository"
           @close="gitHistorySelection = null"
         />
+        <GitConflictEditor
+          v-else-if="gitDiffSelection?.conflict"
+          :key="gitDiffViewerKey"
+          :pane-id="paneId"
+          :file-path="gitDiffSelection.filePath"
+          :repository="gitRepository"
+          @close="gitDiffSelection = null"
+          @open-source="openGitSource"
+          @refresh="refreshGitPanel"
+        />
         <GitDiffViewer
           v-else-if="gitDiffSelection"
           :key="gitDiffViewerKey"
@@ -344,6 +354,16 @@
             :repository="gitRepository"
             @close="gitHistorySelection = null"
           />
+          <GitConflictEditor
+            v-else-if="gitDiffSelection?.conflict"
+            :key="gitDiffViewerKey"
+            :pane-id="paneId"
+            :file-path="gitDiffSelection.filePath"
+            :repository="gitRepository"
+            @close="gitDiffSelection = null"
+            @open-source="openGitSource"
+            @refresh="refreshGitPanel"
+          />
           <GitDiffViewer
             v-else-if="gitDiffSelection"
             :key="gitDiffViewerKey"
@@ -500,6 +520,7 @@ import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
+import GitConflictEditor from '../workspace/GitConflictEditor.vue'
 import GitDiffViewer from '../workspace/GitDiffViewer.vue'
 import GitHistoryViewer from '../workspace/GitHistoryViewer.vue'
 import GitPanel from '../workspace/GitPanel.vue'
@@ -674,7 +695,7 @@ const gitDiffViewerKey = computed(function computeGitDiffViewerKey() {
   // 步骤1：状态刷新后重新创建查看器，确保暂存或丢弃操作立即反映到 diff。
   if (!gitDiffSelection.value) return `empty:${gitStatusVersion.value}`
   const selection = gitDiffSelection.value
-  return `${selection.filePath}:${selection.staged}:${gitStatusVersion.value}`
+  return `${selection.filePath}:${selection.staged}:${selection.conflict === true}:${gitStatusVersion.value}`
 })
 
 const isSelectedBookmarked = computed(() => {

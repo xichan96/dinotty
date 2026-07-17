@@ -12,6 +12,7 @@ export interface GitDiffSelection {
   filePath: string
   staged: boolean
   untracked: boolean
+  conflict?: boolean
 }
 
 export interface GitRemoteEntry {

@@ -636,6 +636,8 @@ pub fn run_server(
             .route("/api/workspace/git-stash-apply", post(workspace::workspace_git_stash_apply))
             .route("/api/workspace/git-stash-pop", post(workspace::workspace_git_stash_pop))
             .route("/api/workspace/git-stash-drop", post(workspace::workspace_git_stash_drop))
+            .route("/api/workspace/git-conflict-content", get(workspace::workspace_git_conflict_content))
+            .route("/api/workspace/git-conflict-save", post(workspace::workspace_git_conflict_save))
             .route(
                 "/api/workspace/git-conflict-resolve",
                 post(workspace::workspace_git_conflict_resolve),
@@ -836,6 +838,8 @@ mod tests {
             "/api/workspace/git-stash-pop",
             "/api/workspace/git-stash-drop",
             "/api/workspace/git-conflict-resolve",
+            "/api/workspace/git-conflict-content",
+            "/api/workspace/git-conflict-save",
             "/api/workspace/git-merge",
             "/api/workspace/git-rebase",
             "/api/workspace/git-cherry-pick",

@@ -594,6 +594,7 @@ function viewDiff(file: GitFileEntry, staged: boolean): void {
     filePath: file.path,
     staged,
     untracked: !staged && file.status === 'untracked',
+    conflict: file.conflict,
   })
 }
 

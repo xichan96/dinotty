@@ -920,6 +920,20 @@ pub struct GitConflictResolveBody {
 }
 
 #[derive(Deserialize)]
+pub struct GitConflictContentQuery {
+    pub pane_id: String,
+    #[serde(default)]
+    pub repository: Option<String>,
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitConflictSaveBody {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Deserialize)]
 pub struct GitSourceBody {
     pub source: String,
 }
@@ -1409,6 +1423,133 @@ pub async fn workspace_git_conflict_resolve(
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
+}
+
+async fn read_conflict_stage(
+    root: PathBuf,
+    stage: usize,
+    path: String,
+) -> Result<Option<String>, String> {
+    // 步骤1：只允许 Git index 定义的 base、current、incoming 三个 stage。
+    if !(1..=3).contains(&stage) {
+        return Err("invalid conflict stage".to_string());
+    }
+    let arguments = vec!["show".to_string(), format!(":{stage}:{path}")];
+    let output = run_git_output(root, arguments).await?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    if output.stdout.len() > MAX_TEXT_PREVIEW {
+        return Err("conflict source too large".to_string());
+    }
+    Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
+}
+
+pub async fn workspace_git_conflict_content(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<GitConflictContentQuery>,
+) -> Response {
+    // 步骤1：验证仓库和冲突文件路径，并读取当前工作文件结果。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let paths = try_res!(validate_git_paths(&root, &[query.path]));
+    let path = paths[0].clone();
+    let target = try_res!(normalize_join(&root, &path));
+    let metadata = match std::fs::metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) => return json_err(StatusCode::NOT_FOUND, &error.to_string()),
+    };
+    if metadata.len() > MAX_TEXT_PREVIEW as u64 {
+        return json_err(StatusCode::BAD_REQUEST, "conflict file too large");
+    }
+    let result_content = match std::fs::read_to_string(&target) {
+        Ok(content) => content,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error.to_string()),
+    };
+
+    // 步骤2：并行读取 index 中的 base、current 和 incoming，缺失 stage 返回空值。
+    let base_future = read_conflict_stage(root.clone(), 1, path.clone());
+    let current_future = read_conflict_stage(root.clone(), 2, path.clone());
+    let incoming_future = read_conflict_stage(root, 3, path);
+    let (base_result, current_result, incoming_result) =
+        tokio::join!(base_future, current_future, incoming_future);
+    let base = match base_result {
+        Ok(content) => content,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let current = match current_result {
+        Ok(content) => content,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let incoming = match incoming_result {
+        Ok(content) => content,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    Json(serde_json::json!({
+        "base": base,
+        "current": current,
+        "incoming": incoming,
+        "result": result_content,
+    }))
+    .into_response()
+}
+
+pub async fn workspace_git_conflict_save(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitConflictSaveBody>,
+) -> Response {
+    // 步骤1：限制合并结果大小，并确认目标文件当前确实处于 unmerged 状态。
+    if body.content.len() > MAX_TEXT_PREVIEW {
+        return json_err(StatusCode::BAD_REQUEST, "merged content too large");
+    }
+    if contains_conflict_markers(&body.content) {
+        return json_err(StatusCode::BAD_REQUEST, "conflict markers remain");
+    }
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let paths = try_res!(validate_git_paths(&root, &[body.path]));
+    let path = paths[0].clone();
+    let check_arguments = vec![
+        "ls-files".to_string(),
+        "--unmerged".to_string(),
+        "--".to_string(),
+        path.clone(),
+    ];
+    let check_output = match run_git_output(root.clone(), check_arguments).await {
+        Ok(output) => output,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    if !check_output.status.success() {
+        return git_command_response(&check_output);
+    }
+    if check_output.stdout.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "file is not conflicted");
+    }
+
+    // 步骤2：写入完整合并结果，再由 git add 原子地标记冲突已解决。
+    let target = try_res!(normalize_join(&root, &path));
+    if let Err(error) = std::fs::write(&target, body.content.as_bytes()) {
+        return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+    }
+    let add_arguments = vec!["add".to_string(), "--".to_string(), path];
+    match run_git_output(root, add_arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn contains_conflict_markers(content: &str) -> bool {
+    // 步骤1：只识别行首 Git 冲突标记，普通代码中的连续等号不会误报。
+    for line in content.lines() {
+        let marker = line.trim_end_matches('\r');
+        if marker.starts_with("<<<<<<<")
+            || marker.starts_with("|||||||")
+            || marker == "======="
+            || marker.starts_with(">>>>>>>")
+        {
+            return true;
+        }
+    }
+    false
 }
 
 async fn run_git_action(
@@ -2141,9 +2282,10 @@ pub async fn workspace_git_unified_diff(
 mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_switch_arguments,
-        build_commit_arguments, discover_git_repositories, extract_unified_diff_hunk, git_command,
-        git_commit_matches_search, parse_branch_output, parse_log_output, parse_remote_output,
-        parse_stash_output, parse_status_output, parse_tag_output, unstage_git_paths,
+        build_commit_arguments, contains_conflict_markers, discover_git_repositories,
+        extract_unified_diff_hunk, git_command, git_commit_matches_search, parse_branch_output,
+        parse_log_output, parse_remote_output, parse_stash_output, parse_status_output,
+        parse_tag_output, read_conflict_stage, unstage_git_paths,
     };
     use std::path::Path;
 
@@ -2450,6 +2592,75 @@ mod tests {
         let create_arguments =
             build_branch_create_arguments("feature/history", Some("abcdef12"));
         assert_eq!(create_arguments, vec!["switch", "-c", "feature/history", "abcdef12"]);
+    }
+
+    #[tokio::test]
+    async fn reads_base_current_and_incoming_conflict_stages() {
+        // 步骤1：建立两个分支并在同一行制造真实合并冲突。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        run_test_git(temporary_directory.path(), &["init"]);
+        run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
+        run_test_git(
+            temporary_directory.path(),
+            &["config", "user.email", "test@example.com"],
+        );
+        let file_path = temporary_directory.path().join("conflict.txt");
+        std::fs::write(&file_path, "base value\n").unwrap();
+        run_test_git(temporary_directory.path(), &["add", "conflict.txt"]);
+        run_test_git(temporary_directory.path(), &["commit", "-m", "base"]);
+        let branch_output = git_command()
+            .args(["branch", "--show-current"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let initial_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+        run_test_git(temporary_directory.path(), &["switch", "-c", "feature"]);
+        std::fs::write(&file_path, "incoming value\n").unwrap();
+        run_test_git(temporary_directory.path(), &["commit", "-am", "incoming"]);
+        run_test_git(temporary_directory.path(), &["switch", &initial_branch]);
+        std::fs::write(&file_path, "current value\n").unwrap();
+        run_test_git(temporary_directory.path(), &["commit", "-am", "current"]);
+        let merge_output = git_command()
+            .args(["merge", "feature"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        assert!(!merge_output.status.success());
+
+        // 步骤2：从 Git index 三个 stage 读取 base、当前和传入版本。
+        let base = read_conflict_stage(
+            temporary_directory.path().to_path_buf(),
+            1,
+            "conflict.txt".to_string(),
+        )
+        .await
+        .unwrap();
+        let current = read_conflict_stage(
+            temporary_directory.path().to_path_buf(),
+            2,
+            "conflict.txt".to_string(),
+        )
+        .await
+        .unwrap();
+        let incoming = read_conflict_stage(
+            temporary_directory.path().to_path_buf(),
+            3,
+            "conflict.txt".to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(base.as_deref(), Some("base value\n"));
+        assert_eq!(current.as_deref(), Some("current value\n"));
+        assert_eq!(incoming.as_deref(), Some("incoming value\n"));
+    }
+
+    #[test]
+    fn detects_remaining_conflict_marker_lines() {
+        // 步骤1：只有完整标记行触发保护，普通代码中的等号不应误报。
+        assert!(contains_conflict_markers("before\n<<<<<<< HEAD\nvalue\n"));
+        assert!(contains_conflict_markers("value\n=======\nother\n"));
+        assert!(contains_conflict_markers("value\n>>>>>>> feature\n"));
+        assert!(!contains_conflict_markers("let value = '=======';\n"));
     }
 
     #[test]

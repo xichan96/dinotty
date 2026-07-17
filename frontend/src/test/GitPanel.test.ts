@@ -343,6 +343,17 @@ describe('GitPanel', function gitPanelSuite() {
         files: conflictFiles,
       },
     })
+    await wrapper.get('[data-testid="git-staged-row"]').trigger('click')
+    expect(wrapper.emitted('view-diff')).toEqual([
+      [
+        {
+          filePath: 'src/conflict.ts',
+          staged: true,
+          untracked: false,
+          conflict: true,
+        },
+      ],
+    ])
     await wrapper.get('[data-testid="git-conflict-ours"]').trigger('click')
     await flushPromises()
 

@@ -101,6 +101,7 @@
             @view-diff="showGitDiff"
             @view-history="showGitHistory"
             @select-repository="selectGitRepository"
+            @repository-created="handleGitRepositoryCreated"
           />
         </div>
       </div>
@@ -329,6 +330,7 @@
               @view-diff="showGitDiff"
               @view-history="showGitHistory"
               @select-repository="selectGitRepository"
+              @repository-created="handleGitRepositoryCreated"
             />
           </div>
         </div>
@@ -809,6 +811,19 @@ async function openGitSource(path: string): Promise<void> {
 async function refreshGitPanel(): Promise<void> {
   // 步骤1：重新读取状态，并让已打开的 diff 使用最新内容。
   await fetchGitStatus()
+}
+
+async function handleGitRepositoryCreated(repository: string): Promise<void> {
+  // 步骤1：优先记录刚创建的仓库路径，再强制重新扫描仓库列表。
+  gitRepository.value = repository
+  gitRepositoriesLoaded.value = false
+  await fetchGitRepositories()
+
+  // 步骤2：刷新 Git 状态和文件树，使初始化或克隆结果立即出现在导航器中。
+  gitDiffSelection.value = null
+  gitHistorySelection.value = null
+  childCache.value = {}
+  await Promise.all([fetchGitStatus(), ensureChildren('')])
 }
 
 // --- Navigation ---

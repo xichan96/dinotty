@@ -58,10 +58,11 @@
     <div v-if="loading && !files.length" class="git-panel-state">
       {{ t('gitPanel.loading') }}
     </div>
-    <div v-else-if="!isGitRepo" class="git-panel-state">
-      <GitBranch :size="22" aria-hidden="true" />
-      <span>{{ t('gitPanel.notRepository') }}</span>
-    </div>
+    <GitRepositorySetup
+      v-else-if="!isGitRepo"
+      :pane-id="paneId"
+      @repository-created="emit('repository-created', $event)"
+    />
     <template v-else>
       <div class="git-panel-tabs" role="tablist">
         <button
@@ -452,6 +453,7 @@ import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitAdvancedActions from './GitAdvancedActions.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'
+import GitRepositorySetup from './GitRepositorySetup.vue'
 import GitStashSection from './GitStashSection.vue'
 
 const props = defineProps<{
@@ -476,6 +478,7 @@ const emit = defineEmits<{
   'view-diff': [selection: GitDiffSelection]
   'view-history': [selection: GitHistorySelection]
   'select-repository': [repository: string]
+  'repository-created': [repository: string]
 }>()
 
 const { t } = useI18n()

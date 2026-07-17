@@ -139,6 +139,61 @@ pub struct GitRepositoriesResponse {
     pub repositories: Vec<GitRepositoryEntry>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GitInitializeBody {
+    pub initial_branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitCloneBody {
+    pub url: String,
+    pub directory: String,
+}
+
+fn validate_initial_branch(value: &str) -> Result<String, String> {
+    // 步骤1：先拒绝空名称、控制字符和可能被 Git 解释为选项的名称。
+    let branch = value.trim();
+    if branch.is_empty() || branch.starts_with('-') || branch.chars().any(char::is_control) {
+        return Err("invalid initial branch".to_string());
+    }
+
+    // 步骤2：交给 Git 自身校验完整引用命名规则，避免手工规则与 Git 不一致。
+    let output = git_command()
+        .args(["check-ref-format", "--branch", branch])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err("invalid initial branch".to_string());
+    }
+    Ok(branch.to_string())
+}
+
+fn validate_clone_url(value: &str) -> Result<String, String> {
+    // 步骤1：允许 HTTPS、SSH 和本地仓库路径，但拒绝空值、控制字符和选项注入。
+    let url = value.trim();
+    if url.is_empty() || url.starts_with('-') || url.chars().any(char::is_control) {
+        return Err("invalid repository URL".to_string());
+    }
+    Ok(url.to_string())
+}
+
+fn validate_clone_directory(value: &str) -> Result<String, String> {
+    // 步骤1：克隆目录只接受一个普通目录名称，确保目标始终是工作区直属子目录。
+    let directory = value.trim();
+    let invalid = directory.is_empty()
+        || directory == "."
+        || directory == ".."
+        || directory.starts_with('-')
+        || directory.contains('/')
+        || directory.contains('\\')
+        || directory.contains(':')
+        || directory.chars().any(char::is_control);
+    if invalid {
+        return Err("invalid clone directory".to_string());
+    }
+    Ok(directory.to_string())
+}
+
 fn discover_git_repositories(root: &Path) -> Vec<GitRepositoryEntry> {
     // 步骤1：使用显式栈限制扫描深度，并跳过常见的大型生成目录。
     let skipped_directories = [".git", "node_modules", "target", ".venv", "dist", "build"];
@@ -237,6 +292,102 @@ pub async fn workspace_git_repositories(
     match result {
         Ok(repositories) => Json(GitRepositoriesResponse { repositories }).into_response(),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+    }
+}
+
+async fn initialize_git_repository(
+    root: PathBuf,
+    initial_branch: String,
+) -> Result<std::process::Output, String> {
+    // 步骤1：在当前工作区创建仓库，并显式指定用户选择的初始分支。
+    let arguments = vec![
+        "init".to_string(),
+        "--initial-branch".to_string(),
+        initial_branch,
+        ".".to_string(),
+    ];
+    run_git_output(root, arguments).await
+}
+
+async fn clone_git_repository(
+    workspace_root: PathBuf,
+    url: String,
+    destination: PathBuf,
+) -> Result<std::process::Output, String> {
+    // 步骤1：使用 -- 结束选项解析，并让 Git 在工作区内创建目标目录。
+    let arguments = vec![
+        "clone".to_string(),
+        "--".to_string(),
+        url,
+        destination.to_string_lossy().into_owned(),
+    ];
+    run_git_output(workspace_root, arguments).await
+}
+
+fn repository_setup_response(output: &std::process::Output, repository: &str) -> Response {
+    // 步骤1：成功时返回新仓库相对路径，前端据此重新扫描并自动选中。
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stdout.is_empty() { stderr } else { stdout };
+        return Json(serde_json::json!({
+            "ok": true,
+            "repository": repository,
+            "output": message,
+        }))
+        .into_response();
+    }
+
+    // 步骤2：失败时沿用统一 Git 错误响应，保留真实 stderr。
+    git_command_response(output)
+}
+
+pub async fn workspace_git_initialize(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitInitializeBody>,
+) -> Response {
+    // 步骤1：读取当前文件导航根目录，并拒绝重复初始化已有仓库。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    if root.join(".git").exists() {
+        return json_err(StatusCode::CONFLICT, "workspace is already a Git repository");
+    }
+    let initial_branch = match validate_initial_branch(&body.initial_branch) {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+
+    // 步骤2：执行初始化并返回根仓库使用的空相对路径。
+    match initialize_git_repository(root, initial_branch).await {
+        Ok(output) => repository_setup_response(&output, ""),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_clone(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitCloneBody>,
+) -> Response {
+    // 步骤1：验证远程地址和直属子目录名称，确保目标不会逃离工作区。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let url = match validate_clone_url(&body.url) {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    let directory = match validate_clone_directory(&body.directory) {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    let destination = root.join(&directory);
+    if destination.exists() {
+        return json_err(StatusCode::CONFLICT, "clone destination already exists");
+    }
+
+    // 步骤2：克隆成功后返回目录名称，文件导航会重新扫描并选中新仓库。
+    match clone_git_repository(root, url, destination).await {
+        Ok(output) => repository_setup_response(&output, &directory),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
 }
 
@@ -2283,9 +2434,10 @@ mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_switch_arguments,
         build_commit_arguments, contains_conflict_markers, discover_git_repositories,
-        extract_unified_diff_hunk, git_command, git_commit_matches_search, parse_branch_output,
-        parse_log_output, parse_remote_output, parse_stash_output, parse_status_output,
-        parse_tag_output, read_conflict_stage, unstage_git_paths,
+        clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
+        initialize_git_repository, parse_branch_output, parse_log_output, parse_remote_output,
+        parse_stash_output, parse_status_output, parse_tag_output, read_conflict_stage,
+        unstage_git_paths, validate_clone_directory, validate_clone_url, validate_initial_branch,
     };
     use std::path::Path;
 
@@ -2661,6 +2813,66 @@ mod tests {
         assert!(contains_conflict_markers("value\n=======\nother\n"));
         assert!(contains_conflict_markers("value\n>>>>>>> feature\n"));
         assert!(!contains_conflict_markers("let value = '=======';\n"));
+    }
+
+    #[tokio::test]
+    async fn initializes_and_clones_real_repositories() {
+        // 步骤1：初始化指定目录并确认初始分支名称。
+        let workspace_directory = tempfile::tempdir().unwrap();
+        let initialized_root = workspace_directory.path().join("initialized");
+        std::fs::create_dir_all(&initialized_root).unwrap();
+        let init_output =
+            initialize_git_repository(initialized_root.clone(), "develop".to_string())
+                .await
+                .unwrap();
+        assert!(init_output.status.success());
+        let branch_output = git_command()
+            .args(["branch", "--show-current"])
+            .current_dir(&initialized_root)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&branch_output.stdout).trim(), "develop");
+
+        // 步骤2：创建本地源仓库，再通过与远程相同的 clone 流程复制到工作区。
+        let source_directory = tempfile::tempdir().unwrap();
+        run_test_git(source_directory.path(), &["init"]);
+        run_test_git(source_directory.path(), &["config", "user.name", "Test User"]);
+        run_test_git(
+            source_directory.path(),
+            &["config", "user.email", "test@example.com"],
+        );
+        std::fs::write(source_directory.path().join("README.md"), "source\n").unwrap();
+        run_test_git(source_directory.path(), &["add", "README.md"]);
+        run_test_git(source_directory.path(), &["commit", "-m", "initial"]);
+        let cloned_root = workspace_directory.path().join("cloned");
+        let clone_output = clone_git_repository(
+            workspace_directory.path().to_path_buf(),
+            source_directory.path().to_string_lossy().into_owned(),
+            cloned_root.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(clone_output.status.success());
+        assert!(cloned_root.join(".git").is_dir());
+        let cloned_content = std::fs::read_to_string(cloned_root.join("README.md")).unwrap();
+        assert_eq!(cloned_content.trim(), "source");
+    }
+
+    #[test]
+    fn validates_repository_setup_inputs() {
+        // 步骤1：允许常规分支、远程地址和单层工作区子目录。
+        assert_eq!(validate_initial_branch("main").unwrap(), "main");
+        assert_eq!(validate_clone_url("https://example.com/team/app.git").unwrap(), "https://example.com/team/app.git");
+        assert_eq!(validate_clone_directory("app").unwrap(), "app");
+
+        // 步骤2：拒绝空值、Git 选项注入和任何可能逃离工作区的目录。
+        assert!(validate_initial_branch("-main").is_err());
+        assert!(validate_clone_url("").is_err());
+        assert!(validate_clone_url("--upload-pack=program").is_err());
+        assert!(validate_clone_directory("").is_err());
+        assert!(validate_clone_directory("../outside").is_err());
+        assert!(validate_clone_directory("nested/repository").is_err());
+        assert!(validate_clone_directory("C:\\outside").is_err());
     }
 
     #[test]

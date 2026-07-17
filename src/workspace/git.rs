@@ -31,6 +31,8 @@ macro_rules! try_res {
 fn git_command() -> std::process::Command {
     let mut command = std::process::Command::new("git");
     command.no_window();
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.env("GCM_INTERACTIVE", "never");
     command
 }
 
@@ -45,36 +47,85 @@ pub struct GitFileStatus {
     pub conflict: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct GitRemote {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+}
+
 #[derive(Serialize)]
 pub struct GitStatusResponse {
     pub is_git_repo: bool,
     pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: usize,
+    pub behind: usize,
+    pub remotes: Vec<GitRemote>,
     pub files: Vec<GitFileStatus>,
 }
 
 struct ParsedGitStatus {
     branch: Option<String>,
+    upstream: Option<String>,
+    ahead: usize,
+    behind: usize,
     files: Vec<GitFileStatus>,
 }
 
-fn parse_branch_line(line: &str) -> Option<String> {
+struct ParsedBranchStatus {
+    branch: Option<String>,
+    upstream: Option<String>,
+    ahead: usize,
+    behind: usize,
+}
+
+fn parse_branch_line(line: &str) -> ParsedBranchStatus {
     // 步骤1：去掉 porcelain 分支标记并识别 detached HEAD。
-    let branch_text = line.strip_prefix("## ")?.trim();
+    let Some(branch_text) = line.strip_prefix("## ") else {
+        return ParsedBranchStatus { branch: None, upstream: None, ahead: 0, behind: 0 };
+    };
+    let branch_text = branch_text.trim();
     if branch_text.starts_with("HEAD ") || branch_text == "HEAD" {
-        return None;
+        return ParsedBranchStatus { branch: None, upstream: None, ahead: 0, behind: 0 };
     }
     if let Some(initial_branch) = branch_text.strip_prefix("No commits yet on ") {
-        return Some(initial_branch.to_string());
+        return ParsedBranchStatus {
+            branch: Some(initial_branch.to_string()),
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+        };
     }
 
-    // 步骤2：去掉上游分支和 ahead/behind 信息，只保留当前分支名称。
-    let branch_without_upstream = branch_text.split("...").next().unwrap_or(branch_text);
-    let branch = branch_without_upstream.split(" [").next().unwrap_or(branch_without_upstream);
-    if branch.is_empty() {
-        None
-    } else {
-        Some(branch.to_string())
+    // 步骤2：分离本地分支、上游分支和同步计数。
+    let mut branch_parts = branch_text.splitn(2, "...");
+    let local_branch = branch_parts.next().unwrap_or("").trim();
+    let upstream_text = branch_parts.next();
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
+    if let Some(upstream_text) = upstream_text {
+        let upstream_name = upstream_text.split(" [").next().unwrap_or(upstream_text).trim();
+        if !upstream_name.is_empty() {
+            upstream = Some(upstream_name.to_string());
+        }
+        if let Some(metadata_start) = upstream_text.find('[') {
+            let metadata = upstream_text[metadata_start + 1..].trim_end_matches(']');
+            for item in metadata.split(',') {
+                let item = item.trim();
+                if let Some(value) = item.strip_prefix("ahead ") {
+                    ahead = value.parse().unwrap_or(0);
+                }
+                if let Some(value) = item.strip_prefix("behind ") {
+                    behind = value.parse().unwrap_or(0);
+                }
+            }
+        }
     }
+
+    let branch = if local_branch.is_empty() { None } else { Some(local_branch.to_string()) };
+    ParsedBranchStatus { branch, upstream, ahead, behind }
 }
 
 fn status_name(index_status: char, worktree_status: char, conflict: bool) -> &'static str {
@@ -105,10 +156,17 @@ fn status_name(index_status: char, worktree_status: char, conflict: bool) -> &'s
 fn parse_status_output(output: &str) -> ParsedGitStatus {
     // 步骤1：逐行读取分支和文件状态，避免按空格拆分带空格的文件名。
     let mut branch = None;
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
     let mut files = Vec::new();
     for line in output.lines() {
         if line.starts_with("## ") {
-            branch = parse_branch_line(line);
+            let branch_status = parse_branch_line(line);
+            branch = branch_status.branch;
+            upstream = branch_status.upstream;
+            ahead = branch_status.ahead;
+            behind = branch_status.behind;
             continue;
         }
         if line.len() < 4 {
@@ -140,7 +198,38 @@ fn parse_status_output(output: &str) -> ParsedGitStatus {
             conflict,
         });
     }
-    ParsedGitStatus { branch, files }
+    ParsedGitStatus { branch, upstream, ahead, behind, files }
+}
+
+fn parse_remote_output(output: &str) -> Vec<GitRemote> {
+    // 步骤1：逐行读取 remote、地址和用途，并按远程仓库名称合并。
+    let mut remotes: Vec<GitRemote> = Vec::new();
+    for line in output.lines() {
+        let mut columns = line.split_whitespace();
+        let Some(name) = columns.next() else { continue };
+        let Some(url) = columns.next() else { continue };
+        let Some(direction) = columns.next() else { continue };
+        let remote_index = remotes.iter().position(|remote| remote.name == name);
+        let index = if let Some(index) = remote_index {
+            index
+        } else {
+            remotes.push(GitRemote {
+                name: name.to_string(),
+                fetch_url: String::new(),
+                push_url: String::new(),
+            });
+            remotes.len() - 1
+        };
+
+        // 步骤2：分别保存 fetch 与 push 地址，支持两者使用不同协议或主机。
+        if direction == "(fetch)" {
+            remotes[index].fetch_url = url.to_string();
+        }
+        if direction == "(push)" {
+            remotes[index].push_url = url.to_string();
+        }
+    }
+    remotes
 }
 
 pub async fn workspace_git_status(
@@ -148,8 +237,8 @@ pub async fn workspace_git_status(
     Query(q): Query<PaneQuery>,
 ) -> impl IntoResponse {
     let root = try_res!(get_root(&manager, &q.pane_id));
-    let output = match tokio::task::spawn_blocking(move || {
-        git_command()
+    let outputs = match tokio::task::spawn_blocking(move || {
+        let status_output = git_command()
             .args([
                 "-c",
                 "core.quotepath=false",
@@ -159,20 +248,47 @@ pub async fn workspace_git_status(
                 "--untracked-files=all",
             ])
             .current_dir(&root)
-            .output()
+            .output()?;
+        let remote_output = git_command().args(["remote", "-v"]).current_dir(&root).output()?;
+        Ok::<_, std::io::Error>((status_output, remote_output))
     })
     .await
     {
-        Ok(Ok(o)) if o.status.success() => o,
+        Ok(Ok((status_output, remote_output))) if status_output.status.success() => {
+            (status_output, remote_output)
+        }
         _ => {
-            return Json(GitStatusResponse { is_git_repo: false, branch: None, files: vec![] })
-                .into_response()
+            return Json(GitStatusResponse {
+                is_git_repo: false,
+                branch: None,
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+                remotes: vec![],
+                files: vec![],
+            })
+            .into_response()
         }
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (status_output, remote_output) = outputs;
+    let stdout = String::from_utf8_lossy(&status_output.stdout);
     let parsed = parse_status_output(&stdout);
-    Json(GitStatusResponse { is_git_repo: true, branch: parsed.branch, files: parsed.files })
-        .into_response()
+    let remote_stdout = String::from_utf8_lossy(&remote_output.stdout);
+    let remotes = if remote_output.status.success() {
+        parse_remote_output(&remote_stdout)
+    } else {
+        Vec::new()
+    };
+    Json(GitStatusResponse {
+        is_git_repo: true,
+        branch: parsed.branch,
+        upstream: parsed.upstream,
+        ahead: parsed.ahead,
+        behind: parsed.behind,
+        remotes,
+        files: parsed.files,
+    })
+    .into_response()
 }
 
 #[derive(Serialize)]
@@ -525,7 +641,9 @@ fn git_command_response(output: &std::process::Output) -> Response {
     // 步骤1：成功时返回 Git 的简短输出，便于提交后显示摘要。
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Json(serde_json::json!({ "ok": true, "output": stdout })).into_response();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stdout.is_empty() { stderr } else { stdout };
+        return Json(serde_json::json!({ "ok": true, "output": message })).into_response();
     }
 
     // 步骤2：失败时优先返回 stderr，避免前端只能看到模糊错误。
@@ -622,6 +740,51 @@ pub async fn workspace_git_commit(
     }
 }
 
+async fn run_git_remote_command(
+    manager: &SessionManager,
+    query: &PaneQuery,
+    arguments: Vec<String>,
+) -> Response {
+    // 步骤1：读取当前 pane 的真实工作目录，确保远程操作作用于正在查看的仓库。
+    let root = match get_root(manager, &query.pane_id) {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
+
+    // 步骤2：执行不经过 shell 的 Git 参数，并把远程端真实结果返回给面板。
+    match run_git_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_fetch(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：拉取全部远程引用并清理远程已删除的引用。
+    let arguments = vec!["fetch".to_string(), "--prune".to_string()];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_pull(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：只允许快进拉取，避免面板在用户不知情时创建合并提交。
+    let arguments = vec!["pull".to_string(), "--ff-only".to_string()];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_push(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：推送当前分支到已配置的上游分支。
+    let arguments = vec!["push".to_string()];
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
 fn build_untracked_patch(path: &str, content: &str) -> String {
     // 步骤1：生成与 Git unified diff 一致的新增文件头部。
     let mut diff_text = format!("diff --git a/{path} b/{path}\n--- /dev/null\n+++ b/{path}\n");
@@ -683,7 +846,7 @@ pub async fn workspace_git_unified_diff(
 
 #[cfg(test)]
 mod tests {
-    use super::{git_command, parse_status_output, unstage_git_paths};
+    use super::{git_command, parse_remote_output, parse_status_output, unstage_git_paths};
     use std::path::Path;
 
     fn run_test_git(root: &Path, arguments: &[&str]) {
@@ -695,11 +858,14 @@ mod tests {
     #[test]
     fn parses_branch_and_worktree_groups() {
         // 步骤1：准备同时包含暂存、未暂存、未跟踪和重命名状态的 Git 输出。
-        let output = "## feature/git-panel...origin/feature/git-panel [ahead 1]\n M src/main.rs\nM  staged.rs\nMM both.rs\n?? new file.txt\nR  old.txt -> new.txt\nUU conflict.txt\n";
+        let output = "## feature/git-panel...origin/feature/git-panel [ahead 2, behind 1]\n M src/main.rs\nM  staged.rs\nMM both.rs\n?? new file.txt\nR  old.txt -> new.txt\nUU conflict.txt\n";
 
         // 步骤2：解析输出并检查分支名称和每类文件状态。
         let parsed = parse_status_output(output);
         assert_eq!(parsed.branch.as_deref(), Some("feature/git-panel"));
+        assert_eq!(parsed.upstream.as_deref(), Some("origin/feature/git-panel"));
+        assert_eq!(parsed.ahead, 2);
+        assert_eq!(parsed.behind, 1);
         assert_eq!(parsed.files.len(), 6);
 
         let unstaged = &parsed.files[0];
@@ -733,6 +899,20 @@ mod tests {
         let conflict = &parsed.files[5];
         assert!(conflict.conflict);
         assert_eq!(conflict.status, "conflict");
+    }
+
+    #[test]
+    fn parses_fetch_and_push_remote_urls() {
+        // 步骤1：准备包含多个远程仓库和不同 fetch、push 地址的 Git 输出。
+        let output = "origin\thttps://example.com/team/project.git (fetch)\norigin\tgit@example.com:team/project.git (push)\nbackup\thttps://backup.example.com/project.git (fetch)\nbackup\thttps://backup.example.com/project.git (push)\n";
+
+        // 步骤2：确认每个远程仓库保留自己的拉取和推送地址。
+        let remotes = parse_remote_output(output);
+        assert_eq!(remotes.len(), 2);
+        assert_eq!(remotes[0].name, "origin");
+        assert_eq!(remotes[0].fetch_url, "https://example.com/team/project.git");
+        assert_eq!(remotes[0].push_url, "git@example.com:team/project.git");
+        assert_eq!(remotes[1].name, "backup");
     }
 
     #[test]

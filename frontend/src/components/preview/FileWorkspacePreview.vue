@@ -85,6 +85,10 @@
             v-else
             :pane-id="paneId"
             :branch="gitBranch"
+            :upstream="gitUpstream"
+            :ahead="gitAhead"
+            :behind="gitBehind"
+            :remotes="gitRemotes"
             :is-git-repo="isGitRepo"
             :loading="gitStatusLoading"
             :files="gitFiles"
@@ -193,16 +197,10 @@
             @click="ctxMenu.addMenuOpen.value = false"
           ></div>
           <div v-if="ctxMenu.addMenuOpen.value" class="file-workspace-add-dropdown">
-            <button
-              type="button"
-              @click="openNewFileFromAddMenu"
-            >
+            <button type="button" @click="openNewFileFromAddMenu">
               {{ t('filePreview.ctxNewFile') }}
             </button>
-            <button
-              type="button"
-              @click="openNewFolderFromAddMenu"
-            >
+            <button type="button" @click="openNewFolderFromAddMenu">
               {{ t('filePreview.ctxNewFolder') }}
             </button>
           </div>
@@ -292,6 +290,10 @@
               v-else
               :pane-id="paneId"
               :branch="gitBranch"
+              :upstream="gitUpstream"
+              :ahead="gitAhead"
+              :behind="gitBehind"
+              :remotes="gitRemotes"
               :is-git-repo="isGitRepo"
               :loading="gitStatusLoading"
               :files="gitFiles"
@@ -478,7 +480,13 @@ import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
 import { Files, GitBranch, Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
-import { mapGitFileEntry, type GitDiffSelection, type GitFileEntry } from '../../utils/gitPanel'
+import {
+  mapGitFileEntry,
+  mapGitRemoteEntry,
+  type GitDiffSelection,
+  type GitFileEntry,
+  type GitRemoteEntry,
+} from '../../utils/gitPanel'
 
 const props = withDefaults(
   defineProps<{ visible: boolean; paneId: string; embedded?: boolean }>(),
@@ -502,6 +510,10 @@ const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
 const gitFiles = ref<GitFileEntry[]>([])
 const gitBranch = ref<string | null>(null)
+const gitUpstream = ref<string | null>(null)
+const gitAhead = ref(0)
+const gitBehind = ref(0)
+const gitRemotes = ref<GitRemoteEntry[]>([])
 const isGitRepo = ref(false)
 const gitStatusLoading = ref(false)
 const gitStatusVersion = ref(0)
@@ -837,6 +849,10 @@ async function fetchGitStatus(): Promise<void> {
     if (!response.ok) {
       isGitRepo.value = false
       gitBranch.value = null
+      gitUpstream.value = null
+      gitAhead.value = 0
+      gitBehind.value = 0
+      gitRemotes.value = []
       gitFiles.value = []
       gitStatusMap.value = {}
       return
@@ -844,6 +860,19 @@ async function fetchGitStatus(): Promise<void> {
     const data = await response.json()
     isGitRepo.value = data.is_git_repo === true
     gitBranch.value = typeof data.branch === 'string' ? data.branch : null
+    gitUpstream.value = typeof data.upstream === 'string' ? data.upstream : null
+    gitAhead.value = typeof data.ahead === 'number' ? data.ahead : 0
+    gitBehind.value = typeof data.behind === 'number' ? data.behind : 0
+    const nextRemotes: GitRemoteEntry[] = []
+    if (Array.isArray(data.remotes)) {
+      for (const rawRemote of data.remotes) {
+        const remote = mapGitRemoteEntry(rawRemote)
+        if (remote.name) {
+          nextRemotes.push(remote)
+        }
+      }
+    }
+    gitRemotes.value = nextRemotes
 
     // 步骤2：同时生成 Git 面板条目和文件树使用的兼容状态映射。
     const nextFiles: GitFileEntry[] = []
@@ -862,6 +891,10 @@ async function fetchGitStatus(): Promise<void> {
   } catch {
     isGitRepo.value = false
     gitBranch.value = null
+    gitUpstream.value = null
+    gitAhead.value = 0
+    gitBehind.value = 0
+    gitRemotes.value = []
     gitFiles.value = []
     gitStatusMap.value = {}
   } finally {

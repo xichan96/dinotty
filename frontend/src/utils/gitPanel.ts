@@ -14,6 +14,12 @@ export interface GitDiffSelection {
   untracked: boolean
 }
 
+export interface GitRemoteEntry {
+  name: string
+  fetchUrl: string
+  pushUrl: string
+}
+
 export function getGitFileName(path: string): string {
   // 步骤1：统一路径分隔符后返回最后一段文件名。
   const normalizedPath = path.replace(/\\/g, '/')
@@ -46,5 +52,14 @@ export function mapGitFileEntry(rawFile: Record<string, unknown>): GitFileEntry 
     staged: typeof rawFile.staged === 'boolean' ? rawFile.staged : stagedByStatus,
     unstaged: typeof rawFile.unstaged === 'boolean' ? rawFile.unstaged : unstagedByStatus,
     conflict: rawFile.conflict === true,
+  }
+}
+
+export function mapGitRemoteEntry(rawRemote: Record<string, unknown>): GitRemoteEntry {
+  // 步骤1：把后端 snake_case 字段转换成前端统一的 camelCase 字段。
+  return {
+    name: String(rawRemote.name || ''),
+    fetchUrl: String(rawRemote.fetch_url || ''),
+    pushUrl: String(rawRemote.push_url || ''),
   }
 }

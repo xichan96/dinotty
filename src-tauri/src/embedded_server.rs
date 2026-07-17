@@ -600,6 +600,9 @@ pub fn run_server(
             .route("/api/workspace/git-unstage", post(workspace::workspace_git_unstage))
             .route("/api/workspace/git-discard", post(workspace::workspace_git_discard))
             .route("/api/workspace/git-commit", post(workspace::workspace_git_commit))
+            .route("/api/workspace/git-fetch", post(workspace::workspace_git_fetch))
+            .route("/api/workspace/git-pull", post(workspace::workspace_git_pull))
+            .route("/api/workspace/git-push", post(workspace::workspace_git_push))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
@@ -758,6 +761,9 @@ mod tests {
             "/api/workspace/git-unstage",
             "/api/workspace/git-discard",
             "/api/workspace/git-commit",
+            "/api/workspace/git-fetch",
+            "/api/workspace/git-pull",
+            "/api/workspace/git-push",
         ];
 
         // 步骤2：确认 Git 管理面板使用的每个接口都已在桌面版注册。

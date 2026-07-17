@@ -25,6 +25,70 @@
       <span>{{ t('gitPanel.notRepository') }}</span>
     </div>
     <template v-else>
+      <div class="git-remote-bar">
+        <span class="git-upstream-copy" :title="remoteTooltip">
+          <span data-testid="git-upstream-name" class="git-upstream-name">
+            {{ upstream || primaryRemote?.name || t('gitPanel.noUpstream') }}
+          </span>
+        </span>
+        <span v-if="ahead > 0 || behind > 0" class="git-sync-counts">
+          <span
+            v-if="behind > 0"
+            data-testid="git-behind-count"
+            class="git-sync-count behind"
+            :title="t('gitPanel.behind')"
+          >
+            <ArrowDown :size="11" />{{ behind }}
+          </span>
+          <span
+            v-if="ahead > 0"
+            data-testid="git-ahead-count"
+            class="git-sync-count ahead"
+            :title="t('gitPanel.ahead')"
+          >
+            <ArrowUp :size="11" />{{ ahead }}
+          </span>
+        </span>
+        <span class="git-remote-actions">
+          <button
+            type="button"
+            data-testid="git-fetch-button"
+            class="git-icon-button"
+            :title="t('gitPanel.fetch')"
+            :aria-label="t('gitPanel.fetch')"
+            :disabled="busy || !primaryRemote"
+            @click="runRemoteAction('git-fetch')"
+          >
+            <LoaderCircle v-if="activeAction === 'git-fetch'" :size="14" class="spinning" />
+            <CloudDownload v-else :size="14" />
+          </button>
+          <button
+            type="button"
+            data-testid="git-pull-button"
+            class="git-icon-button"
+            :title="t('gitPanel.pull')"
+            :aria-label="t('gitPanel.pull')"
+            :disabled="busy || !upstream"
+            @click="runRemoteAction('git-pull')"
+          >
+            <LoaderCircle v-if="activeAction === 'git-pull'" :size="14" class="spinning" />
+            <ArrowDownToLine v-else :size="14" />
+          </button>
+          <button
+            type="button"
+            data-testid="git-push-button"
+            class="git-icon-button"
+            :title="t('gitPanel.push')"
+            :aria-label="t('gitPanel.push')"
+            :disabled="busy || !upstream"
+            @click="runRemoteAction('git-push')"
+          >
+            <LoaderCircle v-if="activeAction === 'git-push'" :size="14" class="spinning" />
+            <ArrowUpFromLine v-else :size="14" />
+          </button>
+        </span>
+      </div>
+
       <div class="git-commit-box">
         <textarea
           v-model="commitMessage"
@@ -183,7 +247,21 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Check, CircleCheck, GitBranch, Minus, Plus, RefreshCw, Undo2 } from 'lucide-vue-next'
+import {
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowUpFromLine,
+  Check,
+  CircleCheck,
+  CloudDownload,
+  GitBranch,
+  LoaderCircle,
+  Minus,
+  Plus,
+  RefreshCw,
+  Undo2,
+} from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import {
@@ -191,12 +269,17 @@ import {
   getGitFileName,
   type GitDiffSelection,
   type GitFileEntry,
+  type GitRemoteEntry,
 } from '../../utils/gitPanel'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 
 const props = defineProps<{
   paneId: string
   branch: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+  remotes: GitRemoteEntry[]
   isGitRepo: boolean
   loading: boolean
   files: GitFileEntry[]
@@ -214,6 +297,30 @@ const busy = ref(false)
 const errorMessage = ref('')
 const statusMessage = ref('')
 const discardFile = ref<GitFileEntry | null>(null)
+const activeAction = ref('')
+
+const primaryRemote = computed(function computePrimaryRemote() {
+  // 步骤1：优先使用上游分支所属 remote，其次选择 origin，最后使用第一个 remote。
+  const upstreamRemoteName = props.upstream?.split('/')[0] || ''
+  for (const remote of props.remotes) {
+    if (remote.name === upstreamRemoteName) {
+      return remote
+    }
+  }
+  for (const remote of props.remotes) {
+    if (remote.name === 'origin') {
+      return remote
+    }
+  }
+  return props.remotes[0] || null
+})
+
+const remoteTooltip = computed(function computeRemoteTooltip() {
+  // 步骤1：在悬停提示中展示远程名称和 Fetch 地址，不占用紧凑面板空间。
+  if (!primaryRemote.value) return t('gitPanel.noRemote')
+  const remote = primaryRemote.value
+  return remote.fetchUrl ? `${remote.name}: ${remote.fetchUrl}` : remote.name
+})
 
 const stagedFiles = computed(function computeStagedFiles() {
   // 步骤1：保留所有具有 index 状态的文件，包括同时存在工作区修改的文件。
@@ -277,6 +384,7 @@ function viewDiff(file: GitFileEntry, staged: boolean): void {
 async function postGitAction(endpoint: string, body: Record<string, unknown>): Promise<boolean> {
   // 步骤1：重置反馈并向当前终端工作区发送 Git 操作。
   busy.value = true
+  activeAction.value = endpoint
   errorMessage.value = ''
   statusMessage.value = ''
   try {
@@ -304,7 +412,13 @@ async function postGitAction(endpoint: string, body: Record<string, unknown>): P
     return false
   } finally {
     busy.value = false
+    activeAction.value = ''
   }
+}
+
+async function runRemoteAction(endpoint: 'git-fetch' | 'git-pull' | 'git-push'): Promise<void> {
+  // 步骤1：复用统一 Git 操作流程，并在成功后刷新 ahead、behind 与文件状态。
+  await postGitAction(endpoint, {})
 }
 
 async function stagePaths(paths: string[]): Promise<void> {
@@ -404,6 +518,62 @@ async function commitChanges(): Promise<void> {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg-bright);
+}
+
+.git-remote-bar {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 9px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.git-upstream-copy {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.git-upstream-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.git-sync-counts,
+.git-remote-actions,
+.git-sync-count {
+  display: inline-flex;
+  align-items: center;
+}
+
+.git-sync-counts {
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.git-sync-count {
+  gap: 1px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.git-sync-count.behind {
+  color: var(--color-blue, #69a7d8);
+}
+
+.git-sync-count.ahead {
+  color: var(--color-green, #62b478);
+}
+
+.git-remote-actions {
+  flex: 0 0 auto;
 }
 
 .git-icon-button {

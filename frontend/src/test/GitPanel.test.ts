@@ -73,6 +73,16 @@ function mountGitPanel(): VueWrapper {
     props: {
       paneId: 'pane-1',
       branch: 'feature/git-panel',
+      upstream: 'origin/feature/git-panel',
+      ahead: 2,
+      behind: 1,
+      remotes: [
+        {
+          name: 'origin',
+          fetchUrl: 'https://example.com/team/project.git',
+          pushUrl: 'git@example.com:team/project.git',
+        },
+      ],
       isGitRepo: true,
       loading: false,
       files,
@@ -115,6 +125,36 @@ describe('GitPanel', function gitPanelSuite() {
     // 步骤3：新增文件使用 Git 常见的 A 标记，与未跟踪文件的 U 区分。
     expect(findRow(wrapper, 'git-staged-row', 'src/added.ts').get('.git-status-mark').text()).toBe(
       'A'
+    )
+  })
+
+  it('shows upstream sync state and runs remote actions', async function synchronizesRemote() {
+    // 步骤1：显示当前上游分支以及待推送、待拉取提交数量。
+    const wrapper = mountGitPanel()
+    expect(wrapper.get('[data-testid="git-upstream-name"]').text()).toBe('origin/feature/git-panel')
+    expect(wrapper.get('[data-testid="git-ahead-count"]').text()).toContain('2')
+    expect(wrapper.get('[data-testid="git-behind-count"]').text()).toContain('1')
+
+    // 步骤2：依次执行 Fetch、Pull 和 Push，并核对工作区接口。
+    await wrapper.get('[data-testid="git-fetch-button"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-fetch?pane_id=pane-1',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    await wrapper.get('[data-testid="git-pull-button"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-pull?pane_id=pane-1',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    await wrapper.get('[data-testid="git-push-button"]').trigger('click')
+    await flushPromises()
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-push?pane_id=pane-1',
+      expect.objectContaining({ method: 'POST' })
     )
   })
 

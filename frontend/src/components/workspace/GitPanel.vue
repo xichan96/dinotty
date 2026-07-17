@@ -90,6 +90,7 @@
         :pane-id="paneId"
         :current-branch="branch"
         :repository="repository"
+        @refresh="emit('refresh')"
         @view-history="emit('view-history', $event)"
       />
       <template v-else>

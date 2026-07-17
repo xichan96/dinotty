@@ -76,6 +76,9 @@
     <p v-if="errorMessage" class="git-history-message error" role="alert">
       {{ errorMessage }}
     </p>
+    <p v-else-if="statusMessage" class="git-history-message success" role="status">
+      {{ statusMessage }}
+    </p>
     <div v-if="loading && !commits.length" class="git-history-state">
       {{ t('gitPanel.loadingHistory') }}
     </div>
@@ -144,6 +147,13 @@
             <time :datetime="commit.authoredAt">{{ formatDate(commit.authoredAt) }}</time>
           </span>
         </button>
+        <GitCommitActions
+          :pane-id="paneId"
+          :repository="repository"
+          :commit="commit"
+          @refresh="emit('refresh')"
+          @result="handleCommitActionResult"
+        />
       </div>
       <button
         v-if="hasMore"
@@ -164,6 +174,7 @@ import { GitCompareArrows, Search, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { appendGitRepository } from '../../utils/gitPanel'
+import GitCommitActions from './GitCommitActions.vue'
 import {
   buildGitGraphRows,
   mapGitCommitEntry,
@@ -183,6 +194,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'view-history': [selection: GitHistorySelection]
+  refresh: []
 }>()
 
 const { t } = useI18n()
@@ -198,6 +210,7 @@ const compareTarget = ref('')
 const loading = ref(false)
 const hasMore = ref(false)
 const errorMessage = ref('')
+const statusMessage = ref('')
 
 const graphRows = computed(function computeGraphRows() {
   // 步骤1：提交列表每次加载或追加后重新计算连续图谱泳道。
@@ -307,6 +320,18 @@ async function loadHistory(append: boolean): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+function handleCommitActionResult(message: string, error: boolean): void {
+  // 步骤1：把提交操作结果显示在历史面板顶部，成功消息与错误消息互斥。
+  if (error) {
+    errorMessage.value = message
+    statusMessage.value = ''
+    return
+  }
+  statusMessage.value = message
+  errorMessage.value = ''
+  void loadHistory(false)
 }
 
 function applyPathFilter(): void {
@@ -541,6 +566,10 @@ watch(
 
 .git-history-message.error {
   color: var(--color-red, #e06c75);
+}
+
+.git-history-message.success {
+  color: var(--color-green, #62b478);
 }
 
 .git-history-state {

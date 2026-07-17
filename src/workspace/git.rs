@@ -964,11 +964,15 @@ pub struct GitBranchSwitchBody {
     pub name: String,
     #[serde(default)]
     pub remote: bool,
+    #[serde(default)]
+    pub detached: bool,
 }
 
 #[derive(Deserialize)]
 pub struct GitBranchNameBody {
     pub name: String,
+    #[serde(default)]
+    pub start_point: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1652,14 +1656,28 @@ pub async fn workspace_git_branch_switch(
     Query(query): Query<PaneQuery>,
     Json(body): Json<GitBranchSwitchBody>,
 ) -> Response {
-    // 步骤1：校验目标引用，并区分本地切换与远程跟踪分支创建。
-    let name = try_res!(validate_git_name(&body.name, "branch"));
-    let arguments = if body.remote {
-        vec!["switch".to_string(), "--track".to_string(), name]
+    // 步骤1：历史提交检出只接受提交 hash，普通切换继续使用分支名称。
+    let name = if body.detached {
+        try_res!(validate_commit_hash(&body.name))
     } else {
-        vec!["switch".to_string(), name]
+        try_res!(validate_git_name(&body.name, "branch"))
     };
+    if body.detached && body.remote {
+        return json_err(StatusCode::BAD_REQUEST, "detached checkout cannot track a remote");
+    }
+    let arguments = build_branch_switch_arguments(&name, body.remote, body.detached);
     run_git_remote_command(&manager, &query, arguments).await
+}
+
+fn build_branch_switch_arguments(name: &str, remote: bool, detached: bool) -> Vec<String> {
+    // 步骤1：按互斥模式构造 detached、远程跟踪或普通分支切换参数。
+    if detached {
+        return vec!["switch".to_string(), "--detach".to_string(), name.to_string()];
+    }
+    if remote {
+        return vec!["switch".to_string(), "--track".to_string(), name.to_string()];
+    }
+    vec!["switch".to_string(), name.to_string()]
 }
 
 pub async fn workspace_git_branch_create(
@@ -1667,10 +1685,23 @@ pub async fn workspace_git_branch_create(
     Query(query): Query<PaneQuery>,
     Json(body): Json<GitBranchNameBody>,
 ) -> Response {
-    // 步骤1：创建新分支并立即切换，保持面板与工作区分支一致。
+    // 步骤1：创建新分支并立即切换；历史入口可指定经过校验的提交起点。
     let name = try_res!(validate_git_name(&body.name, "branch"));
-    let arguments = vec!["switch".to_string(), "-c".to_string(), name];
+    let start_point = match body.start_point.as_deref() {
+        Some(value) if !value.trim().is_empty() => Some(try_res!(validate_commit_hash(value))),
+        _ => None,
+    };
+    let arguments = build_branch_create_arguments(&name, start_point.as_deref());
     run_git_remote_command(&manager, &query, arguments).await
+}
+
+fn build_branch_create_arguments(name: &str, start_point: Option<&str>) -> Vec<String> {
+    // 步骤1：先放置固定命令和分支名，再按需追加历史提交起点。
+    let mut arguments = vec!["switch".to_string(), "-c".to_string(), name.to_string()];
+    if let Some(start_point) = start_point {
+        arguments.push(start_point.to_string());
+    }
+    arguments
 }
 
 pub async fn workspace_git_branch_delete(
@@ -2109,10 +2140,10 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_unified_diff_hunk, build_commit_arguments, discover_git_repositories,
-        extract_unified_diff_hunk, git_command, git_commit_matches_search, parse_branch_output,
-        parse_log_output, parse_remote_output, parse_stash_output, parse_status_output,
-        parse_tag_output, unstage_git_paths,
+        apply_unified_diff_hunk, build_branch_create_arguments, build_branch_switch_arguments,
+        build_commit_arguments, discover_git_repositories, extract_unified_diff_hunk, git_command,
+        git_commit_matches_search, parse_branch_output, parse_log_output, parse_remote_output,
+        parse_stash_output, parse_status_output, parse_tag_output, unstage_git_paths,
     };
     use std::path::Path;
 
@@ -2407,6 +2438,18 @@ mod tests {
         assert!(git_commit_matches_search(&commit, "GRAPH HISTORY"));
         assert!(git_commit_matches_search(&commit, "release-1"));
         assert!(!git_commit_matches_search(&commit, "missing"));
+    }
+
+    #[test]
+    fn builds_branch_arguments_for_history_commits() {
+        // 步骤1：历史检出必须使用 detached，避免把提交 hash 误当分支。
+        let checkout_arguments = build_branch_switch_arguments("abcdef12", false, true);
+        assert_eq!(checkout_arguments, vec!["switch", "--detach", "abcdef12"]);
+
+        // 步骤2：从历史创建分支时把提交 hash 作为明确起点。
+        let create_arguments =
+            build_branch_create_arguments("feature/history", Some("abcdef12"));
+        assert_eq!(create_arguments, vec!["switch", "-c", "feature/history", "abcdef12"]);
     }
 
     #[test]

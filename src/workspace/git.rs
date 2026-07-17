@@ -1153,6 +1153,37 @@ pub struct GitBranchPublishBody {
 }
 
 #[derive(Deserialize)]
+pub struct GitRemoteAddBody {
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitRemoteUpdateBody {
+    pub name: String,
+    pub new_name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitRemoteNameBody {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitUpstreamSetBody {
+    pub remote: String,
+    pub branch: String,
+    pub remote_branch: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitUpstreamUnsetBody {
+    pub branch: String,
+}
+
+#[derive(Deserialize)]
 pub struct GitUnifiedDiffQuery {
     pub pane_id: String,
     #[serde(default)]
@@ -2031,6 +2062,152 @@ pub async fn workspace_git_branch_publish(
     run_git_remote_command(&manager, &query, arguments).await
 }
 
+fn build_remote_add_arguments(name: &str, url: &str) -> Vec<String> {
+    // 步骤1：使用固定 remote add 子命令添加名称和地址。
+    vec!["remote".to_string(), "add".to_string(), name.to_string(), url.to_string()]
+}
+
+fn build_remote_update_arguments(
+    name: &str,
+    new_name: &str,
+    fetch_url: &str,
+    push_url: &str,
+) -> Vec<Vec<String>> {
+    // 步骤1：名称变化时先重命名，后续命令统一使用新名称。
+    let mut commands = Vec::new();
+    if name != new_name {
+        commands.push(vec![
+            "remote".to_string(),
+            "rename".to_string(),
+            name.to_string(),
+            new_name.to_string(),
+        ]);
+    }
+
+    // 步骤2：分别设置 Fetch 与 Push 地址，支持读写地址不同的仓库。
+    commands.push(vec![
+        "remote".to_string(),
+        "set-url".to_string(),
+        new_name.to_string(),
+        fetch_url.to_string(),
+    ]);
+    commands.push(vec![
+        "remote".to_string(),
+        "set-url".to_string(),
+        "--push".to_string(),
+        new_name.to_string(),
+        push_url.to_string(),
+    ]);
+    commands
+}
+
+fn build_remote_delete_arguments(name: &str) -> Vec<String> {
+    // 步骤1：删除 Remote 及其远程跟踪引用。
+    vec!["remote".to_string(), "remove".to_string(), name.to_string()]
+}
+
+fn build_upstream_set_arguments(
+    remote: &str,
+    branch: &str,
+    remote_branch: &str,
+) -> Vec<String> {
+    // 步骤1：显式拼接经过验证的 Remote 与远程分支，再绑定指定本地分支。
+    let upstream = format!("--set-upstream-to={remote}/{remote_branch}");
+    vec!["branch".to_string(), upstream, branch.to_string()]
+}
+
+fn build_upstream_unset_arguments(branch: &str) -> Vec<String> {
+    // 步骤1：只取消指定本地分支的 Upstream，不修改远程引用。
+    vec!["branch".to_string(), "--unset-upstream".to_string(), branch.to_string()]
+}
+
+pub async fn workspace_git_remote_add(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitRemoteAddBody>,
+) -> Response {
+    // 步骤1：校验名称和地址，再执行固定 Remote 添加命令。
+    let name = try_res!(validate_git_name(&body.name, "remote"));
+    let url = match validate_clone_url(&body.url) {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    let arguments = build_remote_add_arguments(&name, &url);
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_remote_update(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitRemoteUpdateBody>,
+) -> Response {
+    // 步骤1：完整校验旧名称、新名称以及两个地址。
+    let name = try_res!(validate_git_name(&body.name, "remote"));
+    let new_name = try_res!(validate_git_name(&body.new_name, "new remote"));
+    let fetch_url = match validate_clone_url(&body.fetch_url) {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    let push_url = match validate_clone_url(&body.push_url) {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    let commands = build_remote_update_arguments(&name, &new_name, &fetch_url, &push_url);
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+
+    // 步骤2：顺序执行重命名和地址更新，任一步失败立即返回真实 Git 错误。
+    let mut last_output = None;
+    for arguments in commands {
+        let output = match run_git_output(root.clone(), arguments).await {
+            Ok(value) => value,
+            Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+        };
+        if !output.status.success() {
+            return git_command_response(&output);
+        }
+        last_output = Some(output);
+    }
+    match last_output {
+        Some(output) => git_command_response(&output),
+        None => json_err(StatusCode::BAD_REQUEST, "remote update required"),
+    }
+}
+
+pub async fn workspace_git_remote_delete(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitRemoteNameBody>,
+) -> Response {
+    // 步骤1：校验名称后删除指定 Remote。
+    let name = try_res!(validate_git_name(&body.name, "remote"));
+    let arguments = build_remote_delete_arguments(&name);
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_upstream_set(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitUpstreamSetBody>,
+) -> Response {
+    // 步骤1：校验 Remote、本地分支和远程分支，再建立跟踪关系。
+    let remote = try_res!(validate_git_name(&body.remote, "remote"));
+    let branch = try_res!(validate_git_name(&body.branch, "branch"));
+    let remote_branch = try_res!(validate_git_name(&body.remote_branch, "remote branch"));
+    let arguments = build_upstream_set_arguments(&remote, &branch, &remote_branch);
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_upstream_unset(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitUpstreamUnsetBody>,
+) -> Response {
+    // 步骤1：校验本地分支后取消其跟踪关系。
+    let branch = try_res!(validate_git_name(&body.branch, "branch"));
+    let arguments = build_upstream_unset_arguments(&branch);
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
 fn validate_commit_hash(value: &str) -> Result<String, Response> {
     // 步骤1：提交详情只接受 Git 生成的十六进制对象 ID，避免把选项当作 revision。
     let value = value.trim();
@@ -2433,7 +2610,9 @@ pub async fn workspace_git_unified_diff(
 mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_switch_arguments,
-        build_commit_arguments, contains_conflict_markers, discover_git_repositories,
+        build_commit_arguments, build_remote_add_arguments, build_remote_delete_arguments,
+        build_remote_update_arguments, build_upstream_set_arguments,
+        build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
         initialize_git_repository, parse_branch_output, parse_log_output, parse_remote_output,
         parse_stash_output, parse_status_output, parse_tag_output, read_conflict_stage,
@@ -2873,6 +3052,45 @@ mod tests {
         assert!(validate_clone_directory("../outside").is_err());
         assert!(validate_clone_directory("nested/repository").is_err());
         assert!(validate_clone_directory("C:\\outside").is_err());
+    }
+
+    #[test]
+    fn builds_remote_and_upstream_management_arguments() {
+        // 步骤1：Remote 新增、修改和删除只生成固定子命令与经过验证的值。
+        assert_eq!(
+            build_remote_add_arguments("mirror", "https://example.com/project.git"),
+            vec!["remote", "add", "mirror", "https://example.com/project.git"]
+        );
+        assert_eq!(
+            build_remote_update_arguments(
+                "origin",
+                "upstream",
+                "https://example.com/upstream.git",
+                "git@example.com:upstream.git"
+            ),
+            vec![
+                vec!["remote", "rename", "origin", "upstream"],
+                vec!["remote", "set-url", "upstream", "https://example.com/upstream.git"],
+                vec![
+                    "remote",
+                    "set-url",
+                    "--push",
+                    "upstream",
+                    "git@example.com:upstream.git"
+                ],
+            ]
+        );
+        assert_eq!(build_remote_delete_arguments("backup"), vec!["remote", "remove", "backup"]);
+
+        // 步骤2：Upstream 设置和取消明确包含本地分支，避免误改当前 HEAD 之外的引用。
+        assert_eq!(
+            build_upstream_set_arguments("origin", "main", "release"),
+            vec!["branch", "--set-upstream-to=origin/release", "main"]
+        );
+        assert_eq!(
+            build_upstream_unset_arguments("main"),
+            vec!["branch", "--unset-upstream", "main"]
+        );
     }
 
     #[test]

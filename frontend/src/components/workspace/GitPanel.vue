@@ -55,6 +55,20 @@
       @result="handleBranchResult"
     />
 
+    <GitRemoteManager
+      :visible="remoteManagerVisible && isGitRepo"
+      :pane-id="paneId"
+      :repository="repository"
+      :remotes="remotes"
+      :branch="branch"
+      :upstream="upstream"
+      :selected-remote-name="selectedRemoteName"
+      @close="remoteManagerVisible = false"
+      @refresh="emit('refresh')"
+      @result="handleBranchResult"
+      @select-remote="selectedRemoteName = $event"
+    />
+
     <div v-if="loading && !files.length" class="git-panel-state">
       {{ t('gitPanel.loading') }}
     </div>
@@ -120,6 +134,17 @@
             </span>
           </span>
           <span class="git-remote-actions">
+            <button
+              type="button"
+              data-testid="git-manage-remotes-button"
+              class="git-icon-button"
+              :title="t('gitPanel.manageRemotes')"
+              :aria-label="t('gitPanel.manageRemotes')"
+              :disabled="busy"
+              @click="remoteManagerVisible = !remoteManagerVisible"
+            >
+              <Settings2 :size="14" />
+            </button>
             <button
               type="button"
               data-testid="git-fetch-button"
@@ -435,6 +460,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings2,
   Undo2,
 } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
@@ -454,6 +480,7 @@ import GitAdvancedActions from './GitAdvancedActions.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'
 import GitRepositorySetup from './GitRepositorySetup.vue'
+import GitRemoteManager from './GitRemoteManager.vue'
 import GitStashSection from './GitStashSection.vue'
 
 const props = defineProps<{
@@ -491,11 +518,18 @@ const statusMessage = ref('')
 const discardFile = ref<GitFileEntry | null>(null)
 const activeAction = ref('')
 const branchMenuVisible = ref(false)
+const remoteManagerVisible = ref(false)
 const panelMode = ref<'changes' | 'history'>('changes')
 const fileSearch = ref('')
+const selectedRemoteName = ref('')
 
 const primaryRemote = computed(function computePrimaryRemote() {
-  // 步骤1：优先使用上游分支所属 remote，其次选择 origin，最后使用第一个 remote。
+  // 步骤1：优先使用用户选择的 Remote，再回退到上游、origin 和首个 Remote。
+  for (const remote of props.remotes) {
+    if (remote.name === selectedRemoteName.value) {
+      return remote
+    }
+  }
   const upstreamRemoteName = props.upstream?.split('/')[0] || ''
   for (const remote of props.remotes) {
     if (remote.name === upstreamRemoteName) {

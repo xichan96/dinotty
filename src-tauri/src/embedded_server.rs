@@ -597,6 +597,23 @@ pub fn run_server(
             .route("/api/workspace/git-repositories", get(workspace::workspace_git_repositories))
             .route("/api/workspace/git-init", post(workspace::workspace_git_initialize))
             .route("/api/workspace/git-clone", post(workspace::workspace_git_clone))
+            .route("/api/workspace/git-remote-add", post(workspace::workspace_git_remote_add))
+            .route(
+                "/api/workspace/git-remote-update",
+                post(workspace::workspace_git_remote_update),
+            )
+            .route(
+                "/api/workspace/git-remote-delete",
+                post(workspace::workspace_git_remote_delete),
+            )
+            .route(
+                "/api/workspace/git-upstream-set",
+                post(workspace::workspace_git_upstream_set),
+            )
+            .route(
+                "/api/workspace/git-upstream-unset",
+                post(workspace::workspace_git_upstream_unset),
+            )
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
             .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
             .route("/api/workspace/git-hunk-action", post(workspace::workspace_git_hunk_action))
@@ -818,6 +835,11 @@ mod tests {
             "/api/workspace/git-repositories",
             "/api/workspace/git-init",
             "/api/workspace/git-clone",
+            "/api/workspace/git-remote-add",
+            "/api/workspace/git-remote-update",
+            "/api/workspace/git-remote-delete",
+            "/api/workspace/git-upstream-set",
+            "/api/workspace/git-upstream-unset",
             "/api/workspace/git-stage",
             "/api/workspace/git-stage-all",
             "/api/workspace/git-unstage",

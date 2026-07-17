@@ -85,7 +85,7 @@
           <Cherry :size="13" />
           <span>{{ t('gitPanel.cherryPick') }}</span>
         </button>
-        <button type="button" @click="requestAction('revert')">
+        <button type="button" data-testid="git-history-revert" @click="requestAction('revert')">
           <RotateCcw :size="13" />
           <span>{{ t('gitPanel.revertCommit') }}</span>
         </button>
@@ -222,7 +222,11 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
       emit('result', result.error || t('gitPanel.commitActionFailed'), true)
       return false
     }
-    emit('result', result.output || t('gitPanel.commitActionSucceeded'), false)
+    const resultMessage =
+      result.result_code === 'nothing_to_revert'
+        ? t('gitPanel.nothingToRevert')
+        : result.output || t('gitPanel.commitActionSucceeded')
+    emit('result', resultMessage, false)
     emit('refresh')
     return true
   } catch {

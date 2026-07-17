@@ -420,7 +420,10 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
       errorMessage.value = String(result.error || t('gitPanel.advancedOperationFailed'))
       return false
     }
-    statusMessage.value = String(result.output || t('gitPanel.advancedOperationSucceeded'))
+    statusMessage.value =
+      result.result_code === 'nothing_to_revert'
+        ? t('gitPanel.nothingToRevert')
+        : String(result.output || t('gitPanel.advancedOperationSucceeded'))
     emit('refresh')
     return true
   } catch {

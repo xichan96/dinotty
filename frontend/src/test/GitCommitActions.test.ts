@@ -113,4 +113,20 @@ describe('GitCommitActions', function gitCommitActionsSuite() {
       })
     )
   })
+
+  it('reports an already reverted commit as a completed no-op', async function reportsRevertNoop() {
+    // 步骤1：后端确认提交改动早已不存在时，历史菜单执行还原并返回专用结果码。
+    commitActionMocks.authFetch.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result_code: 'nothing_to_revert' }), { status: 200 })
+    )
+    const wrapper = mountActions()
+    await wrapper.get('[data-testid="git-commit-actions-button"]').trigger('click')
+    await wrapper.get('[data-testid="git-history-revert"]').trigger('click')
+    wrapper.findComponent(ConfirmModal).vm.$emit('confirm')
+    await flushPromises()
+
+    // 步骤2：界面显示明确提示并按成功结果刷新，不再显示“git command failed”。
+    expect(wrapper.emitted('result')).toEqual([['该提交的改动已经还原，无需重复操作', false]])
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
 })

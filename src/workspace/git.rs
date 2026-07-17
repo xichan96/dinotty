@@ -42,6 +42,7 @@ macro_rules! try_res {
 fn git_command() -> std::process::Command {
     let mut command = std::process::Command::new("git");
     command.no_window();
+    command.env("LC_ALL", "C");
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.env("GCM_INTERACTIVE", "never");
     command.env("GIT_EDITOR", "true");
@@ -2618,10 +2619,28 @@ fn git_command_response(output: &std::process::Output) -> Response {
         return Json(serde_json::json!({ "ok": true, "output": message })).into_response();
     }
 
-    // 步骤2：失败时优先返回 stderr，避免前端只能看到模糊错误。
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let message = if stderr.is_empty() { "git command failed" } else { &stderr };
-    json_err(StatusCode::BAD_REQUEST, message)
+    // 步骤2：失败时合并两路输出，部分 Git 命令只会把失败原因写入 stdout。
+    let message = git_command_error_message(&output.stdout, &output.stderr);
+    json_err(StatusCode::BAD_REQUEST, &message)
+}
+
+fn git_command_error_message(stdout: &[u8], stderr: &[u8]) -> String {
+    // 步骤1：优先显示标准错误，再补充标准输出中的上下文。
+    let stdout_message = String::from_utf8_lossy(stdout).trim().to_string();
+    let stderr_message = String::from_utf8_lossy(stderr).trim().to_string();
+    let mut message = stderr_message;
+    if !stdout_message.is_empty() {
+        if !message.is_empty() {
+            message.push('\n');
+        }
+        message.push_str(&stdout_message);
+    }
+
+    // 步骤2：只有 Git 确实没有返回任何文字时才使用通用兜底提示。
+    if message.is_empty() {
+        return "git command failed".to_string();
+    }
+    message
 }
 
 pub async fn workspace_git_stage(
@@ -3422,8 +3441,45 @@ pub async fn workspace_git_revert_commit(
 ) -> Response {
     // 步骤1：验证提交 ID，并创建不打开编辑器的反向提交。
     let commit = try_res!(validate_commit_hash(&body.commit));
-    let arguments = vec!["revert".to_string(), "--no-edit".to_string(), commit];
-    run_git_action(&manager, &query, arguments).await
+    let arguments = build_revert_commit_arguments(&commit);
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    match run_git_tracked_output(root, arguments).await {
+        Ok(output)
+            if !output.status.success()
+                && git_revert_has_no_changes(&output.stdout, &output.stderr) =>
+        {
+            // 步骤2：目标提交的改动已被还原时无需再创建空提交，按无操作成功返回。
+            Json(serde_json::json!({
+                "ok": true,
+                "result_code": "nothing_to_revert",
+            }))
+            .into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn build_revert_commit_arguments(commit: &str) -> Vec<String> {
+    // 步骤1：固定关闭提交说明编辑器，再追加已验证的提交 ID。
+    vec!["revert".to_string(), "--no-edit".to_string(), commit.to_string()]
+}
+
+fn git_revert_has_no_changes(stdout: &[u8], stderr: &[u8]) -> bool {
+    // 步骤1：存在标准错误时仍按真实失败处理，避免把 Hook 等错误误判为成功。
+    let stderr_message = String::from_utf8_lossy(stderr);
+    if !stderr_message.trim().is_empty() {
+        return false;
+    }
+
+    // 步骤2：Git 在目标改动已不存在时只向 stdout 输出固定提示并返回退出码 1。
+    let stdout_message = String::from_utf8_lossy(stdout);
+    for line in stdout_message.lines() {
+        if line.trim() == "nothing to commit, working tree clean" {
+            return true;
+        }
+    }
+    false
 }
 
 pub async fn workspace_git_reset(
@@ -4566,20 +4622,21 @@ mod tests {
         build_git_config_update_commands, build_git_log_arguments,
         build_git_sync_preview_arguments, build_pull_arguments, build_push_arguments,
         build_remote_add_arguments, build_remote_branch_delete_arguments,
-        build_remote_delete_arguments, build_remote_update_arguments, build_reverted_content,
-        build_stash_save_arguments, build_upstream_set_arguments, build_upstream_unset_arguments,
-        cleanup_incomplete_clone, clone_git_repository, contains_conflict_markers,
-        discover_git_repositories, extract_unified_diff_hunk, git_clean_preview_paths, git_command,
+        build_remote_delete_arguments, build_remote_update_arguments,
+        build_revert_commit_arguments, build_reverted_content, build_stash_save_arguments,
+        build_upstream_set_arguments, build_upstream_unset_arguments, cleanup_incomplete_clone,
+        clone_git_repository, contains_conflict_markers, discover_git_repositories,
+        extract_unified_diff_hunk, git_clean_preview_paths, git_command, git_command_error_message,
         git_command_records_for_root, git_command_tracker, git_commit_matches_search,
-        git_content_version, git_ignore_literal_pattern, initialize_git_repository,
-        parse_branch_output, parse_git_blame_output, parse_git_clean_preview_output,
-        parse_git_config_output, parse_log_output, parse_reflog_output, parse_remote_output,
-        parse_stash_output, parse_status_output, parse_tag_output, read_conflict_stage,
-        request_git_command_cancellation, run_git_output, run_rebase_plan, sanitize_git_command,
-        unstage_git_paths, update_running_git_command_output, validate_clone_directory,
-        validate_clone_url, validate_git_candidate_path, validate_initial_branch,
-        GitCommandCancellation, GitCommandRecord, GitCommandTracker, GitConfigUpdateBody,
-        GitRebasePlanEntry,
+        git_content_version, git_ignore_literal_pattern, git_revert_has_no_changes,
+        initialize_git_repository, parse_branch_output, parse_git_blame_output,
+        parse_git_clean_preview_output, parse_git_config_output, parse_log_output,
+        parse_reflog_output, parse_remote_output, parse_stash_output, parse_status_output,
+        parse_tag_output, read_conflict_stage, request_git_command_cancellation, run_git_output,
+        run_rebase_plan, sanitize_git_command, unstage_git_paths,
+        update_running_git_command_output, validate_clone_directory, validate_clone_url,
+        validate_git_candidate_path, validate_initial_branch, GitCommandCancellation,
+        GitCommandRecord, GitCommandTracker, GitConfigUpdateBody, GitRebasePlanEntry,
     };
     use std::{
         path::{Path, PathBuf},
@@ -5116,6 +5173,36 @@ mod tests {
         assert!(build_reverted_content("one\n", "one\n", 20, 20).is_err());
         assert_eq!(git_content_version("same"), git_content_version("same"));
         assert_ne!(git_content_version("before"), git_content_version("after"));
+    }
+
+    #[test]
+    fn builds_non_interactive_revert_command() {
+        // 步骤1：还原提交必须关闭编辑器，并把已验证的提交 ID 作为独立参数传入。
+        let arguments = build_revert_commit_arguments("abcdef12");
+        assert_eq!(arguments, vec!["revert", "--no-edit", "abcdef12"]);
+    }
+
+    #[test]
+    fn preserves_stdout_when_a_git_command_fails_without_stderr() {
+        // 步骤1：部分 Git 失败说明只写入 stdout，界面仍应获得真实原因。
+        let message = git_command_error_message(
+            b"On branch main\nnothing to commit, working tree clean\n",
+            b"",
+        );
+        assert_eq!(message, "On branch main\nnothing to commit, working tree clean");
+    }
+
+    #[test]
+    fn recognizes_a_commit_that_is_already_reverted() {
+        // 步骤1：Git 的无改动提示表示目标状态已经满足，不应再显示为命令错误。
+        assert!(git_revert_has_no_changes(
+            b"On branch main\nnothing to commit, working tree clean\n",
+            b"",
+        ));
+        assert!(!git_revert_has_no_changes(
+            b"On branch main\nnothing to commit, working tree clean\n",
+            b"hook failed\n",
+        ));
     }
 
     #[test]

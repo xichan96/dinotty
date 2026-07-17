@@ -179,21 +179,40 @@ describe('GitPanel', function gitPanelSuite() {
     await flushPromises()
     expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
       '/api/workspace/git-fetch?pane_id=pane-1',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ remote: 'origin', all: false }),
+      })
     )
 
     await wrapper.get('[data-testid="git-pull-button"]').trigger('click')
     await flushPromises()
     expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
       '/api/workspace/git-pull?pane_id=pane-1',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          remote: 'origin',
+          branch: 'feature/git-panel',
+          strategy: 'ff-only',
+        }),
+      })
     )
 
     await wrapper.get('[data-testid="git-push-button"]').trigger('click')
     await flushPromises()
     expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
       '/api/workspace/git-push?pane_id=pane-1',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          remote: 'origin',
+          branch: 'feature/git-panel',
+          remote_branch: 'feature/git-panel',
+          push_tags: false,
+          force_with_lease: false,
+        }),
+      })
     )
   })
 

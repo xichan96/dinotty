@@ -1183,6 +1183,48 @@ pub struct GitUpstreamUnsetBody {
     pub branch: String,
 }
 
+#[derive(Default, Deserialize)]
+pub struct GitFetchBody {
+    #[serde(default)]
+    pub remote: Option<String>,
+    #[serde(default)]
+    pub all: bool,
+}
+
+#[derive(Default, Deserialize)]
+pub struct GitPullBody {
+    #[serde(default)]
+    pub remote: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default = "default_pull_strategy")]
+    pub strategy: String,
+}
+
+fn default_pull_strategy() -> String {
+    "ff-only".to_string()
+}
+
+#[derive(Default, Deserialize)]
+pub struct GitPushBody {
+    #[serde(default)]
+    pub remote: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub remote_branch: Option<String>,
+    #[serde(default)]
+    pub push_tags: bool,
+    #[serde(default)]
+    pub force_with_lease: bool,
+}
+
+#[derive(Deserialize)]
+pub struct GitRemoteBranchDeleteBody {
+    pub remote: String,
+    pub branch: String,
+}
+
 #[derive(Deserialize)]
 pub struct GitUnifiedDiffQuery {
     pub pane_id: String,
@@ -2363,30 +2405,151 @@ pub async fn workspace_git_compare(
     }
 }
 
+fn build_fetch_arguments(remote: Option<&str>, all: bool) -> Vec<String> {
+    // 步骤1：始终清理失效引用，并按选项获取全部或指定 Remote。
+    let mut arguments = vec!["fetch".to_string(), "--prune".to_string()];
+    if all {
+        arguments.push("--all".to_string());
+    } else if let Some(remote) = remote {
+        arguments.push(remote.to_string());
+    }
+    arguments
+}
+
+fn build_pull_arguments(
+    remote: Option<&str>,
+    branch: Option<&str>,
+    strategy: &str,
+) -> Result<Vec<String>, String> {
+    // 步骤1：把三种明确的整合策略转换为 Git 参数。
+    let strategy_argument = match strategy {
+        "ff-only" => "--ff-only",
+        "rebase" => "--rebase",
+        "merge" => "--no-rebase",
+        _ => return Err("invalid pull strategy".to_string()),
+    };
+    let mut arguments = vec!["pull".to_string(), strategy_argument.to_string()];
+
+    // 步骤2：Remote 与分支存在时按顺序追加；空值继续使用已配置的 Upstream。
+    if let Some(remote) = remote {
+        arguments.push(remote.to_string());
+        if let Some(branch) = branch {
+            arguments.push(branch.to_string());
+        }
+    }
+    Ok(arguments)
+}
+
+fn build_push_arguments(
+    remote: Option<&str>,
+    branch: Option<&str>,
+    remote_branch: Option<&str>,
+    push_tags: bool,
+    force_with_lease: bool,
+) -> Vec<String> {
+    // 步骤1：危险推送只允许 force-with-lease，并把所有选项放在 Remote 之前。
+    let mut arguments = vec!["push".to_string()];
+    if force_with_lease {
+        arguments.push("--force-with-lease".to_string());
+    }
+    if push_tags {
+        arguments.push("--tags".to_string());
+    }
+
+    // 步骤2：显式 Remote 存在时追加本地到远程分支的 refspec。
+    if let Some(remote) = remote {
+        arguments.push(remote.to_string());
+        if let Some(branch) = branch {
+            let target_branch = remote_branch.unwrap_or(branch);
+            arguments.push(format!("{branch}:{target_branch}"));
+        }
+    }
+    arguments
+}
+
+fn build_remote_branch_delete_arguments(remote: &str, branch: &str) -> Vec<String> {
+    // 步骤1：使用 Git 的显式 --delete 形式删除远程分支。
+    vec![
+        "push".to_string(),
+        remote.to_string(),
+        "--delete".to_string(),
+        branch.to_string(),
+    ]
+}
+
+fn validate_optional_git_name(
+    value: Option<&str>,
+    label: &str,
+) -> Result<Option<String>, Response> {
+    // 步骤1：空选项保持为空，非空选项复用统一 Git 名称校验。
+    match value {
+        Some(value) if !value.trim().is_empty() => validate_git_name(value, label).map(Some),
+        _ => Ok(None),
+    }
+}
+
 pub async fn workspace_git_fetch(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
+    Json(body): Json<GitFetchBody>,
 ) -> Response {
-    // 步骤1：拉取全部远程引用并清理远程已删除的引用。
-    let arguments = vec!["fetch".to_string(), "--prune".to_string()];
+    // 步骤1：验证可选 Remote，并构造带清理选项的 Fetch 命令。
+    let remote = try_res!(validate_optional_git_name(body.remote.as_deref(), "remote"));
+    let arguments = build_fetch_arguments(remote.as_deref(), body.all);
     run_git_remote_command(&manager, &query, arguments).await
 }
 
 pub async fn workspace_git_pull(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
+    Json(body): Json<GitPullBody>,
 ) -> Response {
-    // 步骤1：只允许快进拉取，避免面板在用户不知情时创建合并提交。
-    let arguments = vec!["pull".to_string(), "--ff-only".to_string()];
+    // 步骤1：验证可选 Remote 和分支，分支不能脱离 Remote 单独出现。
+    let remote = try_res!(validate_optional_git_name(body.remote.as_deref(), "remote"));
+    let branch = try_res!(validate_optional_git_name(body.branch.as_deref(), "remote branch"));
+    if remote.is_none() && branch.is_some() {
+        return json_err(StatusCode::BAD_REQUEST, "remote required for branch");
+    }
+    let arguments = match build_pull_arguments(remote.as_deref(), branch.as_deref(), &body.strategy)
+    {
+        Ok(value) => value,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
     run_git_remote_command(&manager, &query, arguments).await
 }
 
 pub async fn workspace_git_push(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
+    Json(body): Json<GitPushBody>,
 ) -> Response {
-    // 步骤1：推送当前分支到已配置的上游分支。
-    let arguments = vec!["push".to_string()];
+    // 步骤1：验证 Remote、本地分支和远程分支，并拒绝无 Remote 的显式 refspec。
+    let remote = try_res!(validate_optional_git_name(body.remote.as_deref(), "remote"));
+    let branch = try_res!(validate_optional_git_name(body.branch.as_deref(), "branch"));
+    let remote_branch =
+        try_res!(validate_optional_git_name(body.remote_branch.as_deref(), "remote branch"));
+    if remote.is_none() && (branch.is_some() || remote_branch.is_some()) {
+        return json_err(StatusCode::BAD_REQUEST, "remote required for branch");
+    }
+    let arguments = build_push_arguments(
+        remote.as_deref(),
+        branch.as_deref(),
+        remote_branch.as_deref(),
+        body.push_tags,
+        body.force_with_lease,
+    );
+    run_git_remote_command(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_remote_branch_delete(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitRemoteBranchDeleteBody>,
+) -> Response {
+    // 步骤1：验证 Remote 和分支后执行专用删除命令。
+    let remote = try_res!(validate_git_name(&body.remote, "remote"));
+    let branch = try_res!(validate_git_name(&body.branch, "remote branch"));
+    let arguments = build_remote_branch_delete_arguments(&remote, &branch);
     run_git_remote_command(&manager, &query, arguments).await
 }
 
@@ -2611,7 +2774,9 @@ mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_switch_arguments,
         build_commit_arguments, build_remote_add_arguments, build_remote_delete_arguments,
-        build_remote_update_arguments, build_upstream_set_arguments,
+        build_fetch_arguments, build_pull_arguments, build_push_arguments,
+        build_remote_branch_delete_arguments, build_remote_update_arguments,
+        build_upstream_set_arguments,
         build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
         initialize_git_repository, parse_branch_output, parse_log_output, parse_remote_output,
@@ -3090,6 +3255,48 @@ mod tests {
         assert_eq!(
             build_upstream_unset_arguments("main"),
             vec!["branch", "--unset-upstream", "main"]
+        );
+    }
+
+    #[test]
+    fn builds_configurable_remote_sync_arguments() {
+        // 步骤1：Fetch 支持指定 Remote 或清理全部 Remote。
+        assert_eq!(
+            build_fetch_arguments(Some("origin"), false),
+            vec!["fetch", "--prune", "origin"]
+        );
+        assert_eq!(
+            build_fetch_arguments(Some("origin"), true),
+            vec!["fetch", "--prune", "--all"]
+        );
+
+        // 步骤2：Pull 按用户策略和目标远程分支生成明确参数。
+        assert_eq!(
+            build_pull_arguments(Some("origin"), Some("release"), "rebase").unwrap(),
+            vec!["pull", "--rebase", "origin", "release"]
+        );
+        assert!(build_pull_arguments(None, None, "invalid").is_err());
+
+        // 步骤3：Push 使用 force-with-lease、明确 refspec 和标签选项。
+        assert_eq!(
+            build_push_arguments(
+                Some("origin"),
+                Some("main"),
+                Some("release"),
+                true,
+                true
+            ),
+            vec![
+                "push",
+                "--force-with-lease",
+                "--tags",
+                "origin",
+                "main:release"
+            ]
+        );
+        assert_eq!(
+            build_remote_branch_delete_arguments("origin", "obsolete"),
+            vec!["push", "origin", "--delete", "obsolete"]
         );
     }
 

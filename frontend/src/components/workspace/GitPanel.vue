@@ -69,6 +69,19 @@
       @select-remote="selectedRemoteName = $event"
     />
 
+    <GitSyncOptions
+      :visible="syncOptionsVisible && isGitRepo"
+      :pane-id="paneId"
+      :repository="repository"
+      :remotes="remotes"
+      :branch="branch"
+      :upstream="upstream"
+      :selected-remote-name="selectedRemoteName"
+      @close="syncOptionsVisible = false"
+      @refresh="emit('refresh')"
+      @select-remote="selectedRemoteName = $event"
+    />
+
     <div v-if="loading && !files.length" class="git-panel-state">
       {{ t('gitPanel.loading') }}
     </div>
@@ -144,6 +157,17 @@
               @click="remoteManagerVisible = !remoteManagerVisible"
             >
               <Settings2 :size="14" />
+            </button>
+            <button
+              type="button"
+              data-testid="git-sync-options-button"
+              class="git-icon-button"
+              :title="t('gitPanel.syncOptions')"
+              :aria-label="t('gitPanel.syncOptions')"
+              :disabled="busy || !primaryRemote"
+              @click="syncOptionsVisible = !syncOptionsVisible"
+            >
+              <SlidersHorizontal :size="14" />
             </button>
             <button
               type="button"
@@ -461,6 +485,7 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  SlidersHorizontal,
   Undo2,
 } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
@@ -482,6 +507,7 @@ import GitHistoryPanel from './GitHistoryPanel.vue'
 import GitRepositorySetup from './GitRepositorySetup.vue'
 import GitRemoteManager from './GitRemoteManager.vue'
 import GitStashSection from './GitStashSection.vue'
+import GitSyncOptions from './GitSyncOptions.vue'
 
 const props = defineProps<{
   paneId: string
@@ -519,6 +545,7 @@ const discardFile = ref<GitFileEntry | null>(null)
 const activeAction = ref('')
 const branchMenuVisible = ref(false)
 const remoteManagerVisible = ref(false)
+const syncOptionsVisible = ref(false)
 const panelMode = ref<'changes' | 'history'>('changes')
 const fileSearch = ref('')
 const selectedRemoteName = ref('')
@@ -672,8 +699,35 @@ async function postGitAction(endpoint: string, body: Record<string, unknown>): P
 }
 
 async function runRemoteAction(endpoint: 'git-fetch' | 'git-pull' | 'git-push'): Promise<void> {
-  // 步骤1：复用统一 Git 操作流程，并在成功后刷新 ahead、behind 与文件状态。
-  await postGitAction(endpoint, {})
+  // 步骤1：读取当前选择的 Remote，并确定其默认目标分支。
+  const remote = primaryRemote.value
+  if (!remote) return
+  let remoteBranch = props.branch || ''
+  const upstreamPrefix = `${remote.name}/`
+  if (props.upstream?.startsWith(upstreamPrefix)) {
+    remoteBranch = props.upstream.slice(upstreamPrefix.length)
+  }
+
+  // 步骤2：为三个快捷操作发送与同步选项面板一致的结构化参数。
+  if (endpoint === 'git-fetch') {
+    await postGitAction(endpoint, { remote: remote.name, all: false })
+    return
+  }
+  if (endpoint === 'git-pull') {
+    await postGitAction(endpoint, {
+      remote: remote.name,
+      branch: remoteBranch,
+      strategy: 'ff-only',
+    })
+    return
+  }
+  await postGitAction(endpoint, {
+    remote: remote.name,
+    branch: props.branch || '',
+    remote_branch: remoteBranch,
+    push_tags: false,
+    force_with_lease: false,
+  })
 }
 
 async function publishBranch(): Promise<void> {

@@ -848,6 +848,10 @@ async fn main() {
                 "/api/workspace/git-upstream-unset",
                 post(workspace::workspace_git_upstream_unset),
             )
+            .route(
+                "/api/workspace/git-remote-branch-delete",
+                post(workspace::workspace_git_remote_branch_delete),
+            )
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
             .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
             .route("/api/workspace/git-hunk-action", post(workspace::workspace_git_hunk_action))

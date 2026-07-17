@@ -206,17 +206,13 @@ function openDiffWidget(change: GitChange) {
         }
       },
       onRevert: async (c) => {
-        if (!props.paneId || !props.filePath || !gitDiffData?.originalContent) return
-        const origLines = gitDiffData.originalContent.split('\n')
-        const start = (c.originalStart ?? 1) - 1
-        const end = c.originalEnd ?? start
-        const lines = origLines.slice(start, end).join('\n')
+        if (!props.paneId || !props.filePath || !gitDiffData?.contentVersion) return
         const ok = await revertLines(
           props.paneId,
           props.filePath,
           c.modifiedStart,
           c.modifiedEnd,
-          lines
+          gitDiffData.contentVersion
         )
         if (ok) {
           closeDiffWidget()

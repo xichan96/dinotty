@@ -593,6 +593,7 @@ import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
 import { Files, GitBranch, Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import {
   appendGitRepository,
+  isLatestGitRequest,
   mapGitFileEntry,
   mapGitRemoteEntry,
   type GitDiffSelection,
@@ -636,6 +637,7 @@ const gitRemotes = ref<GitRemoteEntry[]>([])
 const isGitRepo = ref(false)
 const gitStatusLoading = ref(false)
 const gitStatusVersion = ref(0)
+let gitStatusRequestId = 0
 const sidebarMode = ref<'files' | 'git'>('files')
 const gitDiffSelection = ref<GitDiffSelection | null>(null)
 const gitHistorySelection = ref<GitHistorySelection | null>(null)
@@ -1147,15 +1149,23 @@ function selectGitRepository(repository: string): void {
 
 async function fetchGitStatus(): Promise<void> {
   // 步骤1：标记加载状态并读取当前终端工作区的 Git 状态。
+  const requestId = ++gitStatusRequestId
+  let requestedRepository = gitRepository.value
   gitStatusLoading.value = true
   try {
     await getApiBase()
     if (!gitRepositoriesLoaded.value) {
       await fetchGitRepositories()
     }
+    requestedRepository = gitRepository.value
     const query = new URLSearchParams({ pane_id: props.paneId })
-    appendGitRepository(query, gitRepository.value)
+    appendGitRepository(query, requestedRepository)
     const response = await authFetch(apiUrl(`/api/workspace/git-status?${query}`))
+    if (
+      !isLatestGitRequest(requestId, gitStatusRequestId, requestedRepository, gitRepository.value)
+    ) {
+      return
+    }
     if (!response.ok) {
       isGitRepo.value = false
       gitBranch.value = null
@@ -1194,8 +1204,8 @@ async function fetchGitStatus(): Promise<void> {
         const file = mapGitFileEntry(rawFile)
         if (!file.path) continue
         nextFiles.push(file)
-        const workspacePath = gitRepository.value
-          ? `${gitRepository.value}/${file.path}`
+        const workspacePath = requestedRepository
+          ? `${requestedRepository}/${file.path}`
           : file.path
         nextStatusMap[workspacePath] = file.status
       }
@@ -1206,6 +1216,11 @@ async function fetchGitStatus(): Promise<void> {
     gitStatusMap.value = nextStatusMap
     gitStatusVersion.value += 1
   } catch {
+    if (
+      !isLatestGitRequest(requestId, gitStatusRequestId, requestedRepository, gitRepository.value)
+    ) {
+      return
+    }
     isGitRepo.value = false
     gitBranch.value = null
     gitUpstream.value = null
@@ -1217,7 +1232,11 @@ async function fetchGitStatus(): Promise<void> {
     gitStatusTruncated.value = false
     gitStatusMap.value = {}
   } finally {
-    gitStatusLoading.value = false
+    if (
+      isLatestGitRequest(requestId, gitStatusRequestId, requestedRepository, gitRepository.value)
+    ) {
+      gitStatusLoading.value = false
+    }
   }
 }
 

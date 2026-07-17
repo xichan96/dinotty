@@ -31,6 +31,16 @@ export function appendGitRepository(query: URLSearchParams, repository?: string)
   if (repository) query.set('repository', repository)
 }
 
+export function isLatestGitRequest(
+  requestId: number,
+  currentRequestId: number,
+  requestedRepository: string,
+  currentRepository: string
+): boolean {
+  // 步骤1：请求序号和仓库都保持不变时，响应才允许更新界面。
+  return requestId === currentRequestId && requestedRepository === currentRepository
+}
+
 export function getGitFileName(path: string): string {
   // 步骤1：统一路径分隔符后返回最后一段文件名。
   const normalizedPath = path.replace(/\\/g, '/')

@@ -82,7 +82,7 @@ import { computed, ref, watch } from 'vue'
 import { FileCode2, Pilcrow, RefreshCw, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
-import { appendGitRepository, getGitFileName } from '../../utils/gitPanel'
+import { appendGitRepository, getGitFileName, isLatestGitRequest } from '../../utils/gitPanel'
 import GitPatchContent from './GitPatchContent.vue'
 
 const props = defineProps<{
@@ -106,6 +106,7 @@ const actionErrorMessage = ref('')
 const patch = ref('')
 const ignoreWhitespace = ref(false)
 const hunkActionBusy = ref(false)
+let diffRequestId = 0
 
 const fileName = computed(function computeFileName() {
   // 步骤1：只在主标题显示文件名，完整路径保留为辅助信息。
@@ -114,6 +115,8 @@ const fileName = computed(function computeFileName() {
 
 async function loadDiff(): Promise<void> {
   // 步骤1：根据文件所在分组请求工作区或暂存区差异。
+  const requestId = ++diffRequestId
+  const requestedRepository = props.repository || ''
   loading.value = true
   errorMessage.value = ''
   patch.value = ''
@@ -126,11 +129,16 @@ async function loadDiff(): Promise<void> {
       untracked: String(props.untracked),
       ignore_whitespace: String(ignoreWhitespace.value),
     })
-    appendGitRepository(query, props.repository)
+    appendGitRepository(query, requestedRepository)
     const response = await authFetch(apiUrl(`/api/workspace/git-unified-diff?${query}`))
     const result = await response.json().catch(function emptyDiffResult() {
       return {}
     })
+    if (
+      !isLatestGitRequest(requestId, diffRequestId, requestedRepository, props.repository || '')
+    ) {
+      return
+    }
     if (!response.ok) {
       errorMessage.value = result.error || t('gitPanel.diffFailed')
       return
@@ -139,9 +147,13 @@ async function loadDiff(): Promise<void> {
     // 步骤2：保存后端返回的 unified diff，由计算属性转换为行模型。
     patch.value = result.patch || ''
   } catch {
-    errorMessage.value = t('gitPanel.diffFailed')
+    if (isLatestGitRequest(requestId, diffRequestId, requestedRepository, props.repository || '')) {
+      errorMessage.value = t('gitPanel.diffFailed')
+    }
   } finally {
-    loading.value = false
+    if (isLatestGitRequest(requestId, diffRequestId, requestedRepository, props.repository || '')) {
+      loading.value = false
+    }
   }
 }
 

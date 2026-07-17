@@ -67,7 +67,7 @@ import { ref, watch } from 'vue'
 import { ArrowDown, ArrowUp, GitCompareArrows, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
-import { appendGitRepository } from '../../utils/gitPanel'
+import { appendGitRepository, isLatestGitRequest } from '../../utils/gitPanel'
 import {
   mapGitCommitEntry,
   type GitCommitEntry,
@@ -90,6 +90,7 @@ const loading = ref(false)
 const errorMessage = ref('')
 const incoming = ref<GitCommitEntry[]>([])
 const outgoing = ref<GitCommitEntry[]>([])
+let syncPreviewRequestId = 0
 
 function mapCommitList(value: unknown): GitCommitEntry[] {
   // 步骤1：逐项转换接口提交，忽略不是对象的异常记录。
@@ -106,16 +107,28 @@ function mapCommitList(value: unknown): GitCommitEntry[] {
 async function loadSyncPreview(): Promise<void> {
   // 步骤1：只在面板可见时读取当前仓库的上下游提交差异。
   if (!props.visible) return
+  const requestId = ++syncPreviewRequestId
+  const requestedRepository = props.repository || ''
   loading.value = true
   errorMessage.value = ''
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
-    appendGitRepository(query, props.repository)
+    appendGitRepository(query, requestedRepository)
     const response = await authFetch(apiUrl(`/api/workspace/git-sync-preview?${query}`))
     const result = await response.json().catch(function emptySyncPreviewResult() {
       return {}
     })
+    if (
+      !isLatestGitRequest(
+        requestId,
+        syncPreviewRequestId,
+        requestedRepository,
+        props.repository || ''
+      )
+    ) {
+      return
+    }
     if (!response.ok) {
       errorMessage.value = result.error || t('gitPanel.syncPreviewFailed')
       return
@@ -125,9 +138,27 @@ async function loadSyncPreview(): Promise<void> {
     incoming.value = mapCommitList(result.incoming)
     outgoing.value = mapCommitList(result.outgoing)
   } catch {
-    errorMessage.value = t('gitPanel.syncPreviewFailed')
+    if (
+      isLatestGitRequest(
+        requestId,
+        syncPreviewRequestId,
+        requestedRepository,
+        props.repository || ''
+      )
+    ) {
+      errorMessage.value = t('gitPanel.syncPreviewFailed')
+    }
   } finally {
-    loading.value = false
+    if (
+      isLatestGitRequest(
+        requestId,
+        syncPreviewRequestId,
+        requestedRepository,
+        props.repository || ''
+      )
+    ) {
+      loading.value = false
+    }
   }
 }
 

@@ -244,7 +244,7 @@ import { computed, ref, watch } from 'vue'
 import { Cherry, GitCompareArrows, ListRestart, Search, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
-import { appendGitRepository } from '../../utils/gitPanel'
+import { appendGitRepository, isLatestGitRequest } from '../../utils/gitPanel'
 import GitCommitActions from './GitCommitActions.vue'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitRebasePlanner from './GitRebasePlanner.vue'
@@ -291,6 +291,8 @@ const selectedCommitHashes = ref<string[]>([])
 const cherryPickConfirmationVisible = ref(false)
 const batchBusy = ref(false)
 const rebasePlannerVisible = ref(false)
+let branchRequestId = 0
+let historyRequestId = 0
 
 const graphRows = computed(function computeGraphRows() {
   // 步骤1：提交列表每次加载或追加后重新计算连续图谱泳道。
@@ -329,14 +331,21 @@ function mapBranchNames(rawBranches: unknown, result: string[]): void {
 
 async function loadBranches(): Promise<void> {
   // 步骤1：读取可用于历史比较的本地和远程分支。
+  const requestId = ++branchRequestId
+  const requestedRepository = props.repository || ''
   try {
     await getApiBase()
     const query = new URLSearchParams({ pane_id: props.paneId })
-    appendGitRepository(query, props.repository)
+    appendGitRepository(query, requestedRepository)
     const response = await authFetch(apiUrl(`/api/workspace/git-branches?${query}`))
     const result = await response.json().catch(function emptyBranchResult() {
       return {}
     })
+    if (
+      !isLatestGitRequest(requestId, branchRequestId, requestedRepository, props.repository || '')
+    ) {
+      return
+    }
     if (!response.ok) return
 
     // 步骤2：合并分支列表，并默认比较主分支与当前分支。
@@ -347,7 +356,11 @@ async function loadBranches(): Promise<void> {
     compareTarget.value = props.currentBranch || names[0] || ''
     compareBase.value = findDefaultBase(names, compareTarget.value)
   } catch {
-    branchNames.value = []
+    if (
+      isLatestGitRequest(requestId, branchRequestId, requestedRepository, props.repository || '')
+    ) {
+      branchNames.value = []
+    }
   }
 }
 
@@ -367,6 +380,8 @@ function findDefaultBase(names: string[], target: string): string {
 
 async function loadHistory(append: boolean): Promise<void> {
   // 步骤1：按当前路径和分页位置读取提交历史。
+  const requestId = ++historyRequestId
+  const requestedRepository = props.repository || ''
   loading.value = true
   errorMessage.value = ''
   try {
@@ -377,13 +392,18 @@ async function loadHistory(append: boolean): Promise<void> {
       skip: String(skip),
       limit: String(pageSize),
     })
-    appendGitRepository(query, props.repository)
+    appendGitRepository(query, requestedRepository)
     if (activePath.value) query.set('path', activePath.value)
     if (activeSearch.value) query.set('search', activeSearch.value)
     const response = await authFetch(apiUrl(`/api/workspace/git-log?${query}`))
     const result = await response.json().catch(function emptyHistoryResult() {
       return {}
     })
+    if (
+      !isLatestGitRequest(requestId, historyRequestId, requestedRepository, props.repository || '')
+    ) {
+      return
+    }
     if (!response.ok) {
       errorMessage.value = result.error || t('gitPanel.historyFailed')
       return
@@ -404,9 +424,17 @@ async function loadHistory(append: boolean): Promise<void> {
     }
     hasMore.value = result.has_more === true
   } catch {
-    errorMessage.value = t('gitPanel.historyFailed')
+    if (
+      isLatestGitRequest(requestId, historyRequestId, requestedRepository, props.repository || '')
+    ) {
+      errorMessage.value = t('gitPanel.historyFailed')
+    }
   } finally {
-    loading.value = false
+    if (
+      isLatestGitRequest(requestId, historyRequestId, requestedRepository, props.repository || '')
+    ) {
+      loading.value = false
+    }
   }
 }
 

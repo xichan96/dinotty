@@ -7,6 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
+    hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -423,11 +424,16 @@ fn get_git_root(
 
     // 步骤2：验证选择的仓库位于导航根目录内，并实际包含 .git。
     let repository_root = normalize_join(&workspace_root, repository)?;
-    if repository_root == workspace_root || !repository_root.starts_with(&workspace_root) {
-        return Err(json_err(StatusCode::FORBIDDEN, "repository outside workspace"));
-    }
     if !repository_root.is_dir() || !repository_root.join(".git").exists() {
         return Err(json_err(StatusCode::BAD_REQUEST, "invalid repository"));
+    }
+    let repository_root = match repository_root.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Err(json_err(StatusCode::BAD_REQUEST, "invalid repository")),
+    };
+    let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
+    if repository_root == workspace_root || !repository_root.starts_with(&workspace_root) {
+        return Err(json_err(StatusCode::FORBIDDEN, "repository outside workspace"));
     }
     Ok(repository_root)
 }
@@ -450,12 +456,8 @@ async fn initialize_git_repository(
     initial_branch: String,
 ) -> Result<std::process::Output, String> {
     // 步骤1：在当前工作区创建仓库，并显式指定用户选择的初始分支。
-    let arguments = vec![
-        "init".to_string(),
-        "--initial-branch".to_string(),
-        initial_branch,
-        ".".to_string(),
-    ];
+    let arguments =
+        vec!["init".to_string(), "--initial-branch".to_string(), initial_branch, ".".to_string()];
     run_git_output(root, arguments).await
 }
 
@@ -471,11 +473,26 @@ async fn clone_git_repository(
     };
     let arguments = vec![
         "clone".to_string(),
+        "--progress".to_string(),
         "--".to_string(),
         url,
         destination_argument,
     ];
     run_git_tracked_output(workspace_root, arguments).await
+}
+
+fn cleanup_incomplete_clone(destination: &Path) -> Result<(), String> {
+    // 步骤1：只清理由本次克隆新建的目标，符号链接本身删除但不跟随其目标。
+    let metadata = match std::fs::symlink_metadata(destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        std::fs::remove_file(destination).map_err(|error| error.to_string())
+    } else {
+        std::fs::remove_dir_all(destination).map_err(|error| error.to_string())
+    }
 }
 
 fn repository_setup_response(output: &std::process::Output, repository: &str) -> Response {
@@ -539,9 +556,16 @@ pub async fn workspace_git_clone(
     }
 
     // 步骤2：克隆成功后返回目录名称，文件导航会重新扫描并选中新仓库。
-    match clone_git_repository(root, url, destination).await {
-        Ok(output) => repository_setup_response(&output, &directory),
-        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    match clone_git_repository(root, url, destination.clone()).await {
+        Ok(output) if output.status.success() => repository_setup_response(&output, &directory),
+        Ok(output) => {
+            let _ = cleanup_incomplete_clone(&destination);
+            repository_setup_response(&output, &directory)
+        }
+        Err(error) => {
+            let _ = cleanup_incomplete_clone(&destination);
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, &error)
+        }
     }
 }
 
@@ -649,32 +673,49 @@ fn status_name(index_status: char, worktree_status: char, conflict: bool) -> &'s
 }
 
 fn parse_status_output(output: &str) -> ParsedGitStatus {
-    // 步骤1：逐行读取分支和文件状态，避免按空格拆分带空格的文件名。
+    // 步骤1：优先读取 NUL 记录，文件名中的换行、引号和箭头保持原文。
     let mut branch = None;
     let mut upstream = None;
     let mut ahead = 0;
     let mut behind = 0;
     let mut files = Vec::new();
     let mut total_files = 0;
-    for line in output.lines() {
-        if line.starts_with("## ") {
-            let branch_status = parse_branch_line(line);
+    let nul_records = output.contains('\0');
+    let mut skip_rename_source = false;
+    let records: Vec<&str> =
+        if nul_records { output.split('\0').collect() } else { output.lines().collect() };
+    for record in records {
+        if record.is_empty() {
+            continue;
+        }
+        if skip_rename_source {
+            skip_rename_source = false;
+            continue;
+        }
+        if record.starts_with("## ") {
+            let branch_status = parse_branch_line(record);
             branch = branch_status.branch;
             upstream = branch_status.upstream;
             ahead = branch_status.ahead;
             behind = branch_status.behind;
             continue;
         }
-        if line.len() < 4 {
+        if record.len() < 4 {
             continue;
         }
-        let mut status_characters = line.chars();
+        let mut status_characters = record.chars();
         let index_status = status_characters.next().unwrap_or(' ');
         let worktree_status = status_characters.next().unwrap_or(' ');
-        let Some(raw_path) = line.get(3..) else { continue };
-        let path_without_quotes = raw_path.trim_matches('"');
-        let path =
-            path_without_quotes.split(" -> ").last().unwrap_or(path_without_quotes).to_string();
+        let Some(raw_path) = record.get(3..) else { continue };
+        let path = if nul_records {
+            raw_path.to_string()
+        } else {
+            let path_without_quotes = raw_path.trim_matches('"');
+            path_without_quotes.split(" -> ").last().unwrap_or(path_without_quotes).to_string()
+        };
+        if nul_records && (index_status == 'R' || index_status == 'C') {
+            skip_rename_source = true;
+        }
 
         // 步骤2：分别保留暂存区与工作区状态，支持同一文件同时出现在两个分组。
         let conflict = index_status == 'U'
@@ -830,13 +871,12 @@ fn parse_reflog_output(output: &str) -> Vec<GitReflogEntry> {
 }
 
 fn parse_git_config_output(output: &str) -> GitConfigValues {
-    // 步骤1：Git 的 --null --list 输出按 key、value 交替排列，逐对读取白名单字段。
-    let fields: Vec<&str> = output.split('\0').collect();
+    // 步骤1：每条配置使用 NUL 结尾，键和值由 Git 固定使用换行分隔。
     let mut configuration = GitConfigValues::default();
-    let mut index = 0;
-    while index + 1 < fields.len() {
-        let key = fields[index].trim().to_lowercase();
-        let value = fields[index + 1].trim().to_string();
+    for record in output.split('\0') {
+        let Some((raw_key, raw_value)) = record.split_once('\n') else { continue };
+        let key = raw_key.trim().to_lowercase();
+        let value = raw_value.trim().to_string();
         if key == "user.name" {
             configuration.user_name = value;
         } else if key == "user.email" {
@@ -850,7 +890,6 @@ fn parse_git_config_output(output: &str) -> GitConfigValues {
         } else if key == "user.signingkey" {
             configuration.signing_key = value;
         }
-        index += 2;
     }
     configuration
 }
@@ -898,8 +937,7 @@ fn build_git_config_update_commands(
     // 步骤2：逐个校验界面管理的固定配置值。
     let user_name = validate_git_config_text(&body.user_name, "user name")?;
     let user_email = validate_git_config_text(&body.user_email, "user email")?;
-    let credential_helper =
-        validate_git_config_text(&body.credential_helper, "credential helper")?;
+    let credential_helper = validate_git_config_text(&body.credential_helper, "credential helper")?;
     let default_branch = if body.default_branch.trim().is_empty() {
         String::new()
     } else {
@@ -916,21 +954,13 @@ fn build_git_config_update_commands(
         "credential.helper",
         &credential_helper,
     ));
-    commands.push(build_git_config_command(
-        scope_argument,
-        "init.defaultbranch",
-        &default_branch,
-    ));
+    commands.push(build_git_config_command(scope_argument, "init.defaultbranch", &default_branch));
     commands.push(build_git_config_command(
         scope_argument,
         "commit.gpgsign",
         if body.gpg_sign { "true" } else { "false" },
     ));
-    commands.push(build_git_config_command(
-        scope_argument,
-        "user.signingkey",
-        &signing_key,
-    ));
+    commands.push(build_git_config_command(scope_argument, "user.signingkey", &signing_key));
     Ok(commands)
 }
 
@@ -1109,6 +1139,7 @@ pub async fn workspace_git_status(
                 "core.quotepath=false",
                 "status",
                 "--porcelain=v1",
+                "-z",
                 "--branch",
                 "--untracked-files=all",
             ])
@@ -1177,6 +1208,14 @@ pub struct GitDiffResponse {
     pub is_git_repo: bool,
     pub original_content: Option<String>,
     pub changes: Vec<GitChange>,
+    pub content_version: Option<String>,
+}
+
+fn git_content_version(content: &str) -> String {
+    // 步骤1：为差异对应的工作区内容生成稳定版本，用于拒绝过期撤销请求。
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 pub async fn workspace_git_diff(
@@ -1184,8 +1223,13 @@ pub async fn workspace_git_diff(
     Query(q): Query<PanePathQuery>,
 ) -> impl IntoResponse {
     let no_git = || {
-        Json(GitDiffResponse { is_git_repo: false, original_content: None, changes: vec![] })
-            .into_response()
+        Json(GitDiffResponse {
+            is_git_repo: false,
+            original_content: None,
+            changes: vec![],
+            content_version: None,
+        })
+        .into_response()
     };
     let root = try_res!(get_root(&manager, &q.pane_id));
     let git_check = tokio::task::spawn_blocking({
@@ -1201,6 +1245,10 @@ pub async fn workspace_git_diff(
     if rel.is_empty() {
         return no_git();
     }
+    let target = try_res!(normalize_join(&root, rel));
+    if validate_git_candidate_path(&root, &target).is_err() {
+        return no_git();
+    }
     let original = tokio::task::spawn_blocking({
         let root = root.clone();
         let rel = rel.to_string();
@@ -1211,7 +1259,6 @@ pub async fn workspace_git_diff(
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
         _ => return no_git(),
     };
-    let target = try_res!(normalize_join(&root, rel));
     let Ok(current) = std::fs::read_to_string(&target) else { return no_git() };
     let diff = similar::TextDiff::from_lines(&original_content, &current);
     let mut changes: Vec<GitChange> = Vec::new();
@@ -1258,8 +1305,14 @@ pub async fn workspace_git_diff(
         }
     }
 
-    Json(GitDiffResponse { is_git_repo: true, original_content: Some(original_content), changes })
-        .into_response()
+    let content_version = Some(git_content_version(&current));
+    Json(GitDiffResponse {
+        is_git_repo: true,
+        original_content: Some(original_content),
+        changes,
+        content_version,
+    })
+    .into_response()
 }
 
 #[derive(Deserialize)]
@@ -1279,6 +1332,10 @@ pub async fn workspace_git_stage_lines(
     if rel.is_empty() {
         return json_err(StatusCode::BAD_REQUEST, "path required");
     }
+    let target = try_res!(normalize_join(&root, rel));
+    if let Err(error) = validate_git_candidate_path(&root, &target) {
+        return json_err(StatusCode::FORBIDDEN, &error);
+    }
     let original_out = tokio::task::spawn_blocking({
         let root = root.clone();
         let rel = rel.to_string();
@@ -1289,7 +1346,6 @@ pub async fn workspace_git_stage_lines(
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
         _ => String::new(),
     };
-    let target = try_res!(normalize_join(&root, rel));
     let current = match std::fs::read_to_string(&target) {
         Ok(c) => c,
         Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -1377,7 +1433,78 @@ pub async fn workspace_git_stage_lines(
 pub struct GitRevertBody {
     pub start_line: usize,
     pub end_line: usize,
-    pub original_lines: String,
+    pub content_version: String,
+}
+
+fn build_reverted_content(
+    original: &str,
+    current: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<String, String> {
+    // 步骤1：请求必须命中一个完整差异块，禁止用过期行号修改相邻内容。
+    if start_line == 0 || end_line < start_line {
+        return Err("invalid line range".to_string());
+    }
+    let original_lines: Vec<&str> = original.lines().collect();
+    let current_lines: Vec<&str> = current.lines().collect();
+    let diff = similar::TextDiff::from_slices(&original_lines, &current_lines);
+    let mut result_lines = Vec::new();
+    let mut modified_line = 1usize;
+    let mut matched = false;
+    for operation in diff.ops() {
+        match operation {
+            similar::DiffOp::Equal { new_index, len, .. } => {
+                for offset in 0..*len {
+                    result_lines.push(current_lines[new_index + offset].to_string());
+                }
+                modified_line += len;
+            }
+            similar::DiffOp::Insert { new_index, new_len, .. } => {
+                let operation_end = modified_line + new_len - 1;
+                if modified_line == start_line && operation_end == end_line {
+                    matched = true;
+                } else {
+                    for offset in 0..*new_len {
+                        result_lines.push(current_lines[new_index + offset].to_string());
+                    }
+                }
+                modified_line += new_len;
+            }
+            similar::DiffOp::Delete { old_index, old_len, .. } => {
+                if modified_line == start_line && modified_line == end_line {
+                    for offset in 0..*old_len {
+                        result_lines.push(original_lines[old_index + offset].to_string());
+                    }
+                    matched = true;
+                }
+            }
+            similar::DiffOp::Replace { old_index, old_len, new_index, new_len } => {
+                let operation_end = modified_line + new_len - 1;
+                if modified_line == start_line && operation_end == end_line {
+                    for offset in 0..*old_len {
+                        result_lines.push(original_lines[old_index + offset].to_string());
+                    }
+                    matched = true;
+                } else {
+                    for offset in 0..*new_len {
+                        result_lines.push(current_lines[new_index + offset].to_string());
+                    }
+                }
+                modified_line += new_len;
+            }
+        }
+    }
+    if !matched {
+        return Err("stale line range".to_string());
+    }
+
+    // 步骤2：恢复文件原有的末尾换行约定。
+    let mut result = result_lines.join("\n");
+    if !result.is_empty() && (current.ends_with('\n') || original.ends_with('\n')) {
+        result.push('\n');
+    }
+    Ok(result)
 }
 
 pub async fn workspace_git_revert_lines(
@@ -1391,28 +1518,29 @@ pub async fn workspace_git_revert_lines(
         return json_err(StatusCode::BAD_REQUEST, "path required");
     }
     let target = try_res!(normalize_join(&root, rel));
+    if let Err(error) = validate_git_candidate_path(&root, &target) {
+        return json_err(StatusCode::FORBIDDEN, &error);
+    }
     let current = match std::fs::read_to_string(&target) {
         Ok(c) => c,
         Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
-    let lines: Vec<&str> = current.lines().collect();
-    let start = body.start_line.saturating_sub(1);
-    let end = body.end_line.min(lines.len());
-    let mut result_lines: Vec<&str> = Vec::new();
-    result_lines.extend_from_slice(&lines[..start]);
-    for l in body.original_lines.lines() {
-        result_lines.push(l);
+    if git_content_version(&current) != body.content_version {
+        return json_err(StatusCode::CONFLICT, "file changed; refresh diff");
     }
-    if end < lines.len() {
-        result_lines.extend_from_slice(&lines[end..]);
-    }
-    let new_content = result_lines.join("\n");
-    let trailing = current.ends_with('\n');
-    let write_content = if trailing && !new_content.ends_with('\n') {
-        format!("{new_content}\n")
-    } else {
-        new_content
+    let revision = format!("HEAD:{rel}");
+    let original_arguments = vec!["show".to_string(), revision];
+    let original_output = match run_git_output(root.clone(), original_arguments).await {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => return git_command_response(&output),
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     };
+    let original = String::from_utf8_lossy(&original_output.stdout);
+    let write_content =
+        match build_reverted_content(&original, &current, body.start_line, body.end_line) {
+            Ok(content) => content,
+            Err(error) => return json_err(StatusCode::CONFLICT, &error),
+        };
     if let Err(e) = std::fs::write(&target, write_content.as_bytes()) {
         return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
@@ -1517,11 +1645,7 @@ impl GitRebasePlanEntry {
     #[cfg(test)]
     fn new(commit: String, action: &str, message: &str) -> Self {
         // 步骤1：测试使用直白构造器建立历史重写计划项。
-        Self {
-            commit,
-            action: action.to_string(),
-            message: message.to_string(),
-        }
+        Self { commit, action: action.to_string(), message: message.to_string() }
     }
 }
 
@@ -1772,9 +1896,31 @@ fn validate_git_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, Resp
         if candidate == root || !candidate.starts_with(root) {
             return Err(json_err(StatusCode::FORBIDDEN, "outside workspace"));
         }
+        if validate_git_candidate_path(root, &candidate).is_err() {
+            return Err(json_err(StatusCode::FORBIDDEN, "outside workspace"));
+        }
         validated_paths.push(normalized_path);
     }
     Ok(validated_paths)
+}
+
+fn validate_git_candidate_path(root: &Path, candidate: &Path) -> Result<(), String> {
+    // 步骤1：解析工作区真实路径，避免词法路径检查被符号链接绕过。
+    let canonical_root = root.canonicalize().map_err(|error| error.to_string())?;
+    let mut existing_ancestor = candidate.to_path_buf();
+
+    // 步骤2：目标可以尚未创建，此时向上查找最近的现有父目录并解析其真实路径。
+    while !existing_ancestor.exists() {
+        let Some(parent) = existing_ancestor.parent() else {
+            return Err("outside workspace".to_string());
+        };
+        existing_ancestor = parent.to_path_buf();
+    }
+    let canonical_ancestor = existing_ancestor.canonicalize().map_err(|error| error.to_string())?;
+    if canonical_ancestor != canonical_root && !canonical_ancestor.starts_with(&canonical_root) {
+        return Err("outside workspace".to_string());
+    }
+    Ok(())
 }
 
 fn is_git_blame_header(line: &str) -> Option<(String, usize)> {
@@ -1871,12 +2017,8 @@ pub async fn workspace_git_blame(
     }
 
     // 步骤2：读取逐行 porcelain 输出并转换为前端可直接显示的结构。
-    let arguments = vec![
-        "blame".to_string(),
-        "--line-porcelain".to_string(),
-        "--".to_string(),
-        path.clone(),
-    ];
+    let arguments =
+        vec!["blame".to_string(), "--line-porcelain".to_string(), "--".to_string(), path.clone()];
     match run_git_output(root, arguments).await {
         Ok(output) if output.status.success() => {
             if output.stdout.len() > MAX_GIT_BLAME_OUTPUT {
@@ -2140,16 +2282,10 @@ fn git_command_tracker() -> &'static Mutex<GitCommandTracker> {
 
 fn git_command_timestamp() -> u64 {
     // 步骤1：用 Unix 毫秒记录开始和结束时间，便于前端稳定排序。
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
-fn git_command_records_for_root(
-    tracker: &GitCommandTracker,
-    root: &Path,
-) -> Vec<GitCommandRecord> {
+fn git_command_records_for_root(tracker: &GitCommandTracker, root: &Path) -> Vec<GitCommandRecord> {
     // 步骤1：只复制当前仓库的记录，避免多仓库面板互相泄露操作信息。
     let mut records = Vec::new();
     for record in &tracker.records {
@@ -2267,6 +2403,34 @@ fn truncate_git_command_output(value: &str) -> String {
     output
 }
 
+fn update_running_git_command_output(tracker: &mut GitCommandTracker, id: &str, output: &str) {
+    // 步骤1：只更新仍在运行的匹配命令，避免轮询结果覆盖最终状态。
+    for record in &mut tracker.records {
+        if record.id == id && record.status == "running" {
+            record.output = truncate_git_command_output(output);
+            break;
+        }
+    }
+}
+
+fn read_git_command_output(stdout_path: &Path, stderr_path: &Path) -> String {
+    // 步骤1：读取进程当前已写出的标准输出和错误输出。
+    let stdout = std::fs::read(stdout_path).unwrap_or_default();
+    let stderr = std::fs::read(stderr_path).unwrap_or_default();
+    let stdout_text = String::from_utf8_lossy(&stdout);
+    let stderr_text = String::from_utf8_lossy(&stderr);
+
+    // 步骤2：按最终日志相同的顺序合并两路输出。
+    let mut display_output = stdout_text.trim().to_string();
+    if !stderr_text.trim().is_empty() {
+        if !display_output.is_empty() {
+            display_output.push('\n');
+        }
+        display_output.push_str(stderr_text.trim());
+    }
+    display_output
+}
+
 fn finish_tracked_git_command(
     id: &str,
     status: &str,
@@ -2285,10 +2449,8 @@ fn finish_tracked_git_command(
     }
     let mut cancellation_index = 0;
     while cancellation_index < tracker.cancellations.len() {
-        if Arc::ptr_eq(
-            &tracker.cancellations[cancellation_index].requested,
-            cancellation_requested,
-        ) {
+        if Arc::ptr_eq(&tracker.cancellations[cancellation_index].requested, cancellation_requested)
+        {
             tracker.cancellations.remove(cancellation_index);
             break;
         }
@@ -2316,8 +2478,7 @@ async fn run_git_tracked_output(
     let command_id = uuid::Uuid::new_v4().to_string();
     let cancellation_requested = Arc::new(AtomicBool::new(false));
     {
-        let mut tracker =
-            git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+        let mut tracker = git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
         tracker.records.push_front(GitCommandRecord {
             id: command_id.clone(),
             command: sanitize_git_command(&arguments),
@@ -2339,6 +2500,7 @@ async fn run_git_tracked_output(
 
     // 步骤2：把输出写入临时文件并轮询进程，使取消请求可以及时生效。
     let worker_cancellation = cancellation_requested.clone();
+    let worker_command_id = command_id.clone();
     let result = tokio::task::spawn_blocking(move || {
         let stdout_file = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
         let stderr_file = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
@@ -2359,7 +2521,20 @@ async fn run_git_tracked_output(
             }
             match child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Ok(None) => {
+                    let display_output =
+                        read_git_command_output(stdout_file.path(), stderr_file.path());
+                    if !display_output.is_empty() {
+                        let mut tracker =
+                            git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
+                        update_running_git_command_output(
+                            &mut tracker,
+                            &worker_command_id,
+                            &display_output,
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
                 Err(error) => return Err(error.to_string()),
             }
         };
@@ -2398,12 +2573,7 @@ async fn run_git_tracked_output(
             Ok(output)
         }
         Ok(Err(error)) => {
-            finish_tracked_git_command(
-                &command_id,
-                "failed",
-                &error,
-                &cancellation_requested,
-            );
+            finish_tracked_git_command(&command_id, "failed", &error, &cancellation_requested);
             Err(error)
         }
         Err(error) => {
@@ -2892,12 +3062,8 @@ pub async fn workspace_git_conflict_save(
     let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let paths = try_res!(validate_git_paths(&root, &[body.path]));
     let path = paths[0].clone();
-    let check_arguments = vec![
-        "ls-files".to_string(),
-        "--unmerged".to_string(),
-        "--".to_string(),
-        path.clone(),
-    ];
+    let check_arguments =
+        vec!["ls-files".to_string(), "--unmerged".to_string(), "--".to_string(), path.clone()];
     let check_output = match run_git_output(root.clone(), check_arguments).await {
         Ok(output) => output,
         Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
@@ -3086,7 +3252,8 @@ fn build_rebase_todo(
         // 步骤2：Reword 通过受控消息文件执行 amend，避免把用户文本拼入 shell 命令。
         if entry.action == "reword" {
             let message_path = plan_directory.join(format!("message-{index}.txt"));
-            std::fs::write(&message_path, entry.message.trim()).map_err(|error| error.to_string())?;
+            std::fs::write(&message_path, entry.message.trim())
+                .map_err(|error| error.to_string())?;
             todo.push_str("exec git commit --amend --no-verify -F ");
             todo.push_str(&quote_shell_path(&message_path));
             todo.push('\n');
@@ -3131,11 +3298,7 @@ async fn validate_rebase_plan_range(
     }
 
     // 步骤2：显式拒绝范围内的合并提交，避免普通交互式 Rebase 意外压平分支结构。
-    let merge_arguments = vec![
-        "rev-list".to_string(),
-        "--merges".to_string(),
-        revision_range,
-    ];
+    let merge_arguments = vec!["rev-list".to_string(), "--merges".to_string(), revision_range];
     let merge_output = run_git_output(root, merge_arguments).await?;
     if !merge_output.status.success() {
         return Err(String::from_utf8_lossy(&merge_output.stderr).trim().to_string());
@@ -3161,7 +3324,8 @@ async fn run_rebase_plan(
     if !git_directory_output.status.success() {
         return Err(String::from_utf8_lossy(&git_directory_output.stderr).trim().to_string());
     }
-    let git_directory_text = String::from_utf8_lossy(&git_directory_output.stdout).trim().to_string();
+    let git_directory_text =
+        String::from_utf8_lossy(&git_directory_output.stdout).trim().to_string();
     let git_directory = PathBuf::from(git_directory_text);
     if git_directory.join("rebase-merge").exists() || git_directory.join("rebase-apply").exists() {
         return Err("a rebase operation is already in progress".to_string());
@@ -3713,11 +3877,7 @@ fn build_remote_delete_arguments(name: &str) -> Vec<String> {
     vec!["remote".to_string(), "remove".to_string(), name.to_string()]
 }
 
-fn build_upstream_set_arguments(
-    remote: &str,
-    branch: &str,
-    remote_branch: &str,
-) -> Vec<String> {
+fn build_upstream_set_arguments(remote: &str, branch: &str, remote_branch: &str) -> Vec<String> {
     // 步骤1：显式拼接经过验证的 Remote 与远程分支，再绑定指定本地分支。
     let upstream = format!("--set-upstream-to={remote}/{remote_branch}");
     vec!["branch".to_string(), upstream, branch.to_string()]
@@ -3829,60 +3989,65 @@ pub async fn workspace_git_log(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<GitLogQuery>,
 ) -> Response {
-    // 步骤1：限制单页数量，并构造字段稳定的 Git Log 格式。
+    // 步骤1：限制单页数量，并验证可选的文件路径。
     let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let limit = query.limit.clamp(1, 200);
     let requested_count = limit + 1;
     let search = query.search.as_deref().unwrap_or("").trim().to_string();
     let search_active = !search.is_empty();
-    let mut arguments = vec![
-        "log".to_string(),
-        "--all".to_string(),
-        "--topo-order".to_string(),
-        "--date=iso-strict".to_string(),
-        "--decorate=short".to_string(),
-        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%D%x00%s%x1e".to_string(),
-    ];
-    if search_active {
-        arguments.push("--max-count=10000".to_string());
-    } else {
-        arguments.push(format!("--max-count={requested_count}"));
-        arguments.push(format!("--skip={}", query.skip));
-    }
+    let mut history_path = None;
     if let Some(path) = query.path.as_deref() {
         if !path.trim().is_empty() {
             let paths = try_res!(validate_git_paths(&root, &[path.to_string()]));
-            arguments.push("--".to_string());
-            arguments.push(paths[0].clone());
+            history_path = Some(paths[0].clone());
         }
     }
 
-    // 步骤2：多取一条判断是否还有下一页，再只返回请求数量。
+    // 步骤2：搜索时分块扫描全部历史，普通列表只读取当前页和一条探测记录。
+    if search_active {
+        let mut commits = Vec::new();
+        let mut matched_count = 0usize;
+        let mut scan_skip = 0usize;
+        let scan_count = 1_000usize;
+        loop {
+            let arguments = build_git_log_arguments(history_path.as_deref(), scan_count, scan_skip);
+            let output = match run_git_output(root.clone(), arguments).await {
+                Ok(output) if output.status.success() => output,
+                Ok(output) => return git_command_response(&output),
+                Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+            };
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parsed_commits = parse_log_output(&stdout);
+            let parsed_count = parsed_commits.len();
+            for commit in parsed_commits {
+                if !git_commit_matches_search(&commit, &search) {
+                    continue;
+                }
+                if matched_count < query.skip {
+                    matched_count += 1;
+                    continue;
+                }
+                commits.push(commit);
+                matched_count += 1;
+                if commits.len() >= requested_count {
+                    break;
+                }
+            }
+            if commits.len() >= requested_count || parsed_count < scan_count {
+                break;
+            }
+            scan_skip += parsed_count;
+        }
+        let has_more = commits.len() > limit;
+        commits.truncate(limit);
+        return Json(GitLogResponse { commits, has_more }).into_response();
+    }
+
+    let arguments = build_git_log_arguments(history_path.as_deref(), requested_count, query.skip);
     match run_git_output(root, arguments).await {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let parsed_commits = parse_log_output(&stdout);
-            let mut commits = Vec::new();
-            if search_active {
-                // 步骤2：搜索结果先过滤再分页，确保翻页不会跳过匹配提交。
-                let mut matched_count = 0usize;
-                for commit in parsed_commits {
-                    if !git_commit_matches_search(&commit, &search) {
-                        continue;
-                    }
-                    if matched_count < query.skip {
-                        matched_count += 1;
-                        continue;
-                    }
-                    commits.push(commit);
-                    matched_count += 1;
-                    if commits.len() >= requested_count {
-                        break;
-                    }
-                }
-            } else {
-                commits = parsed_commits;
-            }
+            let mut commits = parse_log_output(&stdout);
             let has_more = commits.len() > limit;
             commits.truncate(limit);
             Json(GitLogResponse { commits, has_more }).into_response()
@@ -3890,6 +4055,29 @@ pub async fn workspace_git_log(
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
+}
+
+fn build_git_log_arguments(path: Option<&str>, max_count: usize, skip: usize) -> Vec<String> {
+    // 步骤1：普通历史覆盖全部引用，文件历史从当前分支跟随重命名。
+    let mut arguments = vec![
+        "log".to_string(),
+        "--topo-order".to_string(),
+        "--date=iso-strict".to_string(),
+        "--decorate=short".to_string(),
+        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%D%x00%s%x1e".to_string(),
+        format!("--max-count={max_count}"),
+        format!("--skip={skip}"),
+    ];
+    if path.is_some() {
+        arguments.push("--follow".to_string());
+    } else {
+        arguments.push("--all".to_string());
+    }
+    if let Some(path) = path {
+        arguments.push("--".to_string());
+        arguments.push(path.to_string());
+    }
+    arguments
 }
 
 fn build_git_sync_preview_arguments(range: &str) -> Vec<String> {
@@ -4082,12 +4270,7 @@ fn build_push_arguments(
 
 fn build_remote_branch_delete_arguments(remote: &str, branch: &str) -> Vec<String> {
     // 步骤1：使用 Git 的显式 --delete 形式删除远程分支。
-    vec![
-        "push".to_string(),
-        remote.to_string(),
-        "--delete".to_string(),
-        branch.to_string(),
-    ]
+    vec!["push".to_string(), remote.to_string(), "--delete".to_string(), branch.to_string()]
 }
 
 fn validate_optional_git_name(
@@ -4222,11 +4405,8 @@ async fn apply_unified_diff_hunk(
     action: &str,
 ) -> Result<std::process::Output, String> {
     // 步骤1：把界面动作转换为固定 Git 参数，不接受任意命令选项。
-    let mut arguments = vec![
-        "apply".to_string(),
-        "--recount".to_string(),
-        "--whitespace=nowarn".to_string(),
-    ];
+    let mut arguments =
+        vec!["apply".to_string(), "--recount".to_string(), "--whitespace=nowarn".to_string()];
     if action == "stage" || action == "unstage" {
         arguments.push("--cached".to_string());
     }
@@ -4247,10 +4427,8 @@ async fn apply_unified_diff_hunk(
             .stderr(std::process::Stdio::piped())
             .current_dir(root)
             .spawn()?;
-        let mut child_stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| std::io::Error::other("git stdin unavailable"))?;
+        let mut child_stdin =
+            child.stdin.take().ok_or_else(|| std::io::Error::other("git stdin unavailable"))?;
         child_stdin.write_all(patch.as_bytes())?;
         drop(child_stdin);
         child.wait_with_output()
@@ -4297,11 +4475,8 @@ pub async fn workspace_git_hunk_action(
             Err(error) => return json_err(StatusCode::BAD_REQUEST, &error.to_string()),
         }
     } else {
-        let mut arguments = vec![
-            "diff".to_string(),
-            "--no-ext-diff".to_string(),
-            "--no-color".to_string(),
-        ];
+        let mut arguments =
+            vec!["diff".to_string(), "--no-ext-diff".to_string(), "--no-color".to_string()];
         if body.staged {
             arguments.push("--cached".to_string());
         }
@@ -4386,27 +4561,25 @@ pub async fn workspace_git_unified_diff(
 mod tests {
     use super::{
         append_git_ignore_pattern, apply_unified_diff_hunk, build_branch_create_arguments,
-        build_branch_delete_arguments,
-        build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
-        build_git_clean_arguments, build_git_config_update_commands,
-        build_git_sync_preview_arguments, git_clean_preview_paths,
-        git_command_records_for_root, git_command_tracker, git_ignore_literal_pattern,
-        request_git_command_cancellation, sanitize_git_command,
-        build_remote_add_arguments, build_remote_delete_arguments,
-        build_fetch_arguments, build_pull_arguments, build_push_arguments,
-        build_remote_branch_delete_arguments, build_remote_update_arguments,
-        build_stash_save_arguments, build_upstream_set_arguments,
-        build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
-        clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
-        initialize_git_repository, parse_branch_output, parse_git_blame_output,
-        parse_git_config_output, parse_log_output,
-        parse_git_clean_preview_output, parse_reflog_output, parse_remote_output,
-        parse_stash_output, parse_status_output,
-        parse_tag_output,
-        read_conflict_stage, run_git_output, run_rebase_plan, unstage_git_paths,
-        validate_clone_directory, validate_clone_url,
-        validate_initial_branch, GitCommandCancellation, GitCommandRecord, GitCommandTracker,
-        GitConfigUpdateBody, GitRebasePlanEntry,
+        build_branch_delete_arguments, build_branch_switch_arguments, build_cherry_pick_arguments,
+        build_commit_arguments, build_fetch_arguments, build_git_clean_arguments,
+        build_git_config_update_commands, build_git_log_arguments,
+        build_git_sync_preview_arguments, build_pull_arguments, build_push_arguments,
+        build_remote_add_arguments, build_remote_branch_delete_arguments,
+        build_remote_delete_arguments, build_remote_update_arguments, build_reverted_content,
+        build_stash_save_arguments, build_upstream_set_arguments, build_upstream_unset_arguments,
+        cleanup_incomplete_clone, clone_git_repository, contains_conflict_markers,
+        discover_git_repositories, extract_unified_diff_hunk, git_clean_preview_paths, git_command,
+        git_command_records_for_root, git_command_tracker, git_commit_matches_search,
+        git_content_version, git_ignore_literal_pattern, initialize_git_repository,
+        parse_branch_output, parse_git_blame_output, parse_git_clean_preview_output,
+        parse_git_config_output, parse_log_output, parse_reflog_output, parse_remote_output,
+        parse_stash_output, parse_status_output, parse_tag_output, read_conflict_stage,
+        request_git_command_cancellation, run_git_output, run_rebase_plan, sanitize_git_command,
+        unstage_git_paths, update_running_git_command_output, validate_clone_directory,
+        validate_clone_url, validate_git_candidate_path, validate_initial_branch,
+        GitCommandCancellation, GitCommandRecord, GitCommandTracker, GitConfigUpdateBody,
+        GitRebasePlanEntry,
     };
     use std::{
         path::{Path, PathBuf},
@@ -4429,11 +4602,7 @@ mod tests {
         run_test_git(root, &["commit", "-m", message]);
 
         // 步骤2：返回刚创建提交的完整对象 ID，供 Rebase 计划精确引用。
-        let output = git_command()
-            .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .output()
-            .unwrap();
+        let output = git_command().args(["rev-parse", "HEAD"]).current_dir(root).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
@@ -4467,10 +4636,7 @@ mod tests {
         let temporary_directory = tempfile::tempdir().unwrap();
         run_test_git(temporary_directory.path(), &["init"]);
         run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
-        run_test_git(
-            temporary_directory.path(),
-            &["config", "user.email", "test@example.com"],
-        );
+        run_test_git(temporary_directory.path(), &["config", "user.email", "test@example.com"]);
         let mut original_lines = Vec::new();
         for line_number in 1..=20 {
             original_lines.push(format!("line {line_number}"));
@@ -4533,10 +4699,7 @@ mod tests {
         let temporary_directory = tempfile::tempdir().unwrap();
         run_test_git(temporary_directory.path(), &["init"]);
         run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
-        run_test_git(
-            temporary_directory.path(),
-            &["config", "user.email", "test@example.com"],
-        );
+        run_test_git(temporary_directory.path(), &["config", "user.email", "test@example.com"]);
         let mut original_lines = Vec::new();
         for line_number in 1..=20 {
             original_lines.push(format!("line {line_number}"));
@@ -4644,6 +4807,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_nul_status_paths_without_corrupting_special_names() {
+        // 步骤1：NUL 输出中的换行、引号和箭头都是文件名原文，不是记录分隔符。
+        let output = concat!(
+            "## main\0",
+            " M quote\"name.txt\0",
+            "?? line\nbreak.txt\0",
+            "R  new -> name.txt\0",
+            "old -> name.txt\0",
+        );
+        let parsed = parse_status_output(output);
+        assert_eq!(parsed.files.len(), 3);
+        assert_eq!(parsed.files[0].path, "quote\"name.txt");
+        assert_eq!(parsed.files[1].path, "line\nbreak.txt");
+        assert_eq!(parsed.files[2].path, "new -> name.txt");
+        assert_eq!(parsed.files[2].status, "renamed");
+    }
+
+    #[test]
     fn truncates_large_status_lists_but_keeps_total_count() {
         // 步骤1：构造超过界面安全上限的文件状态输出。
         let mut output = String::from("## main\n");
@@ -4721,8 +4902,8 @@ mod tests {
 
     #[test]
     fn parses_and_builds_whitelisted_git_configuration() {
-        // 步骤1：解析 Git 的 NUL 配置输出，忽略界面不管理的其他键。
-        let output = "user.name\0Alice\0user.email\0alice@example.com\0credential.helper\0manager-core\0commit.gpgsign\0true\0core.autocrlf\0true\0";
+        // 步骤1：解析 Git 真实的 key 换行 value NUL 输出，忽略界面不管理的其他键。
+        let output = "user.name\nAlice\0user.email\nalice@example.com\0credential.helper\nmanager-core\0commit.gpgsign\ntrue\0core.autocrlf\ntrue\0";
         let configuration = parse_git_config_output(output);
         assert_eq!(configuration.user_name, "Alice");
         assert_eq!(configuration.user_email, "alice@example.com");
@@ -4744,10 +4925,7 @@ mod tests {
             commands[0],
             vec!["config", "--local", "--replace-all", "user.name", "Alice New"]
         );
-        assert_eq!(
-            commands[5],
-            vec!["config", "--local", "--unset-all", "user.signingkey"]
-        );
+        assert_eq!(commands[5], vec!["config", "--local", "--unset-all", "user.signingkey"]);
     }
 
     #[test]
@@ -4759,34 +4937,26 @@ mod tests {
             "origin".to_string(),
             "https://user:secret@example.com/repository.git".to_string(),
         ];
-        assert_eq!(
-            sanitize_git_command(&remote_arguments),
-            "git remote add origin [redacted-url]"
-        );
-        let commit_arguments = vec![
-            "commit".to_string(),
-            "-m".to_string(),
-            "private message".to_string(),
-        ];
+        assert_eq!(sanitize_git_command(&remote_arguments), "git remote add origin [redacted-url]");
+        let commit_arguments =
+            vec!["commit".to_string(), "-m".to_string(), "private message".to_string()];
         assert_eq!(sanitize_git_command(&commit_arguments), "git commit -m [redacted-message]");
 
         let clone_arguments = vec![
             "clone".to_string(),
+            "--progress".to_string(),
             "--".to_string(),
             "https://user:secret@example.com/repository.git".to_string(),
             "repository".to_string(),
         ];
         assert_eq!(
             sanitize_git_command(&clone_arguments),
-            "git clone -- [redacted-url] repository"
+            "git clone --progress -- [redacted-url] repository"
         );
 
         // 步骤2：不含敏感值的同步命令保留完整参数，便于排查。
-        let fetch_arguments = vec![
-            "fetch".to_string(),
-            "--prune".to_string(),
-            "origin".to_string(),
-        ];
+        let fetch_arguments =
+            vec!["fetch".to_string(), "--prune".to_string(), "origin".to_string()];
         assert_eq!(sanitize_git_command(&fetch_arguments), "git fetch --prune origin");
     }
 
@@ -4919,6 +5089,66 @@ mod tests {
     }
 
     #[test]
+    fn updates_running_git_command_output_before_completion() {
+        // 步骤1：运行中的克隆进度应立即写入对应命令记录。
+        let root = PathBuf::from("repository");
+        let mut tracker = GitCommandTracker::default();
+        tracker.records.push_back(GitCommandRecord {
+            id: "clone-command".to_string(),
+            command: "git clone --progress -- [redacted-url] app".to_string(),
+            status: "running".to_string(),
+            started_at: 1,
+            finished_at: None,
+            output: String::new(),
+            root,
+        });
+        update_running_git_command_output(&mut tracker, "clone-command", "Receiving objects: 25%");
+        assert_eq!(tracker.records[0].output, "Receiving objects: 25%");
+    }
+
+    #[test]
+    fn rebuilds_reverted_content_from_head_without_deleting_neighbor_lines() {
+        // 步骤1：撤销删除操作时应把 HEAD 行插回当前位置，而不是覆盖下一行。
+        let reverted = build_reverted_content("one\ntwo\nthree\n", "one\nthree\n", 2, 2).unwrap();
+        assert_eq!(reverted, "one\ntwo\nthree\n");
+
+        // 步骤2：越出当前差异范围的旧请求必须被拒绝。
+        assert!(build_reverted_content("one\n", "one\n", 20, 20).is_err());
+        assert_eq!(git_content_version("same"), git_content_version("same"));
+        assert_ne!(git_content_version("before"), git_content_version("after"));
+    }
+
+    #[test]
+    fn rejects_existing_targets_that_resolve_outside_the_workspace() {
+        // 步骤1：真实路径不在工作区内时，即使词法路径看似合法也必须拒绝。
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        assert!(validate_git_candidate_path(workspace.path(), outside.path()).is_err());
+        assert!(validate_git_candidate_path(workspace.path(), workspace.path()).is_ok());
+    }
+
+    #[test]
+    fn builds_file_history_with_rename_following() {
+        // 步骤1：文件历史只从当前历史跟随重命名，普通历史继续覆盖全部引用。
+        let file_arguments = build_git_log_arguments(Some("src/new-name.rs"), 51, 0);
+        assert!(file_arguments.contains(&"--follow".to_string()));
+        assert!(!file_arguments.contains(&"--all".to_string()));
+        let all_arguments = build_git_log_arguments(None, 51, 0);
+        assert!(all_arguments.contains(&"--all".to_string()));
+    }
+
+    #[test]
+    fn removes_an_incomplete_clone_destination() {
+        // 步骤1：取消或失败的克隆目录必须清理，确保相同目录可以直接重试。
+        let workspace = tempfile::tempdir().unwrap();
+        let destination = workspace.path().join("partial-clone");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("partial.pack"), "partial").unwrap();
+        cleanup_incomplete_clone(&destination).unwrap();
+        assert!(!destination.exists());
+    }
+
+    #[test]
     fn requests_git_command_cancellation_only_in_same_repository() {
         // 步骤1：构造一个运行中命令及其取消令牌。
         let first_root = PathBuf::from("first-repository");
@@ -4932,17 +5162,9 @@ mod tests {
         });
 
         // 步骤2：其他仓库不能取消该命令，所属仓库可以发出取消请求。
-        assert!(!request_git_command_cancellation(
-            &mut tracker,
-            &second_root,
-            "command-id"
-        ));
+        assert!(!request_git_command_cancellation(&mut tracker, &second_root, "command-id"));
         assert!(!requested.load(Ordering::SeqCst));
-        assert!(request_git_command_cancellation(
-            &mut tracker,
-            &first_root,
-            "command-id"
-        ));
+        assert!(request_git_command_cancellation(&mut tracker, &first_root, "command-id"));
         assert!(requested.load(Ordering::SeqCst));
     }
 
@@ -4975,8 +5197,7 @@ mod tests {
         assert_eq!(checkout_arguments, vec!["switch", "--detach", "abcdef12"]);
 
         // 步骤2：从历史创建分支时把提交 hash 作为明确起点。
-        let create_arguments =
-            build_branch_create_arguments("feature/history", Some("abcdef12"));
+        let create_arguments = build_branch_create_arguments("feature/history", Some("abcdef12"));
         assert_eq!(create_arguments, vec!["switch", "-c", "feature/history", "abcdef12"]);
     }
 
@@ -5011,10 +5232,7 @@ mod tests {
         let temporary_directory = tempfile::tempdir().unwrap();
         run_test_git(temporary_directory.path(), &["init"]);
         run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
-        run_test_git(
-            temporary_directory.path(),
-            &["config", "user.email", "test@example.com"],
-        );
+        run_test_git(temporary_directory.path(), &["config", "user.email", "test@example.com"]);
         let base_commit = commit_test_file(temporary_directory.path(), "base.txt", "base", "base");
         let first_commit =
             commit_test_file(temporary_directory.path(), "first.txt", "first", "first");
@@ -5032,13 +5250,10 @@ mod tests {
             GitRebasePlanEntry::new(third_commit, "fixup", ""),
             GitRebasePlanEntry::new(fourth_commit, "reword", "renamed fourth"),
         ];
-        let output = run_rebase_plan(
-            temporary_directory.path().to_path_buf(),
-            base_commit,
-            entries,
-        )
-        .await
-        .unwrap();
+        let output =
+            run_rebase_plan(temporary_directory.path().to_path_buf(), base_commit, entries)
+                .await
+                .unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 
         // 步骤3：确认四条提交被折叠为两条，且 Reword 说明生效。
@@ -5058,10 +5273,7 @@ mod tests {
         let temporary_directory = tempfile::tempdir().unwrap();
         run_test_git(temporary_directory.path(), &["init"]);
         run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
-        run_test_git(
-            temporary_directory.path(),
-            &["config", "user.email", "test@example.com"],
-        );
+        run_test_git(temporary_directory.path(), &["config", "user.email", "test@example.com"]);
         let file_path = temporary_directory.path().join("conflict.txt");
         std::fs::write(&file_path, "base value\n").unwrap();
         run_test_git(temporary_directory.path(), &["add", "conflict.txt"]);
@@ -5143,10 +5355,7 @@ mod tests {
         let source_directory = tempfile::tempdir().unwrap();
         run_test_git(source_directory.path(), &["init"]);
         run_test_git(source_directory.path(), &["config", "user.name", "Test User"]);
-        run_test_git(
-            source_directory.path(),
-            &["config", "user.email", "test@example.com"],
-        );
+        run_test_git(source_directory.path(), &["config", "user.email", "test@example.com"]);
         std::fs::write(source_directory.path().join("README.md"), "source\n").unwrap();
         run_test_git(source_directory.path(), &["add", "README.md"]);
         run_test_git(source_directory.path(), &["commit", "-m", "initial"]);
@@ -5167,7 +5376,7 @@ mod tests {
         let tracker = git_command_tracker().lock().unwrap_or_else(|error| error.into_inner());
         let records = git_command_records_for_root(&tracker, workspace_directory.path());
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].command, "git clone -- [redacted-url] cloned");
+        assert_eq!(records[0].command, "git clone --progress -- [redacted-url] cloned");
         assert_eq!(records[0].status, "success");
     }
 
@@ -5175,7 +5384,10 @@ mod tests {
     fn validates_repository_setup_inputs() {
         // 步骤1：允许常规分支、远程地址和单层工作区子目录。
         assert_eq!(validate_initial_branch("main").unwrap(), "main");
-        assert_eq!(validate_clone_url("https://example.com/team/app.git").unwrap(), "https://example.com/team/app.git");
+        assert_eq!(
+            validate_clone_url("https://example.com/team/app.git").unwrap(),
+            "https://example.com/team/app.git"
+        );
         assert_eq!(validate_clone_directory("app").unwrap(), "app");
 
         // 步骤2：拒绝空值、Git 选项注入和任何可能逃离工作区的目录。
@@ -5205,13 +5417,7 @@ mod tests {
             vec![
                 vec!["remote", "rename", "origin", "upstream"],
                 vec!["remote", "set-url", "upstream", "https://example.com/upstream.git"],
-                vec![
-                    "remote",
-                    "set-url",
-                    "--push",
-                    "upstream",
-                    "git@example.com:upstream.git"
-                ],
+                vec!["remote", "set-url", "--push", "upstream", "git@example.com:upstream.git"],
             ]
         );
         assert_eq!(build_remote_delete_arguments("backup"), vec!["remote", "remove", "backup"]);
@@ -5234,10 +5440,7 @@ mod tests {
             build_fetch_arguments(Some("origin"), false),
             vec!["fetch", "--prune", "origin"]
         );
-        assert_eq!(
-            build_fetch_arguments(Some("origin"), true),
-            vec!["fetch", "--prune", "--all"]
-        );
+        assert_eq!(build_fetch_arguments(Some("origin"), true), vec!["fetch", "--prune", "--all"]);
 
         // 步骤2：Pull 按用户策略和目标远程分支生成明确参数。
         assert_eq!(
@@ -5248,20 +5451,8 @@ mod tests {
 
         // 步骤3：Push 使用 force-with-lease、明确 refspec 和标签选项。
         assert_eq!(
-            build_push_arguments(
-                Some("origin"),
-                Some("main"),
-                Some("release"),
-                true,
-                true
-            ),
-            vec![
-                "push",
-                "--force-with-lease",
-                "--tags",
-                "origin",
-                "main:release"
-            ]
+            build_push_arguments(Some("origin"), Some("main"), Some("release"), true, true),
+            vec!["push", "--force-with-lease", "--tags", "origin", "main:release"]
         );
         assert_eq!(
             build_remote_branch_delete_arguments("origin", "obsolete"),
@@ -5294,14 +5485,7 @@ mod tests {
         // 步骤1：全部保存时支持说明、未跟踪文件和保留暂存区。
         assert_eq!(
             build_stash_save_arguments("before experiment", true, true, false, &[]),
-            vec![
-                "stash",
-                "push",
-                "--include-untracked",
-                "--keep-index",
-                "-m",
-                "before experiment"
-            ]
+            vec!["stash", "push", "--include-untracked", "--keep-index", "-m", "before experiment"]
         );
 
         // 步骤2：仅暂存模式和选中文件模式生成互不混淆的参数。

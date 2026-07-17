@@ -2,6 +2,7 @@ import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/tes
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GitDiffViewer from '../components/workspace/GitDiffViewer.vue'
 import GitPanel from '../components/workspace/GitPanel.vue'
+import { isLatestGitRequest } from '../utils/gitPanel'
 
 const gitPanelMocks = vi.hoisted(function createGitPanelMocks() {
   return { authFetch: vi.fn() }
@@ -103,6 +104,11 @@ function findRow(wrapper: VueWrapper, testId: string, path: string): DOMWrapper<
 }
 
 describe('GitPanel', function gitPanelSuite() {
+  it('rejects stale repository responses', function rejectsStaleRepositoryResponse() {
+    // 步骤1：旧请求即使最后返回，也不能覆盖新仓库状态。
+    expect(isLatestGitRequest(1, 2, 'apps/old', 'apps/new')).toBe(false)
+    expect(isLatestGitRequest(2, 2, 'apps/new', 'apps/new')).toBe(true)
+  })
   beforeEach(function resetGitPanelMocks() {
     // 步骤1：每个用例使用独立的成功接口响应。
     gitPanelMocks.authFetch.mockReset()

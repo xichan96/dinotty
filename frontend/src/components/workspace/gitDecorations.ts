@@ -13,6 +13,7 @@ export interface GitDiffData {
   isGitRepo: boolean
   originalContent: string | null
   changes: GitChange[]
+  contentVersion: string | null
 }
 
 const ADDED_COLOR = '#2ea043'
@@ -163,6 +164,7 @@ export async function fetchGitDiff(paneId: string, filePath: string): Promise<Gi
     return {
       isGitRepo: data.is_git_repo,
       originalContent: data.original_content ?? null,
+      contentVersion: data.content_version ?? null,
       changes: (data.changes || []).map((c: any) => ({
         type: c.type,
         modifiedStart: c.modified_start,
@@ -201,7 +203,7 @@ export async function revertLines(
   filePath: string,
   startLine: number,
   endLine: number,
-  originalLines: string
+  contentVersion: string
 ): Promise<boolean> {
   try {
     await getApiBase()
@@ -212,7 +214,7 @@ export async function revertLines(
       body: JSON.stringify({
         start_line: startLine,
         end_line: endLine,
-        original_lines: originalLines,
+        content_version: contentVersion,
       }),
     })
     return res.ok

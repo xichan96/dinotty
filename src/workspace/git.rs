@@ -1116,6 +1116,39 @@ pub struct GitCherryPickBody {
     pub commits: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct GitRebasePlanEntry {
+    pub commit: String,
+    pub action: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+impl GitRebasePlanEntry {
+    #[cfg(test)]
+    fn new(commit: String, action: &str, message: &str) -> Self {
+        // 步骤1：测试使用直白构造器建立历史重写计划项。
+        Self {
+            commit,
+            action: action.to_string(),
+            message: message.to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GitRebasePlanBody {
+    pub upstream: String,
+    pub entries: Vec<GitRebasePlanEntry>,
+    #[serde(default)]
+    pub confirm_rewrite: bool,
+}
+
+#[derive(Serialize)]
+pub struct GitRebaseCandidatesResponse {
+    pub commits: Vec<GitCommitSummary>,
+}
+
 #[derive(Deserialize)]
 pub struct GitResetBody {
     pub target: String,
@@ -1907,6 +1940,248 @@ pub async fn workspace_git_rebase(
     let source = try_res!(validate_git_name(&body.source, "source"));
     let arguments = vec!["rebase".to_string(), source];
     run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_rebase_candidates(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：只读取当前 HEAD 的第一父提交链，避免把其他分支历史放入重写范围。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let arguments = vec![
+        "log".to_string(),
+        "--first-parent".to_string(),
+        "--max-count=31".to_string(),
+        "--date=iso-strict".to_string(),
+        "--decorate=short".to_string(),
+        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%D%x00%s%x1e".to_string(),
+        "HEAD".to_string(),
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            // 步骤2：遇到根提交或合并提交即停止，只返回可安全线性重写的最新连续范围。
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let parsed_commits = parse_log_output(&stdout);
+            let mut commits = Vec::new();
+            for commit in parsed_commits {
+                if commit.parents.len() != 1 {
+                    break;
+                }
+                commits.push(commit);
+                if commits.len() >= 30 {
+                    break;
+                }
+            }
+            Json(GitRebaseCandidatesResponse { commits }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_rebase_plan(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitRebasePlanBody>,
+) -> Response {
+    // 步骤1：历史重写必须由界面明确确认，并限制单次计划规模。
+    if !body.confirm_rewrite {
+        return json_err(StatusCode::BAD_REQUEST, "history rewrite confirmation required");
+    }
+    if body.entries.is_empty() || body.entries.len() > 30 {
+        return json_err(StatusCode::BAD_REQUEST, "invalid rebase plan size");
+    }
+    let upstream = try_res!(validate_commit_hash(&body.upstream));
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+
+    // 步骤2：执行受控交互式 Rebase，并返回 Git 的真实冲突或成功信息。
+    match run_rebase_plan(root, upstream, body.entries).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn validate_rebase_plan_entries(entries: &[GitRebasePlanEntry]) -> Result<(), String> {
+    // 步骤1：逐项校验提交、动作和 Reword 说明，并拒绝重复提交。
+    let mut validated_commits = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let commit = validate_commit_hash(&entry.commit).map_err(|_| "invalid rebase commit")?;
+        if validated_commits.contains(&commit) {
+            return Err("duplicate rebase commit".to_string());
+        }
+        validated_commits.push(commit);
+
+        let valid_action = entry.action == "pick"
+            || entry.action == "squash"
+            || entry.action == "fixup"
+            || entry.action == "reword";
+        if !valid_action {
+            return Err("invalid rebase action".to_string());
+        }
+        if index == 0 && (entry.action == "squash" || entry.action == "fixup") {
+            return Err("first rebase action cannot combine with a previous commit".to_string());
+        }
+        if entry.action == "reword" && entry.message.trim().is_empty() {
+            return Err("reword message required".to_string());
+        }
+        if entry.message.len() > 10_000 {
+            return Err("reword message too long".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn quote_shell_path(path: &Path) -> String {
+    // 步骤1：使用 POSIX 单引号规则保护 Rebase todo 中由 shell 执行的受控文件路径。
+    let normalized_path = path.to_string_lossy().replace('\\', "/");
+    let escaped_path = normalized_path.replace('\'', "'\"'\"'");
+    format!("'{escaped_path}'")
+}
+
+fn build_rebase_todo(
+    entries: &[GitRebasePlanEntry],
+    plan_directory: &Path,
+) -> Result<String, String> {
+    // 步骤1：按界面顺序生成 todo，Squash 和 Fixup 直接使用 Git 原生命令。
+    let mut todo = String::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let command = if entry.action == "reword" { "pick" } else { entry.action.as_str() };
+        todo.push_str(command);
+        todo.push(' ');
+        todo.push_str(&entry.commit);
+        todo.push('\n');
+
+        // 步骤2：Reword 通过受控消息文件执行 amend，避免把用户文本拼入 shell 命令。
+        if entry.action == "reword" {
+            let message_path = plan_directory.join(format!("message-{index}.txt"));
+            std::fs::write(&message_path, entry.message.trim()).map_err(|error| error.to_string())?;
+            todo.push_str("exec git commit --amend --no-verify -F ");
+            todo.push_str(&quote_shell_path(&message_path));
+            todo.push('\n');
+        }
+    }
+    Ok(todo)
+}
+
+async fn validate_rebase_plan_range(
+    root: PathBuf,
+    upstream: &str,
+    entries: &[GitRebasePlanEntry],
+) -> Result<(), String> {
+    // 步骤1：读取上游到 HEAD 的线性提交，确保计划没有遗漏或混入其他分支提交。
+    let revision_range = format!("{upstream}..HEAD");
+    let arguments = vec![
+        "rev-list".to_string(),
+        "--reverse".to_string(),
+        "--first-parent".to_string(),
+        revision_range.clone(),
+    ];
+    let output = run_git_output(root.clone(), arguments).await?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected_commits: Vec<&str> = stdout.lines().collect();
+    if expected_commits.len() != entries.len() {
+        return Err("rebase plan must include every commit from upstream to HEAD".to_string());
+    }
+    for expected_commit in expected_commits {
+        let mut found = false;
+        for entry in entries {
+            if entry.commit == expected_commit {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err("rebase plan contains commits outside the current HEAD range".to_string());
+        }
+    }
+
+    // 步骤2：显式拒绝范围内的合并提交，避免普通交互式 Rebase 意外压平分支结构。
+    let merge_arguments = vec![
+        "rev-list".to_string(),
+        "--merges".to_string(),
+        revision_range,
+    ];
+    let merge_output = run_git_output(root, merge_arguments).await?;
+    if !merge_output.status.success() {
+        return Err(String::from_utf8_lossy(&merge_output.stderr).trim().to_string());
+    }
+    if !merge_output.stdout.is_empty() {
+        return Err("rebase plan cannot rewrite merge commits".to_string());
+    }
+    Ok(())
+}
+
+async fn run_rebase_plan(
+    root: PathBuf,
+    upstream: String,
+    entries: Vec<GitRebasePlanEntry>,
+) -> Result<std::process::Output, String> {
+    // 步骤1：在修改仓库前完成计划字段和提交范围校验。
+    validate_rebase_plan_entries(&entries)?;
+    validate_rebase_plan_range(root.clone(), &upstream, &entries).await?;
+
+    // 步骤2：读取实际 Git 目录，拒绝覆盖正在进行的 Rebase。
+    let git_directory_arguments = vec!["rev-parse".to_string(), "--absolute-git-dir".to_string()];
+    let git_directory_output = run_git_output(root.clone(), git_directory_arguments).await?;
+    if !git_directory_output.status.success() {
+        return Err(String::from_utf8_lossy(&git_directory_output.stderr).trim().to_string());
+    }
+    let git_directory_text = String::from_utf8_lossy(&git_directory_output.stdout).trim().to_string();
+    let git_directory = PathBuf::from(git_directory_text);
+    if git_directory.join("rebase-merge").exists() || git_directory.join("rebase-apply").exists() {
+        return Err("a rebase operation is already in progress".to_string());
+    }
+
+    // 步骤3：把 todo 和 Reword 消息写入 Git 目录，冲突暂停后仍可继续使用。
+    let plan_directory = git_directory.join("dinotty-rebase-plan");
+    if plan_directory.exists() {
+        std::fs::remove_dir_all(&plan_directory).map_err(|error| error.to_string())?;
+    }
+    std::fs::create_dir_all(&plan_directory).map_err(|error| error.to_string())?;
+    let todo = build_rebase_todo(&entries, &plan_directory)?;
+    let todo_path = plan_directory.join("todo.txt");
+    std::fs::write(&todo_path, todo).map_err(|error| error.to_string())?;
+
+    // 步骤4：让 Git 的序列编辑器用受控 todo 替换默认计划，再启动交互式 Rebase。
+    let sequence_editor = if cfg!(windows) {
+        let editor_path = plan_directory.join("sequence-editor.ps1");
+        let editor_script = concat!(
+            "param([string]$TargetPath)\n",
+            "Copy-Item -LiteralPath $env:DINOTTY_REBASE_TODO -Destination $TargetPath -Force\n"
+        );
+        std::fs::write(&editor_path, editor_script).map_err(|error| error.to_string())?;
+        let normalized_editor_path = editor_path.to_string_lossy().replace('\\', "/");
+        format!(
+            "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{normalized_editor_path}\""
+        )
+    } else {
+        format!("cp {}", quote_shell_path(&todo_path))
+    };
+    let rebase_root = root.clone();
+    let rebase_todo_path = todo_path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        git_command()
+            .env("GIT_SEQUENCE_EDITOR", sequence_editor)
+            .env("DINOTTY_REBASE_TODO", rebase_todo_path)
+            .args(["rebase", "-i", &upstream])
+            .current_dir(rebase_root)
+            .output()
+    })
+    .await;
+    let output = match result {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => return Err(error.to_string()),
+        Err(error) => return Err(error.to_string()),
+    };
+
+    // 步骤5：成功后清理计划文件；冲突失败时保留文件供继续操作使用。
+    if output.status.success() {
+        std::fs::remove_dir_all(&plan_directory).map_err(|error| error.to_string())?;
+    }
+    Ok(output)
 }
 
 pub async fn workspace_git_cherry_pick(
@@ -2907,7 +3182,8 @@ mod tests {
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
         initialize_git_repository, parse_branch_output, parse_log_output, parse_remote_output,
         parse_stash_output, parse_status_output, parse_tag_output, read_conflict_stage,
-        unstage_git_paths, validate_clone_directory, validate_clone_url, validate_initial_branch,
+        run_rebase_plan, unstage_git_paths, validate_clone_directory, validate_clone_url,
+        validate_initial_branch, GitRebasePlanEntry,
     };
     use std::path::Path;
 
@@ -2915,6 +3191,22 @@ mod tests {
         // 步骤1：在临时仓库执行 Git 命令，并在失败时输出真实 stderr。
         let output = git_command().args(arguments).current_dir(root).output().unwrap();
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    fn commit_test_file(root: &Path, file_name: &str, content: &str, message: &str) -> String {
+        // 步骤1：写入并提交一个独立文件，避免历史重排测试产生内容冲突。
+        std::fs::write(root.join(file_name), content).unwrap();
+        run_test_git(root, &["add", file_name]);
+        run_test_git(root, &["commit", "-m", message]);
+
+        // 步骤2：返回刚创建提交的完整对象 ID，供 Rebase 计划精确引用。
+        let output = git_command()
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
     #[test]
@@ -3239,6 +3531,53 @@ mod tests {
             build_cherry_pick_arguments(&commits),
             vec!["cherry-pick", "bbbbbbbb", "aaaaaaaa"]
         );
+    }
+
+    #[tokio::test]
+    async fn rewrites_linear_history_with_reorder_squash_fixup_and_reword() {
+        // 步骤1：建立基础提交和四个互不冲突的线性提交，并记录每个提交 ID。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        run_test_git(temporary_directory.path(), &["init"]);
+        run_test_git(temporary_directory.path(), &["config", "user.name", "Test User"]);
+        run_test_git(
+            temporary_directory.path(),
+            &["config", "user.email", "test@example.com"],
+        );
+        let base_commit = commit_test_file(temporary_directory.path(), "base.txt", "base", "base");
+        let first_commit =
+            commit_test_file(temporary_directory.path(), "first.txt", "first", "first");
+        let second_commit =
+            commit_test_file(temporary_directory.path(), "second.txt", "second", "second");
+        let third_commit =
+            commit_test_file(temporary_directory.path(), "third.txt", "third", "third");
+        let fourth_commit =
+            commit_test_file(temporary_directory.path(), "fourth.txt", "fourth", "fourth");
+
+        // 步骤2：重排中间提交，把两个提交分别 Squash 和 Fixup，并修改最后提交说明。
+        let entries = vec![
+            GitRebasePlanEntry::new(second_commit, "pick", ""),
+            GitRebasePlanEntry::new(first_commit, "squash", ""),
+            GitRebasePlanEntry::new(third_commit, "fixup", ""),
+            GitRebasePlanEntry::new(fourth_commit, "reword", "renamed fourth"),
+        ];
+        let output = run_rebase_plan(
+            temporary_directory.path().to_path_buf(),
+            base_commit,
+            entries,
+        )
+        .await
+        .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+        // 步骤3：确认四条提交被折叠为两条，且 Reword 说明生效。
+        let subjects_output = git_command()
+            .args(["log", "--format=%s", "-2"])
+            .current_dir(temporary_directory.path())
+            .output()
+            .unwrap();
+        let subjects = String::from_utf8_lossy(&subjects_output.stdout);
+        let subject_lines: Vec<&str> = subjects.lines().collect();
+        assert_eq!(subject_lines, vec!["renamed fourth", "second"]);
     }
 
     #[tokio::test]

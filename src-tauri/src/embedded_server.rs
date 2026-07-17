@@ -668,6 +668,14 @@ pub fn run_server(
             )
             .route("/api/workspace/git-merge", post(workspace::workspace_git_merge))
             .route("/api/workspace/git-rebase", post(workspace::workspace_git_rebase))
+            .route(
+                "/api/workspace/git-rebase-candidates",
+                get(workspace::workspace_git_rebase_candidates),
+            )
+            .route(
+                "/api/workspace/git-rebase-plan",
+                post(workspace::workspace_git_rebase_plan),
+            )
             .route("/api/workspace/git-cherry-pick", post(workspace::workspace_git_cherry_pick))
             .route("/api/workspace/git-revert-commit", post(workspace::workspace_git_revert_commit))
             .route("/api/workspace/git-reset", post(workspace::workspace_git_reset))
@@ -875,6 +883,8 @@ mod tests {
             "/api/workspace/git-conflict-save",
             "/api/workspace/git-merge",
             "/api/workspace/git-rebase",
+            "/api/workspace/git-rebase-candidates",
+            "/api/workspace/git-rebase-plan",
             "/api/workspace/git-cherry-pick",
             "/api/workspace/git-revert-commit",
             "/api/workspace/git-reset",

@@ -1,5 +1,16 @@
 <template>
   <section class="git-history-panel" :aria-label="t('gitPanel.history')">
+    <div class="git-history-tools">
+      <button
+        type="button"
+        data-testid="git-history-rewrite-button"
+        :title="t('gitPanel.rewriteHistory')"
+        @click="rebasePlannerVisible = true"
+      >
+        <ListRestart :size="13" />
+        <span>{{ t('gitPanel.rewriteHistory') }}</span>
+      </button>
+    </div>
     <form class="git-history-search" @submit.prevent="applySearch">
       <Search :size="13" aria-hidden="true" />
       <input
@@ -218,17 +229,25 @@
       @confirm="confirmCherryPickSelected"
       @cancel="cherryPickConfirmationVisible = false"
     />
+    <GitRebasePlanner
+      :visible="rebasePlannerVisible"
+      :pane-id="paneId"
+      :repository="repository"
+      @close="rebasePlannerVisible = false"
+      @completed="handleRebaseCompleted"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Cherry, GitCompareArrows, Search, X } from 'lucide-vue-next'
+import { Cherry, GitCompareArrows, ListRestart, Search, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { appendGitRepository } from '../../utils/gitPanel'
 import GitCommitActions from './GitCommitActions.vue'
 import ConfirmModal from '../ui/ConfirmModal.vue'
+import GitRebasePlanner from './GitRebasePlanner.vue'
 import {
   buildGitGraphRows,
   mapGitCommitEntry,
@@ -268,6 +287,7 @@ const statusMessage = ref('')
 const selectedCommitHashes = ref<string[]>([])
 const cherryPickConfirmationVisible = ref(false)
 const batchBusy = ref(false)
+const rebasePlannerVisible = ref(false)
 
 const graphRows = computed(function computeGraphRows() {
   // 步骤1：提交列表每次加载或追加后重新计算连续图谱泳道。
@@ -397,6 +417,16 @@ function handleCommitActionResult(message: string, error: boolean): void {
   statusMessage.value = message
   errorMessage.value = ''
   void loadHistory(false)
+}
+
+function handleRebaseCompleted(message: string): void {
+  // 步骤1：关闭规划器并刷新历史与仓库状态，展示 Git 返回的重写结果。
+  rebasePlannerVisible.value = false
+  statusMessage.value = message
+  errorMessage.value = ''
+  clearSelectedCommits()
+  void loadHistory(false)
+  emit('refresh')
 }
 
 function isCommitSelected(hash: string): boolean {
@@ -571,6 +601,37 @@ watch(
   flex: 1;
   flex-direction: column;
   overflow: hidden;
+}
+
+.git-history-tools {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-history-tools button {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-muted);
+  background: var(--tab-bg);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.git-history-tools button:hover,
+.git-history-tools button:focus-visible {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: var(--bg-hover);
+  outline: none;
 }
 
 .git-history-search,

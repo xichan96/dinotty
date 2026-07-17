@@ -5,25 +5,53 @@
       <Wrench :size="13" />
       <span>{{ t('gitPanel.advancedActions') }}</span>
     </button>
-    <template v-if="expanded">
-      <div v-if="currentOperation" class="git-operation-banner" role="status">
-        <span class="git-operation-copy">
-          <span>
-            {{ t('gitPanel.operationInProgress').replace('{operation}', currentOperation) }}
-          </span>
-          <code v-if="operationTarget">{{ operationTarget.slice(0, 12) }}</code>
-          <strong v-if="operationProgress" data-testid="git-operation-progress">
-            {{ operationProgress }}
-          </strong>
+    <div
+      v-if="currentOperation"
+      data-testid="git-operation-banner"
+      class="git-operation-banner"
+      role="status"
+    >
+      <span class="git-operation-copy">
+        <span>
+          {{ t('gitPanel.operationInProgress').replace('{operation}', currentOperation) }}
         </span>
-        <button type="button" :disabled="busy" @click="controlOperation('continue')">
-          {{ t('gitPanel.continueOperation') }}
-        </button>
-        <button type="button" class="danger" :disabled="busy" @click="controlOperation('abort')">
-          {{ t('gitPanel.abortOperation') }}
-        </button>
-      </div>
+        <code v-if="operationTarget">{{ operationTarget.slice(0, 12) }}</code>
+        <strong v-if="operationProgress" data-testid="git-operation-progress">
+          {{ operationProgress }}
+        </strong>
+      </span>
+      <button type="button" :disabled="busy" @click="controlOperation('continue')">
+        {{ t('gitPanel.continueOperation') }}
+      </button>
+      <button
+        v-if="currentOperation !== 'merge'"
+        type="button"
+        data-testid="git-operation-skip"
+        :disabled="busy"
+        @click="controlOperation('skip')"
+      >
+        {{ t('gitPanel.skipOperation') }}
+      </button>
+      <button
+        type="button"
+        data-testid="git-operation-quit"
+        :disabled="busy"
+        @click="controlOperation('quit')"
+      >
+        {{ t('gitPanel.quitOperation') }}
+      </button>
+      <button
+        type="button"
+        data-testid="git-operation-abort"
+        class="danger"
+        :disabled="busy"
+        @click="controlOperation('abort')"
+      >
+        {{ t('gitPanel.abortOperation') }}
+      </button>
+    </div>
 
+    <template v-if="expanded">
       <p v-if="errorMessage" class="git-advanced-message error" role="alert">
         {{ errorMessage }}
       </p>
@@ -420,10 +448,13 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
       errorMessage.value = String(result.error || t('gitPanel.advancedOperationFailed'))
       return false
     }
-    statusMessage.value =
-      result.result_code === 'nothing_to_revert'
-        ? t('gitPanel.nothingToRevert')
-        : String(result.output || t('gitPanel.advancedOperationSucceeded'))
+    if (result.result_code === 'nothing_to_revert') {
+      statusMessage.value = t('gitPanel.nothingToRevert')
+    } else if (result.result_code === 'nothing_to_cherry_pick') {
+      statusMessage.value = t('gitPanel.nothingToCherryPick')
+    } else {
+      statusMessage.value = String(result.output || t('gitPanel.advancedOperationSucceeded'))
+    }
     emit('refresh')
     return true
   } catch {
@@ -455,8 +486,8 @@ async function runCommitAction(endpoint: 'git-cherry-pick' | 'git-revert-commit'
   await refreshAuxiliaryData()
 }
 
-async function controlOperation(action: 'continue' | 'abort'): Promise<void> {
-  // 步骤1：只对后端识别出的进行中操作执行继续或中止。
+async function controlOperation(action: 'continue' | 'skip' | 'quit' | 'abort'): Promise<void> {
+  // 步骤1：只对后端识别出的进行中操作执行继续、跳过、退出或中止。
   if (!currentOperation.value) return
   await postAction('git-operation-action', { operation: currentOperation.value, action })
   await refreshAuxiliaryData()
@@ -576,6 +607,7 @@ watch(
 
 .git-operation-banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   padding: 6px 7px;
@@ -586,7 +618,7 @@ watch(
 
 .git-operation-copy {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 180px;
   display: flex;
   align-items: center;
   gap: 5px;

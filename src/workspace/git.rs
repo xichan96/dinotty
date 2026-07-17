@@ -3421,8 +3421,18 @@ pub async fn workspace_git_cherry_pick(
         let commit = try_res!(validate_commit_hash(&requested_commit));
         commits.push(commit);
     }
-    let arguments = build_cherry_pick_arguments(&commits);
-    run_git_action(&manager, &query, arguments).await
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    match run_cherry_pick_sequence(root, &commits).await {
+        Ok(result) if result.output.status.success() && result.skipped_count == commits.len() => {
+            Json(serde_json::json!({
+                "ok": true,
+                "result_code": "nothing_to_cherry_pick",
+            }))
+            .into_response()
+        }
+        Ok(result) => git_command_response(&result.output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
 }
 
 fn build_cherry_pick_arguments(commits: &[String]) -> Vec<String> {
@@ -3432,6 +3442,40 @@ fn build_cherry_pick_arguments(commits: &[String]) -> Vec<String> {
         arguments.push(commit.to_string());
     }
     arguments
+}
+
+struct GitCherryPickSequenceResult {
+    output: std::process::Output,
+    skipped_count: usize,
+}
+
+async fn run_cherry_pick_sequence(
+    root: PathBuf,
+    commits: &[String],
+) -> Result<GitCherryPickSequenceResult, String> {
+    // 步骤1：按用户选择顺序启动一次 Cherry-pick 序列。
+    let arguments = build_cherry_pick_arguments(commits);
+    let mut output = run_git_tracked_output(root.clone(), arguments).await?;
+    let mut skipped_count = 0usize;
+
+    // 步骤2：提交改动已经存在时跳过当前项，让 Git 自动继续处理序列中的下一项。
+    while git_cherry_pick_requires_skip(&output) && skipped_count < commits.len() {
+        let skip_arguments = vec!["cherry-pick".to_string(), "--skip".to_string()];
+        output = run_git_tracked_output(root.clone(), skip_arguments).await?;
+        skipped_count += 1;
+    }
+    Ok(GitCherryPickSequenceResult { output, skipped_count })
+}
+
+fn git_cherry_pick_requires_skip(output: &std::process::Output) -> bool {
+    // 步骤1：只识别 Git 明确要求执行 --skip 的空提交状态，冲突和 Hook 错误继续返回失败。
+    if output.status.success() {
+        return false;
+    }
+    let stdout_message = String::from_utf8_lossy(&output.stdout);
+    let stderr_message = String::from_utf8_lossy(&output.stderr);
+    stdout_message.contains("please use 'git cherry-pick --skip'")
+        || stderr_message.contains("please use 'git cherry-pick --skip'")
 }
 
 pub async fn workspace_git_revert_commit(
@@ -3545,9 +3589,31 @@ pub async fn workspace_git_operation_state(
     } else if git_dir.join("REVERT_HEAD").exists() {
         operation = Some("revert".to_string());
         target = read_git_state_text(&git_dir.join("REVERT_HEAD"));
+    } else if let Some((sequencer_operation, sequencer_target)) = read_sequencer_operation(&git_dir)
+    {
+        operation = Some(sequencer_operation);
+        target = Some(sequencer_target);
     }
     Json(GitOperationStateResponse { operation, target, progress_current, progress_total })
         .into_response()
+}
+
+fn read_sequencer_operation(git_dir: &Path) -> Option<(String, String)> {
+    // 步骤1：读取批量 Cherry-pick 或 Revert 剩余计划，兼容 HEAD 标记被 Reset 清除的状态。
+    let todo_path = git_dir.join("sequencer").join("todo");
+    let todo = std::fs::read_to_string(todo_path).ok()?;
+    for line in todo.lines() {
+        let mut fields = line.split_whitespace();
+        let action = fields.next()?;
+        let target = fields.next()?;
+        if action == "pick" {
+            return Some(("cherry-pick".to_string(), target.to_string()));
+        }
+        if action == "revert" {
+            return Some(("revert".to_string(), target.to_string()));
+        }
+    }
+    None
 }
 
 pub async fn workspace_git_operation_action(
@@ -3562,7 +3628,11 @@ pub async fn workspace_git_operation_action(
         || operation == "rebase"
         || operation == "cherry-pick"
         || operation == "revert";
-    if !valid_operation || (action != "continue" && action != "abort") {
+    let valid_action = action == "continue"
+        || action == "abort"
+        || action == "quit"
+        || (action == "skip" && operation != "merge");
+    if !valid_operation || !valid_action {
         return json_err(StatusCode::BAD_REQUEST, "invalid operation action");
     }
     let arguments = vec![operation.to_string(), format!("--{action}")];
@@ -4632,7 +4702,8 @@ mod tests {
         initialize_git_repository, parse_branch_output, parse_git_blame_output,
         parse_git_clean_preview_output, parse_git_config_output, parse_log_output,
         parse_reflog_output, parse_remote_output, parse_stash_output, parse_status_output,
-        parse_tag_output, read_conflict_stage, request_git_command_cancellation, run_git_output,
+        parse_tag_output, read_conflict_stage, read_sequencer_operation,
+        request_git_command_cancellation, run_cherry_pick_sequence, run_git_output,
         run_rebase_plan, sanitize_git_command, unstage_git_paths,
         update_running_git_command_output, validate_clone_directory, validate_clone_url,
         validate_git_candidate_path, validate_initial_branch, GitCommandCancellation,
@@ -5311,6 +5382,45 @@ mod tests {
             build_cherry_pick_arguments(&commits),
             vec!["cherry-pick", "bbbbbbbb", "aaaaaaaa"]
         );
+    }
+
+    #[tokio::test]
+    async fn skips_an_already_applied_commit_and_finishes_the_cherry_pick_sequence() {
+        // 步骤1：建立来源分支的两个提交，并让主分支预先包含第一个提交的改动。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        let root = temporary_directory.path();
+        run_test_git(root, &["init", "-b", "main"]);
+        run_test_git(root, &["config", "user.name", "Test User"]);
+        run_test_git(root, &["config", "user.email", "test@example.com"]);
+        commit_test_file(root, "base.txt", "base", "base");
+        run_test_git(root, &["switch", "-c", "source"]);
+        let first_commit = commit_test_file(root, "first.txt", "first", "first");
+        let second_commit = commit_test_file(root, "second.txt", "second", "second");
+        run_test_git(root, &["switch", "main"]);
+        run_test_git(root, &["cherry-pick", &first_commit]);
+
+        // 步骤2：批量挑拣时自动跳过空提交，继续应用后续提交并清理序列状态。
+        let commits = vec![first_commit, second_commit];
+        let result = run_cherry_pick_sequence(root.to_path_buf(), &commits).await.unwrap();
+        assert!(result.output.status.success());
+        assert_eq!(result.skipped_count, 1);
+        assert_eq!(std::fs::read_to_string(root.join("second.txt")).unwrap(), "second");
+        assert!(!root.join(".git").join("sequencer").exists());
+        assert!(!root.join(".git").join("CHERRY_PICK_HEAD").exists());
+    }
+
+    #[test]
+    fn detects_cherry_pick_from_a_sequencer_todo_without_head_marker() {
+        // 步骤1：模拟 Reset 后只剩 sequencer/todo 的批量 Cherry-pick 状态。
+        let temporary_directory = tempfile::tempdir().unwrap();
+        let sequencer_directory = temporary_directory.path().join("sequencer");
+        std::fs::create_dir(&sequencer_directory).unwrap();
+        std::fs::write(sequencer_directory.join("todo"), "pick abcdef1234567890 selected commit\n")
+            .unwrap();
+
+        // 步骤2：操作检测仍应返回 Cherry-pick 和待处理提交 ID。
+        let operation = read_sequencer_operation(temporary_directory.path());
+        assert_eq!(operation, Some(("cherry-pick".to_string(), "abcdef1234567890".to_string())));
     }
 
     #[tokio::test]

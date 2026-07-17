@@ -222,10 +222,12 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
       emit('result', result.error || t('gitPanel.commitActionFailed'), true)
       return false
     }
-    const resultMessage =
-      result.result_code === 'nothing_to_revert'
-        ? t('gitPanel.nothingToRevert')
-        : result.output || t('gitPanel.commitActionSucceeded')
+    let resultMessage = result.output || t('gitPanel.commitActionSucceeded')
+    if (result.result_code === 'nothing_to_revert') {
+      resultMessage = t('gitPanel.nothingToRevert')
+    } else if (result.result_code === 'nothing_to_cherry_pick') {
+      resultMessage = t('gitPanel.nothingToCherryPick')
+    }
     emit('result', resultMessage, false)
     emit('refresh')
     return true

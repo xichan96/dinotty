@@ -507,7 +507,10 @@ async function confirmCherryPickSelected(): Promise<void> {
       errorMessage.value = result.error || t('gitPanel.commitActionFailed')
       return
     }
-    statusMessage.value = result.output || t('gitPanel.commitActionSucceeded')
+    statusMessage.value =
+      result.result_code === 'nothing_to_cherry_pick'
+        ? t('gitPanel.nothingToCherryPick')
+        : result.output || t('gitPanel.commitActionSucceeded')
     clearSelectedCommits()
     await loadHistory(false)
     emit('refresh')

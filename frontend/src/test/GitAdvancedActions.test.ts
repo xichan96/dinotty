@@ -159,4 +159,43 @@ describe('GitAdvancedActions', function gitAdvancedActionsSuite() {
       })
     )
   })
+
+  it('shows persistent controls for a sequencer-only cherry-pick', async function controlsSequencer() {
+    // 步骤1：模拟没有 CHERRY_PICK_HEAD、但后端从 sequencer/todo 识别出的 Cherry-pick。
+    advancedMocks.authFetch.mockImplementation(async function respondToSequencerRequest(
+      url: string,
+      options?: RequestInit
+    ) {
+      if (options) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      if (url.startsWith('/api/workspace/git-operation-state?')) {
+        return new Response(
+          JSON.stringify({ operation: 'cherry-pick', target: 'abcdef1234567890' }),
+          { status: 200 }
+        )
+      }
+      if (url.startsWith('/api/workspace/git-tags?')) {
+        return new Response(JSON.stringify({ tags: [] }), { status: 200 })
+      }
+      if (url.startsWith('/api/workspace/git-reflog?')) {
+        return new Response(JSON.stringify({ entries: [] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ local: [], remote: [] }), { status: 200 })
+    })
+    const wrapper = mount(GitAdvancedActions, { props: { paneId: 'pane-1' } })
+    await flushPromises()
+
+    // 步骤2：操作栏无需展开高级区域即可看见，并提供跳过、退出和中止动作。
+    expect(wrapper.get('[data-testid="git-operation-banner"]').text()).toContain('cherry-pick')
+    expect(wrapper.find('[data-testid="git-operation-skip"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="git-operation-abort"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="git-operation-quit"]').trigger('click')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-operation-action?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ operation: 'cherry-pick', action: 'quit' }),
+      })
+    )
+  })
 })

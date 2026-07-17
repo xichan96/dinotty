@@ -36,7 +36,7 @@ pub use git::{
     workspace_git_conflict_resolve,
     workspace_git_conflict_save, workspace_git_diff,
     workspace_git_diagnostics, workspace_git_discard, workspace_git_fetch, workspace_git_hunk_action,
-    workspace_git_log,
+    workspace_git_log, workspace_git_sync_preview,
     workspace_git_ignore, workspace_git_ignore_add, workspace_git_ignore_update,
     workspace_git_initialize, workspace_git_merge,
     workspace_git_operation_action, workspace_git_operation_state, workspace_git_pull,
@@ -72,7 +72,8 @@ pub use git::{
     GitSourceBody, GitStageBody, GitStashDiffQuery, GitStashEntry, GitStashReferenceBody,
     GitStashSaveBody,
     GitStashesResponse, GitStatusResponse, GitTagCreateBody, GitTagDeleteBody, GitTagEntry,
-    GitTagsResponse, GitUnifiedDiffQuery, GitUpstreamSetBody, GitUpstreamUnsetBody,
+    GitSyncPreviewResponse, GitTagsResponse, GitUnifiedDiffQuery, GitUpstreamSetBody,
+    GitUpstreamUnsetBody,
 };
 pub use syntax::{workspace_syntax_check, SyntaxCheckBody, SyntaxCheckResponse, SyntaxDiagnostic};
 

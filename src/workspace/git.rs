@@ -98,6 +98,12 @@ pub struct GitLogResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct GitSyncPreviewResponse {
+    pub incoming: Vec<GitCommitSummary>,
+    pub outgoing: Vec<GitCommitSummary>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct GitCompareResponse {
     pub base_only: usize,
     pub target_only: usize,
@@ -3866,6 +3872,54 @@ pub async fn workspace_git_log(
     }
 }
 
+fn build_git_sync_preview_arguments(range: &str) -> Vec<String> {
+    // 步骤1：使用与历史记录相同的稳定字段格式，并限制单侧最多返回一百条提交。
+    vec![
+        "log".to_string(),
+        "--topo-order".to_string(),
+        "--date=iso-strict".to_string(),
+        "--decorate=short".to_string(),
+        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%D%x00%s%x1e".to_string(),
+        "--max-count=100".to_string(),
+        range.to_string(),
+    ]
+}
+
+async fn read_git_sync_preview(
+    root: PathBuf,
+    range: &str,
+) -> Result<Vec<GitCommitSummary>, String> {
+    // 步骤1：读取指定同步方向的提交，并把 Git 失败结果原样交给接口层处理。
+    let arguments = build_git_sync_preview_arguments(range);
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(parse_log_output(&stdout))
+        }
+        Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        Err(error) => Err(error),
+    }
+}
+
+pub async fn workspace_git_sync_preview(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取当前仓库相对上游的传入提交。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let incoming = match read_git_sync_preview(root.clone(), "HEAD..@{upstream}").await {
+        Ok(commits) => commits,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+
+    // 步骤2：读取当前仓库相对上游的传出提交并返回两个方向。
+    let outgoing = match read_git_sync_preview(root, "@{upstream}..HEAD").await {
+        Ok(commits) => commits,
+        Err(error) => return json_err(StatusCode::BAD_REQUEST, &error),
+    };
+    Json(GitSyncPreviewResponse { incoming, outgoing }).into_response()
+}
+
 pub async fn workspace_git_commit_diff(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<GitCommitDiffQuery>,
@@ -4314,7 +4368,8 @@ mod tests {
         append_git_ignore_pattern, apply_unified_diff_hunk, build_branch_create_arguments,
         build_branch_delete_arguments,
         build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
-        build_git_clean_arguments, build_git_config_update_commands, git_clean_preview_paths,
+        build_git_clean_arguments, build_git_config_update_commands,
+        build_git_sync_preview_arguments, git_clean_preview_paths,
         git_command_records_for_root, git_ignore_literal_pattern,
         request_git_command_cancellation, sanitize_git_command,
         build_remote_add_arguments, build_remote_delete_arguments,
@@ -5174,6 +5229,26 @@ mod tests {
             build_remote_branch_delete_arguments("origin", "obsolete"),
             vec!["push", "origin", "--delete", "obsolete"]
         );
+    }
+
+    #[test]
+    fn builds_incoming_and_outgoing_sync_preview_ranges() {
+        // 步骤1：传入提交从当前 HEAD 到上游，传出提交从上游到当前 HEAD。
+        let incoming = build_git_sync_preview_arguments("HEAD..@{upstream}");
+        let outgoing = build_git_sync_preview_arguments("@{upstream}..HEAD");
+        assert!(incoming.contains(&"HEAD..@{upstream}".to_string()));
+        assert!(outgoing.contains(&"@{upstream}..HEAD".to_string()));
+
+        // 步骤2：两个命令都限制数量并使用稳定的 NUL 字段格式。
+        assert!(incoming.contains(&"--max-count=100".to_string()));
+        assert!(outgoing.contains(&"--max-count=100".to_string()));
+        assert!(incoming.iter().any(contains_git_log_format));
+        assert!(outgoing.iter().any(contains_git_log_format));
+    }
+
+    fn contains_git_log_format(argument: &String) -> bool {
+        // 步骤1：识别用于解析稳定提交字段的格式参数。
+        argument.starts_with("--pretty=format:")
     }
 
     #[test]

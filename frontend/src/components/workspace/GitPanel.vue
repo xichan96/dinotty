@@ -82,6 +82,14 @@
       @select-remote="selectedRemoteName = $event"
     />
 
+    <GitSyncPreview
+      :visible="syncPreviewVisible && isGitRepo"
+      :pane-id="paneId"
+      :repository="repository"
+      @close="syncPreviewVisible = false"
+      @view-history="emit('view-history', $event)"
+    />
+
     <div v-if="loading && !files.length" class="git-panel-state">
       {{ t('gitPanel.loading') }}
     </div>
@@ -130,22 +138,28 @@
             </span>
           </span>
           <span v-if="ahead > 0 || behind > 0" class="git-sync-counts">
-            <span
+            <button
               v-if="behind > 0"
+              type="button"
               data-testid="git-behind-count"
               class="git-sync-count behind"
               :title="t('gitPanel.behind')"
+              :aria-label="t('gitPanel.behind')"
+              @click="syncPreviewVisible = true"
             >
               <ArrowDown :size="11" />{{ behind }}
-            </span>
-            <span
+            </button>
+            <button
               v-if="ahead > 0"
+              type="button"
               data-testid="git-ahead-count"
               class="git-sync-count ahead"
               :title="t('gitPanel.ahead')"
+              :aria-label="t('gitPanel.ahead')"
+              @click="syncPreviewVisible = true"
             >
               <ArrowUp :size="11" />{{ ahead }}
-            </span>
+            </button>
           </span>
           <span class="git-remote-actions">
             <button
@@ -524,6 +538,7 @@ import GitRepositorySetup from './GitRepositorySetup.vue'
 import GitRemoteManager from './GitRemoteManager.vue'
 import GitStashSection from './GitStashSection.vue'
 import GitSyncOptions from './GitSyncOptions.vue'
+import GitSyncPreview from './GitSyncPreview.vue'
 
 const props = defineProps<{
   paneId: string
@@ -563,6 +578,7 @@ const activeAction = ref('')
 const branchMenuVisible = ref(false)
 const remoteManagerVisible = ref(false)
 const syncOptionsVisible = ref(false)
+const syncPreviewVisible = ref(false)
 const panelMode = ref<'changes' | 'history'>('changes')
 const fileSearch = ref('')
 const selectedRemoteName = ref('')
@@ -998,9 +1014,17 @@ async function resolveConflict(
 
 .git-sync-count {
   gap: 1px;
+  border: 0;
+  padding: 1px 2px;
+  background: transparent;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
+  cursor: pointer;
+}
+
+.git-sync-count:hover {
+  background: var(--bg-hover);
 }
 
 .git-sync-count.behind {

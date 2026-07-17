@@ -174,7 +174,11 @@ describe('GitPanel', function gitPanelSuite() {
     expect(wrapper.get('[data-testid="git-ahead-count"]').text()).toContain('2')
     expect(wrapper.get('[data-testid="git-behind-count"]').text()).toContain('1')
 
-    // 步骤2：依次执行 Fetch、Pull 和 Push，并核对工作区接口。
+    // 步骤2：点击同步计数时打开传入和传出提交预览。
+    await wrapper.get('[data-testid="git-ahead-count"]').trigger('click')
+    expect(wrapper.findComponent({ name: 'GitSyncPreview' }).props('visible')).toBe(true)
+
+    // 步骤3：依次执行 Fetch、Pull 和 Push，并核对工作区接口。
     await wrapper.get('[data-testid="git-fetch-button"]').trigger('click')
     await flushPromises()
     expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(

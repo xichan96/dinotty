@@ -115,6 +115,52 @@
           </button>
         </template>
       </section>
+
+      <section class="git-maintenance-group" :aria-label="t('gitPanel.safetyBackups')">
+        <div class="git-maintenance-group-header">
+          <span>{{ t('gitPanel.safetyBackups') }}</span>
+          <button
+            type="button"
+            class="git-maintenance-icon-button"
+            :disabled="loadingBackups"
+            @click="loadBackups"
+          >
+            <RefreshCw :size="13" :class="{ spinning: loadingBackups }" />
+          </button>
+        </div>
+        <div v-if="backups.length" class="git-backup-list">
+          <div
+            v-for="backup in backups"
+            :key="backup.name"
+            data-testid="git-backup-row"
+            class="git-backup-row"
+          >
+            <span>
+              <strong>{{ backup.reason }}</strong>
+              <code>{{ backup.paths.join(', ') }}</code>
+              <small>{{ formatBackupSize(backup.size) }}</small>
+            </span>
+            <button
+              type="button"
+              data-testid="git-backup-restore"
+              class="git-maintenance-icon-button"
+              :title="t('gitPanel.restoreBackup')"
+              @click="backupPendingAction = { backup, action: 'restore' }"
+            >
+              <ArchiveRestore :size="13" />
+            </button>
+            <button
+              type="button"
+              class="git-maintenance-icon-button danger"
+              :title="t('gitPanel.deleteBackup')"
+              @click="backupPendingAction = { backup, action: 'delete' }"
+            >
+              <Trash2 :size="13" />
+            </button>
+          </div>
+        </div>
+        <p v-else class="git-maintenance-empty">{{ t('gitPanel.noSafetyBackups') }}</p>
+      </section>
     </template>
 
     <ConfirmModal
@@ -126,12 +172,22 @@
       @confirm="cleanSelectedPaths"
       @cancel="cleanConfirmationVisible = false"
     />
+    <ConfirmModal
+      :visible="!!backupPendingAction"
+      :title="backupActionTitle"
+      :message="backupActionMessage"
+      :confirm-text="backupActionTitle"
+      :cancel-text="t('filePreview.cancel')"
+      @confirm="runBackupAction"
+      @cancel="backupPendingAction = null"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import {
+  ArchiveRestore,
   ChevronDown,
   File,
   Folder,
@@ -152,6 +208,14 @@ const props = defineProps<{
   repository?: string
 }>()
 
+interface GitBackupEntry {
+  name: string
+  reason: string
+  createdAt: number
+  paths: string[]
+  size: number
+}
+
 const emit = defineEmits<{
   refresh: []
 }>()
@@ -164,11 +228,17 @@ const loadingPreview = ref(false)
 const cleaning = ref(false)
 const previewLoaded = ref(false)
 const cleanConfirmationVisible = ref(false)
+const loadingBackups = ref(false)
 const ignoreContent = ref('')
 const cleanPaths = ref<string[]>([])
 const selectedCleanPaths = ref<Set<string>>(new Set())
 const errorMessage = ref('')
 const statusMessage = ref('')
+const backups = ref<GitBackupEntry[]>([])
+const backupPendingAction = ref<{
+  backup: GitBackupEntry
+  action: 'restore' | 'delete'
+} | null>(null)
 
 const selectedCount = computed(function countSelectedCleanPaths() {
   return selectedCleanPaths.value.size
@@ -176,6 +246,20 @@ const selectedCount = computed(function countSelectedCleanPaths() {
 
 const cleanConfirmationMessage = computed(function computeCleanConfirmationMessage() {
   return t('gitPanel.cleanConfirmation').replace('{count}', String(selectedCount.value))
+})
+
+const backupActionTitle = computed(function computeBackupActionTitle() {
+  return backupPendingAction.value?.action === 'delete'
+    ? t('gitPanel.deleteBackup')
+    : t('gitPanel.restoreBackup')
+})
+
+const backupActionMessage = computed(function computeBackupActionMessage() {
+  // 步骤1：确认信息显示服务端生成的备份名称。
+  return t('gitPanel.backupActionMessage').replace(
+    '{name}',
+    backupPendingAction.value?.backup.name || ''
+  )
 })
 
 function buildQuery(): string {
@@ -194,7 +278,76 @@ function clearMessages(): void {
 function toggleExpanded(): void {
   // 步骤1：首次展开时读取仓库根 .gitignore。
   expanded.value = !expanded.value
-  if (expanded.value) void loadGitIgnore()
+  if (expanded.value) {
+    void loadGitIgnore()
+    void loadBackups()
+  }
+}
+
+async function loadBackups(): Promise<void> {
+  // 步骤1：读取服务端结构化备份并转换固定字段。
+  loadingBackups.value = true
+  try {
+    await getApiBase()
+    const response = await authFetch(apiUrl(`/api/workspace/git-backups?${buildQuery()}`))
+    const result = await response.json()
+    const nextBackups: GitBackupEntry[] = []
+    if (response.ok && Array.isArray(result.backups)) {
+      for (const backup of result.backups) {
+        const paths: string[] = []
+        if (Array.isArray(backup.paths)) {
+          for (const value of backup.paths) {
+            paths.push(String(value))
+          }
+        }
+        nextBackups.push({
+          name: String(backup.name || ''),
+          reason: String(backup.reason || ''),
+          createdAt: Number(backup.created_at || 0),
+          paths,
+          size: Number(backup.size || 0),
+        })
+      }
+    }
+    backups.value = nextBackups
+  } catch {
+    errorMessage.value = t('gitPanel.backupOperationFailed')
+  } finally {
+    loadingBackups.value = false
+  }
+}
+
+function formatBackupSize(size: number): string {
+  // 步骤1：紧凑显示字节或 MiB，避免长数字撑开侧栏。
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KiB`
+  return `${(size / 1024 / 1024).toFixed(1)} MiB`
+}
+
+async function runBackupAction(): Promise<void> {
+  // 步骤1：恢复和删除都通过确认状态发送服务端生成的名称。
+  const pendingAction = backupPendingAction.value
+  backupPendingAction.value = null
+  if (!pendingAction) return
+  const endpoint = pendingAction.action === 'restore' ? 'git-backup-restore' : 'git-backup-delete'
+  try {
+    await getApiBase()
+    const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${buildQuery()}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: pendingAction.backup.name, confirm: true }),
+    })
+    if (!response.ok) {
+      const result = await response.json().catch(function emptyBackupResult() {
+        return {}
+      })
+      errorMessage.value = result.error || t('gitPanel.backupOperationFailed')
+      return
+    }
+    emit('refresh')
+    await loadBackups()
+  } catch {
+    errorMessage.value = t('gitPanel.backupOperationFailed')
+  }
 }
 
 async function loadGitIgnore(): Promise<void> {
@@ -514,6 +667,46 @@ async function cleanSelectedPaths(): Promise<void> {
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.git-backup-list {
+  border: 1px solid var(--border);
+}
+
+.git-backup-row {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-backup-row:last-child {
+  border-bottom: 0;
+}
+
+.git-backup-row > span {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.git-backup-row code {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-backup-row small {
+  color: var(--fg-muted);
+  font-size: 8px;
+}
+
+.git-maintenance-icon-button.danger:hover {
+  color: var(--color-red, #e06c75);
 }
 
 .spinning {

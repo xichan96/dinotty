@@ -457,6 +457,7 @@ describe('GitDiffViewer', function gitDiffViewerSuite() {
         new Response(
           JSON.stringify({
             patch: 'diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old value\n+new value',
+            content_version: 'version-1',
           }),
           { status: 200 }
         )
@@ -487,6 +488,7 @@ describe('GitDiffViewer', function gitDiffViewerSuite() {
           untracked: false,
           hunk_index: 0,
           action: 'stage',
+          content_version: 'version-1',
         }),
       })
     )

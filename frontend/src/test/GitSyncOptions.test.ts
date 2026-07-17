@@ -97,13 +97,22 @@ describe('GitSyncOptions', function gitSyncOptionsSuite() {
     )
   })
 
-  it('pushes tags safely and deletes a remote branch', async function pushesAndDeletesRemoteBranch() {
-    // 步骤1：把 main 安全强推到 origin/release，并同时推送标签。
+  it('confirms force push and deletes a remote branch', async function pushesAndDeletesRemoteBranch() {
+    // 步骤1：安全强推必须先弹出包含目标分支的二次确认，不立即发送请求。
     const wrapper = mountSyncOptions()
     await wrapper.get('[data-testid="git-push-remote-branch"]').setValue('release')
     await wrapper.get('[data-testid="git-push-tags"]').setValue(true)
     await wrapper.get('[data-testid="git-force-with-lease"]').setValue(true)
     await wrapper.get('[data-testid="git-sync-push-button"]').trigger('click')
+    await flushPromises()
+    expect(syncOptionsMocks.authFetch).not.toHaveBeenCalled()
+    const forcePushModal = wrapper
+      .findAllComponents(ConfirmModal)
+      .find(function findForceModal(modal) {
+        return modal.props('visible') && String(modal.props('message')).includes('origin/release')
+      })
+    expect(forcePushModal).toBeDefined()
+    forcePushModal?.vm.$emit('confirm')
     await flushPromises()
     expect(syncOptionsMocks.authFetch).toHaveBeenLastCalledWith(
       '/api/workspace/git-push?pane_id=pane-1&repository=apps%2Fweb',
@@ -122,7 +131,13 @@ describe('GitSyncOptions', function gitSyncOptionsSuite() {
 
     // 步骤2：请求删除同一远程分支，并在确认后调用专用接口。
     await wrapper.get('[data-testid="git-remote-branch-delete-button"]').trigger('click')
-    wrapper.findComponent(ConfirmModal).vm.$emit('confirm')
+    const deleteModal = wrapper
+      .findAllComponents(ConfirmModal)
+      .find(function findDeleteModal(modal) {
+        return modal.props('visible') && String(modal.props('message')).includes('origin/release')
+      })
+    expect(deleteModal).toBeDefined()
+    deleteModal?.vm.$emit('confirm')
     await flushPromises()
     expect(syncOptionsMocks.authFetch).toHaveBeenLastCalledWith(
       '/api/workspace/git-remote-branch-delete?pane_id=pane-1&repository=apps%2Fweb',

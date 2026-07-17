@@ -119,6 +119,16 @@
     </section>
 
     <ConfirmModal
+      :visible="forcePushPending"
+      :title="t('gitPanel.confirmForcePush')"
+      :message="forcePushMessage"
+      :confirm-text="t('gitPanel.forceWithLease')"
+      :cancel-text="t('filePreview.cancel')"
+      @confirm="confirmForcePush"
+      @cancel="forcePushPending = false"
+    />
+
+    <ConfirmModal
       :visible="deletePending"
       :title="t('gitPanel.deleteRemoteBranch')"
       :message="deleteMessage"
@@ -169,6 +179,7 @@ const pullRemoteBranch = ref('')
 const pushRemoteBranch = ref('')
 const pushTags = ref(false)
 const forceWithLease = ref(false)
+const forcePushPending = ref(false)
 const deletePending = ref(false)
 const busy = ref(false)
 const errorMessage = ref('')
@@ -178,6 +189,12 @@ const deleteMessage = computed(function computeDeleteMessage() {
   // 步骤1：在确认信息中明确 Remote 和分支，降低误删风险。
   const target = `${activeRemoteName.value}/${pushRemoteBranch.value.trim()}`
   return t('gitPanel.deleteRemoteBranchMessage').replace('{branch}', target)
+})
+
+const forcePushMessage = computed(function computeForcePushMessage() {
+  // 步骤1：在二次确认中显示完整 Remote 和目标分支。
+  const target = `${activeRemoteName.value}/${pushRemoteBranch.value.trim()}`
+  return t('gitPanel.forcePushMessage').replace('{branch}', target)
 })
 
 function selectRemote(): void {
@@ -241,6 +258,21 @@ async function pullRemote(): Promise<void> {
 }
 
 async function pushRemote(): Promise<void> {
+  // 步骤1：安全强推先进入独立确认流程，普通推送直接执行。
+  if (forceWithLease.value) {
+    forcePushPending.value = true
+    return
+  }
+  await executePush(false)
+}
+
+async function confirmForcePush(): Promise<void> {
+  // 步骤1：只有确认弹窗回调可以发送后端要求的确认标记。
+  forcePushPending.value = false
+  await executePush(true)
+}
+
+async function executePush(forceConfirmed: boolean): Promise<void> {
   // 步骤1：把当前本地分支推送到目标分支，并附带标签与安全强推选项。
   const remoteBranch = pushRemoteBranch.value.trim()
   if (!activeRemoteName.value || !props.branch || !remoteBranch) return
@@ -250,7 +282,7 @@ async function pushRemote(): Promise<void> {
     remote_branch: remoteBranch,
     push_tags: pushTags.value,
     force_with_lease: forceWithLease.value,
-    confirm_force_with_lease: forceWithLease.value,
+    confirm_force_with_lease: forceConfirmed,
   })
 }
 

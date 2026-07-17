@@ -303,6 +303,7 @@
           :pane-id="paneId"
           :repository="repository"
           :remotes="remotes"
+          :branch="branch"
           @refresh="emit('refresh')"
         />
 

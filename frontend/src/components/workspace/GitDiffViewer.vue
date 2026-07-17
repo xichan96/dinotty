@@ -104,6 +104,7 @@ const loading = ref(false)
 const errorMessage = ref('')
 const actionErrorMessage = ref('')
 const patch = ref('')
+const contentVersion = ref('')
 const ignoreWhitespace = ref(false)
 const hunkActionBusy = ref(false)
 let diffRequestId = 0
@@ -120,6 +121,7 @@ async function loadDiff(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   patch.value = ''
+  contentVersion.value = ''
   try {
     await getApiBase()
     const query = new URLSearchParams({
@@ -146,6 +148,7 @@ async function loadDiff(): Promise<void> {
 
     // 步骤2：保存后端返回的 unified diff，由计算属性转换为行模型。
     patch.value = result.patch || ''
+    contentVersion.value = result.content_version || ''
   } catch {
     if (isLatestGitRequest(requestId, diffRequestId, requestedRepository, props.repository || '')) {
       errorMessage.value = t('gitPanel.diffFailed')
@@ -175,6 +178,7 @@ async function runHunkAction(
       untracked: props.untracked,
       hunk_index: hunkIndex,
       action,
+      content_version: contentVersion.value,
     }
     if (ignoreWhitespace.value) {
       requestBody.ignore_whitespace = true

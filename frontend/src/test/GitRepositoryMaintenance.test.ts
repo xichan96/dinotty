@@ -32,8 +32,48 @@ describe('GitRepositoryMaintenance', function gitRepositoryMaintenanceSuite() {
           status: 200,
         })
       }
+      if (url.includes('git-backups')) {
+        return new Response(
+          JSON.stringify({
+            backups: [
+              {
+                name: 'discard-1000',
+                reason: 'discard',
+                created_at: 1000,
+                paths: ['src/main.ts'],
+                size: 128,
+              },
+            ],
+          }),
+          { status: 200 }
+        )
+      }
       return new Response(JSON.stringify({ content: 'target/\n', exists: true }), { status: 200 })
     })
+  })
+
+  it('lists and restores a safety backup after confirmation', async function restoresBackup() {
+    // 步骤1：展开维护区域后读取可恢复备份。
+    const wrapper = mount(GitRepositoryMaintenance, {
+      attachTo: document.body,
+      props: { paneId: 'pane-1', repository: 'apps/web' },
+    })
+    await wrapper.get('[data-testid="git-maintenance-heading"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="git-backup-row"]').text()).toContain('src/main.ts')
+
+    // 步骤2：恢复必须经过确认，并只提交服务端返回的备份名称。
+    await wrapper.get('[data-testid="git-backup-restore"]').trigger('click')
+    const confirmButton = document.querySelector<HTMLButtonElement>('.confirm-btn.primary')
+    confirmButton?.click()
+    await flushPromises()
+    expect(maintenanceMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-backup-restore?pane_id=pane-1&repository=apps%2Fweb',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'discard-1000', confirm: true }),
+      })
+    )
   })
 
   afterEach(function cleanMaintenanceDocument() {

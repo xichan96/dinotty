@@ -135,6 +135,120 @@ describe('GitAdvancedActions', function gitAdvancedActionsSuite() {
     )
   })
 
+  it('lists remote tags and pushes one local tag', async function pushesRemoteTag() {
+    // 步骤1：远程标签接口返回与本地不同的标签，展开后应明确显示。
+    advancedMocks.authFetch.mockImplementation(async function respondToRemoteTagRequest(
+      url: string,
+      options?: RequestInit
+    ) {
+      if (options) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      if (url.startsWith('/api/workspace/git-remote-tags?')) {
+        return new Response(JSON.stringify({ tags: [{ name: 'v0.9.0', target: 'bbbbbbbb' }] }), {
+          status: 200,
+        })
+      }
+      if (url.startsWith('/api/workspace/git-tags?')) {
+        return new Response(JSON.stringify({ tags: [{ name: 'v1.0.0', target: 'aaaaaaaa' }] }), {
+          status: 200,
+        })
+      }
+      if (url.startsWith('/api/workspace/git-branches?')) {
+        return new Response(JSON.stringify({ local: [], remote: [] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ operation: null, entries: [] }), { status: 200 })
+    })
+    const wrapper = mount(GitAdvancedActions, {
+      props: {
+        paneId: 'pane-1',
+        remotes: [{ name: 'origin', fetchUrl: '', pushUrl: '' }],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.git-advanced-heading').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="git-remote-tag-row"]').text()).toContain('v0.9.0')
+
+    // 步骤2：单标签推送只发送选中的 Remote 和标签。
+    await wrapper.get('[data-testid="git-tag-push-button"]').trigger('click')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-remote-tag-push?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ remote: 'origin', tag: 'v1.0.0' }),
+      })
+    )
+  })
+
+  it('runs bisect actions and patch preflight', async function runsBisectAndPatch() {
+    // 步骤1：启动 Bisect，并把坏提交作为独立修订版本发送。
+    const wrapper = mount(GitAdvancedActions, { props: { paneId: 'pane-1' } })
+    await flushPromises()
+    await wrapper.get('.git-advanced-heading').trigger('click')
+    await wrapper.get('[data-testid="git-bisect-revision"]').setValue('abcdef12')
+    await wrapper.get('[data-testid="git-bisect-bad"]').trigger('click')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-bisect?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ action: 'bad', revision: 'abcdef12' }),
+      })
+    )
+
+    // 步骤2：Patch 预检必须携带 check，不能误启用三方应用。
+    await wrapper.get('[data-testid="git-patch-content"]').setValue('diff --git a/a.txt b/a.txt\n')
+    await wrapper.get('[data-testid="git-patch-check"]').trigger('click')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-patch-apply?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          patch: 'diff --git a/a.txt b/a.txt\n',
+          check: true,
+          three_way: false,
+        }),
+      })
+    )
+  })
+
+  it('continues a persisted bisect session from the operation banner', async function continuesBisect() {
+    // 步骤1：后端识别 BISECT_START 后，折叠状态也应显示专用判定操作。
+    advancedMocks.authFetch.mockImplementation(async function respondToBisectState(
+      url: string,
+      options?: RequestInit
+    ) {
+      if (options) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      if (url.startsWith('/api/workspace/git-operation-state?')) {
+        return new Response(JSON.stringify({ operation: 'bisect', target: 'abcdef12' }), {
+          status: 200,
+        })
+      }
+      if (url.startsWith('/api/workspace/git-tags?')) {
+        return new Response(JSON.stringify({ tags: [] }), { status: 200 })
+      }
+      if (url.startsWith('/api/workspace/git-reflog?')) {
+        return new Response(JSON.stringify({ entries: [] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ local: [], remote: [] }), { status: 200 })
+    })
+    const wrapper = mount(GitAdvancedActions, { props: { paneId: 'pane-1' } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="git-operation-banner"]').text()).toContain('bisect')
+
+    // 步骤2：状态栏的“正常”直接提交 Bisect good，不走通用 continue 接口。
+    await wrapper.get('[data-testid="git-bisect-banner-good"]').trigger('click')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-bisect?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ action: 'good', revision: '' }),
+      })
+    )
+  })
+
   it('shows operation progress and creates a recovery branch from reflog', async function recoversFromReflog() {
     // 步骤1：让状态接口返回进行到一半的 Rebase，并返回一条可恢复的 Reflog。
     advancedMocks.authFetch.mockImplementation(async function respondToRecoveryRequest(

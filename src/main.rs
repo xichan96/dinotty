@@ -914,6 +914,12 @@ async fn main() {
             .route("/api/workspace/git-ignore-add", post(workspace::workspace_git_ignore_add))
             .route("/api/workspace/git-clean-preview", get(workspace::workspace_git_clean_preview))
             .route("/api/workspace/git-clean", post(workspace::workspace_git_clean))
+            .route("/api/workspace/git-backups", get(workspace::workspace_git_backups))
+            .route(
+                "/api/workspace/git-backup-restore",
+                post(workspace::workspace_git_backup_restore),
+            )
+            .route("/api/workspace/git-backup-delete", post(workspace::workspace_git_backup_delete))
             .route("/api/workspace/git-worktrees", get(workspace::workspace_git_worktrees))
             .route(
                 "/api/workspace/git-worktree-create",
@@ -923,13 +929,34 @@ async fn main() {
                 "/api/workspace/git-worktree-remove",
                 post(workspace::workspace_git_worktree_remove),
             )
+            .route(
+                "/api/workspace/git-worktree-action",
+                post(workspace::workspace_git_worktree_action),
+            )
             .route("/api/workspace/git-submodules", get(workspace::workspace_git_submodules))
             .route(
                 "/api/workspace/git-submodule-update",
                 post(workspace::workspace_git_submodule_update),
             )
+            .route("/api/workspace/git-submodule-add", post(workspace::workspace_git_submodule_add))
+            .route(
+                "/api/workspace/git-submodule-sync",
+                post(workspace::workspace_git_submodule_sync),
+            )
+            .route(
+                "/api/workspace/git-submodule-deinit",
+                post(workspace::workspace_git_submodule_deinit),
+            )
+            .route(
+                "/api/workspace/git-submodule-remove",
+                post(workspace::workspace_git_submodule_remove),
+            )
             .route("/api/workspace/git-lfs-tracks", get(workspace::workspace_git_lfs_tracks))
             .route("/api/workspace/git-lfs-track", post(workspace::workspace_git_lfs_track))
+            .route("/api/workspace/git-lfs-untrack", post(workspace::workspace_git_lfs_untrack))
+            .route("/api/workspace/git-lfs-locks", get(workspace::workspace_git_lfs_locks))
+            .route("/api/workspace/git-lfs-lock", post(workspace::workspace_git_lfs_lock))
+            .route("/api/workspace/git-lfs-unlock", post(workspace::workspace_git_lfs_unlock))
             .route("/api/workspace/git-lfs-pull", post(workspace::workspace_git_lfs_pull))
             .route("/api/workspace/git-lfs-push", post(workspace::workspace_git_lfs_push))
             .route(
@@ -943,6 +970,13 @@ async fn main() {
                 "/api/workspace/git-remote-tag-delete",
                 post(workspace::workspace_git_remote_tag_delete),
             )
+            .route("/api/workspace/git-remote-tags", get(workspace::workspace_git_remote_tags))
+            .route(
+                "/api/workspace/git-remote-tag-push",
+                post(workspace::workspace_git_remote_tag_push),
+            )
+            .route("/api/workspace/git-bisect", post(workspace::workspace_git_bisect))
+            .route("/api/workspace/git-patch-apply", post(workspace::workspace_git_patch_apply))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))

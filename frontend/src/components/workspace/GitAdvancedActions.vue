@@ -20,35 +20,56 @@
           {{ operationProgress }}
         </strong>
       </span>
-      <button type="button" :disabled="busy" @click="controlOperation('continue')">
-        {{ t('gitPanel.continueOperation') }}
-      </button>
-      <button
-        v-if="currentOperation !== 'merge'"
-        type="button"
-        data-testid="git-operation-skip"
-        :disabled="busy"
-        @click="controlOperation('skip')"
-      >
-        {{ t('gitPanel.skipOperation') }}
-      </button>
-      <button
-        type="button"
-        data-testid="git-operation-quit"
-        :disabled="busy"
-        @click="controlOperation('quit')"
-      >
-        {{ t('gitPanel.quitOperation') }}
-      </button>
-      <button
-        type="button"
-        data-testid="git-operation-abort"
-        class="danger"
-        :disabled="busy"
-        @click="controlOperation('abort')"
-      >
-        {{ t('gitPanel.abortOperation') }}
-      </button>
+      <template v-if="currentOperation === 'bisect'">
+        <button
+          type="button"
+          data-testid="git-bisect-banner-good"
+          :disabled="busy"
+          @click="runBisectAction('good')"
+        >
+          {{ t('gitPanel.bisectGood') }}
+        </button>
+        <button type="button" :disabled="busy" @click="runBisectAction('bad')">
+          {{ t('gitPanel.bisectBad') }}
+        </button>
+        <button type="button" :disabled="busy" @click="runBisectAction('skip')">
+          {{ t('gitPanel.bisectSkip') }}
+        </button>
+        <button type="button" class="danger" :disabled="busy" @click="runBisectAction('reset')">
+          {{ t('gitPanel.bisectReset') }}
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" :disabled="busy" @click="controlOperation('continue')">
+          {{ t('gitPanel.continueOperation') }}
+        </button>
+        <button
+          v-if="currentOperation !== 'merge'"
+          type="button"
+          data-testid="git-operation-skip"
+          :disabled="busy"
+          @click="controlOperation('skip')"
+        >
+          {{ t('gitPanel.skipOperation') }}
+        </button>
+        <button
+          type="button"
+          data-testid="git-operation-quit"
+          :disabled="busy"
+          @click="controlOperation('quit')"
+        >
+          {{ t('gitPanel.quitOperation') }}
+        </button>
+        <button
+          type="button"
+          data-testid="git-operation-abort"
+          class="danger"
+          :disabled="busy"
+          @click="controlOperation('abort')"
+        >
+          {{ t('gitPanel.abortOperation') }}
+        </button>
+      </template>
     </div>
 
     <template v-if="expanded">
@@ -111,6 +132,43 @@
             @click="runCommitAction('git-revert-commit')"
           >
             <RotateCcw :size="13" />{{ t('gitPanel.revertCommit') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="git-advanced-group">
+        <h3>{{ t('gitPanel.bisect') }}</h3>
+        <input
+          v-model="bisectRevision"
+          data-testid="git-bisect-revision"
+          type="text"
+          :placeholder="t('gitPanel.bisectRevision')"
+        />
+        <div class="git-advanced-button-row git-advanced-button-row-wrap">
+          <button type="button" :disabled="busy" @click="runBisectAction('start')">
+            <Play :size="13" />{{ t('gitPanel.bisectStart') }}
+          </button>
+          <button
+            type="button"
+            data-testid="git-bisect-good"
+            :disabled="busy"
+            @click="runBisectAction('good')"
+          >
+            <ThumbsUp :size="13" />{{ t('gitPanel.bisectGood') }}
+          </button>
+          <button
+            type="button"
+            data-testid="git-bisect-bad"
+            :disabled="busy"
+            @click="runBisectAction('bad')"
+          >
+            <ThumbsDown :size="13" />{{ t('gitPanel.bisectBad') }}
+          </button>
+          <button type="button" :disabled="busy" @click="runBisectAction('skip')">
+            <SkipForward :size="13" />{{ t('gitPanel.bisectSkip') }}
+          </button>
+          <button type="button" :disabled="busy" @click="runBisectAction('reset')">
+            <RotateCcw :size="13" />{{ t('gitPanel.bisectReset') }}
           </button>
         </div>
       </div>
@@ -201,7 +259,12 @@
 
       <div class="git-advanced-group">
         <h3>{{ t('gitPanel.tags') }}</h3>
-        <select v-if="remotes.length" v-model="selectedTagRemote" data-testid="git-tag-remote">
+        <select
+          v-if="remotes.length"
+          v-model="selectedTagRemote"
+          data-testid="git-tag-remote"
+          @change="loadRemoteTags"
+        >
           <option v-for="remote in remotes" :key="remote.name" :value="remote.name">
             {{ remote.name }}
           </option>
@@ -230,6 +293,18 @@
               <code>{{ tag.target.slice(0, 8) }}</code>
             </span>
             <button
+              v-if="remotes.length"
+              type="button"
+              data-testid="git-tag-push-button"
+              class="git-advanced-icon-button"
+              :disabled="busy || !activeTagRemote"
+              :title="t('gitPanel.pushRemoteTag')"
+              :aria-label="t('gitPanel.pushRemoteTag')"
+              @click="pushRemoteTag(tag.name)"
+            >
+              <CloudUpload :size="13" />
+            </button>
+            <button
               type="button"
               class="git-advanced-icon-button danger"
               :title="t('gitPanel.deleteTag')"
@@ -251,6 +326,59 @@
               <CloudOff :size="13" />
             </button>
           </div>
+        </div>
+        <div v-if="remoteTags.length" class="git-tag-list">
+          <div
+            v-for="tag in remoteTags"
+            :key="`remote:${tag.name}`"
+            data-testid="git-remote-tag-row"
+            class="git-tag-row"
+          >
+            <span class="git-tag-copy">
+              <span>{{ activeTagRemote }}/{{ tag.name }}</span>
+              <code>{{ tag.target.slice(0, 8) }}</code>
+            </span>
+            <button
+              type="button"
+              class="git-advanced-icon-button danger"
+              :title="t('gitPanel.deleteRemoteTag')"
+              :aria-label="t('gitPanel.deleteRemoteTag')"
+              @click="remoteTagPendingDelete = tag.name"
+            >
+              <CloudOff :size="13" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="git-advanced-group">
+        <h3>{{ t('gitPanel.patchApply') }}</h3>
+        <textarea
+          v-model="patchContent"
+          data-testid="git-patch-content"
+          :placeholder="t('gitPanel.patchContent')"
+        ></textarea>
+        <label class="git-advanced-checkbox">
+          <input v-model="patchThreeWay" type="checkbox" />
+          <span>{{ t('gitPanel.patchThreeWay') }}</span>
+        </label>
+        <div class="git-advanced-button-row">
+          <button
+            type="button"
+            data-testid="git-patch-check"
+            :disabled="busy || !patchContent.trim()"
+            @click="runPatchAction(true)"
+          >
+            <FileCheck2 :size="13" />{{ t('gitPanel.patchCheck') }}
+          </button>
+          <button
+            type="button"
+            data-testid="git-patch-apply"
+            :disabled="busy || !patchContent.trim()"
+            @click="runPatchAction(false)"
+          >
+            <Play :size="13" />{{ t('gitPanel.patchApply') }}
+          </button>
         </div>
       </div>
     </template>
@@ -291,12 +419,18 @@ import {
   Cherry,
   ChevronDown,
   CloudOff,
+  CloudUpload,
+  FileCheck2,
   GitBranchPlus,
   GitMerge,
   GitPullRequestArrow,
   LocateFixed,
   Plus,
+  Play,
   RotateCcw,
+  SkipForward,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Wrench,
 } from 'lucide-vue-next'
@@ -347,6 +481,7 @@ const operationTarget = ref('')
 const operationProgressCurrent = ref<number | null>(null)
 const operationProgressTotal = ref<number | null>(null)
 const tags = ref<GitTagEntry[]>([])
+const remoteTags = ref<GitTagEntry[]>([])
 const reflogEntries = ref<GitReflogEntry[]>([])
 const recoveryCommit = ref('')
 const recoveryBranchName = ref('')
@@ -357,6 +492,9 @@ const tagMessage = ref('')
 const tagPendingDelete = ref<string | null>(null)
 const remoteTagPendingDelete = ref<string | null>(null)
 const selectedTagRemote = ref('')
+const bisectRevision = ref('')
+const patchContent = ref('')
+const patchThreeWay = ref(false)
 
 const remotes = computed(function computeRemotes() {
   // 步骤1：兼容旧调用方没有传入 remotes 的情况。
@@ -407,11 +545,12 @@ const operationProgress = computed(function computeOperationProgress() {
   return `${operationProgressCurrent.value}/${operationProgressTotal.value}`
 })
 
-async function getJson(endpoint: string): Promise<Record<string, unknown>> {
+async function getJson(endpoint: string, remote = ''): Promise<Record<string, unknown>> {
   // 步骤1：读取当前仓库的高级操作辅助数据。
   await getApiBase()
   const query = new URLSearchParams({ pane_id: props.paneId })
   appendGitRepository(query, props.repository)
+  if (remote) query.set('remote', remote)
   const response = await authFetch(apiUrl(`/api/workspace/${endpoint}?${query}`))
   if (!response.ok) return {}
   return response.json().catch(function emptyAdvancedResult() {
@@ -453,6 +592,30 @@ async function loadTags(): Promise<void> {
     }
   }
   tags.value = nextTags
+}
+
+async function loadRemoteTags(): Promise<void> {
+  // 步骤1：读取当前 Remote 的真实标签引用；没有 Remote 时清空旧列表。
+  const remote = activeTagRemote.value
+  if (!remote) {
+    remoteTags.value = []
+    return
+  }
+  const result = await getJson('git-remote-tags', remote)
+  const nextTags: GitTagEntry[] = []
+  if (Array.isArray(result.tags)) {
+    for (const rawTag of result.tags) {
+      if (!rawTag || typeof rawTag !== 'object') continue
+      const tag = rawTag as Record<string, unknown>
+      nextTags.push({
+        name: String(tag.name || ''),
+        target: String(tag.target || ''),
+        createdAt: String(tag.created_at || ''),
+        subject: String(tag.subject || ''),
+      })
+    }
+  }
+  remoteTags.value = nextTags
 }
 
 async function loadOperationState(): Promise<void> {
@@ -527,7 +690,13 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
 
 async function refreshAuxiliaryData(): Promise<void> {
   // 步骤1：操作后并行刷新操作状态、分支、标签和引用日志。
-  await Promise.all([loadOperationState(), loadBranches(), loadTags(), loadReflog()])
+  await Promise.all([
+    loadOperationState(),
+    loadBranches(),
+    loadTags(),
+    loadRemoteTags(),
+    loadReflog(),
+  ])
 }
 
 async function runSourceAction(endpoint: 'git-merge' | 'git-rebase'): Promise<void> {
@@ -544,6 +713,26 @@ async function runCommitAction(endpoint: 'git-cherry-pick' | 'git-revert-commit'
   const succeeded = await postAction(endpoint, { commit })
   if (succeeded) commitHash.value = ''
   await refreshAuxiliaryData()
+}
+
+async function runBisectAction(action: 'start' | 'good' | 'bad' | 'skip' | 'reset'): Promise<void> {
+  // 步骤1：开始和重置不携带修订版本，判定动作可使用当前输入或默认 HEAD。
+  let revision = bisectRevision.value.trim()
+  if (action === 'start' || action === 'reset') revision = ''
+  await postAction('git-bisect', { action, revision })
+  await loadOperationState()
+}
+
+async function runPatchAction(check: boolean): Promise<void> {
+  // 步骤1：预检和实际应用使用互斥选项，三方模式只在实际应用时生效。
+  const patch = patchContent.value
+  if (!patch.trim()) return
+  const succeeded = await postAction('git-patch-apply', {
+    patch,
+    check,
+    three_way: !check && patchThreeWay.value,
+  })
+  if (succeeded && !check) patchContent.value = ''
 }
 
 async function controlOperation(action: 'continue' | 'skip' | 'quit' | 'abort'): Promise<void> {
@@ -624,7 +813,15 @@ async function deleteRemoteTag(): Promise<void> {
   remoteTagPendingDelete.value = null
   if (!tag || !remote) return
   await postAction('git-remote-tag-delete', { remote, tag })
-  await loadTags()
+  await Promise.all([loadTags(), loadRemoteTags()])
+}
+
+async function pushRemoteTag(tag: string): Promise<void> {
+  // 步骤1：只推送当前行的本地标签到选中的 Remote。
+  const remote = activeTagRemote.value
+  if (!tag || !remote) return
+  await postAction('git-remote-tag-push', { remote, tag })
+  await loadRemoteTags()
 }
 
 watch(
@@ -663,6 +860,7 @@ watch(
     if (!selectedTagRemote.value && remotes.value.length) {
       selectedTagRemote.value = remotes.value[0].name
     }
+    void loadRemoteTags()
   },
   { immediate: true }
 )
@@ -820,6 +1018,10 @@ watch(
   gap: 5px;
 }
 
+.git-advanced-button-row-wrap {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .git-reset-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 64px auto;
@@ -837,6 +1039,30 @@ watch(
   align-items: center;
   gap: 4px;
   color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.git-advanced-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.git-advanced-checkbox input {
+  margin: 0;
+}
+
+.git-advanced-group textarea {
+  min-height: 110px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 6px;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--font-mono);
   font-size: 9px;
 }
 

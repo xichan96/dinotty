@@ -935,6 +935,7 @@ async fn main() {
                 "/api/workspace/git-command-cancel",
                 post(workspace::workspace_git_command_cancel),
             )
+            .route("/api/workspace/git-blame", get(workspace::workspace_git_blame))
             .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),

@@ -25,8 +25,9 @@ mod remote;
 mod syntax;
 
 pub use git::{
-    workspace_git_branch_create, workspace_git_branch_delete, workspace_git_branch_publish,
-    workspace_git_branch_rename, workspace_git_branch_switch, workspace_git_branches,
+    workspace_git_blame, workspace_git_branch_create, workspace_git_branch_delete,
+    workspace_git_branch_publish, workspace_git_branch_rename, workspace_git_branch_switch,
+    workspace_git_branches,
     workspace_git_cherry_pick, workspace_git_command_cancel, workspace_git_command_log,
     workspace_git_commit, workspace_git_commit_diff,
     workspace_git_config, workspace_git_config_update,
@@ -49,7 +50,8 @@ pub use git::{
     workspace_git_tag_delete, workspace_git_tags, workspace_git_unified_diff,
     workspace_git_unstage, workspace_git_unstage_all, workspace_git_upstream_set,
     workspace_git_upstream_unset, GitBranchInfo, GitBranchNameBody,
-    GitBranchPublishBody, GitBranchRenameBody, GitBranchSwitchBody, GitBranchesResponse, GitChange,
+    GitBlameLine, GitBlameQuery, GitBlameResponse, GitBranchPublishBody, GitBranchRenameBody,
+    GitBranchSwitchBody, GitBranchesResponse, GitChange,
     GitCommandCancelBody, GitCommandLogResponse, GitCommandRecord, GitCommitActionBody,
     GitCommitBody, GitCommitDiffQuery, GitCommitSummary, GitCompareQuery,
     GitConfigResponse, GitConfigUpdateBody, GitConfigValues,

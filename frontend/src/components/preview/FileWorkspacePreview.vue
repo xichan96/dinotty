@@ -127,6 +127,14 @@
           :repository="gitRepository"
           @close="gitHistorySelection = null"
         />
+        <GitBlameViewer
+          v-else-if="gitBlamePath"
+          :pane-id="paneId"
+          :file-path="gitBlamePath"
+          :repository="gitRepository"
+          @close="gitBlamePath = null"
+          @view-history="showGitHistory"
+        />
         <GitConflictEditor
           v-else-if="gitDiffSelection?.conflict"
           :key="gitDiffViewerKey"
@@ -356,6 +364,14 @@
             :repository="gitRepository"
             @close="gitHistorySelection = null"
           />
+          <GitBlameViewer
+            v-else-if="gitBlamePath"
+            :pane-id="paneId"
+            :file-path="gitBlamePath"
+            :repository="gitRepository"
+            @close="gitBlamePath = null"
+            @view-history="showGitHistory"
+          />
           <GitConflictEditor
             v-else-if="gitDiffSelection?.conflict"
             :key="gitDiffViewerKey"
@@ -441,6 +457,26 @@
           <span class="tree-ctx-label">{{ t('filePreview.ctxCopyPath') }}</span>
         </button>
         <button
+          v-if="ctxMenu.canRunCode.value"
+          type="button"
+          class="tree-ctx-item"
+          data-testid="tree-context-run-code"
+          role="menuitem"
+          @click="ctxMenu.ctxRunCode"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxRunCode') }}</span>
+        </button>
+        <button
+          v-if="canBlameContextFile"
+          type="button"
+          class="tree-ctx-item"
+          data-testid="tree-context-git-blame"
+          role="menuitem"
+          @click="openContextFileBlame"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxGitBlame') }}</span>
+        </button>
+        <button
           type="button"
           class="tree-ctx-item"
           role="menuitem"
@@ -523,6 +559,7 @@ import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
 import GitConflictEditor from '../workspace/GitConflictEditor.vue'
+import GitBlameViewer from '../workspace/GitBlameViewer.vue'
 import GitDiffViewer from '../workspace/GitDiffViewer.vue'
 import GitHistoryViewer from '../workspace/GitHistoryViewer.vue'
 import GitPanel from '../workspace/GitPanel.vue'
@@ -580,6 +617,7 @@ const gitStatusVersion = ref(0)
 const sidebarMode = ref<'files' | 'git'>('files')
 const gitDiffSelection = ref<GitDiffSelection | null>(null)
 const gitHistorySelection = ref<GitHistorySelection | null>(null)
+const gitBlamePath = ref<string | null>(null)
 const inlineCreate = ref<{ parentRel: string; kind: 'file' | 'dir' } | null>(null)
 const inlineRename = ref<{ rel: string; isDir: boolean } | null>(null)
 const recentDropdownOpen = ref(false)
@@ -717,6 +755,43 @@ const ctxIsBookmarked = computed(() => {
   return workspaceBookmarks.isBookmarked(ops.absolutePath(rel))
 })
 
+const canBlameContextFile = computed(function computeCanBlameContextFile() {
+  // 步骤1：只允许当前 Git 仓库内的文件打开 Blame。
+  if (!isGitRepo.value) return false
+  const menu = ctxMenu.contextMenu.value
+  if (!menu) return false
+  const targetRel = menu.rel || selectedRel.value
+  const targetIsDirectory = menu.rel ? menu.isDir : selectedIsDir.value
+  if (!targetRel || targetIsDirectory) return false
+  return repositoryPathForWorkspaceFile(targetRel) !== null
+})
+
+function repositoryPathForWorkspaceFile(workspacePath: string): string | null {
+  // 步骤1：根仓库直接使用工作区路径，子仓库则移除仓库目录前缀。
+  const repository = gitRepository.value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  const normalizedPath = workspacePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!repository) return normalizedPath
+  const repositoryPrefix = `${repository}/`
+  if (!normalizedPath.startsWith(repositoryPrefix)) return null
+  return normalizedPath.slice(repositoryPrefix.length)
+}
+
+function openContextFileBlame(): void {
+  // 步骤1：读取右键目标并转换为当前仓库内的相对路径。
+  const menu = ctxMenu.contextMenu.value
+  if (!menu) return
+  const targetRel = menu.rel || selectedRel.value
+  if (!targetRel) return
+  const repositoryPath = repositoryPathForWorkspaceFile(targetRel)
+  if (!repositoryPath) return
+
+  // 步骤2：关闭菜单和其他 Git 查看器，在主区域打开 Blame。
+  ctxMenu.closeContextMenu()
+  gitBlamePath.value = repositoryPath
+  gitDiffSelection.value = null
+  gitHistorySelection.value = null
+}
+
 const deleteConfirmMessage = computed(() => {
   const info = ctxMenu.deleteConfirm.value
   if (!info) return ''
@@ -793,6 +868,7 @@ function showGitDiff(selection: GitDiffSelection): void {
   // 步骤1：在主区域打开与侧栏分组对应的 Git 差异。
   gitDiffSelection.value = selection
   gitHistorySelection.value = null
+  gitBlamePath.value = null
 }
 
 function showGitHistory(selection: GitHistorySelection): void {
@@ -822,6 +898,7 @@ async function handleGitRepositoryCreated(repository: string): Promise<void> {
   // 步骤2：刷新 Git 状态和文件树，使初始化或克隆结果立即出现在导航器中。
   gitDiffSelection.value = null
   gitHistorySelection.value = null
+  gitBlamePath.value = null
   childCache.value = {}
   await Promise.all([fetchGitStatus(), ensureChildren('')])
 }
@@ -887,6 +964,7 @@ const { selectedPath: globalSelectedPath } = useSelectedPath()
 function onSelectDir(rel: string) {
   // 步骤1：普通导航会退出 Git 差异视图并打开目标目录。
   gitDiffSelection.value = null
+  gitBlamePath.value = null
   editorSplit.openFileInActivePane(rel, true)
   meta.value = null
   nav.pushNav(rel, true)
@@ -901,6 +979,7 @@ async function loadMetaForActivePane(rel: string) {
 async function onSelectFile(rel: string) {
   // 步骤1：普通导航会退出 Git 差异视图并打开目标文件。
   gitDiffSelection.value = null
+  gitBlamePath.value = null
   editorSplit.openFileInActivePane(rel, false)
   meta.value = null
   nav.pushNav(rel, false)
@@ -969,6 +1048,7 @@ function selectGitRepository(repository: string): void {
   gitRepository.value = repository
   gitDiffSelection.value = null
   gitHistorySelection.value = null
+  gitBlamePath.value = null
   void fetchGitStatus()
 }
 

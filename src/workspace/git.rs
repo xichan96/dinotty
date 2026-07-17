@@ -24,6 +24,7 @@ use super::{
 };
 
 const MAX_GIT_DIFF_OUTPUT: usize = 2 * 1024 * 1024;
+const MAX_GIT_BLAME_OUTPUT: usize = 16 * 1024 * 1024;
 const MAX_GIT_STATUS_FILES: usize = 2000;
 const MAX_DISCOVERED_REPOSITORIES: usize = 100;
 const MAX_REPOSITORY_SCAN_DEPTH: usize = 4;
@@ -211,6 +212,24 @@ pub struct GitCommandLogResponse {
 #[derive(Debug, Deserialize)]
 pub struct GitCommandCancelBody {
     pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitBlameLine {
+    pub line_number: usize,
+    pub content: String,
+    pub hash: String,
+    pub short_hash: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub authored_at: u64,
+    pub summary: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitBlameResponse {
+    pub path: String,
+    pub lines: Vec<GitBlameLine>,
 }
 
 struct GitCommandCancellation {
@@ -1631,6 +1650,14 @@ pub struct GitUnifiedDiffQuery {
 }
 
 #[derive(Deserialize)]
+pub struct GitBlameQuery {
+    pub pane_id: String,
+    #[serde(default)]
+    pub repository: Option<String>,
+    pub path: String,
+}
+
+#[derive(Deserialize)]
 pub struct GitHunkActionBody {
     pub path: String,
     #[serde(default)]
@@ -1701,6 +1728,119 @@ fn validate_git_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, Resp
         validated_paths.push(trimmed_path.replace('\\', "/"));
     }
     Ok(validated_paths)
+}
+
+fn is_git_blame_header(line: &str) -> Option<(String, usize)> {
+    // 步骤1：Blame 头必须包含 40 位十六进制提交和最终文件行号。
+    let mut fields = line.split_whitespace();
+    let raw_hash = fields.next()?;
+    let hash = raw_hash.trim_start_matches('^');
+    if hash.len() != 40 {
+        return None;
+    }
+    for value in hash.bytes() {
+        if !value.is_ascii_hexdigit() {
+            return None;
+        }
+    }
+    fields.next()?;
+    let line_number = fields.next()?.parse::<usize>().ok()?;
+    Some((hash.to_string(), line_number))
+}
+
+fn parse_git_blame_output(output: &str) -> Vec<GitBlameLine> {
+    // 步骤1：逐行读取 porcelain 块，保存当前源码行的提交元数据。
+    let mut blame_lines = Vec::new();
+    let mut hash = String::new();
+    let mut line_number = 0;
+    let mut author_name = String::new();
+    let mut author_email = String::new();
+    let mut authored_at = 0;
+    let mut summary = String::new();
+    for line in output.lines() {
+        if let Some((next_hash, next_line_number)) = is_git_blame_header(line) {
+            hash = next_hash;
+            line_number = next_line_number;
+            author_name.clear();
+            author_email.clear();
+            authored_at = 0;
+            summary.clear();
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("author ") {
+            author_name = value.to_string();
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("author-mail ") {
+            author_email = value.trim_start_matches('<').trim_end_matches('>').to_string();
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("author-time ") {
+            authored_at = value.parse::<u64>().unwrap_or(0);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("summary ") {
+            summary = value.to_string();
+            continue;
+        }
+        let Some(content) = line.strip_prefix('\t') else {
+            continue;
+        };
+        if hash.len() != 40 || line_number == 0 {
+            continue;
+        }
+
+        // 步骤2：遇到源码内容行时完成一条稳定记录。
+        blame_lines.push(GitBlameLine {
+            line_number,
+            content: content.to_string(),
+            short_hash: hash[..8].to_string(),
+            hash: hash.clone(),
+            author_name: author_name.clone(),
+            author_email: author_email.clone(),
+            authored_at,
+            summary: summary.clone(),
+        });
+    }
+    blame_lines
+}
+
+pub async fn workspace_git_blame(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<GitBlameQuery>,
+) -> Response {
+    // 步骤1：验证仓库内文件并限制源文件大小，避免 Blame 占用过多内存。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let paths = try_res!(validate_git_paths(&root, &[query.path]));
+    let path = paths[0].clone();
+    let target = try_res!(normalize_join(&root, &path));
+    let metadata = match std::fs::metadata(&target) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => return json_err(StatusCode::BAD_REQUEST, "blame target must be a file"),
+        Err(error) => return json_err(StatusCode::NOT_FOUND, &error.to_string()),
+    };
+    if metadata.len() > MAX_TEXT_PREVIEW as u64 {
+        return json_err(StatusCode::PAYLOAD_TOO_LARGE, "file too large for blame");
+    }
+
+    // 步骤2：读取逐行 porcelain 输出并转换为前端可直接显示的结构。
+    let arguments = vec![
+        "blame".to_string(),
+        "--line-porcelain".to_string(),
+        "--".to_string(),
+        path.clone(),
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            if output.stdout.len() > MAX_GIT_BLAME_OUTPUT {
+                return json_err(StatusCode::PAYLOAD_TOO_LARGE, "blame output too large");
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Json(GitBlameResponse { path, lines: parse_git_blame_output(&stdout) }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
 }
 
 async fn run_git_output(
@@ -3919,7 +4059,8 @@ mod tests {
         build_stash_save_arguments, build_upstream_set_arguments,
         build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
-        initialize_git_repository, parse_branch_output, parse_git_config_output, parse_log_output,
+        initialize_git_repository, parse_branch_output, parse_git_blame_output,
+        parse_git_config_output, parse_log_output,
         parse_reflog_output, parse_remote_output, parse_stash_output, parse_status_output,
         parse_tag_output,
         read_conflict_stage,
@@ -4296,6 +4437,40 @@ mod tests {
             "origin".to_string(),
         ];
         assert_eq!(sanitize_git_command(&fetch_arguments), "git fetch --prune origin");
+    }
+
+    #[test]
+    fn parses_git_blame_porcelain_lines() {
+        // 步骤1：准备两行带作者、时间和提交说明的 porcelain 输出。
+        let output = concat!(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1\n",
+            "author Alice Zhang\n",
+            "author-mail <alice@example.com>\n",
+            "author-time 1721181600\n",
+            "summary Add first line\n",
+            "filename src/main.rs\n",
+            "\tfirst line\n",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 2 2 1\n",
+            "author Bob Li\n",
+            "author-mail <bob@example.com>\n",
+            "author-time 1721268000\n",
+            "summary Update second line\n",
+            "filename src/main.rs\n",
+            "\tsecond line\n",
+        );
+
+        // 步骤2：每个源码行应保留行号、内容和可跳转的提交元数据。
+        let lines = parse_git_blame_output(output);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].line_number, 1);
+        assert_eq!(lines[0].content, "first line");
+        assert_eq!(lines[0].short_hash, "aaaaaaaa");
+        assert_eq!(lines[0].author_name, "Alice Zhang");
+        assert_eq!(lines[0].author_email, "alice@example.com");
+        assert_eq!(lines[0].authored_at, 1_721_181_600);
+        assert_eq!(lines[0].summary, "Add first line");
+        assert_eq!(lines[1].line_number, 2);
+        assert_eq!(lines[1].content, "second line");
     }
 
     #[test]

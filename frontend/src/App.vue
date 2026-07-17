@@ -864,23 +864,30 @@ async function revealPane(paneId: string): Promise<boolean> {
 
   await nextTick()
   if (gen !== revealNavGen) return false
-
-  let tabElementFound = false
-  for (let attempt = 0; attempt < 5; attempt++) {
-    if (tabBarRef.value?.hasTab(tab.paneId)) {
-      tabElementFound = true
-      break
-    }
-    if (attempt < 4) {
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      if (gen !== revealNavGen) return false
-    }
-  }
-  if (!tabElementFound) return false
-
-  if (gen !== revealNavGen) return false
   tab = resolveTab(paneId)
   if (!tab) return false
+
+  // Desktop renders a horizontal tab-strip; wait for the target tab element to
+  // exist before scrolling it into view. Mobile has no #tabs-list DOM, so skip
+  // this gate entirely — otherwise reveal-goto would always no-op on touch /
+  // narrow viewports (hasTab() can never succeed there).
+  if (!isMobile.value) {
+    let tabElementFound = false
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (tabBarRef.value?.hasTab(tab.paneId)) {
+        tabElementFound = true
+        break
+      }
+      if (attempt < 4) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        if (gen !== revealNavGen) return false
+      }
+    }
+    if (!tabElementFound) return false
+    if (gen !== revealNavGen) return false
+    tab = resolveTab(paneId)
+    if (!tab) return false
+  }
 
   if (tab.type === 'terminal') {
     try {

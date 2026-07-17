@@ -917,6 +917,7 @@ async fn main() {
                 "/api/workspace/git-operation-state",
                 get(workspace::workspace_git_operation_state),
             )
+            .route("/api/workspace/git-reflog", get(workspace::workspace_git_reflog))
             .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),

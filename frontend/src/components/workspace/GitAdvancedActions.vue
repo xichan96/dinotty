@@ -7,8 +7,14 @@
     </button>
     <template v-if="expanded">
       <div v-if="currentOperation" class="git-operation-banner" role="status">
-        <span>
-          {{ t('gitPanel.operationInProgress').replace('{operation}', currentOperation) }}
+        <span class="git-operation-copy">
+          <span>
+            {{ t('gitPanel.operationInProgress').replace('{operation}', currentOperation) }}
+          </span>
+          <code v-if="operationTarget">{{ operationTarget.slice(0, 12) }}</code>
+          <strong v-if="operationProgress" data-testid="git-operation-progress">
+            {{ operationProgress }}
+          </strong>
         </span>
         <button type="button" :disabled="busy" @click="controlOperation('continue')">
           {{ t('gitPanel.continueOperation') }}
@@ -84,7 +90,12 @@
       <div class="git-advanced-group">
         <h3>{{ t('gitPanel.reset') }}</h3>
         <div class="git-reset-row">
-          <input v-model="resetTarget" type="text" :placeholder="t('gitPanel.resetTarget')" />
+          <input
+            v-model="resetTarget"
+            data-testid="git-reset-target"
+            type="text"
+            :placeholder="t('gitPanel.resetTarget')"
+          />
           <select v-model="resetMode">
             <option value="soft">soft</option>
             <option value="mixed">mixed</option>
@@ -98,6 +109,66 @@
             {{ t('gitPanel.reset') }}
           </button>
         </div>
+      </div>
+
+      <div class="git-advanced-group">
+        <h3>{{ t('gitPanel.reflog') }}</h3>
+        <div v-if="recoveryCommit" class="git-recovery-branch-row">
+          <input
+            v-model="recoveryBranchName"
+            data-testid="git-recovery-branch-name"
+            type="text"
+            :placeholder="t('gitPanel.recoveryBranchName')"
+          />
+          <button
+            type="button"
+            data-testid="git-recovery-branch-create"
+            :disabled="busy || !recoveryBranchName.trim()"
+            @click="createRecoveryBranch"
+          >
+            <GitBranchPlus :size="13" />{{ t('gitPanel.createRecoveryBranch') }}
+          </button>
+        </div>
+        <div v-if="reflogEntries.length" class="git-reflog-list">
+          <div
+            v-for="entry in reflogEntries"
+            :key="`${entry.selector}:${entry.hash}`"
+            data-testid="git-reflog-row"
+            class="git-reflog-row"
+          >
+            <span class="git-reflog-copy">
+              <span>
+                <strong>{{ entry.action }}</strong>
+                {{ entry.message }}
+              </span>
+              <small>
+                <code>{{ entry.shortHash }}</code>
+                <time :datetime="entry.authoredAt">{{ formatReflogDate(entry.authoredAt) }}</time>
+              </small>
+            </span>
+            <button
+              type="button"
+              data-testid="git-reflog-reset-target"
+              class="git-advanced-icon-button"
+              :title="t('gitPanel.useAsResetTarget')"
+              :aria-label="t('gitPanel.useAsResetTarget')"
+              @click="resetTarget = entry.hash"
+            >
+              <LocateFixed :size="13" />
+            </button>
+            <button
+              type="button"
+              data-testid="git-reflog-recover"
+              class="git-advanced-icon-button"
+              :title="t('gitPanel.prepareRecoveryBranch')"
+              :aria-label="t('gitPanel.prepareRecoveryBranch')"
+              @click="prepareRecoveryBranch(entry)"
+            >
+              <GitBranchPlus :size="13" />
+            </button>
+          </div>
+        </div>
+        <p v-else class="git-reflog-empty">{{ t('gitPanel.noReflog') }}</p>
       </div>
 
       <div class="git-advanced-group">
@@ -165,8 +236,10 @@ import { computed, ref, watch } from 'vue'
 import {
   Cherry,
   ChevronDown,
+  GitBranchPlus,
   GitMerge,
   GitPullRequestArrow,
+  LocateFixed,
   Plus,
   RotateCcw,
   Trash2,
@@ -182,6 +255,15 @@ interface GitTagEntry {
   target: string
   createdAt: string
   subject: string
+}
+
+interface GitReflogEntry {
+  selector: string
+  hash: string
+  shortHash: string
+  action: string
+  message: string
+  authoredAt: string
 }
 
 const props = defineProps<{
@@ -205,7 +287,13 @@ const resetTarget = ref('HEAD')
 const resetMode = ref<'soft' | 'mixed' | 'hard'>('mixed')
 const resetPending = ref(false)
 const currentOperation = ref<string | null>(null)
+const operationTarget = ref('')
+const operationProgressCurrent = ref<number | null>(null)
+const operationProgressTotal = ref<number | null>(null)
 const tags = ref<GitTagEntry[]>([])
+const reflogEntries = ref<GitReflogEntry[]>([])
+const recoveryCommit = ref('')
+const recoveryBranchName = ref('')
 const tagName = ref('')
 const tagTarget = ref('HEAD')
 const annotatedTag = ref(false)
@@ -223,6 +311,12 @@ const resetConfirmationMessage = computed(function computeResetConfirmationMessa
   // 步骤1：hard 模式明确提示会丢弃工作区更改，其他模式说明目标和模式。
   const key = resetMode.value === 'hard' ? 'gitPanel.hardResetMessage' : 'gitPanel.resetMessage'
   return t(key).replace('{target}', resetTarget.value).replace('{mode}', resetMode.value)
+})
+
+const operationProgress = computed(function computeOperationProgress() {
+  // 步骤1：只有当前步骤和总步骤都有效时才显示进度。
+  if (operationProgressCurrent.value === null || operationProgressTotal.value === null) return ''
+  return `${operationProgressCurrent.value}/${operationProgressTotal.value}`
 })
 
 async function getJson(endpoint: string): Promise<Record<string, unknown>> {
@@ -274,9 +368,35 @@ async function loadTags(): Promise<void> {
 }
 
 async function loadOperationState(): Promise<void> {
-  // 步骤1：读取当前是否有需要继续或中止的 Git 操作。
+  // 步骤1：读取进行中的操作、目标提交和可用进度。
   const result = await getJson('git-operation-state')
   currentOperation.value = typeof result.operation === 'string' ? result.operation : null
+  operationTarget.value = typeof result.target === 'string' ? result.target : ''
+  operationProgressCurrent.value =
+    typeof result.progress_current === 'number' ? result.progress_current : null
+  operationProgressTotal.value =
+    typeof result.progress_total === 'number' ? result.progress_total : null
+}
+
+async function loadReflog(): Promise<void> {
+  // 步骤1：读取并转换最近的 HEAD 引用日志。
+  const result = await getJson('git-reflog')
+  const nextEntries: GitReflogEntry[] = []
+  if (Array.isArray(result.entries)) {
+    for (const rawEntry of result.entries) {
+      if (!rawEntry || typeof rawEntry !== 'object') continue
+      const entry = rawEntry as Record<string, unknown>
+      nextEntries.push({
+        selector: String(entry.selector || ''),
+        hash: String(entry.hash || ''),
+        shortHash: String(entry.short_hash || ''),
+        action: String(entry.action || ''),
+        message: String(entry.message || ''),
+        authoredAt: String(entry.authored_at || ''),
+      })
+    }
+  }
+  reflogEntries.value = nextEntries
 }
 
 async function postAction(endpoint: string, body: Record<string, unknown>): Promise<boolean> {
@@ -312,8 +432,8 @@ async function postAction(endpoint: string, body: Record<string, unknown>): Prom
 }
 
 async function refreshAuxiliaryData(): Promise<void> {
-  // 步骤1：操作后并行刷新操作状态、分支和标签。
-  await Promise.all([loadOperationState(), loadBranches(), loadTags()])
+  // 步骤1：操作后并行刷新操作状态、分支、标签和引用日志。
+  await Promise.all([loadOperationState(), loadBranches(), loadTags(), loadReflog()])
 }
 
 async function runSourceAction(endpoint: 'git-merge' | 'git-rebase'): Promise<void> {
@@ -337,6 +457,34 @@ async function controlOperation(action: 'continue' | 'abort'): Promise<void> {
   if (!currentOperation.value) return
   await postAction('git-operation-action', { operation: currentOperation.value, action })
   await refreshAuxiliaryData()
+}
+
+function prepareRecoveryBranch(entry: GitReflogEntry): void {
+  // 步骤1：选中 Reflog 提交，并生成可编辑且可识别的恢复分支名。
+  recoveryCommit.value = entry.hash
+  recoveryBranchName.value = `recovery/${entry.shortHash}`
+}
+
+async function createRecoveryBranch(): Promise<void> {
+  // 步骤1：从选中的完整提交 ID 创建并切换到恢复分支。
+  const name = recoveryBranchName.value.trim()
+  if (!recoveryCommit.value || !name) return
+  const succeeded = await postAction('git-branch-create', {
+    name,
+    start_point: recoveryCommit.value,
+  })
+  if (succeeded) {
+    recoveryCommit.value = ''
+    recoveryBranchName.value = ''
+  }
+  await refreshAuxiliaryData()
+}
+
+function formatReflogDate(value: string): string {
+  // 步骤1：使用系统地区格式显示时间，解析失败时保留 Git 原值。
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 }
 
 async function confirmReset(): Promise<void> {
@@ -433,9 +581,19 @@ watch(
   font-size: 9px;
 }
 
-.git-operation-banner span {
+.git-operation-copy {
   min-width: 0;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.git-operation-copy code,
+.git-operation-copy strong {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 8px;
 }
 
 .git-operation-banner button,
@@ -558,6 +716,79 @@ watch(
 
 .git-tag-list {
   border-top: 1px solid var(--border);
+}
+
+.git-recovery-branch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+}
+
+.git-recovery-branch-row button {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  background: var(--tab-bg);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.git-reflog-list {
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+}
+
+.git-reflog-row {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 2px 3px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.git-reflog-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 9px;
+}
+
+.git-reflog-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-reflog-copy strong {
+  color: var(--fg-bright);
+  font-weight: 600;
+}
+
+.git-reflog-copy small {
+  display: flex;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 8px;
+}
+
+.git-reflog-copy code {
+  color: var(--color-blue, #69a7d8);
+  font-family: var(--font-mono);
+}
+
+.git-reflog-empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 9px;
 }
 
 .git-tag-row {

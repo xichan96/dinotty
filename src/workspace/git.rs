@@ -126,6 +126,24 @@ pub struct GitTagsResponse {
 #[derive(Debug, Serialize)]
 pub struct GitOperationStateResponse {
     pub operation: Option<String>,
+    pub target: Option<String>,
+    pub progress_current: Option<u32>,
+    pub progress_total: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitReflogEntry {
+    pub selector: String,
+    pub hash: String,
+    pub short_hash: String,
+    pub action: String,
+    pub message: String,
+    pub authored_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitReflogResponse {
+    pub entries: Vec<GitReflogEntry>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -640,6 +658,55 @@ fn parse_log_output(output: &str) -> Vec<GitCommitSummary> {
         });
     }
     commits
+}
+
+fn parse_reflog_output(output: &str) -> Vec<GitReflogEntry> {
+    // 步骤1：按记录分隔符和 NUL 字段读取 Reflog，避免说明文字中的空格干扰解析。
+    let mut entries = Vec::new();
+    for record in output.split('\x1e') {
+        let record = record.trim_matches(['\r', '\n']);
+        if record.is_empty() {
+            continue;
+        }
+        let columns: Vec<&str> = record.split('\0').collect();
+        if columns.len() < 5 {
+            continue;
+        }
+
+        // 步骤2：把 Git 主题中的动作前缀与说明拆开，未知格式保留完整说明。
+        let subject = columns[3].trim();
+        let mut action = subject.to_string();
+        let mut message = String::new();
+        if let Some(separator_index) = subject.find(": ") {
+            action = subject[..separator_index].to_string();
+            message = subject[separator_index + 2..].to_string();
+        }
+        entries.push(GitReflogEntry {
+            selector: columns[0].to_string(),
+            hash: columns[1].to_string(),
+            short_hash: columns[2].to_string(),
+            action,
+            message,
+            authored_at: columns[4].to_string(),
+        });
+    }
+    entries
+}
+
+fn read_git_state_text(path: &Path) -> Option<String> {
+    // 步骤1：读取 Git 操作状态文件，空值或读取失败都视为没有该字段。
+    let content = std::fs::read_to_string(path).ok()?;
+    let value = content.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn read_git_state_number(path: &Path) -> Option<u32> {
+    // 步骤1：操作进度只接受 Git 写入的无符号整数。
+    let value = read_git_state_text(path)?;
+    value.parse().ok()
 }
 
 fn git_commit_matches_search(commit: &GitCommitSummary, search: &str) -> bool {
@@ -2264,20 +2331,38 @@ pub async fn workspace_git_operation_state(
     let git_dir_path = PathBuf::from(&git_dir_text);
     let git_dir = if git_dir_path.is_absolute() { git_dir_path } else { root.join(git_dir_path) };
 
-    // 步骤2：按优先级识别正在进行的变基、合并、Cherry-pick 或 Revert。
-    let operation =
-        if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
-            Some("rebase".to_string())
-        } else if git_dir.join("MERGE_HEAD").exists() {
-            Some("merge".to_string())
-        } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
-            Some("cherry-pick".to_string())
-        } else if git_dir.join("REVERT_HEAD").exists() {
-            Some("revert".to_string())
-        } else {
-            None
-        };
-    Json(GitOperationStateResponse { operation }).into_response()
+    // 步骤2：按优先级识别操作，并读取目标提交和 Rebase 进度。
+    let mut operation = None;
+    let mut target = None;
+    let mut progress_current = None;
+    let mut progress_total = None;
+    let rebase_merge_directory = git_dir.join("rebase-merge");
+    let rebase_apply_directory = git_dir.join("rebase-apply");
+    if rebase_merge_directory.exists() {
+        operation = Some("rebase".to_string());
+        target = read_git_state_text(&rebase_merge_directory.join("stopped-sha"));
+        if target.is_none() {
+            target = read_git_state_text(&rebase_merge_directory.join("onto"));
+        }
+        progress_current = read_git_state_number(&rebase_merge_directory.join("msgnum"));
+        progress_total = read_git_state_number(&rebase_merge_directory.join("end"));
+    } else if rebase_apply_directory.exists() {
+        operation = Some("rebase".to_string());
+        target = read_git_state_text(&rebase_apply_directory.join("original-commit"));
+        progress_current = read_git_state_number(&rebase_apply_directory.join("next"));
+        progress_total = read_git_state_number(&rebase_apply_directory.join("last"));
+    } else if git_dir.join("MERGE_HEAD").exists() {
+        operation = Some("merge".to_string());
+        target = read_git_state_text(&git_dir.join("MERGE_HEAD"));
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        operation = Some("cherry-pick".to_string());
+        target = read_git_state_text(&git_dir.join("CHERRY_PICK_HEAD"));
+    } else if git_dir.join("REVERT_HEAD").exists() {
+        operation = Some("revert".to_string());
+        target = read_git_state_text(&git_dir.join("REVERT_HEAD"));
+    }
+    Json(GitOperationStateResponse { operation, target, progress_current, progress_total })
+        .into_response()
 }
 
 pub async fn workspace_git_operation_action(
@@ -2296,7 +2381,52 @@ pub async fn workspace_git_operation_action(
         return json_err(StatusCode::BAD_REQUEST, "invalid operation action");
     }
     let arguments = vec![operation.to_string(), format!("--{action}")];
-    run_git_action(&manager, &query, arguments).await
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    match run_git_output(root.clone(), arguments).await {
+        Ok(output) => {
+            // 步骤2：继续完成或中止成功后清理 Dinotty 保存的 Rebase 计划文件。
+            if output.status.success() {
+                let git_dir_arguments =
+                    vec!["rev-parse".to_string(), "--absolute-git-dir".to_string()];
+                if let Ok(git_dir_output) = run_git_output(root, git_dir_arguments).await {
+                    if git_dir_output.status.success() {
+                        let git_dir_text = String::from_utf8_lossy(&git_dir_output.stdout);
+                        let plan_directory =
+                            PathBuf::from(git_dir_text.trim()).join("dinotty-rebase-plan");
+                        if plan_directory.exists() {
+                            let _ = std::fs::remove_dir_all(plan_directory);
+                        }
+                    }
+                }
+            }
+            git_command_response(&output)
+        }
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_reflog(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取最近一百条 HEAD 引用日志，保留选择器、提交和操作说明。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let arguments = vec![
+        "reflog".to_string(),
+        "show".to_string(),
+        "--max-count=100".to_string(),
+        "--date=iso-strict".to_string(),
+        "--format=%gd%x00%H%x00%h%x00%gs%x00%cI%x1e".to_string(),
+        "HEAD".to_string(),
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Json(GitReflogResponse { entries: parse_reflog_output(&stdout) }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
 }
 
 pub async fn workspace_git_tags(
@@ -3180,8 +3310,9 @@ mod tests {
         build_stash_save_arguments, build_upstream_set_arguments,
         build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
-        initialize_git_repository, parse_branch_output, parse_log_output, parse_remote_output,
-        parse_stash_output, parse_status_output, parse_tag_output, read_conflict_stage,
+        initialize_git_repository, parse_branch_output, parse_log_output, parse_reflog_output,
+        parse_remote_output, parse_stash_output, parse_status_output, parse_tag_output,
+        read_conflict_stage,
         run_rebase_plan, unstage_git_paths, validate_clone_directory, validate_clone_url,
         validate_initial_branch, GitRebasePlanEntry,
     };
@@ -3472,6 +3603,22 @@ mod tests {
         assert_eq!(commits[0].subject, "Add history view");
         assert_eq!(commits[1].author_name, "Bob");
         assert!(commits[1].parents.is_empty());
+    }
+
+    #[test]
+    fn parses_reflog_records_with_actions_and_messages() {
+        // 步骤1：准备包含提交和 Reset 的引用日志记录。
+        let output = "HEAD@{0}\0aaaaaaaa\0aaaaaaa\0commit: add feature\02026-07-17T10:00:00+08:00\x1eHEAD@{1}\0bbbbbbbb\0bbbbbbb\0reset: moving to HEAD~1\02026-07-17T09:00:00+08:00\x1e";
+        let entries = parse_reflog_output(output);
+
+        // 步骤2：确认动作与说明被拆分，恢复仍使用不可歧义的完整提交 ID。
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].selector, "HEAD@{0}");
+        assert_eq!(entries[0].hash, "aaaaaaaa");
+        assert_eq!(entries[0].action, "commit");
+        assert_eq!(entries[0].message, "add feature");
+        assert_eq!(entries[1].action, "reset");
+        assert_eq!(entries[1].message, "moving to HEAD~1");
     }
 
     #[test]

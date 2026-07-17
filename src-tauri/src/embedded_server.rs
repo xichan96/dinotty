@@ -683,6 +683,7 @@ pub fn run_server(
                 "/api/workspace/git-operation-state",
                 get(workspace::workspace_git_operation_state),
             )
+            .route("/api/workspace/git-reflog", get(workspace::workspace_git_reflog))
             .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),
@@ -889,6 +890,7 @@ mod tests {
             "/api/workspace/git-revert-commit",
             "/api/workspace/git-reset",
             "/api/workspace/git-operation-state",
+            "/api/workspace/git-reflog",
             "/api/workspace/git-operation-action",
             "/api/workspace/git-tags",
             "/api/workspace/git-tag-create",

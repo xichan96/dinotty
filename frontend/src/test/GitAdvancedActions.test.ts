@@ -96,4 +96,67 @@ describe('GitAdvancedActions', function gitAdvancedActionsSuite() {
       })
     )
   })
+
+  it('shows operation progress and creates a recovery branch from reflog', async function recoversFromReflog() {
+    // 步骤1：让状态接口返回进行到一半的 Rebase，并返回一条可恢复的 Reflog。
+    advancedMocks.authFetch.mockImplementation(async function respondToRecoveryRequest(
+      url: string,
+      options?: RequestInit
+    ) {
+      if (options) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      if (url.startsWith('/api/workspace/git-operation-state?')) {
+        return new Response(
+          JSON.stringify({
+            operation: 'rebase',
+            target: 'aaaaaaaaaaaaaaaa',
+            progress_current: 2,
+            progress_total: 4,
+          }),
+          { status: 200 }
+        )
+      }
+      if (url.startsWith('/api/workspace/git-reflog?')) {
+        return new Response(
+          JSON.stringify({
+            entries: [
+              {
+                selector: 'HEAD@{1}',
+                hash: 'bbbbbbbbbbbbbbbb',
+                short_hash: 'bbbbbbb',
+                action: 'reset',
+                message: 'moving to HEAD~1',
+                authored_at: '2026-07-17T09:00:00+08:00',
+              },
+            ],
+          }),
+          { status: 200 }
+        )
+      }
+      if (url.startsWith('/api/workspace/git-tags?')) {
+        return new Response(JSON.stringify({ tags: [] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ local: [], remote: [] }), { status: 200 })
+    })
+    const wrapper = mount(GitAdvancedActions, { props: { paneId: 'pane-1' } })
+    await flushPromises()
+    await wrapper.get('.git-advanced-heading').trigger('click')
+    expect(wrapper.get('[data-testid="git-operation-progress"]').text()).toContain('2/4')
+    expect(wrapper.get('[data-testid="git-reflog-row"]').text()).toContain('moving to HEAD~1')
+
+    // 步骤2：从 Reflog 准备恢复分支并提交，后端收到完整提交 ID。
+    await wrapper.get('[data-testid="git-reflog-recover"]').trigger('click')
+    await wrapper.get('[data-testid="git-recovery-branch-name"]').setValue('recovery/before-reset')
+    await wrapper.get('[data-testid="git-recovery-branch-create"]').trigger('click')
+    await flushPromises()
+    expect(advancedMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-branch-create?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'recovery/before-reset',
+          start_point: 'bbbbbbbbbbbbbbbb',
+        }),
+      })
+    )
+  })
 })

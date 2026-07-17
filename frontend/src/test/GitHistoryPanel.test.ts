@@ -26,6 +26,7 @@ const commits = [
     author_email: 'alice@example.com',
     authored_at: '2026-07-17T10:00:00+08:00',
     parents: ['bbbbbbbbbbbbbbbb'],
+    decorations: ['HEAD -> feature/git-panel', 'tag: v1.0.0'],
     subject: 'Add history panel',
   },
   {
@@ -35,6 +36,7 @@ const commits = [
     author_email: 'bob@example.com',
     authored_at: '2026-07-16T09:00:00+08:00',
     parents: [],
+    decorations: ['main'],
     subject: 'Initial commit',
   },
 ]
@@ -97,6 +99,29 @@ describe('GitHistoryPanel', function gitHistoryPanelSuite() {
       }
     )
     expect(String(historyCalls[historyCalls.length - 1][0])).toContain('path=src%2Fmain.rs')
+  })
+
+  it('searches history and displays graph references', async function searchesHistory() {
+    // 步骤1：确认提交图谱和当前提交的分支、标签装饰已经显示。
+    const wrapper = mount(GitHistoryPanel, {
+      props: { paneId: 'pane-1', currentBranch: 'feature/git-panel' },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="git-history-graph"]')).toHaveLength(2)
+    const references = wrapper.findAll('[data-testid="git-history-ref"]')
+    expect(references[0].text()).toContain('feature/git-panel')
+    expect(references[1].text()).toContain('v1.0.0')
+
+    // 步骤2：按提交说明搜索，确认后端收到编码后的关键词。
+    await wrapper.get('[data-testid="git-history-search-input"]').setValue('history panel')
+    await wrapper.get('[data-testid="git-history-search-input"]').trigger('keydown.enter')
+    await flushPromises()
+    const historyCalls = historyPanelMocks.authFetch.mock.calls.filter(
+      function isHistoryCall(call) {
+        return String(call[0]).startsWith('/api/workspace/git-log?')
+      }
+    )
+    expect(String(historyCalls[historyCalls.length - 1][0])).toContain('search=history+panel')
   })
 
   it('opens a comparison between selected branches', async function comparesBranches() {

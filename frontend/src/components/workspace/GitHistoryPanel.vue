@@ -1,5 +1,25 @@
 <template>
   <section class="git-history-panel" :aria-label="t('gitPanel.history')">
+    <form class="git-history-search" @submit.prevent="applySearch">
+      <Search :size="13" aria-hidden="true" />
+      <input
+        v-model="searchInput"
+        data-testid="git-history-search-input"
+        type="search"
+        :placeholder="t('gitPanel.historySearchPlaceholder')"
+        @keydown.enter.prevent="applySearch"
+      />
+      <button
+        v-if="searchInput"
+        type="button"
+        class="git-history-icon-button"
+        :title="t('gitPanel.clearHistorySearch')"
+        :aria-label="t('gitPanel.clearHistorySearch')"
+        @click="clearSearch"
+      >
+        <X :size="13" />
+      </button>
+    </form>
     <form class="git-history-path" @submit.prevent="applyPathFilter">
       <Search :size="13" aria-hidden="true" />
       <input
@@ -63,21 +83,68 @@
       {{ t('gitPanel.noHistory') }}
     </div>
     <div v-else class="git-history-list">
-      <button
-        v-for="commit in commits"
-        :key="commit.hash"
-        type="button"
-        data-testid="git-history-row"
-        class="git-history-row"
-        @click="openCommit(commit)"
-      >
-        <span class="git-history-subject">{{ commit.subject }}</span>
-        <span class="git-history-meta">
-          <code>{{ commit.shortHash }}</code>
-          <span>{{ commit.authorName }}</span>
-          <time :datetime="commit.authoredAt">{{ formatDate(commit.authoredAt) }}</time>
-        </span>
-      </button>
+      <div v-for="(commit, index) in commits" :key="commit.hash" class="git-history-entry">
+        <svg
+          data-testid="git-history-graph"
+          class="git-history-graph"
+          :width="graphWidth(graphRows[index].laneCount)"
+          height="48"
+          :viewBox="`0 0 ${graphWidth(graphRows[index].laneCount)} 48`"
+          aria-hidden="true"
+        >
+          <line
+            v-if="index > 0"
+            :x1="graphX(graphRows[index].lane)"
+            y1="0"
+            :x2="graphX(graphRows[index].lane)"
+            y2="14"
+            :stroke="graphColor(graphRows[index].lane)"
+            stroke-width="2"
+          />
+          <line
+            v-for="(segment, segmentIndex) in graphRows[index].segments"
+            :key="`${segmentIndex}:${segment.fromLane}:${segment.toLane}`"
+            :x1="graphX(segment.fromLane)"
+            :y1="segment.fromLane === graphRows[index].lane ? 14 : 0"
+            :x2="graphX(segment.toLane)"
+            y2="48"
+            :stroke="graphColor(segment.toLane)"
+            stroke-width="2"
+          />
+          <circle
+            :cx="graphX(graphRows[index].lane)"
+            cy="14"
+            r="4"
+            :fill="graphColor(graphRows[index].lane)"
+            stroke="var(--bg)"
+            stroke-width="2"
+          />
+        </svg>
+        <button
+          type="button"
+          data-testid="git-history-row"
+          class="git-history-row"
+          @click="openCommit(commit)"
+        >
+          <span v-if="commit.decorations.length" class="git-history-refs">
+            <span
+              v-for="reference in commit.decorations"
+              :key="reference"
+              data-testid="git-history-ref"
+              class="git-history-ref"
+              :class="`git-history-ref-${referenceType(reference)}`"
+            >
+              {{ referenceLabel(reference) }}
+            </span>
+          </span>
+          <span class="git-history-subject">{{ commit.subject }}</span>
+          <span class="git-history-meta">
+            <code>{{ commit.shortHash }}</code>
+            <span>{{ commit.authorName }}</span>
+            <time :datetime="commit.authoredAt">{{ formatDate(commit.authoredAt) }}</time>
+          </span>
+        </button>
+      </div>
       <button
         v-if="hasMore"
         type="button"
@@ -98,6 +165,7 @@ import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { appendGitRepository } from '../../utils/gitPanel'
 import {
+  buildGitGraphRows,
   mapGitCommitEntry,
   type GitCommitEntry,
   type GitHistorySelection,
@@ -123,11 +191,18 @@ const commits = ref<GitCommitEntry[]>([])
 const branchNames = ref<string[]>([])
 const pathInput = ref('')
 const activePath = ref('')
+const searchInput = ref('')
+const activeSearch = ref('')
 const compareBase = ref('')
 const compareTarget = ref('')
 const loading = ref(false)
 const hasMore = ref(false)
 const errorMessage = ref('')
+
+const graphRows = computed(function computeGraphRows() {
+  // 步骤1：提交列表每次加载或追加后重新计算连续图谱泳道。
+  return buildGitGraphRows(commits.value)
+})
 
 const canCompare = computed(function computeCanCompare() {
   // 步骤1：只有选择两个不同分支时才允许比较。
@@ -203,6 +278,7 @@ async function loadHistory(append: boolean): Promise<void> {
     })
     appendGitRepository(query, props.repository)
     if (activePath.value) query.set('path', activePath.value)
+    if (activeSearch.value) query.set('search', activeSearch.value)
     const response = await authFetch(apiUrl(`/api/workspace/git-log?${query}`))
     const result = await response.json().catch(function emptyHistoryResult() {
       return {}
@@ -246,6 +322,19 @@ function clearPathFilter(): void {
   void loadHistory(false)
 }
 
+function applySearch(): void {
+  // 步骤1：保存去除首尾空白的关键词并从第一页重新加载。
+  activeSearch.value = searchInput.value.trim()
+  void loadHistory(false)
+}
+
+function clearSearch(): void {
+  // 步骤1：同时清空输入和已生效关键词，再恢复完整历史。
+  searchInput.value = ''
+  activeSearch.value = ''
+  void loadHistory(false)
+}
+
 function loadMore(): void {
   // 步骤1：在当前列表后追加下一页提交。
   if (!loading.value && hasMore.value) void loadHistory(true)
@@ -281,6 +370,40 @@ function formatDate(value: string): string {
   return date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 }
 
+function graphWidth(laneCount: number): number {
+  // 步骤1：每条泳道使用固定宽度，避免提交数量变化时侧栏抖动。
+  return Math.max(laneCount, 1) * 14 + 8
+}
+
+function graphX(lane: number): number {
+  // 步骤1：返回泳道中心点，供节点和连接线共享。
+  return lane * 14 + 8
+}
+
+function graphColor(lane: number): string {
+  // 步骤1：循环使用易区分的固定颜色，合并分支不依赖单一色相。
+  const colors = ['#5aa9e6', '#f28e66', '#62b478', '#c792ea', '#e5b95c', '#d96c75']
+  return colors[lane % colors.length]
+}
+
+function referenceLabel(reference: string): string {
+  // 步骤1：移除 Git 装饰前缀，只保留用户识别的分支或标签名称。
+  return reference
+    .replace(/^HEAD -> /, '')
+    .replace(/^tag: /, '')
+    .replace(/^refs\/heads\//, '')
+    .replace(/^refs\/remotes\//, '')
+    .replace(/^refs\/tags\//, '')
+}
+
+function referenceType(reference: string): 'head' | 'tag' | 'remote' | 'branch' {
+  // 步骤1：按引用类型返回稳定样式名称。
+  if (reference.startsWith('HEAD -> ')) return 'head'
+  if (reference.startsWith('tag: ')) return 'tag'
+  if (reference.includes('refs/remotes/') || reference.includes('/')) return 'remote'
+  return 'branch'
+}
+
 watch(
   function watchHistoryRepository() {
     return [props.paneId, props.currentBranch, props.repository]
@@ -302,6 +425,7 @@ watch(
   overflow: hidden;
 }
 
+.git-history-search,
 .git-history-path {
   min-height: 34px;
   display: flex;
@@ -312,6 +436,7 @@ watch(
   color: var(--fg-muted);
 }
 
+.git-history-search input,
 .git-history-path input {
   min-width: 0;
   flex: 1;
@@ -436,15 +561,35 @@ watch(
   padding: 2px 0 8px;
 }
 
+.git-history-entry {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.git-history-entry:hover,
+.git-history-entry:focus-within {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.git-history-graph {
+  min-width: 22px;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
 .git-history-row {
-  width: 100%;
+  min-width: 0;
+  flex: 1;
   min-height: 48px;
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding: 7px 9px;
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   color: var(--fg);
   background: transparent;
   text-align: left;
@@ -453,9 +598,43 @@ watch(
 
 .git-history-row:hover,
 .git-history-row:focus-visible {
-  background: var(--bg-hover);
+  background: transparent;
   outline: none;
-  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.git-history-refs {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.git-history-ref {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-muted);
+  background: var(--tab-bg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8px;
+}
+
+.git-history-ref-head {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  color: var(--accent);
+}
+
+.git-history-ref-tag {
+  border-color: color-mix(in srgb, #e5b95c 70%, var(--border));
+  color: #e5b95c;
+}
+
+.git-history-ref-remote {
+  border-color: color-mix(in srgb, #62b478 65%, var(--border));
+  color: #62b478;
 }
 
 .git-history-subject {

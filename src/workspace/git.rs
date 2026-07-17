@@ -80,6 +80,7 @@ pub struct GitCommitSummary {
     pub author_email: String,
     pub authored_at: String,
     pub parents: Vec<String>,
+    pub decorations: Vec<String>,
     pub subject: String,
 }
 
@@ -460,7 +461,7 @@ fn parse_log_output(output: &str) -> Vec<GitCommitSummary> {
             continue;
         }
         let columns: Vec<&str> = record.split('\0').collect();
-        if columns.len() < 7 {
+        if columns.len() < 8 {
             continue;
         }
 
@@ -469,6 +470,13 @@ fn parse_log_output(output: &str) -> Vec<GitCommitSummary> {
         for parent in columns[5].split_whitespace() {
             parents.push(parent.to_string());
         }
+        let mut decorations = Vec::new();
+        for decoration in columns[6].split(", ") {
+            let decoration = decoration.trim();
+            if !decoration.is_empty() {
+                decorations.push(decoration.to_string());
+            }
+        }
         commits.push(GitCommitSummary {
             hash: columns[0].to_string(),
             short_hash: columns[1].to_string(),
@@ -476,10 +484,37 @@ fn parse_log_output(output: &str) -> Vec<GitCommitSummary> {
             author_email: columns[3].to_string(),
             authored_at: columns[4].to_string(),
             parents,
-            subject: columns[6].to_string(),
+            decorations,
+            subject: columns[7].to_string(),
         });
     }
     commits
+}
+
+fn git_commit_matches_search(commit: &GitCommitSummary, search: &str) -> bool {
+    // 步骤1：统一使用小写比较，覆盖 hash、作者、说明和分支/标签名称。
+    let search = search.trim().to_lowercase();
+    if search.is_empty() {
+        return true;
+    }
+    let text_fields = [
+        commit.hash.as_str(),
+        commit.short_hash.as_str(),
+        commit.author_name.as_str(),
+        commit.author_email.as_str(),
+        commit.subject.as_str(),
+    ];
+    for field in text_fields {
+        if field.to_lowercase().contains(&search) {
+            return true;
+        }
+    }
+    for decoration in &commit.decorations {
+        if decoration.to_lowercase().contains(&search) {
+            return true;
+        }
+    }
+    false
 }
 
 fn parse_stash_output(output: &str) -> Vec<GitStashEntry> {
@@ -986,6 +1021,8 @@ pub struct GitLogQuery {
     pub repository: Option<String>,
     #[serde(default)]
     pub path: Option<String>,
+    #[serde(default)]
+    pub search: Option<String>,
     #[serde(default)]
     pub skip: usize,
     #[serde(default = "default_git_log_limit")]
@@ -1689,13 +1726,22 @@ pub async fn workspace_git_log(
     let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
     let limit = query.limit.clamp(1, 200);
     let requested_count = limit + 1;
+    let search = query.search.as_deref().unwrap_or("").trim().to_string();
+    let search_active = !search.is_empty();
     let mut arguments = vec![
         "log".to_string(),
+        "--all".to_string(),
+        "--topo-order".to_string(),
         "--date=iso-strict".to_string(),
-        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%s%x1e".to_string(),
-        format!("--max-count={requested_count}"),
-        format!("--skip={}", query.skip),
+        "--decorate=short".to_string(),
+        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%D%x00%s%x1e".to_string(),
     ];
+    if search_active {
+        arguments.push("--max-count=10000".to_string());
+    } else {
+        arguments.push(format!("--max-count={requested_count}"));
+        arguments.push(format!("--skip={}", query.skip));
+    }
     if let Some(path) = query.path.as_deref() {
         if !path.trim().is_empty() {
             let paths = try_res!(validate_git_paths(&root, &[path.to_string()]));
@@ -1708,7 +1754,28 @@ pub async fn workspace_git_log(
     match run_git_output(root, arguments).await {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let mut commits = parse_log_output(&stdout);
+            let parsed_commits = parse_log_output(&stdout);
+            let mut commits = Vec::new();
+            if search_active {
+                // 步骤2：搜索结果先过滤再分页，确保翻页不会跳过匹配提交。
+                let mut matched_count = 0usize;
+                for commit in parsed_commits {
+                    if !git_commit_matches_search(&commit, &search) {
+                        continue;
+                    }
+                    if matched_count < query.skip {
+                        matched_count += 1;
+                        continue;
+                    }
+                    commits.push(commit);
+                    matched_count += 1;
+                    if commits.len() >= requested_count {
+                        break;
+                    }
+                }
+            } else {
+                commits = parsed_commits;
+            }
             let has_more = commits.len() > limit;
             commits.truncate(limit);
             Json(GitLogResponse { commits, has_more }).into_response()
@@ -2043,9 +2110,9 @@ pub async fn workspace_git_unified_diff(
 mod tests {
     use super::{
         apply_unified_diff_hunk, build_commit_arguments, discover_git_repositories,
-        extract_unified_diff_hunk, git_command, parse_branch_output, parse_log_output,
-        parse_remote_output, parse_stash_output, parse_status_output, parse_tag_output,
-        unstage_git_paths,
+        extract_unified_diff_hunk, git_command, git_commit_matches_search, parse_branch_output,
+        parse_log_output, parse_remote_output, parse_stash_output, parse_status_output,
+        parse_tag_output, unstage_git_paths,
     };
     use std::path::Path;
 
@@ -2307,16 +2374,39 @@ mod tests {
     #[test]
     fn parses_commit_log_records() {
         // 步骤1：准备两个由记录分隔符和 NUL 字段组成的提交日志。
-        let output = "aaaaaaaa\0aaaaaaa\0Alice\0alice@example.com\02026-07-17T10:00:00+08:00\0bbbbbbbb cccccccc\0Add history view\x1ebbbbbbbb\0bbbbbbb\0Bob\0bob@example.com\02026-07-16T09:00:00+08:00\0\0Initial commit\x1e";
+        let output = "aaaaaaaa\0aaaaaaa\0Alice\0alice@example.com\02026-07-17T10:00:00+08:00\0bbbbbbbb cccccccc\0HEAD -> feature, tag: v1.0.0\0Add history view\x1ebbbbbbbb\0bbbbbbb\0Bob\0bob@example.com\02026-07-16T09:00:00+08:00\0\0main\0Initial commit\x1e";
 
         // 步骤2：确认作者、父提交和主题被完整解析。
         let commits = parse_log_output(output);
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].hash, "aaaaaaaa");
         assert_eq!(commits[0].parents, vec!["bbbbbbbb", "cccccccc"]);
+        assert_eq!(commits[0].decorations, vec!["HEAD -> feature", "tag: v1.0.0"]);
         assert_eq!(commits[0].subject, "Add history view");
         assert_eq!(commits[1].author_name, "Bob");
         assert!(commits[1].parents.is_empty());
+    }
+
+    #[test]
+    fn searches_commits_by_hash_author_subject_and_reference() {
+        // 步骤1：构造包含作者、说明和标签的提交记录。
+        let commit = super::GitCommitSummary {
+            hash: "abcdef1234567890".to_string(),
+            short_hash: "abcdef1".to_string(),
+            author_name: "Alice Zhang".to_string(),
+            author_email: "alice@example.com".to_string(),
+            authored_at: "2026-07-17T10:00:00+08:00".to_string(),
+            parents: Vec::new(),
+            decorations: vec!["tag: release-1".to_string()],
+            subject: "Add graph history".to_string(),
+        };
+
+        // 步骤2：确认四类常用关键词均可命中，并且比较不区分大小写。
+        assert!(git_commit_matches_search(&commit, "ABCDEF"));
+        assert!(git_commit_matches_search(&commit, "alice zhang"));
+        assert!(git_commit_matches_search(&commit, "GRAPH HISTORY"));
+        assert!(git_commit_matches_search(&commit, "release-1"));
+        assert!(!git_commit_matches_search(&commit, "missing"));
     }
 
     #[test]

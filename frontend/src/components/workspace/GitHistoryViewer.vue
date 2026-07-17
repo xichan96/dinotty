@@ -48,6 +48,8 @@
       :search-placeholder="t('gitPanel.searchDiff')"
       :load-more-text="t('gitPanel.loadMoreDiffLines')"
       :wrap-text="t('gitPanel.wrapDiffLines')"
+      :inline-view-text="t('gitPanel.inlineDiffView')"
+      :split-view-text="t('gitPanel.splitDiffView')"
     />
   </section>
 </template>

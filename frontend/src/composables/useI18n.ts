@@ -70,6 +70,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'gitPanel.deleteBranch': 'Delete branch',
     'gitPanel.deleteBranchMessage':
       'Delete local branch {branch}? Unmerged branches are protected.',
+    'gitPanel.forceDeleteBranch': 'Force delete branch',
+    'gitPanel.forceDeleteBranchMessage':
+      'Force delete local branch {branch}? Unmerged commits on this branch may become unreachable.',
     'gitPanel.branchOperationFailed': 'Branch operation failed',
     'gitPanel.branchOperationSucceeded': 'Branch operation completed',
     'gitPanel.commitPlaceholder': 'Message (Ctrl+Enter to commit)',
@@ -903,6 +906,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'gitPanel.confirmRename': '确认分支名称',
     'gitPanel.deleteBranch': '删除分支',
     'gitPanel.deleteBranchMessage': '确定删除本地分支 {branch} 吗？未合并分支会受到保护。',
+    'gitPanel.forceDeleteBranch': '强制删除分支',
+    'gitPanel.forceDeleteBranchMessage':
+      '确定强制删除本地分支 {branch} 吗？该分支未合并的提交之后可能无法找回。',
     'gitPanel.branchOperationFailed': '分支操作失败',
     'gitPanel.branchOperationSucceeded': '分支操作已完成',
     'gitPanel.commitPlaceholder': '提交说明（Ctrl+Enter 提交）',

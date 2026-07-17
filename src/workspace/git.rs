@@ -1152,6 +1152,8 @@ pub struct GitBranchNameBody {
     pub name: String,
     #[serde(default)]
     pub start_point: Option<String>,
+    #[serde(default)]
+    pub force: bool,
 }
 
 #[derive(Deserialize)]
@@ -2159,10 +2161,16 @@ pub async fn workspace_git_branch_delete(
     Query(query): Query<PaneQuery>,
     Json(body): Json<GitBranchNameBody>,
 ) -> Response {
-    // 步骤1：只删除已合并的本地分支，未合并分支由 Git 拒绝并返回明确提示。
+    // 步骤1：验证分支名，再依据用户明确选择使用安全删除或强制删除。
     let name = try_res!(validate_git_name(&body.name, "branch"));
-    let arguments = vec!["branch".to_string(), "-d".to_string(), name];
+    let arguments = build_branch_delete_arguments(&name, body.force);
     run_git_remote_command(&manager, &query, arguments).await
+}
+
+fn build_branch_delete_arguments(name: &str, force: bool) -> Vec<String> {
+    // 步骤1：默认使用小写 -d 保护未合并分支，只有明确强制时才使用大写 -D。
+    let delete_flag = if force { "-D" } else { "-d" };
+    vec!["branch".to_string(), delete_flag.to_string(), name.to_string()]
 }
 
 pub async fn workspace_git_branch_rename(
@@ -2857,8 +2865,9 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_unified_diff_hunk, build_branch_create_arguments, build_branch_switch_arguments,
-        build_commit_arguments, build_remote_add_arguments, build_remote_delete_arguments,
+        apply_unified_diff_hunk, build_branch_create_arguments, build_branch_delete_arguments,
+        build_branch_switch_arguments, build_commit_arguments, build_remote_add_arguments,
+        build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
         build_remote_branch_delete_arguments, build_remote_update_arguments,
         build_stash_save_arguments, build_upstream_set_arguments,
@@ -3173,6 +3182,21 @@ mod tests {
         let create_arguments =
             build_branch_create_arguments("feature/history", Some("abcdef12"));
         assert_eq!(create_arguments, vec!["switch", "-c", "feature/history", "abcdef12"]);
+    }
+
+    #[test]
+    fn builds_safe_and_force_branch_delete_arguments() {
+        // 步骤1：普通删除只允许 Git 删除已合并分支。
+        assert_eq!(
+            build_branch_delete_arguments("feature/done", false),
+            vec!["branch", "-d", "feature/done"]
+        );
+
+        // 步骤2：用户明确选择强制删除时才使用大写 -D。
+        assert_eq!(
+            build_branch_delete_arguments("feature/unfinished", true),
+            vec!["branch", "-D", "feature/unfinished"]
+        );
     }
 
     #[tokio::test]

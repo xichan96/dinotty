@@ -143,7 +143,29 @@ describe('GitBranchMenu', function gitBranchMenuSuite() {
       '/api/workspace/git-branch-delete?pane_id=pane-1',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ name: 'main' }),
+        body: JSON.stringify({ name: 'main', force: false }),
+      })
+    )
+  })
+
+  it('requires a separate confirmation before force deleting a branch', async function forceDeletesBranch() {
+    // 步骤1：点击强制删除入口后显示明确的危险操作确认框。
+    const wrapper = mountBranchMenu()
+    await flushPromises()
+    const mainRow = findBranchRow(wrapper, 'git-local-branch-row', 'main')
+    await mainRow.get('[data-testid="git-branch-force-delete-button"]').trigger('click')
+    const confirmModal = wrapper.findComponent(ConfirmModal)
+    expect(confirmModal.props('visible')).toBe(true)
+    expect(confirmModal.props('message')).toContain('main')
+
+    // 步骤2：确认后发送明确的 force 标记，避免普通删除隐式升级。
+    confirmModal.vm.$emit('confirm')
+    await flushPromises()
+    expect(branchMenuMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-branch-delete?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'main', force: true }),
       })
     )
   })

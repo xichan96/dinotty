@@ -115,9 +115,20 @@
                 :title="t('gitPanel.deleteBranch')"
                 :aria-label="t('gitPanel.deleteBranch')"
                 :disabled="busy || branch.current"
-                @click="requestDelete(branch.name)"
+                @click="requestDelete(branch.name, false)"
               >
                 <Trash2 :size="12" />
+              </button>
+              <button
+                type="button"
+                data-testid="git-branch-force-delete-button"
+                class="git-branch-icon-button danger"
+                :title="t('gitPanel.forceDeleteBranch')"
+                :aria-label="t('gitPanel.forceDeleteBranch')"
+                :disabled="busy || branch.current"
+                @click="requestDelete(branch.name, true)"
+              >
+                <ShieldAlert :size="12" />
               </button>
             </span>
           </template>
@@ -153,19 +164,31 @@
 
     <ConfirmModal
       :visible="!!branchPendingDelete"
-      :title="t('gitPanel.deleteBranch')"
-      :message="t('gitPanel.deleteBranchMessage').replace('{branch}', branchPendingDelete || '')"
-      :confirm-text="t('gitPanel.deleteBranch')"
+      :title="branchDeleteForce ? t('gitPanel.forceDeleteBranch') : t('gitPanel.deleteBranch')"
+      :message="deleteConfirmationMessage"
+      :confirm-text="
+        branchDeleteForce ? t('gitPanel.forceDeleteBranch') : t('gitPanel.deleteBranch')
+      "
       :cancel-text="t('filePreview.cancel')"
       @confirm="confirmDelete"
-      @cancel="branchPendingDelete = null"
+      @cancel="cancelDelete"
     />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Check, Cloud, GitBranch, Pencil, Plus, Search, Trash2, X } from 'lucide-vue-next'
+import {
+  Check,
+  Cloud,
+  GitBranch,
+  Pencil,
+  Plus,
+  Search,
+  ShieldAlert,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { appendGitRepository } from '../../utils/gitPanel'
@@ -201,6 +224,7 @@ const remoteBranches = ref<BranchEntry[]>([])
 const renamingBranch = ref<string | null>(null)
 const renameBranchName = ref('')
 const branchPendingDelete = ref<string | null>(null)
+const branchDeleteForce = ref(false)
 
 const filteredLocalBranches = computed(function computeFilteredLocalBranches() {
   // 步骤1：按不区分大小写的名称筛选本地分支。
@@ -352,17 +376,33 @@ async function confirmRename(oldName: string): Promise<void> {
   if (renamed) cancelRename()
 }
 
-function requestDelete(name: string): void {
-  // 步骤1：保存待删除分支，交给确认弹窗阻止误操作。
+const deleteConfirmationMessage = computed(function buildDeleteConfirmationMessage() {
+  // 步骤1：强制删除使用独立警告，普通删除保留未合并保护说明。
+  const messageKey = branchDeleteForce.value
+    ? 'gitPanel.forceDeleteBranchMessage'
+    : 'gitPanel.deleteBranchMessage'
+  return t(messageKey).replace('{branch}', branchPendingDelete.value || '')
+})
+
+function requestDelete(name: string, force: boolean): void {
+  // 步骤1：保存待删除分支和删除模式，交给确认弹窗阻止误操作。
   branchPendingDelete.value = name
+  branchDeleteForce.value = force
+}
+
+function cancelDelete(): void {
+  // 步骤1：同时清除待删除分支和强制模式，避免状态泄漏到下次操作。
+  branchPendingDelete.value = null
+  branchDeleteForce.value = false
 }
 
 async function confirmDelete(): Promise<void> {
-  // 步骤1：清空确认状态后执行非强制分支删除。
+  // 步骤1：保存当前模式并清空确认状态，再执行对应的分支删除。
   const name = branchPendingDelete.value
-  branchPendingDelete.value = null
+  const force = branchDeleteForce.value
+  cancelDelete()
   if (!name) return
-  await postBranchAction('git-branch-delete', { name })
+  await postBranchAction('git-branch-delete', { name, force })
 }
 
 watch(

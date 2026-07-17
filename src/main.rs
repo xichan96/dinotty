@@ -889,6 +889,7 @@ async fn main() {
             .route("/api/workspace/git-commit-diff", get(workspace::workspace_git_commit_diff))
             .route("/api/workspace/git-compare", get(workspace::workspace_git_compare))
             .route("/api/workspace/git-stashes", get(workspace::workspace_git_stashes))
+            .route("/api/workspace/git-stash-diff", get(workspace::workspace_git_stash_diff))
             .route("/api/workspace/git-stash-save", post(workspace::workspace_git_stash_save))
             .route("/api/workspace/git-stash-apply", post(workspace::workspace_git_stash_apply))
             .route("/api/workspace/git-stash-pop", post(workspace::workspace_git_stash_pop))

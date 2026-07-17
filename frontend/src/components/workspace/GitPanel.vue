@@ -265,7 +265,12 @@
           {{ statusMessage }}
         </p>
 
-        <GitStashSection :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
+        <GitStashSection
+          :pane-id="paneId"
+          :repository="repository"
+          :files="files"
+          @refresh="emit('refresh')"
+        />
         <GitAdvancedActions :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
 
         <label class="git-file-search">

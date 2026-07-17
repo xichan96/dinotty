@@ -1057,10 +1057,24 @@ pub struct GitStashSaveBody {
     pub message: String,
     #[serde(default)]
     pub include_untracked: bool,
+    #[serde(default)]
+    pub keep_index: bool,
+    #[serde(default)]
+    pub staged_only: bool,
+    #[serde(default)]
+    pub paths: Vec<String>,
 }
 
 #[derive(Deserialize)]
 pub struct GitStashReferenceBody {
+    pub reference: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitStashDiffQuery {
+    pub pane_id: String,
+    #[serde(default)]
+    pub repository: Option<String>,
     pub reference: String,
 }
 
@@ -1545,22 +1559,93 @@ pub async fn workspace_git_stashes(
     }
 }
 
+pub async fn workspace_git_stash_diff(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<GitStashDiffQuery>,
+) -> Response {
+    // 步骤1：验证仓库和 Stash 引用，再读取包含未跟踪文件的完整补丁。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let reference = try_res!(validate_stash_reference(&query.reference));
+    let arguments = vec![
+        "stash".to_string(),
+        "show".to_string(),
+        "--patch".to_string(),
+        "--include-untracked".to_string(),
+        "--no-color".to_string(),
+        reference,
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            if output.stdout.len() > MAX_GIT_DIFF_OUTPUT {
+                return json_err(StatusCode::PAYLOAD_TOO_LARGE, "stash diff too large");
+            }
+            let patch = String::from_utf8_lossy(&output.stdout).into_owned();
+            Json(serde_json::json!({ "patch": patch })).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn build_stash_save_arguments(
+    message: &str,
+    include_untracked: bool,
+    keep_index: bool,
+    staged_only: bool,
+    paths: &[String],
+) -> Vec<String> {
+    // 步骤1：按开关追加未跟踪文件、保留暂存区和仅暂存模式。
+    let mut arguments = vec!["stash".to_string(), "push".to_string()];
+    if include_untracked {
+        arguments.push("--include-untracked".to_string());
+    }
+    if keep_index {
+        arguments.push("--keep-index".to_string());
+    }
+    if staged_only {
+        arguments.push("--staged".to_string());
+    }
+
+    // 步骤2：说明位于路径分隔符之前，选中文件位于 -- 之后。
+    if !message.is_empty() {
+        arguments.push("-m".to_string());
+        arguments.push(message.to_string());
+    }
+    if !paths.is_empty() {
+        arguments.push("--".to_string());
+        for path in paths {
+            arguments.push(path.clone());
+        }
+    }
+    arguments
+}
+
 pub async fn workspace_git_stash_save(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
     Json(body): Json<GitStashSaveBody>,
 ) -> Response {
-    // 步骤1：构造 stash push，可选包含未跟踪文件和用户说明。
+    // 步骤1：验证选择模式和文件路径，禁止仅暂存模式与显式路径混用。
     let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
-    let mut arguments = vec!["stash".to_string(), "push".to_string()];
-    if body.include_untracked {
-        arguments.push("--include-untracked".to_string());
+    if body.staged_only && !body.paths.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "staged stash cannot include paths");
     }
+    if body.staged_only && body.include_untracked {
+        return json_err(StatusCode::BAD_REQUEST, "staged stash cannot include untracked files");
+    }
+    let paths = if body.paths.is_empty() {
+        Vec::new()
+    } else {
+        try_res!(validate_git_paths(&root, &body.paths))
+    };
     let message = body.message.trim();
-    if !message.is_empty() {
-        arguments.push("-m".to_string());
-        arguments.push(message.to_string());
-    }
+    let arguments = build_stash_save_arguments(
+        message,
+        body.include_untracked,
+        body.keep_index,
+        body.staged_only,
+        &paths,
+    );
 
     // 步骤2：执行保存并返回 Git 的真实提示。
     match run_git_output(root, arguments).await {
@@ -2776,7 +2861,7 @@ mod tests {
         build_commit_arguments, build_remote_add_arguments, build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
         build_remote_branch_delete_arguments, build_remote_update_arguments,
-        build_upstream_set_arguments,
+        build_stash_save_arguments, build_upstream_set_arguments,
         build_upstream_unset_arguments, contains_conflict_markers, discover_git_repositories,
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
         initialize_git_repository, parse_branch_output, parse_log_output, parse_remote_output,
@@ -3297,6 +3382,38 @@ mod tests {
         assert_eq!(
             build_remote_branch_delete_arguments("origin", "obsolete"),
             vec!["push", "origin", "--delete", "obsolete"]
+        );
+    }
+
+    #[test]
+    fn builds_selective_stash_save_arguments() {
+        // 步骤1：全部保存时支持说明、未跟踪文件和保留暂存区。
+        assert_eq!(
+            build_stash_save_arguments("before experiment", true, true, false, &[]),
+            vec![
+                "stash",
+                "push",
+                "--include-untracked",
+                "--keep-index",
+                "-m",
+                "before experiment"
+            ]
+        );
+
+        // 步骤2：仅暂存模式和选中文件模式生成互不混淆的参数。
+        assert_eq!(
+            build_stash_save_arguments("", false, false, true, &[]),
+            vec!["stash", "push", "--staged"]
+        );
+        assert_eq!(
+            build_stash_save_arguments(
+                "",
+                false,
+                false,
+                false,
+                &["src/a.ts".to_string(), "src/b.ts".to_string()]
+            ),
+            vec!["stash", "push", "--", "src/a.ts", "src/b.ts"]
         );
     }
 

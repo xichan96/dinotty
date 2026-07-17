@@ -196,6 +196,7 @@
         </p>
 
         <GitStashSection :pane-id="paneId" @refresh="emit('refresh')" />
+        <GitAdvancedActions :pane-id="paneId" @refresh="emit('refresh')" />
 
         <label class="git-file-search">
           <Search :size="13" aria-hidden="true" />
@@ -426,6 +427,7 @@ import {
 } from '../../utils/gitPanel'
 import type { GitHistorySelection } from '../../utils/gitHistory'
 import ConfirmModal from '../ui/ConfirmModal.vue'
+import GitAdvancedActions from './GitAdvancedActions.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'
 import GitStashSection from './GitStashSection.vue'

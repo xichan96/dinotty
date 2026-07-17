@@ -872,6 +872,22 @@ async fn main() {
                 "/api/workspace/git-conflict-resolve",
                 post(workspace::workspace_git_conflict_resolve),
             )
+            .route("/api/workspace/git-merge", post(workspace::workspace_git_merge))
+            .route("/api/workspace/git-rebase", post(workspace::workspace_git_rebase))
+            .route("/api/workspace/git-cherry-pick", post(workspace::workspace_git_cherry_pick))
+            .route("/api/workspace/git-revert-commit", post(workspace::workspace_git_revert_commit))
+            .route("/api/workspace/git-reset", post(workspace::workspace_git_reset))
+            .route(
+                "/api/workspace/git-operation-state",
+                get(workspace::workspace_git_operation_state),
+            )
+            .route(
+                "/api/workspace/git-operation-action",
+                post(workspace::workspace_git_operation_action),
+            )
+            .route("/api/workspace/git-tags", get(workspace::workspace_git_tags))
+            .route("/api/workspace/git-tag-create", post(workspace::workspace_git_tag_create))
+            .route("/api/workspace/git-tag-delete", post(workspace::workspace_git_tag_delete))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))

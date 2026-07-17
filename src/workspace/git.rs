@@ -34,6 +34,8 @@ fn git_command() -> std::process::Command {
     command.no_window();
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.env("GCM_INTERACTIVE", "never");
+    command.env("GIT_EDITOR", "true");
+    command.env("GIT_SEQUENCE_EDITOR", "true");
     command
 }
 
@@ -103,6 +105,24 @@ pub struct GitStashEntry {
 #[derive(Debug, Serialize)]
 pub struct GitStashesResponse {
     pub stashes: Vec<GitStashEntry>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct GitTagEntry {
+    pub name: String,
+    pub target: String,
+    pub created_at: String,
+    pub subject: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitTagsResponse {
+    pub tags: Vec<GitTagEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitOperationStateResponse {
+    pub operation: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -368,6 +388,24 @@ fn parse_stash_output(output: &str) -> Vec<GitStashEntry> {
         });
     }
     stashes
+}
+
+fn parse_tag_output(output: &str) -> Vec<GitTagEntry> {
+    // 步骤1：标签每行一条记录，字段使用 NUL 分隔以保留说明中的空格。
+    let mut tags = Vec::new();
+    for line in output.lines() {
+        let columns: Vec<&str> = line.split('\0').collect();
+        if columns.len() < 4 || columns[0].is_empty() {
+            continue;
+        }
+        tags.push(GitTagEntry {
+            name: columns[0].to_string(),
+            target: columns[1].to_string(),
+            created_at: columns[2].to_string(),
+            subject: columns[3].to_string(),
+        });
+    }
+    tags
 }
 
 pub async fn workspace_git_status(
@@ -730,6 +768,46 @@ pub struct GitStashReferenceBody {
 pub struct GitConflictResolveBody {
     pub path: String,
     pub resolution: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitSourceBody {
+    pub source: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitCommitActionBody {
+    pub commit: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitResetBody {
+    pub target: String,
+    pub mode: String,
+    #[serde(default)]
+    pub confirm_hard: bool,
+}
+
+#[derive(Deserialize)]
+pub struct GitOperationActionBody {
+    pub operation: String,
+    pub action: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitTagCreateBody {
+    pub name: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub annotated: bool,
+    #[serde(default)]
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitTagDeleteBody {
+    pub name: String,
 }
 
 #[derive(Deserialize)]
@@ -1157,6 +1235,196 @@ pub async fn workspace_git_conflict_resolve(
     }
 }
 
+async fn run_git_action(
+    manager: &SessionManager,
+    query: &PaneQuery,
+    arguments: Vec<String>,
+) -> Response {
+    // 步骤1：在当前仓库执行已完成参数校验的高级 Git 操作。
+    let root = match get_root(manager, &query.pane_id) {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
+    match run_git_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_merge(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitSourceBody>,
+) -> Response {
+    // 步骤1：校验来源分支并执行不会打开编辑器的合并。
+    let source = try_res!(validate_git_name(&body.source, "source"));
+    let arguments = vec!["merge".to_string(), "--no-edit".to_string(), source];
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_rebase(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitSourceBody>,
+) -> Response {
+    // 步骤1：校验目标分支并把当前分支变基到该分支。
+    let source = try_res!(validate_git_name(&body.source, "source"));
+    let arguments = vec!["rebase".to_string(), source];
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_cherry_pick(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitCommitActionBody>,
+) -> Response {
+    // 步骤1：只接受明确的十六进制提交 ID，再执行 Cherry-pick。
+    let commit = try_res!(validate_commit_hash(&body.commit));
+    let arguments = vec!["cherry-pick".to_string(), commit];
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_revert_commit(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitCommitActionBody>,
+) -> Response {
+    // 步骤1：验证提交 ID，并创建不打开编辑器的反向提交。
+    let commit = try_res!(validate_commit_hash(&body.commit));
+    let arguments = vec!["revert".to_string(), "--no-edit".to_string(), commit];
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_reset(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitResetBody>,
+) -> Response {
+    // 步骤1：Reset 模式使用固定白名单，hard 模式还要求请求体显式二次确认。
+    let mode = body.mode.trim();
+    if mode != "soft" && mode != "mixed" && mode != "hard" {
+        return json_err(StatusCode::BAD_REQUEST, "invalid reset mode");
+    }
+    if mode == "hard" && !body.confirm_hard {
+        return json_err(StatusCode::BAD_REQUEST, "hard reset confirmation required");
+    }
+    let target = try_res!(validate_git_name(&body.target, "target"));
+    let arguments = vec!["reset".to_string(), format!("--{mode}"), target];
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_operation_state(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取真实 Git 目录，兼容普通仓库和 worktree。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let git_dir_arguments = vec!["rev-parse".to_string(), "--git-dir".to_string()];
+    let output = match run_git_output(root.clone(), git_dir_arguments).await {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => return git_command_response(&output),
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let git_dir_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let git_dir_path = PathBuf::from(&git_dir_text);
+    let git_dir = if git_dir_path.is_absolute() { git_dir_path } else { root.join(git_dir_path) };
+
+    // 步骤2：按优先级识别正在进行的变基、合并、Cherry-pick 或 Revert。
+    let operation =
+        if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+            Some("rebase".to_string())
+        } else if git_dir.join("MERGE_HEAD").exists() {
+            Some("merge".to_string())
+        } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+            Some("cherry-pick".to_string())
+        } else if git_dir.join("REVERT_HEAD").exists() {
+            Some("revert".to_string())
+        } else {
+            None
+        };
+    Json(GitOperationStateResponse { operation }).into_response()
+}
+
+pub async fn workspace_git_operation_action(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitOperationActionBody>,
+) -> Response {
+    // 步骤1：操作类型和动作都使用白名单，避免拼接任意 Git 子命令。
+    let operation = body.operation.trim();
+    let action = body.action.trim();
+    let valid_operation = operation == "merge"
+        || operation == "rebase"
+        || operation == "cherry-pick"
+        || operation == "revert";
+    if !valid_operation || (action != "continue" && action != "abort") {
+        return json_err(StatusCode::BAD_REQUEST, "invalid operation action");
+    }
+    let arguments = vec![operation.to_string(), format!("--{action}")];
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_tags(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：按创建时间倒序读取本地标签的稳定字段。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let arguments = vec![
+        "for-each-ref".to_string(),
+        "--sort=-creatordate".to_string(),
+        "--format=%(refname:short)%00%(objectname)%00%(creatordate:iso-strict)%00%(subject)"
+            .to_string(),
+        "refs/tags".to_string(),
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Json(GitTagsResponse { tags: parse_tag_output(&stdout) }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_tag_create(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitTagCreateBody>,
+) -> Response {
+    // 步骤1：校验标签名和目标引用，空目标默认指向 HEAD。
+    let name = try_res!(validate_git_name(&body.name, "tag name"));
+    let target_text = if body.target.trim().is_empty() { "HEAD" } else { body.target.trim() };
+    let target = try_res!(validate_git_name(target_text, "target"));
+    let mut arguments = vec!["tag".to_string()];
+    if body.annotated {
+        let message = body.message.trim();
+        if message.is_empty() {
+            return json_err(StatusCode::BAD_REQUEST, "tag message required");
+        }
+        arguments.push("-a".to_string());
+        arguments.push(name);
+        arguments.push(target);
+        arguments.push("-m".to_string());
+        arguments.push(message.to_string());
+    } else {
+        arguments.push(name);
+        arguments.push(target);
+    }
+    run_git_action(&manager, &query, arguments).await
+}
+
+pub async fn workspace_git_tag_delete(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitTagDeleteBody>,
+) -> Response {
+    // 步骤1：删除用户明确选择且通过校验的本地标签。
+    let name = try_res!(validate_git_name(&body.name, "tag name"));
+    let arguments = vec!["tag".to_string(), "-d".to_string(), name];
+    run_git_action(&manager, &query, arguments).await
+}
+
 async fn run_git_remote_command(
     manager: &SessionManager,
     query: &PaneQuery,
@@ -1486,7 +1754,8 @@ pub async fn workspace_git_unified_diff(
 mod tests {
     use super::{
         build_commit_arguments, git_command, parse_branch_output, parse_log_output,
-        parse_remote_output, parse_stash_output, parse_status_output, unstage_git_paths,
+        parse_remote_output, parse_stash_output, parse_status_output, parse_tag_output,
+        unstage_git_paths,
     };
     use std::path::Path;
 
@@ -1612,6 +1881,19 @@ mod tests {
         assert_eq!(stashes[0].reference, "stash@{0}");
         assert_eq!(stashes[0].message, "On main: work in progress");
         assert_eq!(stashes[1].hash, "bbbbbbbb");
+    }
+
+    #[test]
+    fn parses_tag_records() {
+        // 步骤1：准备两个包含对象 ID、创建时间和主题的标签记录。
+        let output = "v1.2.0\0aaaaaaaa\02026-07-17 11:00:00 +0800\0Release 1.2.0\nv1.1.0\0bbbbbbbb\02026-07-16 10:00:00 +0800\0Release 1.1.0\n";
+
+        // 步骤2：确认标签字段按行和 NUL 正确解析。
+        let tags = parse_tag_output(output);
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].name, "v1.2.0");
+        assert_eq!(tags[0].target, "aaaaaaaa");
+        assert_eq!(tags[1].subject, "Release 1.1.0");
     }
 
     #[test]

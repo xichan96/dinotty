@@ -595,6 +595,11 @@ pub fn run_server(
             .route("/api/workspace/move", post(workspace::workspace_move))
             .route("/api/workspace/git-status", get(workspace::workspace_git_status))
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
+            .route("/api/workspace/git-unified-diff", get(workspace::workspace_git_unified_diff))
+            .route("/api/workspace/git-stage", post(workspace::workspace_git_stage))
+            .route("/api/workspace/git-unstage", post(workspace::workspace_git_unstage))
+            .route("/api/workspace/git-discard", post(workspace::workspace_git_discard))
+            .route("/api/workspace/git-commit", post(workspace::workspace_git_commit))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
@@ -737,5 +742,30 @@ pub fn run_server(
         axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn embedded_server_registers_git_management_routes() {
+        // 步骤1：读取桌面内嵌服务器的路由定义。
+        let server_source = include_str!("embedded_server.rs");
+        let production_source = server_source.split("#[cfg(test)]").next().unwrap_or(server_source);
+        let required_routes = [
+            "/api/workspace/git-unified-diff",
+            "/api/workspace/git-stage",
+            "/api/workspace/git-unstage",
+            "/api/workspace/git-discard",
+            "/api/workspace/git-commit",
+        ];
+
+        // 步骤2：确认 Git 管理面板使用的每个接口都已在桌面版注册。
+        for required_route in required_routes {
+            assert!(
+                production_source.contains(required_route),
+                "desktop route is missing: {required_route}"
+            );
+        }
     }
 }

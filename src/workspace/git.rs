@@ -1109,6 +1109,14 @@ pub struct GitCommitActionBody {
 }
 
 #[derive(Deserialize)]
+pub struct GitCherryPickBody {
+    #[serde(default)]
+    pub commit: Option<String>,
+    #[serde(default)]
+    pub commits: Vec<String>,
+}
+
+#[derive(Deserialize)]
 pub struct GitResetBody {
     pub target: String,
     pub mode: String,
@@ -1904,12 +1912,36 @@ pub async fn workspace_git_rebase(
 pub async fn workspace_git_cherry_pick(
     State(manager): State<Arc<SessionManager>>,
     Query(query): Query<PaneQuery>,
-    Json(body): Json<GitCommitActionBody>,
+    Json(body): Json<GitCherryPickBody>,
 ) -> Response {
-    // 步骤1：只接受明确的十六进制提交 ID，再执行 Cherry-pick。
-    let commit = try_res!(validate_commit_hash(&body.commit));
-    let arguments = vec!["cherry-pick".to_string(), commit];
+    // 步骤1：优先读取批量提交，并兼容原有的单提交请求字段。
+    let mut requested_commits = body.commits;
+    if requested_commits.is_empty() {
+        if let Some(commit) = body.commit {
+            requested_commits.push(commit);
+        }
+    }
+    if requested_commits.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "at least one commit is required");
+    }
+
+    // 步骤2：逐个验证提交 ID，保持请求顺序生成一次 Cherry-pick 命令。
+    let mut commits = Vec::new();
+    for requested_commit in requested_commits {
+        let commit = try_res!(validate_commit_hash(&requested_commit));
+        commits.push(commit);
+    }
+    let arguments = build_cherry_pick_arguments(&commits);
     run_git_action(&manager, &query, arguments).await
+}
+
+fn build_cherry_pick_arguments(commits: &[String]) -> Vec<String> {
+    // 步骤1：固定子命令放在首位，再按用户选择顺序追加每个提交。
+    let mut arguments = vec!["cherry-pick".to_string()];
+    for commit in commits {
+        arguments.push(commit.to_string());
+    }
+    arguments
 }
 
 pub async fn workspace_git_revert_commit(
@@ -2866,8 +2898,8 @@ pub async fn workspace_git_unified_diff(
 mod tests {
     use super::{
         apply_unified_diff_hunk, build_branch_create_arguments, build_branch_delete_arguments,
-        build_branch_switch_arguments, build_commit_arguments, build_remote_add_arguments,
-        build_remote_delete_arguments,
+        build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
+        build_remote_add_arguments, build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
         build_remote_branch_delete_arguments, build_remote_update_arguments,
         build_stash_save_arguments, build_upstream_set_arguments,
@@ -3196,6 +3228,16 @@ mod tests {
         assert_eq!(
             build_branch_delete_arguments("feature/unfinished", true),
             vec!["branch", "-D", "feature/unfinished"]
+        );
+    }
+
+    #[test]
+    fn builds_multi_commit_cherry_pick_arguments_in_request_order() {
+        // 步骤1：多个提交必须按用户选择顺序附加到同一个 Cherry-pick 命令。
+        let commits = vec!["bbbbbbbb".to_string(), "aaaaaaaa".to_string()];
+        assert_eq!(
+            build_cherry_pick_arguments(&commits),
+            vec!["cherry-pick", "bbbbbbbb", "aaaaaaaa"]
         );
     }
 

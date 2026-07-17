@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GitHistoryPanel from '../components/workspace/GitHistoryPanel.vue'
+import ConfirmModal from '../components/ui/ConfirmModal.vue'
 
 const historyPanelMocks = vi.hoisted(function createHistoryPanelMocks() {
   return { authFetch: vi.fn() }
@@ -140,5 +141,40 @@ describe('GitHistoryPanel', function gitHistoryPanelSuite() {
       base: 'main',
       target: 'feature/git-panel',
     })
+  })
+
+  it('cherry-picks multiple selected commits in selection order', async function cherryPicksSelectedCommits() {
+    // 步骤1：先选择较旧提交，再选择较新提交，明确记录用户希望的执行顺序。
+    const wrapper = mount(GitHistoryPanel, {
+      props: { paneId: 'pane-1', currentBranch: 'feature/git-panel', repository: 'apps/web' },
+    })
+    await flushPromises()
+    const selectionInputs = wrapper.findAll('[data-testid="git-history-select-commit"]')
+    await selectionInputs[1].setValue(true)
+    await selectionInputs[0].setValue(true)
+    expect(wrapper.get('[data-testid="git-history-cherry-pick-selected"]').text()).toContain('2')
+
+    // 步骤2：确认后一次发送有序提交数组，后端按该顺序执行 Cherry-pick。
+    await wrapper.get('[data-testid="git-history-cherry-pick-selected"]').trigger('click')
+    const confirmationModals = wrapper.findAllComponents(ConfirmModal)
+    let visibleConfirmationModal = null
+    for (const confirmationModal of confirmationModals) {
+      if (confirmationModal.props('visible')) {
+        visibleConfirmationModal = confirmationModal
+        break
+      }
+    }
+    if (!visibleConfirmationModal) {
+      throw new Error('Missing visible multi-commit confirmation modal')
+    }
+    visibleConfirmationModal.vm.$emit('confirm')
+    await flushPromises()
+    expect(historyPanelMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/git-cherry-pick?pane_id=pane-1&repository=apps%2Fweb',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ commits: ['bbbbbbbbbbbbbbbb', 'aaaaaaaaaaaaaaaa'] }),
+      })
+    )
   })
 })

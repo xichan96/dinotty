@@ -79,6 +79,37 @@
     <p v-else-if="statusMessage" class="git-history-message success" role="status">
       {{ statusMessage }}
     </p>
+    <div v-if="selectedCommitHashes.length" class="git-history-selection-bar">
+      <span>
+        {{
+          t('gitPanel.selectedCommitCount').replace('{count}', String(selectedCommitHashes.length))
+        }}
+      </span>
+      <button
+        type="button"
+        class="git-history-icon-button"
+        :title="t('gitPanel.clearSelectedCommits')"
+        :aria-label="t('gitPanel.clearSelectedCommits')"
+        :disabled="batchBusy"
+        @click="clearSelectedCommits"
+      >
+        <X :size="13" />
+      </button>
+      <button
+        type="button"
+        data-testid="git-history-cherry-pick-selected"
+        class="git-history-batch-button"
+        :disabled="batchBusy"
+        @click="cherryPickConfirmationVisible = true"
+      >
+        <Cherry :size="13" />
+        <span>
+          {{
+            t('gitPanel.cherryPickSelected').replace('{count}', String(selectedCommitHashes.length))
+          }}
+        </span>
+      </button>
+    </div>
     <div v-if="loading && !commits.length" class="git-history-state">
       {{ t('gitPanel.loadingHistory') }}
     </div>
@@ -123,6 +154,18 @@
             stroke-width="2"
           />
         </svg>
+        <label
+          class="git-history-select"
+          :title="t('gitPanel.selectCommit').replace('{commit}', commit.shortHash)"
+        >
+          <input
+            data-testid="git-history-select-commit"
+            type="checkbox"
+            :checked="isCommitSelected(commit.hash)"
+            :aria-label="t('gitPanel.selectCommit').replace('{commit}', commit.shortHash)"
+            @change="toggleCommitSelection(commit.hash)"
+          />
+        </label>
         <button
           type="button"
           data-testid="git-history-row"
@@ -165,16 +208,27 @@
         {{ loading ? t('gitPanel.loadingHistory') : t('gitPanel.loadMoreHistory') }}
       </button>
     </div>
+
+    <ConfirmModal
+      :visible="cherryPickConfirmationVisible"
+      :title="t('gitPanel.cherryPick')"
+      :message="cherryPickConfirmationMessage"
+      :confirm-text="t('gitPanel.cherryPick')"
+      :cancel-text="t('filePreview.cancel')"
+      @confirm="confirmCherryPickSelected"
+      @cancel="cherryPickConfirmationVisible = false"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { GitCompareArrows, Search, X } from 'lucide-vue-next'
+import { Cherry, GitCompareArrows, Search, X } from 'lucide-vue-next'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { appendGitRepository } from '../../utils/gitPanel'
 import GitCommitActions from './GitCommitActions.vue'
+import ConfirmModal from '../ui/ConfirmModal.vue'
 import {
   buildGitGraphRows,
   mapGitCommitEntry,
@@ -211,6 +265,9 @@ const loading = ref(false)
 const hasMore = ref(false)
 const errorMessage = ref('')
 const statusMessage = ref('')
+const selectedCommitHashes = ref<string[]>([])
+const cherryPickConfirmationVisible = ref(false)
+const batchBusy = ref(false)
 
 const graphRows = computed(function computeGraphRows() {
   // 步骤1：提交列表每次加载或追加后重新计算连续图谱泳道。
@@ -223,6 +280,14 @@ const canCompare = computed(function computeCanCompare() {
     compareBase.value.length > 0 &&
     compareTarget.value.length > 0 &&
     compareBase.value !== compareTarget.value
+  )
+})
+
+const cherryPickConfirmationMessage = computed(function computeCherryPickConfirmationMessage() {
+  // 步骤1：在确认消息中显示提交数量，并明确按选择顺序执行。
+  return t('gitPanel.cherryPickSelectedMessage').replace(
+    '{count}',
+    String(selectedCommitHashes.value.length)
   )
 })
 
@@ -332,6 +397,64 @@ function handleCommitActionResult(message: string, error: boolean): void {
   statusMessage.value = message
   errorMessage.value = ''
   void loadHistory(false)
+}
+
+function isCommitSelected(hash: string): boolean {
+  // 步骤1：按完整提交 ID 判断复选框状态。
+  return selectedCommitHashes.value.includes(hash)
+}
+
+function toggleCommitSelection(hash: string): void {
+  // 步骤1：已选择的提交再次勾选时移除，否则按点击顺序追加。
+  const selectedIndex = selectedCommitHashes.value.indexOf(hash)
+  if (selectedIndex >= 0) {
+    selectedCommitHashes.value.splice(selectedIndex, 1)
+    return
+  }
+  selectedCommitHashes.value.push(hash)
+}
+
+function clearSelectedCommits(): void {
+  // 步骤1：清空批量选择和尚未确认的操作状态。
+  selectedCommitHashes.value = []
+  cherryPickConfirmationVisible.value = false
+}
+
+async function confirmCherryPickSelected(): Promise<void> {
+  // 步骤1：复制当前选择并关闭确认框，防止请求过程中选择变化影响顺序。
+  const commitsToCherryPick = selectedCommitHashes.value.slice()
+  cherryPickConfirmationVisible.value = false
+  if (!commitsToCherryPick.length || batchBusy.value) return
+
+  // 步骤2：一次发送有序提交数组，并把真实结果反馈到历史面板。
+  batchBusy.value = true
+  errorMessage.value = ''
+  statusMessage.value = ''
+  try {
+    await getApiBase()
+    const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, props.repository)
+    const response = await authFetch(apiUrl(`/api/workspace/git-cherry-pick?${query}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commits: commitsToCherryPick }),
+    })
+    const result = await response.json().catch(function emptyCherryPickResult() {
+      return {}
+    })
+    if (!response.ok) {
+      errorMessage.value = result.error || t('gitPanel.commitActionFailed')
+      return
+    }
+    statusMessage.value = result.output || t('gitPanel.commitActionSucceeded')
+    clearSelectedCommits()
+    await loadHistory(false)
+    emit('refresh')
+  } catch {
+    errorMessage.value = t('gitPanel.commitActionFailed')
+  } finally {
+    batchBusy.value = false
+  }
 }
 
 function applyPathFilter(): void {
@@ -572,6 +695,49 @@ watch(
   color: var(--color-green, #62b478);
 }
 
+.git-history-selection-bar {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  background: var(--tab-bg);
+  font-size: 10px;
+}
+
+.git-history-selection-bar > span:first-child {
+  min-width: 0;
+  flex: 1;
+}
+
+.git-history-batch-button {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.git-history-batch-button:hover,
+.git-history-batch-button:focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.git-history-batch-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .git-history-state {
   min-height: 110px;
   display: flex;
@@ -622,6 +788,23 @@ watch(
   color: var(--fg);
   background: transparent;
   text-align: left;
+  cursor: pointer;
+}
+
+.git-history-select {
+  width: 26px;
+  flex: 0 0 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.git-history-select input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 

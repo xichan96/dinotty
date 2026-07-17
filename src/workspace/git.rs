@@ -232,6 +232,32 @@ pub struct GitBlameResponse {
     pub lines: Vec<GitBlameLine>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct GitIgnoreResponse {
+    pub content: String,
+    pub exists: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitIgnoreUpdateBody {
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitIgnoreAddBody {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitCleanPreviewResponse {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GitCleanBody {
+    pub paths: Vec<String>,
+}
+
 struct GitCommandCancellation {
     id: String,
     root: PathBuf,
@@ -1718,14 +1744,25 @@ fn validate_git_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, Resp
     let mut validated_paths = Vec::new();
     for path in paths {
         let trimmed_path = path.trim().trim_start_matches('/');
-        if trimmed_path.is_empty() {
+        let normalized_path = trimmed_path.replace('\\', "/");
+        if normalized_path.is_empty() {
             return Err(json_err(StatusCode::BAD_REQUEST, "invalid path"));
         }
-        let candidate = normalize_join(root, trimmed_path)?;
+        for character in normalized_path.chars() {
+            if character.is_control() {
+                return Err(json_err(StatusCode::BAD_REQUEST, "invalid path"));
+            }
+        }
+        for component in normalized_path.split('/') {
+            if component == ".." {
+                return Err(json_err(StatusCode::BAD_REQUEST, "invalid path"));
+            }
+        }
+        let candidate = normalize_join(root, &normalized_path)?;
         if candidate == root || !candidate.starts_with(root) {
             return Err(json_err(StatusCode::FORBIDDEN, "outside workspace"));
         }
-        validated_paths.push(trimmed_path.replace('\\', "/"));
+        validated_paths.push(normalized_path);
     }
     Ok(validated_paths)
 }
@@ -1838,6 +1875,231 @@ pub async fn workspace_git_blame(
             let stdout = String::from_utf8_lossy(&output.stdout);
             Json(GitBlameResponse { path, lines: parse_git_blame_output(&stdout) }).into_response()
         }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn git_ignore_literal_pattern(path: &str, directory: bool) -> String {
+    // 步骤1：生成仓库根锚定规则，并转义 Gitignore 特殊字符。
+    let normalized_path = path.trim_matches('/');
+    let mut pattern = String::from("/");
+    for character in normalized_path.chars() {
+        let needs_escape = character == '\\'
+            || character == '!'
+            || character == '#'
+            || character == '['
+            || character == ']'
+            || character == '*'
+            || character == '?'
+            || character == ' ';
+        if needs_escape {
+            pattern.push('\\');
+        }
+        pattern.push(character);
+    }
+    if directory && !pattern.ends_with('/') {
+        pattern.push('/');
+    }
+    pattern
+}
+
+fn append_git_ignore_pattern(content: &str, pattern: &str) -> String {
+    // 步骤1：已有完全相同的规则时原样返回，避免重复写入。
+    for line in content.lines() {
+        if line == pattern {
+            return content.to_string();
+        }
+    }
+
+    // 步骤2：在现有内容后补齐换行并追加规则。
+    let mut updated = content.to_string();
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(pattern);
+    updated.push('\n');
+    updated
+}
+
+fn read_git_ignore(root: &Path) -> Result<GitIgnoreResponse, String> {
+    // 步骤1：不存在时返回空内容；符号链接和过大文件拒绝读取。
+    let target = root.join(".gitignore");
+    let metadata = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(GitIgnoreResponse { content: String::new(), exists: false });
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err("symbolic .gitignore is not supported".to_string());
+    }
+    if metadata.len() > MAX_TEXT_PREVIEW as u64 {
+        return Err(".gitignore is too large".to_string());
+    }
+    let content = match std::fs::read_to_string(target) {
+        Ok(content) => content,
+        Err(error) => return Err(error.to_string()),
+    };
+    Ok(GitIgnoreResponse { content, exists: true })
+}
+
+fn write_git_ignore(root: &Path, content: &str) -> Result<(), String> {
+    // 步骤1：限制内容大小，并拒绝覆盖指向仓库外部的符号链接。
+    if content.len() > MAX_TEXT_PREVIEW {
+        return Err(".gitignore is too large".to_string());
+    }
+    let target = root.join(".gitignore");
+    match std::fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err("symbolic .gitignore is not supported".to_string());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    match std::fs::write(target, content) {
+        Ok(()) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+pub async fn workspace_git_ignore(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：读取当前仓库根目录的 .gitignore。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    match read_git_ignore(&root) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_ignore_update(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitIgnoreUpdateBody>,
+) -> Response {
+    // 步骤1：把编辑器内容写回当前仓库根目录。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    match write_git_ignore(&root, &body.content) {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_ignore_add(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitIgnoreAddBody>,
+) -> Response {
+    // 步骤1：验证目标位于当前仓库并判断文件类型。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let paths = try_res!(validate_git_paths(&root, &[body.path]));
+    let path = paths[0].trim_end_matches('/').to_string();
+    let target = try_res!(normalize_join(&root, &path));
+    let metadata = match std::fs::metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) => return json_err(StatusCode::NOT_FOUND, &error.to_string()),
+    };
+
+    // 步骤2：按字面路径追加规则并写回 .gitignore。
+    let pattern = git_ignore_literal_pattern(&path, metadata.is_dir());
+    let current = match read_git_ignore(&root) {
+        Ok(response) => response.content,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let updated = append_git_ignore_pattern(&current, &pattern);
+    match write_git_ignore(&root, &updated) {
+        Ok(()) => Json(serde_json::json!({ "ok": true, "pattern": pattern })).into_response(),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn parse_git_clean_preview_output(output: &str) -> Vec<String> {
+    // 步骤1：只接收 Git 明确标记为“将删除”的路径。
+    let mut paths = Vec::new();
+    for line in output.lines() {
+        let Some(path) = line.strip_prefix("Would remove ") else {
+            continue;
+        };
+        let path = path.trim_end_matches('\r');
+        if !path.is_empty() {
+            paths.push(path.to_string());
+        }
+    }
+    paths
+}
+
+fn build_git_clean_arguments(paths: &[String]) -> Vec<String> {
+    // 步骤1：只清理明确选择的未跟踪项，并用 -- 隔离路径参数。
+    let mut arguments = vec!["clean".to_string(), "-fd".to_string(), "--".to_string()];
+    for path in paths {
+        arguments.push(path.clone());
+    }
+    arguments
+}
+
+async fn git_clean_preview_paths(root: PathBuf) -> Result<Vec<String>, String> {
+    // 步骤1：dry-run 默认遵守 .gitignore，并要求 Git 输出可读的非 ASCII 路径。
+    let arguments = vec![
+        "-c".to_string(),
+        "core.quotePath=false".to_string(),
+        "clean".to_string(),
+        "-nd".to_string(),
+    ];
+    let output = run_git_output(root, arguments).await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            return Err("git clean preview failed".to_string());
+        }
+        return Err(stderr);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_git_clean_preview_output(&stdout))
+}
+
+pub async fn workspace_git_clean_preview(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：返回 Git dry-run 的真实待清理路径。
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    match git_clean_preview_paths(root).await {
+        Ok(paths) => Json(GitCleanPreviewResponse { paths }).into_response(),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_clean(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitCleanBody>,
+) -> Response {
+    // 步骤1：限制选择数量并验证仓库相对路径。
+    if body.paths.is_empty() || body.paths.len() > MAX_GIT_STATUS_FILES {
+        return json_err(StatusCode::BAD_REQUEST, "clean paths required");
+    }
+    let root = try_res!(get_git_root(&manager, &query.pane_id, query.repository.as_deref()));
+    let paths = try_res!(validate_git_paths(&root, &body.paths));
+
+    // 步骤2：重新 dry-run，拒绝任何不在当前预览中的路径。
+    let preview_paths = match git_clean_preview_paths(root.clone()).await {
+        Ok(paths) => paths,
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    for path in &paths {
+        if !preview_paths.contains(path) {
+            return json_err(StatusCode::CONFLICT, "clean preview changed; refresh required");
+        }
+    }
+
+    // 步骤3：执行受路径约束的清理，并记录为可查看的 Git 命令。
+    let arguments = build_git_clean_arguments(&paths);
+    match run_git_tracked_output(root, arguments).await {
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
@@ -4049,9 +4311,11 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_unified_diff_hunk, build_branch_create_arguments, build_branch_delete_arguments,
+        append_git_ignore_pattern, apply_unified_diff_hunk, build_branch_create_arguments,
+        build_branch_delete_arguments,
         build_branch_switch_arguments, build_cherry_pick_arguments, build_commit_arguments,
-        build_git_config_update_commands, git_command_records_for_root,
+        build_git_clean_arguments, build_git_config_update_commands, git_clean_preview_paths,
+        git_command_records_for_root, git_ignore_literal_pattern,
         request_git_command_cancellation, sanitize_git_command,
         build_remote_add_arguments, build_remote_delete_arguments,
         build_fetch_arguments, build_pull_arguments, build_push_arguments,
@@ -4061,10 +4325,11 @@ mod tests {
         clone_git_repository, extract_unified_diff_hunk, git_command, git_commit_matches_search,
         initialize_git_repository, parse_branch_output, parse_git_blame_output,
         parse_git_config_output, parse_log_output,
-        parse_reflog_output, parse_remote_output, parse_stash_output, parse_status_output,
+        parse_git_clean_preview_output, parse_reflog_output, parse_remote_output,
+        parse_stash_output, parse_status_output,
         parse_tag_output,
-        read_conflict_stage,
-        run_rebase_plan, unstage_git_paths, validate_clone_directory, validate_clone_url,
+        read_conflict_stage, run_git_output, run_rebase_plan, unstage_git_paths,
+        validate_clone_directory, validate_clone_url,
         validate_initial_branch, GitCommandCancellation, GitCommandRecord, GitCommandTracker,
         GitConfigUpdateBody, GitRebasePlanEntry,
     };
@@ -4471,6 +4736,69 @@ mod tests {
         assert_eq!(lines[0].summary, "Add first line");
         assert_eq!(lines[1].line_number, 2);
         assert_eq!(lines[1].content, "second line");
+    }
+
+    #[test]
+    fn appends_literal_git_ignore_pattern_once() {
+        // 步骤1：追加包含 Gitignore 特殊字符的字面路径并补齐换行。
+        let content = "target/\n";
+        let pattern = "/build/\\[draft\\].txt";
+        let updated = append_git_ignore_pattern(content, pattern);
+        assert_eq!(updated, "target/\n/build/\\[draft\\].txt\n");
+
+        // 步骤2：相同规则已经存在时不得重复写入。
+        assert_eq!(append_git_ignore_pattern(&updated, pattern), updated);
+    }
+
+    #[test]
+    fn creates_rooted_literal_git_ignore_patterns() {
+        // 步骤1：文件路径中的通配、空格和注释字符必须按字面量转义。
+        assert_eq!(
+            git_ignore_literal_pattern("build/[draft] #1.txt", false),
+            "/build/\\[draft\\]\\ \\#1.txt"
+        );
+
+        // 步骤2：目录规则以斜杠结尾，只忽略该仓库内的目标目录。
+        assert_eq!(git_ignore_literal_pattern("cache", true), "/cache/");
+    }
+
+    #[test]
+    fn parses_clean_preview_and_builds_scoped_clean_command() {
+        // 步骤1：解析 Git dry-run 输出，保留目录和带空格的文件名。
+        let output = "Would remove build/\nWould remove notes draft.txt\n";
+        let paths = parse_git_clean_preview_output(output);
+        assert_eq!(paths, vec!["build/", "notes draft.txt"]);
+
+        // 步骤2：实际清理只作用于明确选择的路径，并使用参数分隔符。
+        assert_eq!(
+            build_git_clean_arguments(&paths),
+            vec!["clean", "-fd", "--", "build/", "notes draft.txt"]
+        );
+    }
+
+    #[tokio::test]
+    async fn cleans_only_selected_untracked_paths() {
+        // 步骤1：建立临时仓库并创建两个带空格的未跟踪文件。
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        run_test_git(root, &["init"]);
+        let selected_path = root.join("remove me.txt");
+        let retained_path = root.join("keep me.txt");
+        std::fs::write(&selected_path, "remove").unwrap();
+        std::fs::write(&retained_path, "keep").unwrap();
+
+        // 步骤2：dry-run 必须返回两项，实际命令只传入选中的一项。
+        let preview_paths = git_clean_preview_paths(root.to_path_buf()).await.unwrap();
+        assert!(preview_paths.contains(&"remove me.txt".to_string()));
+        assert!(preview_paths.contains(&"keep me.txt".to_string()));
+        let selected_paths = vec!["remove me.txt".to_string()];
+        let arguments = build_git_clean_arguments(&selected_paths);
+        let output = run_git_output(root.to_path_buf(), arguments).await.unwrap();
+        assert!(output.status.success());
+
+        // 步骤3：选中项已删除，未选项必须完整保留。
+        assert!(!selected_path.exists());
+        assert!(retained_path.exists());
     }
 
     #[test]

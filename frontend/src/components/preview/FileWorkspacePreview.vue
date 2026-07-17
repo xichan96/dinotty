@@ -477,6 +477,16 @@
           <span class="tree-ctx-label">{{ t('filePreview.ctxGitBlame') }}</span>
         </button>
         <button
+          v-if="canIgnoreContextPath"
+          type="button"
+          class="tree-ctx-item"
+          data-testid="tree-context-git-ignore"
+          role="menuitem"
+          @click="addContextPathToGitIgnore"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxGitIgnore') }}</span>
+        </button>
+        <button
           type="button"
           class="tree-ctx-item"
           role="menuitem"
@@ -766,6 +776,20 @@ const canBlameContextFile = computed(function computeCanBlameContextFile() {
   return repositoryPathForWorkspaceFile(targetRel) !== null
 })
 
+const canIgnoreContextPath = computed(function computeCanIgnoreContextPath() {
+  // 步骤1：目录可以整体忽略，文件仅在未跟踪时显示入口。
+  if (!isGitRepo.value) return false
+  const menu = ctxMenu.contextMenu.value
+  if (!menu) return false
+  const targetRel = menu.rel || selectedRel.value
+  const targetIsDirectory = menu.rel ? menu.isDir : selectedIsDir.value
+  if (!targetRel) return false
+  const repositoryPath = repositoryPathForWorkspaceFile(targetRel)
+  if (!repositoryPath || repositoryPath === '.gitignore') return false
+  if (targetIsDirectory) return true
+  return gitStatusMap.value[targetRel] === 'untracked'
+})
+
 function repositoryPathForWorkspaceFile(workspacePath: string): string | null {
   // 步骤1：根仓库直接使用工作区路径，子仓库则移除仓库目录前缀。
   const repository = gitRepository.value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
@@ -790,6 +814,30 @@ function openContextFileBlame(): void {
   gitBlamePath.value = repositoryPath
   gitDiffSelection.value = null
   gitHistorySelection.value = null
+}
+
+async function addContextPathToGitIgnore(): Promise<void> {
+  // 步骤1：读取右键目标并关闭菜单，路径由后端再次验证。
+  const menu = ctxMenu.contextMenu.value
+  if (!menu) return
+  const targetRel = menu.rel || selectedRel.value
+  if (!targetRel) return
+  const repositoryPath = repositoryPathForWorkspaceFile(targetRel)
+  if (!repositoryPath) return
+  ctxMenu.closeContextMenu()
+
+  // 步骤2：追加字面路径规则并刷新 Git 状态标记。
+  try {
+    await getApiBase()
+    const query = new URLSearchParams({ pane_id: props.paneId })
+    appendGitRepository(query, gitRepository.value)
+    const response = await authFetch(apiUrl(`/api/workspace/git-ignore-add?${query}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: repositoryPath }),
+    })
+    if (response.ok) await fetchGitStatus()
+  } catch {}
 }
 
 const deleteConfirmMessage = computed(() => {

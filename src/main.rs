@@ -937,6 +937,19 @@ async fn main() {
             )
             .route("/api/workspace/git-blame", get(workspace::workspace_git_blame))
             .route(
+                "/api/workspace/git-ignore",
+                get(workspace::workspace_git_ignore).post(workspace::workspace_git_ignore_update),
+            )
+            .route(
+                "/api/workspace/git-ignore-add",
+                post(workspace::workspace_git_ignore_add),
+            )
+            .route(
+                "/api/workspace/git-clean-preview",
+                get(workspace::workspace_git_clean_preview),
+            )
+            .route("/api/workspace/git-clean", post(workspace::workspace_git_clean))
+            .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),
             )

@@ -703,6 +703,19 @@ pub fn run_server(
             )
             .route("/api/workspace/git-blame", get(workspace::workspace_git_blame))
             .route(
+                "/api/workspace/git-ignore",
+                get(workspace::workspace_git_ignore).post(workspace::workspace_git_ignore_update),
+            )
+            .route(
+                "/api/workspace/git-ignore-add",
+                post(workspace::workspace_git_ignore_add),
+            )
+            .route(
+                "/api/workspace/git-clean-preview",
+                get(workspace::workspace_git_clean_preview),
+            )
+            .route("/api/workspace/git-clean", post(workspace::workspace_git_clean))
+            .route(
                 "/api/workspace/git-operation-action",
                 post(workspace::workspace_git_operation_action),
             )
@@ -915,6 +928,10 @@ mod tests {
             "/api/workspace/git-command-log",
             "/api/workspace/git-command-cancel",
             "/api/workspace/git-blame",
+            "/api/workspace/git-ignore",
+            "/api/workspace/git-ignore-add",
+            "/api/workspace/git-clean-preview",
+            "/api/workspace/git-clean",
             "/api/workspace/git-operation-action",
             "/api/workspace/git-tags",
             "/api/workspace/git-tag-create",

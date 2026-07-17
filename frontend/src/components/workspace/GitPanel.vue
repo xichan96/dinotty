@@ -274,6 +274,11 @@
         <GitAdvancedActions :pane-id="paneId" :repository="repository" @refresh="emit('refresh')" />
         <GitConfiguration :pane-id="paneId" :repository="repository" />
         <GitCommandLog :pane-id="paneId" :repository="repository" />
+        <GitRepositoryMaintenance
+          :pane-id="paneId"
+          :repository="repository"
+          @refresh="emit('refresh')"
+        />
 
         <label class="git-file-search">
           <Search :size="13" aria-hidden="true" />
@@ -511,6 +516,7 @@ import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitAdvancedActions from './GitAdvancedActions.vue'
 import GitConfiguration from './GitConfiguration.vue'
 import GitCommandLog from './GitCommandLog.vue'
+import GitRepositoryMaintenance from './GitRepositoryMaintenance.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'
 import GitRepositorySetup from './GitRepositorySetup.vue'

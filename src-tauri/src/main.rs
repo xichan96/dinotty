@@ -585,7 +585,30 @@ fn close_window(app: AppHandle, state: State<'_, Arc<SessionManager>>) {
     quit_desktop_app(&app, state.inner().as_ref());
 }
 
+/// GUI-launched macOS apps inherit LaunchServices' minimal PATH, so argv tabs
+/// (e.g. `claude --resume`) fail to spawn. Import the user's login-shell PATH
+/// once at startup, before any PTY spawn or thread exists.
+fn import_login_shell_path() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let Ok(out) = std::process::Command::new(&shell)
+        .args(["-lc", "printf %s \"$PATH\""])
+        .output()
+    else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    if let Ok(path) = String::from_utf8(out.stdout) {
+        let path = path.trim();
+        if !path.is_empty() {
+            std::env::set_var("PATH", path);
+        }
+    }
+}
+
 fn main() {
+    import_login_shell_path();
     let _log_guard = dinotty_server::settings::init_logging();
 
     let args: Vec<String> = std::env::args().collect();

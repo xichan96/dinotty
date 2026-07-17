@@ -239,6 +239,64 @@ describe('GitPanel', function gitPanelSuite() {
       ''
     )
   })
+
+  it('supports amend and signoff commit options', async function commitsWithOptions() {
+    // 步骤1：启用修订提交和 Signed-off-by 后输入新的提交说明。
+    const wrapper = mountGitPanel()
+    await wrapper.get('[data-testid="git-commit-amend"]').setValue(true)
+    await wrapper.get('[data-testid="git-commit-signoff"]').setValue(true)
+    await wrapper.get('[data-testid="git-commit-message"]').setValue('修订 Git 管理面板')
+    await wrapper.get('[data-testid="git-commit-button"]').trigger('click')
+    await flushPromises()
+
+    // 步骤2：确认两个提交选项都传递给后端。
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-commit?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ message: '修订 Git 管理面板', amend: true, signoff: true }),
+      })
+    )
+  })
+
+  it('resolves a conflict with the selected side', async function resolvesConflict() {
+    // 步骤1：挂载包含冲突文件的面板并选择采用当前分支版本。
+    const conflictFiles = [
+      {
+        path: 'src/conflict.ts',
+        status: 'conflict',
+        indexStatus: 'U',
+        worktreeStatus: 'U',
+        staged: true,
+        unstaged: true,
+        conflict: true,
+      },
+    ]
+    const wrapper = mount(GitPanel, {
+      props: {
+        paneId: 'pane-1',
+        branch: 'main',
+        upstream: 'origin/main',
+        ahead: 0,
+        behind: 0,
+        remotes: [],
+        isGitRepo: true,
+        loading: false,
+        files: conflictFiles,
+      },
+    })
+    await wrapper.get('[data-testid="git-conflict-ours"]').trigger('click')
+    await flushPromises()
+
+    // 步骤2：确认路径和解决方式被发送到冲突接口。
+    expect(gitPanelMocks.authFetch).toHaveBeenLastCalledWith(
+      '/api/workspace/git-conflict-resolve?pane_id=pane-1',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: 'src/conflict.ts', resolution: 'ours' }),
+      })
+    )
+  })
 })
 
 describe('GitDiffViewer', function gitDiffViewerSuite() {

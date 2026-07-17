@@ -166,6 +166,16 @@
             @keydown.ctrl.enter.prevent="commitChanges"
             @keydown.meta.enter.prevent="commitChanges"
           ></textarea>
+          <div class="git-commit-options">
+            <label>
+              <input v-model="amendCommit" data-testid="git-commit-amend" type="checkbox" />
+              <span>{{ t('gitPanel.amendCommit') }}</span>
+            </label>
+            <label>
+              <input v-model="signoffCommit" data-testid="git-commit-signoff" type="checkbox" />
+              <span>{{ t('gitPanel.signoffCommit') }}</span>
+            </label>
+          </div>
           <button
             type="button"
             data-testid="git-commit-button"
@@ -184,6 +194,8 @@
         <p v-else-if="statusMessage" class="git-panel-message success" role="status">
           {{ statusMessage }}
         </p>
+
+        <GitStashSection :pane-id="paneId" @refresh="emit('refresh')" />
 
         <div v-if="!files.length" class="git-panel-state clean">
           <CircleCheck :size="22" aria-hidden="true" />
@@ -223,17 +235,54 @@
                 </span>
               </span>
               <span class="git-file-actions">
-                <button
-                  type="button"
-                  data-testid="git-unstage-button"
-                  class="git-icon-button"
-                  :title="t('gitPanel.unstage')"
-                  :aria-label="t('gitPanel.unstage')"
-                  :disabled="busy"
-                  @click.stop="unstagePaths([file.path])"
-                >
-                  <Minus :size="13" />
-                </button>
+                <template v-if="file.conflict">
+                  <button
+                    type="button"
+                    data-testid="git-conflict-ours"
+                    class="git-icon-button"
+                    :title="t('gitPanel.conflictOurs')"
+                    :aria-label="t('gitPanel.conflictOurs')"
+                    :disabled="busy"
+                    @click.stop="resolveConflict(file, 'ours')"
+                  >
+                    <ArrowLeftToLine :size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="git-conflict-theirs"
+                    class="git-icon-button"
+                    :title="t('gitPanel.conflictTheirs')"
+                    :aria-label="t('gitPanel.conflictTheirs')"
+                    :disabled="busy"
+                    @click.stop="resolveConflict(file, 'theirs')"
+                  >
+                    <ArrowRightToLine :size="13" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="git-conflict-resolved"
+                    class="git-icon-button"
+                    :title="t('gitPanel.conflictResolved')"
+                    :aria-label="t('gitPanel.conflictResolved')"
+                    :disabled="busy"
+                    @click.stop="resolveConflict(file, 'resolved')"
+                  >
+                    <Check :size="13" />
+                  </button>
+                </template>
+                <template v-else>
+                  <button
+                    type="button"
+                    data-testid="git-unstage-button"
+                    class="git-icon-button"
+                    :title="t('gitPanel.unstage')"
+                    :aria-label="t('gitPanel.unstage')"
+                    :disabled="busy"
+                    @click.stop="unstagePaths([file.path])"
+                  >
+                    <Minus :size="13" />
+                  </button>
+                </template>
               </span>
             </div>
           </div>
@@ -318,6 +367,8 @@ import { computed, ref } from 'vue'
 import {
   ArrowDown,
   ArrowDownToLine,
+  ArrowLeftToLine,
+  ArrowRightToLine,
   ArrowUp,
   ArrowUpFromLine,
   Check,
@@ -345,6 +396,7 @@ import type { GitHistorySelection } from '../../utils/gitHistory'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
 import GitHistoryPanel from './GitHistoryPanel.vue'
+import GitStashSection from './GitStashSection.vue'
 
 const props = defineProps<{
   paneId: string
@@ -367,6 +419,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const commitMessage = ref('')
+const amendCommit = ref(false)
+const signoffCommit = ref(false)
 const busy = ref(false)
 const errorMessage = ref('')
 const statusMessage = ref('')
@@ -422,7 +476,8 @@ const workingFiles = computed(function computeWorkingFiles() {
 
 const canCommit = computed(function computeCanCommit() {
   // 步骤1：只有存在暂存内容、提交说明非空且没有其他操作时才允许提交。
-  return stagedFiles.value.length > 0 && commitMessage.value.trim().length > 0 && !busy.value
+  const hasCommitContent = stagedFiles.value.length > 0 || amendCommit.value
+  return hasCommitContent && commitMessage.value.trim().length > 0 && !busy.value
 })
 
 function statusMark(file: GitFileEntry): string {
@@ -572,12 +627,24 @@ async function commitChanges(): Promise<void> {
   // 步骤1：在可提交状态下发送去除首尾空白的提交说明。
   if (!canCommit.value) return
   const message = commitMessage.value.trim()
-  const committed = await postGitAction('git-commit', { message })
+  const body: Record<string, unknown> = { message }
+  if (amendCommit.value) body.amend = true
+  if (signoffCommit.value) body.signoff = true
+  const committed = await postGitAction('git-commit', body)
 
   // 步骤2：仅在提交成功后清空输入，失败时保留用户内容。
   if (committed) {
     commitMessage.value = ''
+    amendCommit.value = false
   }
+}
+
+async function resolveConflict(
+  file: GitFileEntry,
+  resolution: 'ours' | 'theirs' | 'resolved'
+): Promise<void> {
+  // 步骤1：把冲突文件和用户选择的解决方式交给后端，并复用统一操作反馈。
+  await postGitAction('git-conflict-resolve', { path: file.path, resolution })
 }
 </script>
 
@@ -786,6 +853,26 @@ async function commitChanges(): Promise<void> {
 .git-commit-message:focus {
   border-color: var(--accent);
   outline: none;
+}
+
+.git-commit-options {
+  min-height: 25px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.git-commit-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.git-commit-options input {
+  margin: 0;
 }
 
 .git-commit-button {

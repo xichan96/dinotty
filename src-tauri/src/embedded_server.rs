@@ -627,6 +627,15 @@ pub fn run_server(
             .route("/api/workspace/git-log", get(workspace::workspace_git_log))
             .route("/api/workspace/git-commit-diff", get(workspace::workspace_git_commit_diff))
             .route("/api/workspace/git-compare", get(workspace::workspace_git_compare))
+            .route("/api/workspace/git-stashes", get(workspace::workspace_git_stashes))
+            .route("/api/workspace/git-stash-save", post(workspace::workspace_git_stash_save))
+            .route("/api/workspace/git-stash-apply", post(workspace::workspace_git_stash_apply))
+            .route("/api/workspace/git-stash-pop", post(workspace::workspace_git_stash_pop))
+            .route("/api/workspace/git-stash-drop", post(workspace::workspace_git_stash_drop))
+            .route(
+                "/api/workspace/git-conflict-resolve",
+                post(workspace::workspace_git_conflict_resolve),
+            )
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
@@ -797,6 +806,12 @@ mod tests {
             "/api/workspace/git-log",
             "/api/workspace/git-commit-diff",
             "/api/workspace/git-compare",
+            "/api/workspace/git-stashes",
+            "/api/workspace/git-stash-save",
+            "/api/workspace/git-stash-apply",
+            "/api/workspace/git-stash-pop",
+            "/api/workspace/git-stash-drop",
+            "/api/workspace/git-conflict-resolve",
         ];
 
         // 步骤2：确认 Git 管理面板使用的每个接口都已在桌面版注册。

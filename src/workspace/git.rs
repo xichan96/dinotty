@@ -91,6 +91,19 @@ pub struct GitCompareResponse {
     pub patch: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct GitStashEntry {
+    pub reference: String,
+    pub hash: String,
+    pub created_at: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitStashesResponse {
+    pub stashes: Vec<GitStashEntry>,
+}
+
 #[derive(Serialize)]
 pub struct GitStatusResponse {
     pub is_git_repo: bool,
@@ -323,6 +336,28 @@ fn parse_log_output(output: &str) -> Vec<GitCommitSummary> {
         });
     }
     commits
+}
+
+fn parse_stash_output(output: &str) -> Vec<GitStashEntry> {
+    // 步骤1：按记录分隔符拆分 stash，再读取引用、对象 ID、时间和说明。
+    let mut stashes = Vec::new();
+    for record in output.split('\x1e') {
+        let record = record.trim_matches(['\r', '\n']);
+        if record.is_empty() {
+            continue;
+        }
+        let columns: Vec<&str> = record.split('\0').collect();
+        if columns.len() < 4 {
+            continue;
+        }
+        stashes.push(GitStashEntry {
+            reference: columns[0].to_string(),
+            hash: columns[1].to_string(),
+            created_at: columns[2].to_string(),
+            message: columns[3].to_string(),
+        });
+    }
+    stashes
 }
 
 pub async fn workspace_git_status(
@@ -658,6 +693,29 @@ pub struct GitDiscardBody {
 #[derive(Deserialize)]
 pub struct GitCommitBody {
     pub message: String,
+    #[serde(default)]
+    pub amend: bool,
+    #[serde(default)]
+    pub signoff: bool,
+}
+
+#[derive(Deserialize)]
+pub struct GitStashSaveBody {
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub include_untracked: bool,
+}
+
+#[derive(Deserialize)]
+pub struct GitStashReferenceBody {
+    pub reference: String,
+}
+
+#[derive(Deserialize)]
+pub struct GitConflictResolveBody {
+    pub path: String,
+    pub resolution: String,
 }
 
 #[derive(Deserialize)]
@@ -879,9 +937,164 @@ pub async fn workspace_git_commit(
     }
     let root = try_res!(get_root(&manager, &query.pane_id));
 
-    // 步骤2：把提交说明作为独立参数传递，避免经过 shell 解释。
-    let arguments = vec!["commit".to_string(), "-m".to_string(), message.to_string()];
+    // 步骤2：把提交选项和说明作为独立参数传递，避免经过 shell 解释。
+    let arguments = build_commit_arguments(message, body.amend, body.signoff);
     match run_git_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+fn build_commit_arguments(message: &str, amend: bool, signoff: bool) -> Vec<String> {
+    // 步骤1：先加入提交命令，再按界面开关追加修订和签署参数。
+    let mut arguments = vec!["commit".to_string()];
+    if amend {
+        arguments.push("--amend".to_string());
+    }
+    if signoff {
+        arguments.push("--signoff".to_string());
+    }
+
+    // 步骤2：提交说明始终作为最后一个独立参数传递。
+    arguments.push("-m".to_string());
+    arguments.push(message.to_string());
+    arguments
+}
+
+fn validate_stash_reference(value: &str) -> Result<String, Response> {
+    // 步骤1：只接受 stash@{数字}，避免引用被解释为 Git 选项或其他对象。
+    let value = value.trim();
+    let Some(index_text) = value.strip_prefix("stash@{").and_then(|rest| rest.strip_suffix('}'))
+    else {
+        return Err(json_err(StatusCode::BAD_REQUEST, "invalid stash reference"));
+    };
+    if index_text.is_empty() || !index_text.chars().all(|character| character.is_ascii_digit()) {
+        return Err(json_err(StatusCode::BAD_REQUEST, "invalid stash reference"));
+    }
+    Ok(value.to_string())
+}
+
+pub async fn workspace_git_stashes(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+) -> Response {
+    // 步骤1：使用稳定分隔符读取当前仓库全部 stash。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let arguments = vec![
+        "stash".to_string(),
+        "list".to_string(),
+        "--date=iso-strict".to_string(),
+        "--format=%gd%x00%H%x00%aI%x00%gs%x1e".to_string(),
+    ];
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Json(GitStashesResponse { stashes: parse_stash_output(&stdout) }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_stash_save(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitStashSaveBody>,
+) -> Response {
+    // 步骤1：构造 stash push，可选包含未跟踪文件和用户说明。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let mut arguments = vec!["stash".to_string(), "push".to_string()];
+    if body.include_untracked {
+        arguments.push("--include-untracked".to_string());
+    }
+    let message = body.message.trim();
+    if !message.is_empty() {
+        arguments.push("-m".to_string());
+        arguments.push(message.to_string());
+    }
+
+    // 步骤2：执行保存并返回 Git 的真实提示。
+    match run_git_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+async fn run_stash_reference_action(
+    manager: &SessionManager,
+    query: &PaneQuery,
+    operation: &str,
+    reference: &str,
+) -> Response {
+    // 步骤1：验证仓库和 stash 引用，再执行单一 stash 操作。
+    let root = match get_root(manager, &query.pane_id) {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
+    let reference = match validate_stash_reference(reference) {
+        Ok(reference) => reference,
+        Err(response) => return response,
+    };
+    let arguments = vec!["stash".to_string(), operation.to_string(), reference];
+    match run_git_output(root, arguments).await {
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_stash_apply(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitStashReferenceBody>,
+) -> Response {
+    // 步骤1：应用 stash 但保留列表记录。
+    run_stash_reference_action(&manager, &query, "apply", &body.reference).await
+}
+
+pub async fn workspace_git_stash_pop(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitStashReferenceBody>,
+) -> Response {
+    // 步骤1：应用 stash，并在成功时由 Git 删除对应记录。
+    run_stash_reference_action(&manager, &query, "pop", &body.reference).await
+}
+
+pub async fn workspace_git_stash_drop(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitStashReferenceBody>,
+) -> Response {
+    // 步骤1：删除用户明确选择的 stash 记录。
+    run_stash_reference_action(&manager, &query, "drop", &body.reference).await
+}
+
+pub async fn workspace_git_conflict_resolve(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<PaneQuery>,
+    Json(body): Json<GitConflictResolveBody>,
+) -> Response {
+    // 步骤1：验证冲突文件路径和界面允许的三种解决方式。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let paths = try_res!(validate_git_paths(&root, &[body.path]));
+    let path = paths[0].clone();
+    let resolution = body.resolution.as_str();
+    if resolution != "ours" && resolution != "theirs" && resolution != "resolved" {
+        return json_err(StatusCode::BAD_REQUEST, "invalid conflict resolution");
+    }
+
+    // 步骤2：采用一侧版本时先恢复对应内容，手动解决时直接进入暂存区。
+    if resolution == "ours" || resolution == "theirs" {
+        let checkout_arguments =
+            vec!["checkout".to_string(), format!("--{resolution}"), "--".to_string(), path.clone()];
+        match run_git_output(root.clone(), checkout_arguments).await {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => return git_command_response(&output),
+            Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+        }
+    }
+    let add_arguments = vec!["add".to_string(), "--".to_string(), path];
+    match run_git_output(root, add_arguments).await {
         Ok(output) => git_command_response(&output),
         Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
     }
@@ -1212,8 +1425,8 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        git_command, parse_branch_output, parse_log_output, parse_remote_output,
-        parse_status_output, unstage_git_paths,
+        build_commit_arguments, git_command, parse_branch_output, parse_log_output,
+        parse_remote_output, parse_stash_output, parse_status_output, unstage_git_paths,
     };
     use std::path::Path;
 
@@ -1311,6 +1524,28 @@ mod tests {
         assert_eq!(commits[0].subject, "Add history view");
         assert_eq!(commits[1].author_name, "Bob");
         assert!(commits[1].parents.is_empty());
+    }
+
+    #[test]
+    fn parses_stash_records() {
+        // 步骤1：准备两条带引用、对象 ID、时间和说明的 stash 记录。
+        let output = "stash@{0}\0aaaaaaaa\02026-07-17T11:00:00+08:00\0On main: work in progress\x1estash@{1}\0bbbbbbbb\02026-07-16T10:00:00+08:00\0On feature: before switch\x1e";
+
+        // 步骤2：确认引用、说明和时间字段完整保留。
+        let stashes = parse_stash_output(output);
+        assert_eq!(stashes.len(), 2);
+        assert_eq!(stashes[0].reference, "stash@{0}");
+        assert_eq!(stashes[0].message, "On main: work in progress");
+        assert_eq!(stashes[1].hash, "bbbbbbbb");
+    }
+
+    #[test]
+    fn builds_amend_and_signoff_commit_arguments() {
+        // 步骤1：同时启用修订提交和 Signed-off-by。
+        let arguments = build_commit_arguments("Update history", true, true);
+
+        // 步骤2：确认两个开关与提交说明都作为独立参数传递。
+        assert_eq!(arguments, vec!["commit", "--amend", "--signoff", "-m", "Update history"]);
     }
 
     #[test]

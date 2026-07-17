@@ -23,34 +23,74 @@
           class="file-workspace-tree tree-host"
           @click.stop
           @pointerdown.capture="bumpTreePointerTs"
-          @contextmenu.prevent="ctxMenu.onTreeBgContextMenu"
+          @contextmenu.prevent="onSidebarContextMenu"
         >
-          <TreeRows
+          <div class="workspace-side-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              data-testid="workspace-files-tab"
+              :aria-selected="sidebarMode === 'files'"
+              :class="{ active: sidebarMode === 'files' }"
+              :title="t('gitPanel.files')"
+              @click="setSidebarMode('files')"
+            >
+              <Files :size="14" />
+              <span>{{ t('gitPanel.files') }}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              data-testid="workspace-git-tab"
+              :aria-selected="sidebarMode === 'git'"
+              :class="{ active: sidebarMode === 'git' }"
+              :title="t('gitPanel.sourceControl')"
+              @click="setSidebarMode('git')"
+            >
+              <GitBranch :size="14" />
+              <span>{{ t('gitPanel.sourceControl') }}</span>
+              <span v-if="gitFiles.length" class="workspace-side-badge">{{ gitFiles.length }}</span>
+            </button>
+          </div>
+          <div v-if="sidebarMode === 'files'" class="workspace-tree-content">
+            <TreeRows
+              :pane-id="paneId"
+              :depth="0"
+              rel-path=""
+              :workspace-root="cwdLabel"
+              :cache="childCache"
+              :expanded="expanded"
+              :selected-rel="selectedRel ?? undefined"
+              :inline-create="inlineCreateForTree"
+              :inline-placeholder="inlineInputPlaceholder"
+              :inline-rename="inlineRename ?? undefined"
+              :git-status="gitStatusMap"
+              :on-dir-drag-enter="ops.setHoveredDir"
+              :on-dir-drag-leave="ops.clearHoveredDir"
+              @toggle="onToggle"
+              @select-file="trySelectFile"
+              @select-dir="trySelectDir"
+              @inline-create-commit="onInlineCreateCommit"
+              @inline-create-cancel="onInlineCreateCancel"
+              @inline-rename-commit="onInlineRenameCommit"
+              @inline-rename-cancel="onInlineRenameCancel"
+              @context-menu="ctxMenu.onTreeContextMenu"
+              @long-press="ctxMenu.onTreeLongPress"
+              @move-entry="ctxMenu.onMoveEntry"
+              @swipe-action="onSwipeAction"
+              @upload-to-dir="onUploadToDir"
+            />
+          </div>
+          <GitPanel
+            v-else
             :pane-id="paneId"
-            :depth="0"
-            rel-path=""
-            :workspace-root="cwdLabel"
-            :cache="childCache"
-            :expanded="expanded"
-            :selected-rel="selectedRel ?? undefined"
-            :inline-create="inlineCreateForTree"
-            :inline-placeholder="inlineInputPlaceholder"
-            :inline-rename="inlineRename ?? undefined"
-            :git-status="gitStatusMap"
-            @toggle="onToggle"
-            @select-file="trySelectFile"
-            @select-dir="trySelectDir"
-            @inline-create-commit="onInlineCreateCommit"
-            @inline-create-cancel="onInlineCreateCancel"
-            @inline-rename-commit="onInlineRenameCommit"
-            @inline-rename-cancel="onInlineRenameCancel"
-            @context-menu="ctxMenu.onTreeContextMenu"
-            @long-press="ctxMenu.onTreeLongPress"
-            @move-entry="ctxMenu.onMoveEntry"
-            @swipe-action="onSwipeAction"
-            @upload-to-dir="onUploadToDir"
-            :on-dir-drag-enter="ops.setHoveredDir"
-            :on-dir-drag-leave="ops.clearHoveredDir"
+            :branch="gitBranch"
+            :is-git-repo="isGitRepo"
+            :loading="gitStatusLoading"
+            :files="gitFiles"
+            :selected-diff="gitDiffSelection"
+            @refresh="refreshGitPanel"
+            @view-diff="showGitDiff"
           />
         </div>
       </div>
@@ -69,7 +109,18 @@
         >
           <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
         </button>
+        <GitDiffViewer
+          v-if="gitDiffSelection"
+          :key="gitDiffViewerKey"
+          :pane-id="paneId"
+          :file-path="gitDiffSelection.filePath"
+          :staged="gitDiffSelection.staged"
+          :untracked="gitDiffSelection.untracked"
+          @close="gitDiffSelection = null"
+          @open-source="openGitSource"
+        />
         <EditorSplitContainer
+          v-else
           :layout="editorSplit.editorLayout.value"
           :active-leaf-id="editorSplit.activeEditorLeafId.value"
           :pane-id="paneId"
@@ -144,19 +195,13 @@
           <div v-if="ctxMenu.addMenuOpen.value" class="file-workspace-add-dropdown">
             <button
               type="button"
-              @click="
-                ctxMenu.addMenuOpen.value = false;
-                startNewFile();
-              "
+              @click="openNewFileFromAddMenu"
             >
               {{ t('filePreview.ctxNewFile') }}
             </button>
             <button
               type="button"
-              @click="
-                ctxMenu.addMenuOpen.value = false;
-                startNewFolder();
-              "
+              @click="openNewFolderFromAddMenu"
             >
               {{ t('filePreview.ctxNewFolder') }}
             </button>
@@ -186,31 +231,73 @@
             class="file-workspace-tree tree-host"
             @click.stop
             @pointerdown.capture="bumpTreePointerTs"
-            @contextmenu.prevent="ctxMenu.onTreeBgContextMenu"
+            @contextmenu.prevent="onSidebarContextMenu"
           >
-            <TreeRows
+            <div class="workspace-side-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                data-testid="workspace-files-tab"
+                :aria-selected="sidebarMode === 'files'"
+                :class="{ active: sidebarMode === 'files' }"
+                :title="t('gitPanel.files')"
+                @click="setSidebarMode('files')"
+              >
+                <Files :size="14" />
+                <span>{{ t('gitPanel.files') }}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-testid="workspace-git-tab"
+                :aria-selected="sidebarMode === 'git'"
+                :class="{ active: sidebarMode === 'git' }"
+                :title="t('gitPanel.sourceControl')"
+                @click="setSidebarMode('git')"
+              >
+                <GitBranch :size="14" />
+                <span>{{ t('gitPanel.sourceControl') }}</span>
+                <span v-if="gitFiles.length" class="workspace-side-badge">{{
+                  gitFiles.length
+                }}</span>
+              </button>
+            </div>
+            <div v-if="sidebarMode === 'files'" class="workspace-tree-content">
+              <TreeRows
+                :pane-id="paneId"
+                :depth="0"
+                rel-path=""
+                :workspace-root="cwdLabel"
+                :cache="childCache"
+                :expanded="expanded"
+                :selected-rel="selectedRel ?? undefined"
+                :inline-create="inlineCreateForTree"
+                :inline-placeholder="inlineInputPlaceholder"
+                :git-status="gitStatusMap"
+                :on-dir-drag-enter="ops.setHoveredDir"
+                :on-dir-drag-leave="ops.clearHoveredDir"
+                @toggle="onToggle"
+                @select-file="trySelectFile"
+                @select-dir="trySelectDir"
+                @inline-create-commit="onInlineCreateCommit"
+                @inline-create-cancel="onInlineCreateCancel"
+                @context-menu="ctxMenu.onTreeContextMenu"
+                @long-press="ctxMenu.onTreeLongPress"
+                @move-entry="ctxMenu.onMoveEntry"
+                @swipe-action="onSwipeAction"
+                @upload-to-dir="onUploadToDir"
+              />
+            </div>
+            <GitPanel
+              v-else
               :pane-id="paneId"
-              :depth="0"
-              rel-path=""
-              :workspace-root="cwdLabel"
-              :cache="childCache"
-              :expanded="expanded"
-              :selected-rel="selectedRel ?? undefined"
-              :inline-create="inlineCreateForTree"
-              :inline-placeholder="inlineInputPlaceholder"
-              :git-status="gitStatusMap"
-              @toggle="onToggle"
-              @select-file="trySelectFile"
-              @select-dir="trySelectDir"
-              @inline-create-commit="onInlineCreateCommit"
-              @inline-create-cancel="onInlineCreateCancel"
-              @context-menu="ctxMenu.onTreeContextMenu"
-              @long-press="ctxMenu.onTreeLongPress"
-              @move-entry="ctxMenu.onMoveEntry"
-              @swipe-action="onSwipeAction"
-              @upload-to-dir="onUploadToDir"
-              :on-dir-drag-enter="ops.setHoveredDir"
-              :on-dir-drag-leave="ops.clearHoveredDir"
+              :branch="gitBranch"
+              :is-git-repo="isGitRepo"
+              :loading="gitStatusLoading"
+              :files="gitFiles"
+              :selected-diff="gitDiffSelection"
+              @refresh="refreshGitPanel"
+              @view-diff="showGitDiff"
             />
           </div>
         </div>
@@ -229,7 +316,18 @@
           >
             <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
           </button>
+          <GitDiffViewer
+            v-if="gitDiffSelection"
+            :key="gitDiffViewerKey"
+            :pane-id="paneId"
+            :file-path="gitDiffSelection.filePath"
+            :staged="gitDiffSelection.staged"
+            :untracked="gitDiffSelection.untracked"
+            @close="gitDiffSelection = null"
+            @open-source="openGitSource"
+          />
           <EditorSplitContainer
+            v-else
             :layout="editorSplit.editorLayout.value"
             :active-leaf-id="editorSplit.activeEditorLeafId.value"
             :pane-id="paneId"
@@ -352,11 +450,7 @@
     @confirm="ctxMenu.executeDelete"
     @cancel="ctxMenu.cancelDelete"
   />
-  <SelectionToolbar
-    :selected-text="''"
-    :anchor-rect="null"
-    @dismiss="() => {}"
-  />
+  <SelectionToolbar :selected-text="''" :anchor-rect="null" @dismiss="() => {}" />
 </template>
 
 <script setup lang="ts">
@@ -376,12 +470,15 @@ import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
+import GitDiffViewer from '../workspace/GitDiffViewer.vue'
+import GitPanel from '../workspace/GitPanel.vue'
 import SelectionToolbar from '../workspace/SelectionToolbar.vue'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
-import { Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { Files, GitBranch, Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { mapGitFileEntry, type GitDiffSelection, type GitFileEntry } from '../../utils/gitPanel'
 
 const props = withDefaults(
   defineProps<{ visible: boolean; paneId: string; embedded?: boolean }>(),
@@ -403,6 +500,13 @@ const childCache = ref<Record<string, DirEntry[]>>({})
 const expanded = ref<Set<string>>(new Set())
 const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
+const gitFiles = ref<GitFileEntry[]>([])
+const gitBranch = ref<string | null>(null)
+const isGitRepo = ref(false)
+const gitStatusLoading = ref(false)
+const gitStatusVersion = ref(0)
+const sidebarMode = ref<'files' | 'git'>('files')
+const gitDiffSelection = ref<GitDiffSelection | null>(null)
 const inlineCreate = ref<{ parentRel: string; kind: 'file' | 'dir' } | null>(null)
 const inlineRename = ref<{ rel: string; isDir: boolean } | null>(null)
 const recentDropdownOpen = ref(false)
@@ -424,11 +528,15 @@ const previewErr = ref('')
 // Keep selectedRel in sync with active editor pane
 watch(
   () => editorSplit.activeLeaf.value?.filePath,
-  (fp) => { selectedRel.value = fp ?? null }
+  (fp) => {
+    selectedRel.value = fp ?? null
+  }
 )
 watch(
   () => editorSplit.activeLeaf.value?.isDir,
-  (isDir) => { selectedIsDir.value = isDir ?? false }
+  (isDir) => {
+    selectedIsDir.value = isDir ?? false
+  }
 )
 
 const ops = useFileOperations({
@@ -512,6 +620,13 @@ const inlineInputPlaceholder = computed(() => {
   return inlineCreate.value.kind === 'dir' ? t('filePreview.nameFolder') : t('filePreview.nameFile')
 })
 
+const gitDiffViewerKey = computed(function computeGitDiffViewerKey() {
+  // 步骤1：状态刷新后重新创建查看器，确保暂存或丢弃操作立即反映到 diff。
+  if (!gitDiffSelection.value) return `empty:${gitStatusVersion.value}`
+  const selection = gitDiffSelection.value
+  return `${selection.filePath}:${selection.staged}:${gitStatusVersion.value}`
+})
+
 const isSelectedBookmarked = computed(() => {
   if (!selectedRel.value || selectedIsDir.value) return false
   return workspaceBookmarks.isBookmarked(ops.absolutePath(selectedRel.value))
@@ -570,7 +685,9 @@ function onEditorFileDrop(leafId: string, rel: string, position: DropPosition) {
 function isInternalTreeMove(ev: DragEvent): boolean {
   const t = ev.dataTransfer?.types
   if (!t) return false
-  return t.includes ? t.includes('application/x-tree-move') : (t as any).contains('application/x-tree-move')
+  return t.includes
+    ? t.includes('application/x-tree-move')
+    : (t as any).contains('application/x-tree-move')
 }
 
 function onWorkspaceDragEnter(ev: DragEvent) {
@@ -581,6 +698,38 @@ function onWorkspaceDragEnter(ev: DragEvent) {
 function onWorkspaceDrop(ev: DragEvent) {
   if (isInternalTreeMove(ev)) return
   ops.onWorkspaceDrop(ev)
+}
+
+function onSidebarContextMenu(event: MouseEvent): void {
+  // 步骤1：文件视图保留新建菜单，Git 视图不显示文件树菜单。
+  if (sidebarMode.value === 'files') {
+    ctxMenu.onTreeBgContextMenu(event)
+  }
+}
+
+function setSidebarMode(mode: 'files' | 'git'): void {
+  // 步骤1：切换侧栏视图，进入源代码管理时读取最新仓库状态。
+  sidebarMode.value = mode
+  ctxMenu.closeContextMenu()
+  if (mode === 'git') {
+    void fetchGitStatus()
+  }
+}
+
+function showGitDiff(selection: GitDiffSelection): void {
+  // 步骤1：在主区域打开与侧栏分组对应的 Git 差异。
+  gitDiffSelection.value = selection
+}
+
+async function openGitSource(path: string): Promise<void> {
+  // 步骤1：关闭差异视图并在当前编辑窗格打开源文件。
+  gitDiffSelection.value = null
+  await onSelectFile(path)
+}
+
+async function refreshGitPanel(): Promise<void> {
+  // 步骤1：重新读取状态，并让已打开的 diff 使用最新内容。
+  await fetchGitStatus()
 }
 
 // --- Navigation ---
@@ -642,6 +791,8 @@ function trySelectDir(rel: string) {
 const { selectedPath: globalSelectedPath } = useSelectedPath()
 
 function onSelectDir(rel: string) {
+  // 步骤1：普通导航会退出 Git 差异视图并打开目标目录。
+  gitDiffSelection.value = null
   editorSplit.openFileInActivePane(rel, true)
   meta.value = null
   nav.pushNav(rel, true)
@@ -654,6 +805,8 @@ async function loadMetaForActivePane(rel: string) {
 }
 
 async function onSelectFile(rel: string) {
+  // 步骤1：普通导航会退出 Git 差异视图并打开目标文件。
+  gitDiffSelection.value = null
   editorSplit.openFileInActivePane(rel, false)
   meta.value = null
   nav.pushNav(rel, false)
@@ -674,24 +827,45 @@ async function fetchList(rel: string): Promise<DirEntry[]> {
   return data.entries || []
 }
 
-async function fetchGitStatus() {
+async function fetchGitStatus(): Promise<void> {
+  // 步骤1：标记加载状态并读取当前终端工作区的 Git 状态。
+  gitStatusLoading.value = true
   try {
     await getApiBase()
-    const q = new URLSearchParams({ pane_id: props.paneId })
-    const res = await authFetch(apiUrl(`/api/workspace/git-status?${q}`))
-    if (!res.ok) return
-    const data = await res.json()
-    if (!data.is_git_repo) {
+    const query = new URLSearchParams({ pane_id: props.paneId })
+    const response = await authFetch(apiUrl(`/api/workspace/git-status?${query}`))
+    if (!response.ok) {
+      isGitRepo.value = false
+      gitBranch.value = null
+      gitFiles.value = []
       gitStatusMap.value = {}
       return
     }
-    const map: Record<string, string> = {}
-    for (const f of data.files || []) {
-      map[f.path] = f.status
+    const data = await response.json()
+    isGitRepo.value = data.is_git_repo === true
+    gitBranch.value = typeof data.branch === 'string' ? data.branch : null
+
+    // 步骤2：同时生成 Git 面板条目和文件树使用的兼容状态映射。
+    const nextFiles: GitFileEntry[] = []
+    const nextStatusMap: Record<string, string> = {}
+    if (isGitRepo.value && Array.isArray(data.files)) {
+      for (const rawFile of data.files) {
+        const file = mapGitFileEntry(rawFile)
+        if (!file.path) continue
+        nextFiles.push(file)
+        nextStatusMap[file.path] = file.status
+      }
     }
-    gitStatusMap.value = map
+    gitFiles.value = nextFiles
+    gitStatusMap.value = nextStatusMap
+    gitStatusVersion.value += 1
   } catch {
+    isGitRepo.value = false
+    gitBranch.value = null
+    gitFiles.value = []
     gitStatusMap.value = {}
+  } finally {
+    gitStatusLoading.value = false
   }
 }
 
@@ -730,6 +904,18 @@ function startNewFolder() {
   inlineCreate.value = { parentRel, kind: 'dir' }
   expanded.value = new Set([...expanded.value, parentRel])
   void ensureChildren(parentRel)
+}
+
+function openNewFileFromAddMenu(): void {
+  // 步骤1：关闭新增菜单，再启动文件名输入。
+  ctxMenu.addMenuOpen.value = false
+  startNewFile()
+}
+
+function openNewFolderFromAddMenu(): void {
+  // 步骤1：关闭新增菜单，再启动文件夹名输入。
+  ctxMenu.addMenuOpen.value = false
+  startNewFolder()
 }
 
 async function onInlineCreateCommit(name: string) {
@@ -1196,9 +1382,88 @@ defineExpose({
 
 .file-workspace-tree-wrap {
   min-width: 120px;
-  overflow: auto;
+  overflow: hidden;
   flex-shrink: 0;
   background: var(--bg, #1a1a1a);
+}
+
+.file-workspace-tree {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.workspace-side-tabs {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--border, #333);
+  background: var(--tab-bg, #202020);
+}
+
+.workspace-side-tabs button {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0 6px;
+  color: var(--fg-muted, #888);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.workspace-side-tabs button > span:not(.workspace-side-badge) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-side-tabs button:hover,
+.workspace-side-tabs button:focus-visible {
+  color: var(--fg-bright, #eee);
+  background: var(--bg-hover, #303030);
+  outline: none;
+}
+
+.workspace-side-tabs button:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent, #0e639c);
+}
+
+.workspace-side-tabs button.active {
+  color: var(--fg-bright, #eee);
+  border-bottom-color: var(--accent, #0e639c);
+}
+
+.workspace-side-badge {
+  min-width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  color: var(--fg-bright, #eee);
+  background: var(--bg-hover, #3a3a3a);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.workspace-tree-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 2px 0;
 }
 
 .file-workspace-preview-wrap {

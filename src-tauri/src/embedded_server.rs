@@ -624,6 +624,9 @@ pub fn run_server(
                 "/api/workspace/git-branch-publish",
                 post(workspace::workspace_git_branch_publish),
             )
+            .route("/api/workspace/git-log", get(workspace::workspace_git_log))
+            .route("/api/workspace/git-commit-diff", get(workspace::workspace_git_commit_diff))
+            .route("/api/workspace/git-compare", get(workspace::workspace_git_compare))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
@@ -791,6 +794,9 @@ mod tests {
             "/api/workspace/git-branch-delete",
             "/api/workspace/git-branch-rename",
             "/api/workspace/git-branch-publish",
+            "/api/workspace/git-log",
+            "/api/workspace/git-commit-diff",
+            "/api/workspace/git-compare",
         ];
 
         // 步骤2：确认 Git 管理面板使用的每个接口都已在桌面版注册。

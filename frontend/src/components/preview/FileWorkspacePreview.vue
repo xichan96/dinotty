@@ -95,6 +95,7 @@
             :selected-diff="gitDiffSelection"
             @refresh="refreshGitPanel"
             @view-diff="showGitDiff"
+            @view-history="showGitHistory"
           />
         </div>
       </div>
@@ -113,8 +114,14 @@
         >
           <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
         </button>
+        <GitHistoryViewer
+          v-if="gitHistorySelection"
+          :pane-id="paneId"
+          :selection="gitHistorySelection"
+          @close="gitHistorySelection = null"
+        />
         <GitDiffViewer
-          v-if="gitDiffSelection"
+          v-else-if="gitDiffSelection"
           :key="gitDiffViewerKey"
           :pane-id="paneId"
           :file-path="gitDiffSelection.filePath"
@@ -300,6 +307,7 @@
               :selected-diff="gitDiffSelection"
               @refresh="refreshGitPanel"
               @view-diff="showGitDiff"
+              @view-history="showGitHistory"
             />
           </div>
         </div>
@@ -318,8 +326,14 @@
           >
             <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
           </button>
+          <GitHistoryViewer
+            v-if="gitHistorySelection"
+            :pane-id="paneId"
+            :selection="gitHistorySelection"
+            @close="gitHistorySelection = null"
+          />
           <GitDiffViewer
-            v-if="gitDiffSelection"
+            v-else-if="gitDiffSelection"
             :key="gitDiffViewerKey"
             :pane-id="paneId"
             :file-path="gitDiffSelection.filePath"
@@ -473,6 +487,7 @@ import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
 import GitDiffViewer from '../workspace/GitDiffViewer.vue'
+import GitHistoryViewer from '../workspace/GitHistoryViewer.vue'
 import GitPanel from '../workspace/GitPanel.vue'
 import SelectionToolbar from '../workspace/SelectionToolbar.vue'
 import ConfirmModal from '../ui/ConfirmModal.vue'
@@ -487,6 +502,7 @@ import {
   type GitFileEntry,
   type GitRemoteEntry,
 } from '../../utils/gitPanel'
+import type { GitHistorySelection } from '../../utils/gitHistory'
 
 const props = withDefaults(
   defineProps<{ visible: boolean; paneId: string; embedded?: boolean }>(),
@@ -519,6 +535,7 @@ const gitStatusLoading = ref(false)
 const gitStatusVersion = ref(0)
 const sidebarMode = ref<'files' | 'git'>('files')
 const gitDiffSelection = ref<GitDiffSelection | null>(null)
+const gitHistorySelection = ref<GitHistorySelection | null>(null)
 const inlineCreate = ref<{ parentRel: string; kind: 'file' | 'dir' } | null>(null)
 const inlineRename = ref<{ rel: string; isDir: boolean } | null>(null)
 const recentDropdownOpen = ref(false)
@@ -731,6 +748,13 @@ function setSidebarMode(mode: 'files' | 'git'): void {
 function showGitDiff(selection: GitDiffSelection): void {
   // 步骤1：在主区域打开与侧栏分组对应的 Git 差异。
   gitDiffSelection.value = selection
+  gitHistorySelection.value = null
+}
+
+function showGitHistory(selection: GitHistorySelection): void {
+  // 步骤1：在主区域打开提交详情或分支比较，并关闭当前文件差异。
+  gitHistorySelection.value = selection
+  gitDiffSelection.value = null
 }
 
 async function openGitSource(path: string): Promise<void> {

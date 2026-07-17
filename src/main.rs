@@ -858,6 +858,9 @@ async fn main() {
                 "/api/workspace/git-branch-publish",
                 post(workspace::workspace_git_branch_publish),
             )
+            .route("/api/workspace/git-log", get(workspace::workspace_git_log))
+            .route("/api/workspace/git-commit-diff", get(workspace::workspace_git_commit_diff))
+            .route("/api/workspace/git-compare", get(workspace::workspace_git_compare))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
             .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
             .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))

@@ -67,6 +67,30 @@ pub struct GitBranchesResponse {
     pub remote: Vec<GitBranchInfo>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct GitCommitSummary {
+    pub hash: String,
+    pub short_hash: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub authored_at: String,
+    pub parents: Vec<String>,
+    pub subject: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitLogResponse {
+    pub commits: Vec<GitCommitSummary>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GitCompareResponse {
+    pub base_only: usize,
+    pub target_only: usize,
+    pub patch: String,
+}
+
 #[derive(Serialize)]
 pub struct GitStatusResponse {
     pub is_git_repo: bool,
@@ -268,6 +292,37 @@ fn parse_branch_output(output: &str) -> GitBranchesResponse {
         }
     }
     GitBranchesResponse { local, remote }
+}
+
+fn parse_log_output(output: &str) -> Vec<GitCommitSummary> {
+    // 步骤1：按记录分隔符拆分提交，再按 NUL 拆分不会与正文冲突的字段。
+    let mut commits = Vec::new();
+    for record in output.split('\x1e') {
+        let record = record.trim_matches(['\r', '\n']);
+        if record.is_empty() {
+            continue;
+        }
+        let columns: Vec<&str> = record.split('\0').collect();
+        if columns.len() < 7 {
+            continue;
+        }
+
+        // 步骤2：逐个保存父提交，支持普通提交、根提交和合并提交。
+        let mut parents = Vec::new();
+        for parent in columns[5].split_whitespace() {
+            parents.push(parent.to_string());
+        }
+        commits.push(GitCommitSummary {
+            hash: columns[0].to_string(),
+            short_hash: columns[1].to_string(),
+            author_name: columns[2].to_string(),
+            author_email: columns[3].to_string(),
+            authored_at: columns[4].to_string(),
+            parents,
+            subject: columns[6].to_string(),
+        });
+    }
+    commits
 }
 
 pub async fn workspace_git_status(
@@ -639,6 +694,36 @@ pub struct GitUnifiedDiffQuery {
     pub untracked: bool,
 }
 
+fn default_git_log_limit() -> usize {
+    50
+}
+
+#[derive(Deserialize)]
+pub struct GitLogQuery {
+    pub pane_id: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub skip: usize,
+    #[serde(default = "default_git_log_limit")]
+    pub limit: usize,
+}
+
+#[derive(Deserialize)]
+pub struct GitCommitDiffQuery {
+    pub pane_id: String,
+    pub commit: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct GitCompareQuery {
+    pub pane_id: String,
+    pub base: String,
+    pub target: String,
+}
+
 fn validate_git_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, Response> {
     // 步骤1：拒绝空操作，避免 Git 将命令作用到整个仓库。
     if paths.is_empty() {
@@ -823,7 +908,7 @@ async fn run_git_remote_command(
 fn validate_git_name(value: &str, label: &str) -> Result<String, Response> {
     // 步骤1：拒绝空名称和控制字符，Git 会继续校验具体引用命名规则。
     let value = value.trim();
-    if value.is_empty() || value.chars().any(char::is_control) {
+    if value.is_empty() || value.starts_with('-') || value.chars().any(char::is_control) {
         return Err(json_err(StatusCode::BAD_REQUEST, &format!("{label} required")));
     }
     Ok(value.to_string())
@@ -911,6 +996,131 @@ pub async fn workspace_git_branch_publish(
     let branch = try_res!(validate_git_name(&body.branch, "branch"));
     let arguments = vec!["push".to_string(), "-u".to_string(), remote, branch];
     run_git_remote_command(&manager, &query, arguments).await
+}
+
+fn validate_commit_hash(value: &str) -> Result<String, Response> {
+    // 步骤1：提交详情只接受 Git 生成的十六进制对象 ID，避免把选项当作 revision。
+    let value = value.trim();
+    let valid_length = (4..=64).contains(&value.len());
+    if !valid_length || !value.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err(json_err(StatusCode::BAD_REQUEST, "invalid commit"));
+    }
+    Ok(value.to_string())
+}
+
+pub async fn workspace_git_log(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<GitLogQuery>,
+) -> Response {
+    // 步骤1：限制单页数量，并构造字段稳定的 Git Log 格式。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let limit = query.limit.clamp(1, 200);
+    let requested_count = limit + 1;
+    let mut arguments = vec![
+        "log".to_string(),
+        "--date=iso-strict".to_string(),
+        "--pretty=format:%H%x00%h%x00%an%x00%ae%x00%aI%x00%P%x00%s%x1e".to_string(),
+        format!("--max-count={requested_count}"),
+        format!("--skip={}", query.skip),
+    ];
+    if let Some(path) = query.path.as_deref() {
+        if !path.trim().is_empty() {
+            let paths = try_res!(validate_git_paths(&root, &[path.to_string()]));
+            arguments.push("--".to_string());
+            arguments.push(paths[0].clone());
+        }
+    }
+
+    // 步骤2：多取一条判断是否还有下一页，再只返回请求数量。
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut commits = parse_log_output(&stdout);
+            let has_more = commits.len() > limit;
+            commits.truncate(limit);
+            Json(GitLogResponse { commits, has_more }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_commit_diff(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<GitCommitDiffQuery>,
+) -> Response {
+    // 步骤1：校验提交 ID，并生成包含提交元数据和文件 Patch 的参数。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let commit = try_res!(validate_commit_hash(&query.commit));
+    let mut arguments = vec![
+        "show".to_string(),
+        "--no-ext-diff".to_string(),
+        "--no-color".to_string(),
+        "--format=fuller".to_string(),
+        "--find-renames".to_string(),
+        commit,
+    ];
+    if let Some(path) = query.path.as_deref() {
+        if !path.trim().is_empty() {
+            let paths = try_res!(validate_git_paths(&root, &[path.to_string()]));
+            arguments.push("--".to_string());
+            arguments.push(paths[0].clone());
+        }
+    }
+
+    // 步骤2：限制返回体大小并交给统一 Patch 查看器渲染。
+    match run_git_output(root, arguments).await {
+        Ok(output) if output.status.success() => {
+            if output.stdout.len() > MAX_GIT_DIFF_OUTPUT {
+                return json_err(StatusCode::BAD_REQUEST, "commit diff too large to display");
+            }
+            let patch = String::from_utf8_lossy(&output.stdout).into_owned();
+            Json(serde_json::json!({ "patch": patch })).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
+}
+
+pub async fn workspace_git_compare(
+    State(manager): State<Arc<SessionManager>>,
+    Query(query): Query<GitCompareQuery>,
+) -> Response {
+    // 步骤1：校验两个引用并统计各自独有的提交数量。
+    let root = try_res!(get_root(&manager, &query.pane_id));
+    let base = try_res!(validate_git_name(&query.base, "base"));
+    let target = try_res!(validate_git_name(&query.target, "target"));
+    let comparison = format!("{base}...{target}");
+    let count_arguments = vec![
+        "rev-list".to_string(),
+        "--left-right".to_string(),
+        "--count".to_string(),
+        comparison.clone(),
+    ];
+    let count_output = match run_git_output(root.clone(), count_arguments).await {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => return git_command_response(&output),
+        Err(error) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    };
+    let count_text = String::from_utf8_lossy(&count_output.stdout);
+    let mut counts = count_text.split_whitespace();
+    let base_only = counts.next().and_then(|value| value.parse().ok()).unwrap_or(0);
+    let target_only = counts.next().and_then(|value| value.parse().ok()).unwrap_or(0);
+
+    // 步骤2：生成从共同祖先到目标分支的完整 Patch。
+    let diff_arguments =
+        vec!["diff".to_string(), "--no-ext-diff".to_string(), "--no-color".to_string(), comparison];
+    match run_git_output(root, diff_arguments).await {
+        Ok(output) if output.status.success() => {
+            if output.stdout.len() > MAX_GIT_DIFF_OUTPUT {
+                return json_err(StatusCode::BAD_REQUEST, "comparison too large to display");
+            }
+            let patch = String::from_utf8_lossy(&output.stdout).into_owned();
+            Json(GitCompareResponse { base_only, target_only, patch }).into_response()
+        }
+        Ok(output) => git_command_response(&output),
+        Err(error) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &error),
+    }
 }
 
 pub async fn workspace_git_fetch(
@@ -1002,8 +1212,8 @@ pub async fn workspace_git_unified_diff(
 #[cfg(test)]
 mod tests {
     use super::{
-        git_command, parse_branch_output, parse_remote_output, parse_status_output,
-        unstage_git_paths,
+        git_command, parse_branch_output, parse_log_output, parse_remote_output,
+        parse_status_output, unstage_git_paths,
     };
     use std::path::Path;
 
@@ -1086,6 +1296,21 @@ mod tests {
         assert_eq!(branches.local[0].upstream.as_deref(), Some("origin/feature"));
         assert!(branches.local[1].current);
         assert_eq!(branches.remote[0].name, "origin/main");
+    }
+
+    #[test]
+    fn parses_commit_log_records() {
+        // 步骤1：准备两个由记录分隔符和 NUL 字段组成的提交日志。
+        let output = "aaaaaaaa\0aaaaaaa\0Alice\0alice@example.com\02026-07-17T10:00:00+08:00\0bbbbbbbb cccccccc\0Add history view\x1ebbbbbbbb\0bbbbbbb\0Bob\0bob@example.com\02026-07-16T09:00:00+08:00\0\0Initial commit\x1e";
+
+        // 步骤2：确认作者、父提交和主题被完整解析。
+        let commits = parse_log_output(output);
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].hash, "aaaaaaaa");
+        assert_eq!(commits[0].parents, vec!["bbbbbbbb", "cccccccc"]);
+        assert_eq!(commits[0].subject, "Add history view");
+        assert_eq!(commits[1].author_name, "Bob");
+        assert!(commits[1].parents.is_empty());
     }
 
     #[test]

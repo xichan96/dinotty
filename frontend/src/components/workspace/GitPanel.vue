@@ -45,230 +45,260 @@
       <span>{{ t('gitPanel.notRepository') }}</span>
     </div>
     <template v-else>
-      <div class="git-remote-bar">
-        <span class="git-upstream-copy" :title="remoteTooltip">
-          <span data-testid="git-upstream-name" class="git-upstream-name">
-            {{ upstream || primaryRemote?.name || t('gitPanel.noUpstream') }}
-          </span>
-        </span>
-        <span v-if="ahead > 0 || behind > 0" class="git-sync-counts">
-          <span
-            v-if="behind > 0"
-            data-testid="git-behind-count"
-            class="git-sync-count behind"
-            :title="t('gitPanel.behind')"
-          >
-            <ArrowDown :size="11" />{{ behind }}
-          </span>
-          <span
-            v-if="ahead > 0"
-            data-testid="git-ahead-count"
-            class="git-sync-count ahead"
-            :title="t('gitPanel.ahead')"
-          >
-            <ArrowUp :size="11" />{{ ahead }}
-          </span>
-        </span>
-        <span class="git-remote-actions">
-          <button
-            type="button"
-            data-testid="git-fetch-button"
-            class="git-icon-button"
-            :title="t('gitPanel.fetch')"
-            :aria-label="t('gitPanel.fetch')"
-            :disabled="busy || !primaryRemote"
-            @click="runRemoteAction('git-fetch')"
-          >
-            <LoaderCircle v-if="activeAction === 'git-fetch'" :size="14" class="spinning" />
-            <CloudDownload v-else :size="14" />
-          </button>
-          <button
-            type="button"
-            data-testid="git-pull-button"
-            class="git-icon-button"
-            :title="t('gitPanel.pull')"
-            :aria-label="t('gitPanel.pull')"
-            :disabled="busy || !upstream"
-            @click="runRemoteAction('git-pull')"
-          >
-            <LoaderCircle v-if="activeAction === 'git-pull'" :size="14" class="spinning" />
-            <ArrowDownToLine v-else :size="14" />
-          </button>
-          <button
-            v-if="!upstream && primaryRemote && branch"
-            type="button"
-            data-testid="git-publish-button"
-            class="git-icon-button"
-            :title="t('gitPanel.publishBranch')"
-            :aria-label="t('gitPanel.publishBranch')"
-            :disabled="busy"
-            @click="publishBranch"
-          >
-            <LoaderCircle
-              v-if="activeAction === 'git-branch-publish'"
-              :size="14"
-              class="spinning"
-            />
-            <CloudUpload v-else :size="14" />
-          </button>
-          <button
-            v-else
-            type="button"
-            data-testid="git-push-button"
-            class="git-icon-button"
-            :title="t('gitPanel.push')"
-            :aria-label="t('gitPanel.push')"
-            :disabled="busy || !upstream"
-            @click="runRemoteAction('git-push')"
-          >
-            <LoaderCircle v-if="activeAction === 'git-push'" :size="14" class="spinning" />
-            <ArrowUpFromLine v-else :size="14" />
-          </button>
-        </span>
-      </div>
-
-      <div class="git-commit-box">
-        <textarea
-          v-model="commitMessage"
-          data-testid="git-commit-message"
-          class="git-commit-message"
-          rows="3"
-          :placeholder="t('gitPanel.commitPlaceholder')"
-          @keydown.ctrl.enter.prevent="commitChanges"
-          @keydown.meta.enter.prevent="commitChanges"
-        ></textarea>
+      <div class="git-panel-tabs" role="tablist">
         <button
           type="button"
-          data-testid="git-commit-button"
-          class="git-commit-button"
-          :disabled="!canCommit"
-          @click="commitChanges"
+          role="tab"
+          data-testid="git-changes-tab"
+          :aria-selected="panelMode === 'changes'"
+          :class="{ active: panelMode === 'changes' }"
+          @click="panelMode = 'changes'"
         >
-          <Check :size="14" />
-          <span>{{ t('gitPanel.commit') }}</span>
+          {{ t('gitPanel.changesTab') }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          data-testid="git-history-tab"
+          :aria-selected="panelMode === 'history'"
+          :class="{ active: panelMode === 'history' }"
+          @click="panelMode = 'history'"
+        >
+          {{ t('gitPanel.history') }}
         </button>
       </div>
+      <GitHistoryPanel
+        v-if="panelMode === 'history'"
+        :pane-id="paneId"
+        :current-branch="branch"
+        @view-history="emit('view-history', $event)"
+      />
+      <template v-else>
+        <div class="git-remote-bar">
+          <span class="git-upstream-copy" :title="remoteTooltip">
+            <span data-testid="git-upstream-name" class="git-upstream-name">
+              {{ upstream || primaryRemote?.name || t('gitPanel.noUpstream') }}
+            </span>
+          </span>
+          <span v-if="ahead > 0 || behind > 0" class="git-sync-counts">
+            <span
+              v-if="behind > 0"
+              data-testid="git-behind-count"
+              class="git-sync-count behind"
+              :title="t('gitPanel.behind')"
+            >
+              <ArrowDown :size="11" />{{ behind }}
+            </span>
+            <span
+              v-if="ahead > 0"
+              data-testid="git-ahead-count"
+              class="git-sync-count ahead"
+              :title="t('gitPanel.ahead')"
+            >
+              <ArrowUp :size="11" />{{ ahead }}
+            </span>
+          </span>
+          <span class="git-remote-actions">
+            <button
+              type="button"
+              data-testid="git-fetch-button"
+              class="git-icon-button"
+              :title="t('gitPanel.fetch')"
+              :aria-label="t('gitPanel.fetch')"
+              :disabled="busy || !primaryRemote"
+              @click="runRemoteAction('git-fetch')"
+            >
+              <LoaderCircle v-if="activeAction === 'git-fetch'" :size="14" class="spinning" />
+              <CloudDownload v-else :size="14" />
+            </button>
+            <button
+              type="button"
+              data-testid="git-pull-button"
+              class="git-icon-button"
+              :title="t('gitPanel.pull')"
+              :aria-label="t('gitPanel.pull')"
+              :disabled="busy || !upstream"
+              @click="runRemoteAction('git-pull')"
+            >
+              <LoaderCircle v-if="activeAction === 'git-pull'" :size="14" class="spinning" />
+              <ArrowDownToLine v-else :size="14" />
+            </button>
+            <button
+              v-if="!upstream && primaryRemote && branch"
+              type="button"
+              data-testid="git-publish-button"
+              class="git-icon-button"
+              :title="t('gitPanel.publishBranch')"
+              :aria-label="t('gitPanel.publishBranch')"
+              :disabled="busy"
+              @click="publishBranch"
+            >
+              <LoaderCircle
+                v-if="activeAction === 'git-branch-publish'"
+                :size="14"
+                class="spinning"
+              />
+              <CloudUpload v-else :size="14" />
+            </button>
+            <button
+              v-else
+              type="button"
+              data-testid="git-push-button"
+              class="git-icon-button"
+              :title="t('gitPanel.push')"
+              :aria-label="t('gitPanel.push')"
+              :disabled="busy || !upstream"
+              @click="runRemoteAction('git-push')"
+            >
+              <LoaderCircle v-if="activeAction === 'git-push'" :size="14" class="spinning" />
+              <ArrowUpFromLine v-else :size="14" />
+            </button>
+          </span>
+        </div>
 
-      <p v-if="errorMessage" class="git-panel-message error" role="alert">
-        {{ errorMessage }}
-      </p>
-      <p v-else-if="statusMessage" class="git-panel-message success" role="status">
-        {{ statusMessage }}
-      </p>
-
-      <div v-if="!files.length" class="git-panel-state clean">
-        <CircleCheck :size="22" aria-hidden="true" />
-        <span>{{ t('gitPanel.clean') }}</span>
-      </div>
-
-      <section v-if="stagedFiles.length" data-testid="git-staged-section" class="git-section">
-        <div class="git-section-header">
-          <span>{{ t('gitPanel.stagedChanges') }}</span>
-          <span class="git-section-count">{{ stagedFiles.length }}</span>
+        <div class="git-commit-box">
+          <textarea
+            v-model="commitMessage"
+            data-testid="git-commit-message"
+            class="git-commit-message"
+            rows="3"
+            :placeholder="t('gitPanel.commitPlaceholder')"
+            @keydown.ctrl.enter.prevent="commitChanges"
+            @keydown.meta.enter.prevent="commitChanges"
+          ></textarea>
           <button
             type="button"
-            class="git-icon-button"
-            :title="t('gitPanel.unstageAll')"
-            :aria-label="t('gitPanel.unstageAll')"
-            :disabled="busy"
-            @click="unstageAll"
+            data-testid="git-commit-button"
+            class="git-commit-button"
+            :disabled="!canCommit"
+            @click="commitChanges"
           >
-            <Minus :size="14" />
+            <Check :size="14" />
+            <span>{{ t('gitPanel.commit') }}</span>
           </button>
         </div>
-        <div class="git-file-list">
-          <div
-            v-for="file in stagedFiles"
-            :key="`staged:${file.path}`"
-            data-testid="git-staged-row"
-            :data-path="file.path"
-            class="git-file-row"
-            :class="{ selected: isSelected(file, true) }"
-            @click="viewDiff(file, true)"
-          >
-            <span class="git-status-mark" :class="statusClass(file)">{{ statusMark(file) }}</span>
-            <span class="git-file-copy">
-              <span class="git-file-name">{{ getGitFileName(file.path) }}</span>
-              <span v-if="getGitDirectory(file.path)" class="git-file-directory">
-                {{ getGitDirectory(file.path) }}
-              </span>
-            </span>
-            <span class="git-file-actions">
-              <button
-                type="button"
-                data-testid="git-unstage-button"
-                class="git-icon-button"
-                :title="t('gitPanel.unstage')"
-                :aria-label="t('gitPanel.unstage')"
-                :disabled="busy"
-                @click.stop="unstagePaths([file.path])"
-              >
-                <Minus :size="13" />
-              </button>
-            </span>
-          </div>
-        </div>
-      </section>
 
-      <section v-if="workingFiles.length" data-testid="git-changes-section" class="git-section">
-        <div class="git-section-header">
-          <span>{{ t('gitPanel.changes') }}</span>
-          <span class="git-section-count">{{ workingFiles.length }}</span>
-          <button
-            type="button"
-            class="git-icon-button"
-            :title="t('gitPanel.stageAll')"
-            :aria-label="t('gitPanel.stageAll')"
-            :disabled="busy"
-            @click="stageAll"
-          >
-            <Plus :size="14" />
-          </button>
+        <p v-if="errorMessage" class="git-panel-message error" role="alert">
+          {{ errorMessage }}
+        </p>
+        <p v-else-if="statusMessage" class="git-panel-message success" role="status">
+          {{ statusMessage }}
+        </p>
+
+        <div v-if="!files.length" class="git-panel-state clean">
+          <CircleCheck :size="22" aria-hidden="true" />
+          <span>{{ t('gitPanel.clean') }}</span>
         </div>
-        <div class="git-file-list">
-          <div
-            v-for="file in workingFiles"
-            :key="`working:${file.path}`"
-            data-testid="git-change-row"
-            :data-path="file.path"
-            class="git-file-row"
-            :class="{ selected: isSelected(file, false) }"
-            @click="viewDiff(file, false)"
-          >
-            <span class="git-status-mark" :class="statusClass(file)">{{ statusMark(file) }}</span>
-            <span class="git-file-copy">
-              <span class="git-file-name">{{ getGitFileName(file.path) }}</span>
-              <span v-if="getGitDirectory(file.path)" class="git-file-directory">
-                {{ getGitDirectory(file.path) }}
-              </span>
-            </span>
-            <span class="git-file-actions">
-              <button
-                type="button"
-                data-testid="git-discard-button"
-                class="git-icon-button danger"
-                :title="t('gitPanel.discard')"
-                :aria-label="t('gitPanel.discard')"
-                :disabled="busy"
-                @click.stop="requestDiscard(file)"
-              >
-                <Undo2 :size="13" />
-              </button>
-              <button
-                type="button"
-                data-testid="git-stage-button"
-                class="git-icon-button"
-                :title="t('gitPanel.stage')"
-                :aria-label="t('gitPanel.stage')"
-                :disabled="busy || file.conflict"
-                @click.stop="stagePaths([file.path])"
-              >
-                <Plus :size="13" />
-              </button>
-            </span>
+
+        <section v-if="stagedFiles.length" data-testid="git-staged-section" class="git-section">
+          <div class="git-section-header">
+            <span>{{ t('gitPanel.stagedChanges') }}</span>
+            <span class="git-section-count">{{ stagedFiles.length }}</span>
+            <button
+              type="button"
+              class="git-icon-button"
+              :title="t('gitPanel.unstageAll')"
+              :aria-label="t('gitPanel.unstageAll')"
+              :disabled="busy"
+              @click="unstageAll"
+            >
+              <Minus :size="14" />
+            </button>
           </div>
-        </div>
-      </section>
+          <div class="git-file-list">
+            <div
+              v-for="file in stagedFiles"
+              :key="`staged:${file.path}`"
+              data-testid="git-staged-row"
+              :data-path="file.path"
+              class="git-file-row"
+              :class="{ selected: isSelected(file, true) }"
+              @click="viewDiff(file, true)"
+            >
+              <span class="git-status-mark" :class="statusClass(file)">{{ statusMark(file) }}</span>
+              <span class="git-file-copy">
+                <span class="git-file-name">{{ getGitFileName(file.path) }}</span>
+                <span v-if="getGitDirectory(file.path)" class="git-file-directory">
+                  {{ getGitDirectory(file.path) }}
+                </span>
+              </span>
+              <span class="git-file-actions">
+                <button
+                  type="button"
+                  data-testid="git-unstage-button"
+                  class="git-icon-button"
+                  :title="t('gitPanel.unstage')"
+                  :aria-label="t('gitPanel.unstage')"
+                  :disabled="busy"
+                  @click.stop="unstagePaths([file.path])"
+                >
+                  <Minus :size="13" />
+                </button>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="workingFiles.length" data-testid="git-changes-section" class="git-section">
+          <div class="git-section-header">
+            <span>{{ t('gitPanel.changes') }}</span>
+            <span class="git-section-count">{{ workingFiles.length }}</span>
+            <button
+              type="button"
+              class="git-icon-button"
+              :title="t('gitPanel.stageAll')"
+              :aria-label="t('gitPanel.stageAll')"
+              :disabled="busy"
+              @click="stageAll"
+            >
+              <Plus :size="14" />
+            </button>
+          </div>
+          <div class="git-file-list">
+            <div
+              v-for="file in workingFiles"
+              :key="`working:${file.path}`"
+              data-testid="git-change-row"
+              :data-path="file.path"
+              class="git-file-row"
+              :class="{ selected: isSelected(file, false) }"
+              @click="viewDiff(file, false)"
+            >
+              <span class="git-status-mark" :class="statusClass(file)">{{ statusMark(file) }}</span>
+              <span class="git-file-copy">
+                <span class="git-file-name">{{ getGitFileName(file.path) }}</span>
+                <span v-if="getGitDirectory(file.path)" class="git-file-directory">
+                  {{ getGitDirectory(file.path) }}
+                </span>
+              </span>
+              <span class="git-file-actions">
+                <button
+                  type="button"
+                  data-testid="git-discard-button"
+                  class="git-icon-button danger"
+                  :title="t('gitPanel.discard')"
+                  :aria-label="t('gitPanel.discard')"
+                  :disabled="busy"
+                  @click.stop="requestDiscard(file)"
+                >
+                  <Undo2 :size="13" />
+                </button>
+                <button
+                  type="button"
+                  data-testid="git-stage-button"
+                  class="git-icon-button"
+                  :title="t('gitPanel.stage')"
+                  :aria-label="t('gitPanel.stage')"
+                  :disabled="busy || file.conflict"
+                  @click.stop="stagePaths([file.path])"
+                >
+                  <Plus :size="13" />
+                </button>
+              </span>
+            </div>
+          </div>
+        </section>
+      </template>
     </template>
 
     <ConfirmModal
@@ -311,8 +341,10 @@ import {
   type GitFileEntry,
   type GitRemoteEntry,
 } from '../../utils/gitPanel'
+import type { GitHistorySelection } from '../../utils/gitHistory'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import GitBranchMenu from './GitBranchMenu.vue'
+import GitHistoryPanel from './GitHistoryPanel.vue'
 
 const props = defineProps<{
   paneId: string
@@ -330,6 +362,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   refresh: []
   'view-diff': [selection: GitDiffSelection]
+  'view-history': [selection: GitHistorySelection]
 }>()
 
 const { t } = useI18n()
@@ -340,6 +373,7 @@ const statusMessage = ref('')
 const discardFile = ref<GitFileEntry | null>(null)
 const activeAction = ref('')
 const branchMenuVisible = ref(false)
+const panelMode = ref<'changes' | 'history'>('changes')
 
 const primaryRemote = computed(function computePrimaryRemote() {
   // 步骤1：优先使用上游分支所属 remote，其次选择 origin，最后使用第一个 remote。
@@ -598,6 +632,37 @@ async function commitChanges(): Promise<void> {
 
 .git-panel-header {
   color: var(--fg-muted);
+}
+
+.git-panel-tabs {
+  min-height: 31px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--tab-bg);
+}
+
+.git-panel-tabs button {
+  min-width: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.git-panel-tabs button:hover,
+.git-panel-tabs button:focus-visible {
+  color: var(--fg-bright);
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.git-panel-tabs button.active {
+  border-bottom-color: var(--accent);
+  color: var(--fg-bright);
 }
 
 .git-panel-branch {

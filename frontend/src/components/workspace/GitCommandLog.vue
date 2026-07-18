@@ -112,7 +112,8 @@ function mapCommand(value: unknown): GitCommandEntry | null {
   if (!value || typeof value !== 'object') return null
   const rawCommand = value as Record<string, unknown>
   if (typeof rawCommand.id !== 'string' || typeof rawCommand.command !== 'string') return null
-  if (typeof rawCommand.status !== 'string' || typeof rawCommand.started_at !== 'number') return null
+  if (typeof rawCommand.status !== 'string' || typeof rawCommand.started_at !== 'number')
+    return null
   return {
     id: rawCommand.id,
     command: rawCommand.command,

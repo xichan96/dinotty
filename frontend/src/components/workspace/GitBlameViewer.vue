@@ -73,7 +73,9 @@
         class="git-blame-load-more"
         @click="loadMoreLines"
       >
-        {{ t('gitPanel.loadMoreBlame').replace('{count}', String(lines.length - visibleLineCount)) }}
+        {{
+          t('gitPanel.loadMoreBlame').replace('{count}', String(lines.length - visibleLineCount))
+        }}
       </button>
     </div>
   </section>

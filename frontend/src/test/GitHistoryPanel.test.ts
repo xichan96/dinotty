@@ -123,9 +123,7 @@ describe('GitHistoryPanel', function gitHistoryPanelSuite() {
         return String(call[0]).startsWith('/api/workspace/git-log?')
       }
     )
-    expect(String(historyCalls[historyCalls.length - 1][0])).toContain(
-      'path=src%2Ffile+history.ts'
-    )
+    expect(String(historyCalls[historyCalls.length - 1][0])).toContain('path=src%2Ffile+history.ts')
   })
 
   it('searches history and displays graph references', async function searchesHistory() {

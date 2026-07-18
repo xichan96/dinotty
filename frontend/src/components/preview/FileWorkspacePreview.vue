@@ -459,16 +459,6 @@
           <span class="tree-ctx-label">{{ t('filePreview.ctxCopyPath') }}</span>
         </button>
         <button
-          v-if="ctxMenu.canRunCode.value"
-          type="button"
-          class="tree-ctx-item"
-          data-testid="tree-context-run-code"
-          role="menuitem"
-          @click="ctxMenu.ctxRunCode"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxRunCode') }}</span>
-        </button>
-        <button
           v-if="canViewContextFileHistory"
           type="button"
           class="tree-ctx-item"

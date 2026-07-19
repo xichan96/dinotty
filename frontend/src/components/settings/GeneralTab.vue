@@ -56,6 +56,7 @@
       <section class="settings-section">
         <h3>{{ t('settings.workspaceBadge') }}</h3>
         <SegmentedControl
+          class="ws-badge-control"
           data-setting="workspace-badge-mode"
           :model-value="wsBadgeEffective.mode"
           :options="wsBadgeModeOptions"
@@ -1088,5 +1089,10 @@ async function refreshLog() {
   padding: 6px 8px;
   font-size: 12px;
   text-align: center;
+}
+
+/* match SettingsPanel .settings-row gap rhythm (10px) removed when the wrapping row was dropped */
+.ws-badge-control {
+  margin-bottom: 10px;
 }
 </style>

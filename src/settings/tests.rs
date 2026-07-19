@@ -160,6 +160,81 @@ fn v5_migrates_all_legacy_workspace_badge_values_idempotently() {
 }
 
 #[test]
+fn v4_put_migrates_explicitly_hidden_workspace_badge_to_off() {
+    let mut settings = Settings {
+        settings_version: 4,
+        show_workspace_badge_on_tab: Some(false),
+        workspace_badge_mode: None,
+        ..Settings::default()
+    };
+
+    migrate_settings(&mut settings);
+
+    assert_eq!(settings.workspace_badge_mode, Some(WorkspaceBadgeMode::Off));
+}
+
+#[test]
+fn v4_put_migrates_explicitly_shown_workspace_badge_to_tab() {
+    let mut settings = Settings {
+        settings_version: 4,
+        show_workspace_badge_on_tab: Some(true),
+        workspace_badge_mode: None,
+        ..Settings::default()
+    };
+
+    migrate_settings(&mut settings);
+
+    assert_eq!(settings.workspace_badge_mode, Some(WorkspaceBadgeMode::Tab));
+}
+
+#[test]
+fn v3_put_keeps_historical_workspace_badge_default_device_aware() {
+    let mut settings = Settings {
+        settings_version: 3,
+        show_workspace_badge_on_tab: Some(true),
+        workspace_badge_mode: None,
+        ..Settings::default()
+    };
+
+    migrate_settings(&mut settings);
+
+    assert_eq!(settings.workspace_badge_mode, None);
+}
+
+#[test]
+fn legacy_put_keeps_existing_workspace_badge_mode() {
+    let mut settings = Settings {
+        settings_version: 4,
+        show_workspace_badge_on_tab: Some(false),
+        workspace_badge_mode: Some(WorkspaceBadgeMode::Both),
+        ..Settings::default()
+    };
+
+    migrate_settings(&mut settings);
+
+    assert_eq!(settings.workspace_badge_mode, Some(WorkspaceBadgeMode::Both));
+}
+
+#[test]
+fn migrated_workspace_badge_mode_is_stable_across_save_load_save() {
+    let mut settings = Settings {
+        settings_version: 4,
+        show_workspace_badge_on_tab: Some(true),
+        workspace_badge_mode: None,
+        ..Settings::default()
+    };
+    migrate_settings(&mut settings);
+
+    let first_save = serde_json::to_string(&settings).unwrap();
+    let mut loaded: Settings = serde_json::from_str(&first_save).unwrap();
+    migrate_settings(&mut loaded);
+    let second_save = serde_json::to_string(&loaded).unwrap();
+
+    assert_eq!(loaded.workspace_badge_mode, Some(WorkspaceBadgeMode::Tab));
+    assert_eq!(second_save, first_save);
+}
+
+#[test]
 fn legacy_text_config_without_custom_fonts_deserializes_to_none() {
     let settings: Settings = serde_json::from_str(r#"{"text":{"font_family":"Monaco"}}"#).unwrap();
     assert_eq!(settings.text.custom_fonts, None);

@@ -1150,6 +1150,7 @@ pub async fn put_settings(
     State(state): State<(Arc<SessionManager>, SettingsState)>,
     Json(mut new_settings): Json<Settings>,
 ) -> impl IntoResponse {
+    let _ = migrate_settings(&mut new_settings);
     new_settings.settings_version = CURRENT_SETTINGS_VERSION;
     let _ = clamp_text_config(&mut new_settings.text);
     let _ = clamp_theme_on_put(&mut new_settings);

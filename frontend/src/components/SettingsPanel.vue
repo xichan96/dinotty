@@ -712,10 +712,6 @@ const tabs = computed(() => [
   border-radius: 6px;
 }
 
-.ak-wysiwyg :deep(.mkb-btn) {
-  touch-action: none;
-}
-
 .ak-wyg-row-outer {
   display: flex;
   align-items: stretch;
@@ -739,11 +735,25 @@ const tabs = computed(() => [
   display: flex;
 }
 
+.ak-wyg-target-row {
+  display: contents;
+}
+
+.ak-wyg-target-row:empty {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 32px;
+  min-height: 36px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
 .ak-wyg-key {
   position: relative;
   flex: 1;
   min-width: 0;
   width: 100%;
+  padding-left: 18px;
   padding-right: 20px;
   box-sizing: border-box;
   cursor: default;
@@ -762,6 +772,26 @@ const tabs = computed(() => [
 
 .ak-wyg-label:hover {
   text-decoration: underline;
+}
+
+.ak-key-grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px 0 0 6px;
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+  cursor: grab;
+  touch-action: none;
+  z-index: 2;
+}
+
+.ak-key-grip:active {
+  cursor: grabbing;
 }
 
 .ak-key-del {
@@ -844,7 +874,26 @@ const tabs = computed(() => [
 }
 
 .ak-wyg-enter {
+  position: relative;
+  padding-left: 0;
   padding-right: 0;
+}
+
+.ak-enter-resize {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  border-radius: 6px 0 0 6px;
+  background: var(--bg-hover);
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.ak-enter-resize:hover {
+  background: rgba(77, 127, 255, 0.4);
 }
 
 .ak-wyg-add-bottom-row {

@@ -243,7 +243,7 @@ export const DEFAULT_ACTION_KEYBOARD: ActionKeyboardConfig & {
 function normalizeActionKey(key: ActionKey): void {
   if (key.grow !== undefined) {
     if (!Number.isFinite(key.grow)) delete key.grow
-    else key.grow = Math.min(6, Math.max(0.5, key.grow))
+    else key.grow = Math.min(12, Math.max(0.5, key.grow))
   }
 
   if (typeof key.kind === 'string' && key.kind !== 'send' && key.kind !== 'action') {
@@ -476,7 +476,7 @@ export function useSettings() {
   }
 }
 
-function restoreActionIcons() {
+export function restoreActionIcons() {
   // Toolbar quick keys are plain user-defined labels/sends; do not attach default icons.
   // Build a lookup from send → icon using DEFAULT_ACTION_KEYBOARD
   const iconMap = new Map<string, object>()

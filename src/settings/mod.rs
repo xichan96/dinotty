@@ -917,7 +917,7 @@ pub struct ActionKeyboardConfig {
 
 fn normalize_action_key(key: &mut ActionKey) {
     if let Some(grow) = key.grow {
-        key.grow = grow.is_finite().then(|| grow.clamp(0.5, 6.0));
+        key.grow = grow.is_finite().then(|| grow.clamp(0.5, 12.0));
     }
 
     if key.kind.as_deref().is_some_and(|kind| kind != "send" && kind != "action") {

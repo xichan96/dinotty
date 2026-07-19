@@ -6,6 +6,7 @@ import {
   effectiveActionKeyboard,
   ensureBottom,
   normalizeActionKeyboard,
+  restoreActionIcons,
   settings,
   type ActionKey,
   type ActionKeyboardConfig,
@@ -76,18 +77,18 @@ describe('normalizeActionKeyboard', () => {
       rows: [[
         { label: 'low', grow: -1 },
         { label: 'fractional', grow: 1.75 },
-        { label: 'high', grow: 8 },
+        { label: 'high', grow: 20 },
         { label: 'nan', grow: Number.NaN },
       ]],
       bottom: {
         rows: [[{ label: 'infinite', grow: Number.NEGATIVE_INFINITY }]],
-        enter: { label: '↵', kind: 'send', send: '\r', grow: 9 },
+        enter: { label: '↵', kind: 'send', send: '\r', grow: 20 },
       },
     })
 
-    expect(cfg.rows[0].map((key) => key.grow)).toEqual([0.5, 1.75, 6, undefined])
+    expect(cfg.rows[0].map((key) => key.grow)).toEqual([0.5, 1.75, 12, undefined])
     expect(cfg.bottom?.rows[0][0]).not.toHaveProperty('grow')
-    expect(cfg.bottom?.enter.grow).toBe(6)
+    expect(cfg.bottom?.enter.grow).toBe(12)
   })
 
   it('treats an unknown kind string as send-kind without rejecting the key', () => {
@@ -158,7 +159,7 @@ describe('normalizeActionKeyboard', () => {
         }]],
       }
       settings.action_keyboard_user_default = {
-        rows: [[{ label: 'Snapshot', grow: 9 }]],
+        rows: [[{ label: 'Snapshot', grow: 20 }]],
         bottom: { rows: [], enter: { label: 'Snapshot Enter', kind: 'action', action: 'newTab' } },
       }
 
@@ -170,7 +171,7 @@ describe('normalizeActionKeyboard', () => {
       }
 
       expect(settings.action_keyboard?.rows[0][0]).not.toHaveProperty('send')
-      expect(settings.action_keyboard_user_default?.rows[0][0].grow).toBe(6)
+      expect(settings.action_keyboard_user_default?.rows[0][0].grow).toBe(12)
       expect(settings.action_keyboard_user_default?.bottom?.enter).toEqual({
         label: 'Snapshot Enter', kind: 'send', send: '\r',
       })
@@ -202,6 +203,29 @@ describe('cloneWithoutIcons', () => {
     expect(cfg.rows[0][0].icon).toBe(icon)
     expect(cfg.bottom?.rows[0][0].icon).toBe(icon)
     expect(cfg.bottom?.enter.icon).toBe(icon)
+  })
+
+  it('restores factory send-key icons without adding them to action keys', () => {
+    const previousActive = settings.action_keyboard
+    const previousSnapshot = settings.action_keyboard_user_default
+    const factoryKey = DEFAULT_ACTION_KEYBOARD.rows[0][1]
+    try {
+      settings.action_keyboard = cloneWithoutIcons({
+        rows: [[
+          factoryKey,
+          { label: 'Action', kind: 'action', action: 'newTab', send: factoryKey.send },
+        ]],
+      })
+      settings.action_keyboard_user_default = null
+
+      restoreActionIcons()
+
+      expect(settings.action_keyboard.rows[0][0].icon).toEqual(factoryKey.icon)
+      expect(settings.action_keyboard.rows[0][1]).not.toHaveProperty('icon')
+    } finally {
+      settings.action_keyboard = previousActive
+      settings.action_keyboard_user_default = previousSnapshot
+    }
   })
 })
 

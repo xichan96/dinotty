@@ -594,12 +594,12 @@ fn action_keyboard_normalize_clamps_width_and_grow_without_rounding() {
             "rows":[[
                 {"label":"low","grow":-1},
                 {"label":"fractional","grow":1.75},
-                {"label":"high","grow":8},
+                {"label":"high","grow":20},
                 {"label":"nan"}
             ]],
             "bottom":{
                 "rows":[[{"label":"infinite"}]],
-                "enter":{"label":"Go","kind":"send","send":"\r","grow":9}
+                "enter":{"label":"Go","kind":"send","send":"\r","grow":20}
             }
         }"#,
     );
@@ -608,11 +608,11 @@ fn action_keyboard_normalize_clamps_width_and_grow_without_rounding() {
     config.normalize();
     assert_eq!(
         config.rows[0].iter().map(|key| key.grow).collect::<Vec<_>>(),
-        vec![Some(0.5), Some(1.75), Some(6.0), None]
+        vec![Some(0.5), Some(1.75), Some(12.0), None]
     );
     let bottom = config.bottom.unwrap();
     assert_eq!(bottom.rows[0][0].grow, None);
-    assert_eq!(bottom.enter.unwrap().grow, Some(6.0));
+    assert_eq!(bottom.enter.unwrap().grow, Some(12.0));
 }
 
 #[test]
@@ -658,7 +658,7 @@ fn action_keyboard_normalize_applies_kind_contract() {
 fn action_keyboard_normalize_is_idempotent_for_active_and_snapshot_slots() {
     let invalid = parse_action_keyboard(
         r#"{
-            "rows":[[{"label":"Action","kind":"action","action":"newTab","send":"remove","grow":9}]],
+            "rows":[[{"label":"Action","kind":"action","action":"newTab","send":"remove","grow":20}]],
             "bottom":{"rows":[],"enter":{"label":"Custom","kind":"action","action":"newTab"},"enter_width":0.9}
         }"#,
     );

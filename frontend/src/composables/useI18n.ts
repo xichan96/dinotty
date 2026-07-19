@@ -270,7 +270,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.text.cursor.bar': 'Bar',
     'settings.actionKeyboard': 'Action Keyboard',
     'settings.akHint':
-      'Matches device:  drag right edge for width, tap label to edit; bottom arrows and ↵ are fixed.',
+      'Matches device: drag the grip to reorder, drag key edges to resize, and tap labels to edit.',
     'settings.dragSort': 'Drag to reorder',
     'settings.dragResize': 'Drag to resize width',
     'settings.deleteRow': 'Remove row',
@@ -924,7 +924,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.text.cursor.underline': '下划线',
     'settings.text.cursor.bar': '竖线',
     'settings.actionKeyboard': '快捷键盘',
-    'settings.akHint': '预览与实机一致：右侧拖宽度，点键帽编辑；底部方向键与 ↵ 固定。',
+    'settings.akHint': '预览与实机一致：拖动把手排序、拖动按键边缘调宽度、点击标签编辑。',
     'settings.dragSort': '拖动排序',
     'settings.dragResize': '拖动调宽度',
     'settings.deleteRow': '删除此行',

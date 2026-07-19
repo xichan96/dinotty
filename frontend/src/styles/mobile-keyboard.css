@@ -291,6 +291,7 @@
 .mkb-action-grid-row {
   display: flex;
   gap: 4px;
+  min-width: 0;
 }
 
 .mkb-action-grid .mkb-btn {

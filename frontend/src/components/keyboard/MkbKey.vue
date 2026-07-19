@@ -2,6 +2,7 @@
   <button
     :class="['mkb-btn', k.cls, { 'mkb-active': isModActive }]"
     :id="k.id"
+    :disabled="isDisabled"
     :style="{ flexGrow: k.g ?? 1, flexBasis: '0' }"
     @touchstart.prevent="onTouchDown"
     @mousedown.prevent="onMouseDown"
@@ -48,8 +49,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'key-press': [ch: string]
+  'app-action': [id: string]
   special: [sp: string]
 }>()
+
+const isDisabled = computed(() => props.k.cls?.split(/\s+/).includes('mkb-disabled') ?? false)
 
 const isModActive = computed(() => {
   const sp = props.k.sp
@@ -75,6 +79,10 @@ let repeatInterval: ReturnType<typeof setInterval> | null = null
 let touchActive = false
 
 function fire() {
+  if (props.k.act) {
+    emit('app-action', props.k.act)
+    return
+  }
   if (props.k.sp) {
     emit('special', props.k.sp)
     return
@@ -97,7 +105,7 @@ function fireWithFeedback() {
 function onTouchDown() {
   touchActive = true
   fireWithFeedback()
-  if (props.k.repeat) {
+  if (props.k.repeat && !props.k.act) {
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(fireWithFeedback, 80)
     }, 400)
@@ -107,7 +115,7 @@ function onTouchDown() {
 function onMouseDown() {
   if (touchActive) return
   fireWithFeedback()
-  if (props.k.repeat) {
+  if (props.k.repeat && !props.k.act) {
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(fireWithFeedback, 80)
     }, 400)

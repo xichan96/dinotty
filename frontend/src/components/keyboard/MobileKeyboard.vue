@@ -138,6 +138,7 @@
           :k="key"
           :state="modState"
           @key-press="onKeyPress"
+          @app-action="onAppAction"
           @special="onSpecial"
         />
       </div>
@@ -156,14 +157,15 @@
         <!-- Main keyboard panel -->
         <div id="mkb-main-panel">
           <!-- Row 1: ` 1-0 - = ⌫ -->
-          <MkbRow :keys="row1" :state="modState" @key-press="onKeyPress" @special="onSpecial" />
+          <MkbRow :keys="row1" :state="modState" @key-press="onKeyPress" @app-action="onAppAction" @special="onSpecial" />
           <!-- Row 2: tab q-p [ ] \ -->
-          <MkbRow :keys="row2" :state="modState" @key-press="onKeyPress" @special="onSpecial" />
+          <MkbRow :keys="row2" :state="modState" @key-press="onKeyPress" @app-action="onAppAction" @special="onSpecial" />
           <!-- Row 3: ⌨ a-l ; ' ↵ (stagger) -->
           <MkbRow
             :keys="row3"
             :state="modState"
             @key-press="onKeyPress"
+            @app-action="onAppAction"
             @special="onSpecial"
             stagger="asdf"
           />
@@ -174,34 +176,39 @@
                 :keys="row4zxcv"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
               <MkbRow
                 :keys="row5bottom"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
             </div>
             <div class="mkb-arrow-cluster">
-              <MkbKey :k="arrowUp" :state="modState" @key-press="onKeyPress" @special="onSpecial" />
+              <MkbKey :k="arrowUp" :state="modState" @key-press="onKeyPress" @app-action="onAppAction" @special="onSpecial" />
               <div class="mkb-arrow-cluster-bot">
                 <MkbKey
                   :k="arrowLeft"
                   :state="modState"
                   @key-press="onKeyPress"
+                  @app-action="onAppAction"
                   @special="onSpecial"
                 />
                 <MkbKey
                   :k="arrowDown"
                   :state="modState"
                   @key-press="onKeyPress"
+                  @app-action="onAppAction"
                   @special="onSpecial"
                 />
                 <MkbKey
                   :k="arrowRight"
                   :state="modState"
                   @key-press="onKeyPress"
+                  @app-action="onAppAction"
                   @special="onSpecial"
                 />
               </div>
@@ -215,6 +222,7 @@
             :keys="actionFirstRow"
             :state="modState"
             @key-press="onKeyPress"
+            @app-action="onAppAction"
             @special="onSpecial"
           />
           <MkbRow
@@ -223,6 +231,7 @@
             :keys="r"
             :state="modState"
             @key-press="onKeyPress"
+            @app-action="onAppAction"
             @special="onSpecial"
           />
           <div class="mkb-action-bottom">
@@ -231,30 +240,35 @@
                 :k="actionYes"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
               <MkbKey
                 :k="actionNo"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
               <MkbKey
                 :k="actionArrowUp"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
               <MkbKey
                 :k="actionContinue"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
               <MkbKey
                 :k="actionArrowBot[0]"
                 :state="modState"
                 @key-press="onKeyPress"
+                @app-action="onAppAction"
                 @special="onSpecial"
               />
             </div>
@@ -262,6 +276,7 @@
               :k="actionEnter"
               :state="modState"
               @key-press="onKeyPress"
+              @app-action="onAppAction"
               @special="onSpecial"
             />
           </div>
@@ -352,6 +367,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:visible': [val: boolean]
   bookmarks: []
+  'app-action': [id: string]
 }>()
 
 const { settings } = useSettings()
@@ -756,6 +772,10 @@ function onKeyPress(ch: string) {
 
   props.getSendFn()?.(data)
   if (kbMode.value === 'default') fetchDebounced(inputBuffer.value || undefined)
+}
+
+function onAppAction(id: string) {
+  emit('app-action', id)
 }
 
 function onSpecial(sp: string) {

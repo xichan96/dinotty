@@ -222,6 +222,7 @@
       :get-send-fn="getSendFn"
       @update:visible="(v: boolean) => (kbVisible = v)"
       @bookmarks="bookmarksRef?.open()"
+      @app-action="dispatchAppAction"
     />
 
     <KbToggleButton
@@ -340,6 +341,7 @@ import { useSettingsStore } from './stores/settingsStore'
 import { shellEscapePath } from './utils/shell'
 import { buildRunCodeCommand } from './utils/runCodeCommand'
 import { resolveAbbr, resolveColor } from './utils/workspaceIcon'
+import { APP_ACTION_IDS } from './utils/appActionCatalog'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
@@ -1775,6 +1777,47 @@ const paletteCommands = computed<Command[]>(() => {
   return base
 })
 
+const keyActions: Record<string, () => void> = {
+  togglePalette: () => paletteRef.value?.toggle(),
+  openBookmarks: () => bookmarksRef.value?.open(),
+  newTab: () => newTab(),
+  closeTab: async () => {
+    if (!activePaneId.value) return
+    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+    if (tab?.type === 'terminal' && getAllLeaves(tab.layout).length > 1) {
+      // Multi-pane: route through confirmation gate (consistent with X button)
+      await onClosePane(tab.paneId, tab.activePaneId)
+    } else {
+      await requestCloseTab(activePaneId.value)
+    }
+  },
+  splitHorizontal: () => splitPane.splitPane('horizontal'),
+  splitVertical: () => splitPane.splitPane('vertical'),
+  toggleBroadcast: () => splitPane.toggleBroadcast(),
+  toggleZoom: () => splitPane.toggleZoom(),
+  equalizePanes: () => splitPane.equalizePanes(),
+  focusNextPane: () => splitPane.focusNext(),
+  focusPrevPane: () => splitPane.focusPrev(),
+  searchTerminal: () => {
+    if (!activePaneId.value) return
+    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+    if (!tab || tab.type !== 'terminal') return
+    termRefs[tab.activePaneId]?.toggleSearch()
+  },
+  missionControl: () => openOverview(),
+  superviseTabs: () => void supervise((id) => activateTab(id, { defer: true })),
+  sshConnect: () => sshPanelRef.value?.open(),
+  fontSizeUp: () => adjustActiveTerminalFontSize(1),
+  fontSizeDown: () => adjustActiveTerminalFontSize(-1),
+  fontSizeReset: () => adjustActiveTerminalFontSize(0),
+}
+
+function dispatchAppAction(id: string) {
+  if (!APP_ACTION_IDS.has(id)) return
+  if (id === 'closeTab') lastTabCloseShortcutAt = Date.now()
+  keyActions[id]?.()
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
   const cmd = e.metaKey || e.ctrlKey
   const altAsCmd = appSettings.windowsAltAsCmd && isWindowsClient
@@ -1783,41 +1826,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
   // (isWindowsClient=false) is unaffected.
   const appCmd = (cmd || (altAsCmd && e.altKey)) && !(isWindowsClient && e.ctrlKey && e.altKey)
   if (!appCmd) return
-
-  const keyActions: Record<string, () => void> = {
-    togglePalette: () => paletteRef.value?.toggle(),
-    openBookmarks: () => bookmarksRef.value?.open(),
-    newTab: () => newTab(),
-    closeTab: async () => {
-      if (!activePaneId.value) return
-      const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
-      if (tab?.type === 'terminal' && getAllLeaves(tab.layout).length > 1) {
-        // Multi-pane: route through confirmation gate (consistent with X button)
-        await onClosePane(tab.paneId, tab.activePaneId)
-      } else {
-        await requestCloseTab(activePaneId.value)
-      }
-    },
-    splitHorizontal: () => splitPane.splitPane('horizontal'),
-    splitVertical: () => splitPane.splitPane('vertical'),
-    toggleBroadcast: () => splitPane.toggleBroadcast(),
-    toggleZoom: () => splitPane.toggleZoom(),
-    equalizePanes: () => splitPane.equalizePanes(),
-    focusNextPane: () => splitPane.focusNext(),
-    focusPrevPane: () => splitPane.focusPrev(),
-    searchTerminal: () => {
-      if (!activePaneId.value) return
-      const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
-      if (!tab || tab.type !== 'terminal') return
-      termRefs[tab.activePaneId]?.toggleSearch()
-    },
-    missionControl: () => openOverview(),
-    superviseTabs: () => void supervise((id) => activateTab(id, { defer: true })),
-    sshConnect: () => sshPanelRef.value?.open(),
-    fontSizeUp: () => adjustActiveTerminalFontSize(1),
-    fontSizeDown: () => adjustActiveTerminalFontSize(-1),
-    fontSizeReset: () => adjustActiveTerminalFontSize(0),
-  }
 
   for (const [id, action] of Object.entries(keyActions)) {
     const binding = getBinding(id)

@@ -271,34 +271,52 @@
             <span>{{ t('settings.label') }}</span>
             <input v-model="akEdit.label" class="shortcut-input" />
           </label>
-          <label class="ak-field">
-            <span>{{ t('settings.send') }}</span>
-            <textarea
-              v-model="akEdit.sendRaw"
-              class="shortcut-input ak-send-textarea"
-              rows="4"
-              spellcheck="false"
-              :placeholder="t('settings.sendPlaceholder')"
-            />
+          <label v-if="akEdit.scope !== 'toolbar'" class="ak-field">
+            <span>{{ t('actionKb.kind') }}</span>
+            <select v-model="akEdit.kind" class="shortcut-input">
+              <option value="send">{{ t('actionKb.kind.send') }}</option>
+              <option value="action">{{ t('actionKb.kind.action') }}</option>
+            </select>
           </label>
-          <div class="ak-send-row">
-            <code class="ak-esc-preview">{{ akSendPreview }}</code>
-            <button
-              type="button"
-              class="ak-record-btn"
-              :class="{ recording: akRecording }"
-              @click.stop="toggleRecord"
-            >
-              {{ akRecording ? t('settings.stop') : t('settings.record') }}
-            </button>
-          </div>
-          <div
-            v-show="akRecording"
-            ref="recordFocusSinkRef"
-            class="ak-record-focus-sink"
-            tabindex="-1"
-            aria-hidden="true"
-          />
+          <template v-if="akEdit.kind === 'send'">
+            <label class="ak-field">
+              <span>{{ t('settings.send') }}</span>
+              <textarea
+                v-model="akEdit.sendRaw"
+                class="shortcut-input ak-send-textarea"
+                rows="4"
+                spellcheck="false"
+                :placeholder="t('settings.sendPlaceholder')"
+              />
+            </label>
+            <div class="ak-send-row">
+              <code class="ak-esc-preview">{{ akSendPreview }}</code>
+              <button
+                type="button"
+                class="ak-record-btn"
+                :class="{ recording: akRecording }"
+                @click.stop="toggleRecord"
+              >
+                {{ akRecording ? t('settings.stop') : t('settings.record') }}
+              </button>
+            </div>
+            <div
+              v-show="akRecording"
+              ref="recordFocusSinkRef"
+              class="ak-record-focus-sink"
+              tabindex="-1"
+              aria-hidden="true"
+            />
+          </template>
+          <label v-else class="ak-field">
+            <span>{{ t('actionKb.action') }}</span>
+            <select v-model="akEdit.action" class="shortcut-input">
+              <option value="" disabled>{{ t('actionKb.selectAction') }}</option>
+              <option v-for="action in APP_ACTIONS" :key="action.id" :value="action.id">
+                {{ t(action.labelKey) }}
+              </option>
+            </select>
+          </label>
           <label class="ak-field">
             <span>{{ t('settings.style') }}</span>
             <select v-model="akEdit.style" class="shortcut-input">
@@ -306,10 +324,10 @@
               <option value="danger">{{ t('settings.style.danger') }}</option>
             </select>
           </label>
-          <label class="shortcut-check">
+          <label v-if="akEdit.kind === 'send'" class="shortcut-check">
             <input type="checkbox" v-model="akEdit.auto_enter" /> {{ t('settings.appendEnter') }}
           </label>
-          <label class="shortcut-check">
+          <label v-if="akEdit.kind === 'send'" class="shortcut-check">
             <input type="checkbox" v-model="akEdit.repeat" /> {{ t('settings.repeatHold') }}
           </label>
           <div class="ak-modal-actions">
@@ -411,6 +429,7 @@ import { useKeybindings } from '../../composables/useKeybindings'
 import type { ActionKey } from '../../composables/useSettings'
 import type { KeyBinding } from '../../composables/useKeybindings'
 import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
+import { APP_ACTIONS, APP_ACTION_IDS } from '../../utils/appActionCatalog'
 import { getApiBase, apiUrl, authFetch } from '../../composables/apiBase'
 import { isWindowsClient } from '../../utils/clientPlatform'
 
@@ -674,6 +693,8 @@ function addToolbarQuickKey() {
     ri: -1,
     ki: settings.toolbar_quick_keys.length,
     label: '',
+    kind: 'send',
+    action: '',
     sendRaw: '',
     style: '',
     repeat: false,
@@ -690,10 +711,15 @@ function editToolbarQuickKey(ki: number) {
     ri: -1,
     ki,
     label: key.label,
+    kind: 'send',
+    action: '',
     sendRaw: escapeForDisplay(key.send),
     style: key.style || '',
     repeat: key.repeat || false,
     auto_enter: resolveAutoEnterForEdit(key),
+    special: key.special,
+    grow: key.grow,
+    icon: key.icon,
   }
 }
 
@@ -756,16 +782,24 @@ const akEdit = ref<{
   ri: number
   ki: number
   label: string
+  kind: 'send' | 'action'
+  action: string
   sendRaw: string
   style: string
   repeat: boolean
   auto_enter: boolean
+  special?: string
+  grow?: number
+  icon?: object
 } | null>(null)
 const akRecording = ref(false)
 const recordFocusSinkRef = ref<HTMLElement | null>(null)
 
 const akCanSave = computed(() => {
   if (!akEdit.value) return false
+  if (akEdit.value.kind === 'action') {
+    return akEdit.value.scope !== 'toolbar' && APP_ACTION_IDS.has(akEdit.value.action)
+  }
   if (akEdit.value.scope !== 'toolbar') return true
   return akEdit.value.label.trim().length > 0 && unescapeFromDisplay(akEdit.value.sendRaw).length > 0
 })
@@ -777,24 +811,43 @@ function editActionKey(ri: number, ki: number) {
     ri,
     ki,
     label: key.label,
+    kind: key.kind === 'action' ? 'action' : 'send',
+    action: key.action || '',
     sendRaw: escapeForDisplay(key.send),
     style: key.style || '',
     repeat: key.repeat || false,
     auto_enter: resolveAutoEnterForEdit(key),
+    special: key.special,
+    grow: key.grow,
+    icon: key.icon,
   }
 }
 
 function saveActionKey() {
   if (!akEdit.value || !akCanSave.value) return
-  const { ri, ki, label, sendRaw, style, repeat, auto_enter } = akEdit.value
-  const next: ActionKey = {
-    label: akEdit.value.scope === 'toolbar' ? label.trim() : label,
-    send: unescapeFromDisplay(sendRaw),
-    style: style || undefined,
-    repeat: repeat || undefined,
-    auto_enter,
-  }
-  if (akEdit.value.scope === 'toolbar') {
+  const edit = akEdit.value
+  const { ri, ki } = edit
+  const label = edit.scope === 'toolbar' ? edit.label.trim() : edit.label
+  const next: ActionKey = edit.kind === 'action'
+    ? {
+        label,
+        kind: 'action',
+        action: edit.action,
+        style: edit.style || undefined,
+        grow: edit.grow,
+      }
+    : {
+        label,
+        kind: 'send',
+        send: unescapeFromDisplay(edit.sendRaw),
+        style: edit.style || undefined,
+        repeat: edit.repeat || undefined,
+        auto_enter: edit.auto_enter,
+        special: edit.special,
+        grow: edit.grow,
+        icon: edit.icon,
+      }
+  if (edit.scope === 'toolbar') {
     ensureToolbarQuickKeys()
     if (ki < settings.toolbar_quick_keys.length) {
       settings.toolbar_quick_keys[ki] = next
@@ -803,7 +856,7 @@ function saveActionKey() {
     }
   } else {
     ensureActionKeyboard()
-    Object.assign(settings.action_keyboard!.rows[ri][ki], next)
+    settings.action_keyboard!.rows[ri][ki] = next
   }
   akEdit.value = null
 }

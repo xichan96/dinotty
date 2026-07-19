@@ -6,7 +6,10 @@ import {
   effectiveActionKeyboard,
   ensureBottom,
   normalizeActionKeyboard,
+  resetActionKeyboard,
+  restoreActionKeyboardUserDefault,
   restoreActionIcons,
+  saveActionKeyboardUserDefault,
   settings,
   type ActionKey,
   type ActionKeyboardConfig,
@@ -292,6 +295,90 @@ describe('ensureBottom', () => {
       expect(JSON.stringify(DEFAULT_ACTION_BOTTOM)).toBe(JSON.stringify(freshFactoryCopy))
     } finally {
       settings.action_keyboard = previous
+    }
+  })
+})
+
+describe('action keyboard user defaults', () => {
+  it('saves the effective config, then restores later live mutations with icons', () => {
+    const previousActive = settings.action_keyboard
+    const previousSnapshot = settings.action_keyboard_user_default
+    const factoryKey = DEFAULT_ACTION_KEYBOARD.rows[0][1]
+    try {
+      settings.action_keyboard = null
+
+      saveActionKeyboardUserDefault()
+      const saved = cloneWithoutIcons(settings.action_keyboard_user_default!)
+      expect(saved).toEqual(cloneWithoutIcons(DEFAULT_ACTION_KEYBOARD))
+      expect(saved.bottom).toEqual(cloneWithoutIcons(DEFAULT_ACTION_KEYBOARD).bottom)
+      expect(settings.action_keyboard_user_default?.rows[0][1]).not.toHaveProperty('icon')
+
+      settings.action_keyboard = cloneWithoutIcons(settings.action_keyboard_user_default!)
+      settings.action_keyboard.rows[0][1].label = 'Mutated main'
+      settings.action_keyboard.bottom!.rows[0][0].label = 'Mutated bottom'
+      settings.action_keyboard.bottom!.enter_width = 0.5
+
+      restoreActionKeyboardUserDefault()
+
+      expect(cloneWithoutIcons(settings.action_keyboard!)).toEqual(saved)
+      expect(settings.action_keyboard?.rows[0][1].icon).toEqual(factoryKey.icon)
+    } finally {
+      settings.action_keyboard = previousActive
+      settings.action_keyboard_user_default = previousSnapshot
+    }
+  })
+
+  it('resets the live config to factory inheritance without clearing the snapshot', () => {
+    const previousActive = settings.action_keyboard
+    const previousSnapshot = settings.action_keyboard_user_default
+    try {
+      settings.action_keyboard = { rows: [[{ label: 'Live', send: 'live' }]] }
+      settings.action_keyboard_user_default = {
+        rows: [[{ label: 'Snapshot', send: 'snapshot' }]],
+      }
+      const snapshot = settings.action_keyboard_user_default
+
+      resetActionKeyboard()
+
+      expect(settings.action_keyboard).toBeNull()
+      expect(settings.action_keyboard_user_default).toBe(snapshot)
+    } finally {
+      settings.action_keyboard = previousActive
+      settings.action_keyboard_user_default = previousSnapshot
+    }
+  })
+
+  it('restores a deep clone that does not alias the saved snapshot', () => {
+    const previousActive = settings.action_keyboard
+    const previousSnapshot = settings.action_keyboard_user_default
+    try {
+      settings.action_keyboard_user_default = {
+        rows: [[{ label: 'Snapshot main', send: 'main' }]],
+        bottom: {
+          rows: [[{ label: 'Snapshot bottom', send: 'bottom' }]],
+          enter: { label: 'Snapshot enter', kind: 'send', send: '\r' },
+        },
+      }
+
+      restoreActionKeyboardUserDefault()
+      const live = settings.action_keyboard!
+      const snapshot = settings.action_keyboard_user_default!
+
+      expect(live).not.toBe(snapshot)
+      expect(live.rows).not.toBe(snapshot.rows)
+      expect(live.rows[0]).not.toBe(snapshot.rows[0])
+      expect(live.rows[0][0]).not.toBe(snapshot.rows[0][0])
+      expect(live.bottom).not.toBe(snapshot.bottom)
+      expect(live.bottom?.rows[0][0]).not.toBe(snapshot.bottom?.rows[0][0])
+
+      live.rows[0][0].label = 'Mutated live main'
+      live.bottom!.rows[0][0].label = 'Mutated live bottom'
+
+      expect(snapshot.rows[0][0].label).toBe('Snapshot main')
+      expect(snapshot.bottom?.rows[0][0].label).toBe('Snapshot bottom')
+    } finally {
+      settings.action_keyboard = previousActive
+      settings.action_keyboard_user_default = previousSnapshot
     }
   })
 })

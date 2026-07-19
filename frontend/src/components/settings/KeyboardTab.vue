@@ -312,18 +312,43 @@
           </div>
         </div>
         <button type="button" class="shortcut-add ak-wyg-add-bottom-row" @click="addBottomRow">
-          + {{ t('settings.addRow') }}
+          {{ t('settings.addRow') }}
         </button>
       </div>
       <div class="ak-actions">
         <button class="shortcut-add" @click="addActionRow">{{ t('settings.addRow') }}</button>
-        <button class="shortcut-add ak-reset" @click="resetActionKeyboard">
-          {{ t('settings.resetDefault') }}
+        <button
+          type="button"
+          class="shortcut-add ak-reset"
+          :title="t('settings.akResetFactory')"
+          :aria-label="t('settings.akResetFactory')"
+          @click="resetActionKeyboard"
+        >
+          {{ t('settings.akResetFactory') }}
+        </button>
+        <button
+          type="button"
+          class="shortcut-add"
+          :title="t('settings.akSaveUserDefault')"
+          :aria-label="t('settings.akSaveUserDefault')"
+          @click="saveActionKeyboardUserDefault"
+        >
+          {{ t('settings.akSaveUserDefault') }}
+        </button>
+        <button
+          type="button"
+          class="shortcut-add"
+          :title="t('settings.akRestoreUserDefault')"
+          :aria-label="t('settings.akRestoreUserDefault')"
+          :disabled="settings.action_keyboard_user_default == null"
+          @click="restoreActionKeyboardUserDefault"
+        >
+          {{ t('settings.akRestoreUserDefault') }}
         </button>
       </div>
 
-      <h4>工具栏快捷键 / Toolbar Quick Keys</h4>
-      <p class="settings-hint">移动网页输入框聚焦时显示，最多 5 个。</p>
+      <h4>{{ t('settings.toolbarQuickKeys') }}</h4>
+      <p class="settings-hint">{{ t('settings.toolbarQuickKeysHint') }}</p>
       <div class="ak-wysiwyg">
         <div class="ak-wyg-row-outer">
           <div class="mkb-row-wrap">
@@ -460,10 +485,10 @@
           <span class="api-url">/api/input</span>
           <div class="mode-tabs">
             <button :class="{ active: openApiMode === 'form' }" @click="switchOpenApiMode('form')">
-              Form
+              {{ t('notification.testForm') }}
             </button>
             <button :class="{ active: openApiMode === 'raw' }" @click="switchOpenApiMode('raw')">
-              Raw
+              {{ t('notification.testRaw') }}
             </button>
           </div>
         </div>
@@ -494,7 +519,7 @@
             :disabled="!openApiCanSend || openApiSending"
             @click="sendOpenApiTest"
           >
-            {{ openApiSending ? '...' : '▶ Send' }}
+            {{ openApiSending ? '...' : `▶ ${t('settings.keyboard.openApiSend')}` }}
           </button>
           <span v-if="openApiResult" class="api-result" :class="openApiResultOk ? 'ok' : 'err'">{{
             openApiResult
@@ -524,7 +549,10 @@ import {
   effectiveActionKeyboard,
   ensureBottom,
   isLoadInFlight,
+  resetActionKeyboard,
+  restoreActionKeyboardUserDefault,
   restoreActionIcons,
+  saveActionKeyboardUserDefault,
 } from '../../composables/useSettings'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { useI18n } from '../../composables/useI18n'
@@ -1313,10 +1341,6 @@ function saveActionKey() {
   akEdit.value = null
 }
 
-function resetActionKeyboard() {
-  settings.action_keyboard = cloneActionKeyboard()
-}
-
 let recordHandler: ((e: KeyboardEvent) => void) | null = null
 
 function toggleRecord() {
@@ -1612,6 +1636,11 @@ function unescapeFromDisplay(s: string): string {
   opacity: 0.85;
 }
 .send-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ak-actions .shortcut-add:disabled {
   opacity: 0.4;
   cursor: default;
 }

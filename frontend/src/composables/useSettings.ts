@@ -317,6 +317,21 @@ export function effectiveActionKeyboard(): ActionKeyboardConfig {
   return { rows: cfg.rows ?? [], bottom: cfg.bottom ?? DEFAULT_ACTION_BOTTOM }
 }
 
+export function saveActionKeyboardUserDefault(): void {
+  settings.action_keyboard_user_default = cloneWithoutIcons(effectiveActionKeyboard())
+}
+
+export function restoreActionKeyboardUserDefault(): void {
+  const snapshot = settings.action_keyboard_user_default
+  if (!snapshot) return
+  settings.action_keyboard = cloneWithoutIcons(snapshot)
+  restoreActionIcons()
+}
+
+export function resetActionKeyboard(): void {
+  settings.action_keyboard = null
+}
+
 export function ensureBottom(): ActionBottomCluster {
   if (
     !settings.action_keyboard ||

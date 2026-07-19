@@ -517,7 +517,6 @@ const tabs = computed(() => [
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  max-height: 260px;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--bg-surface);
@@ -526,6 +525,10 @@ const tabs = computed(() => [
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   z-index: 1000;
   padding: 4px 0;
+}
+.font-dropdown-menu.drop-up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 .font-dropdown-item {
   display: flex;

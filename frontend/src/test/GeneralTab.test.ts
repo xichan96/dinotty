@@ -180,7 +180,7 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     const buttons = control.findAll('button')
     expect(buttons).toHaveLength(4)
     expect(buttons.every((button) => button.text().trim().length > 0)).toBe(true)
-    expect(buttons[0].attributes('aria-selected')).toBe('true')
+    expect(buttons[0].attributes('aria-checked')).toBe('true')
 
     await buttons[3].trigger('click')
     await flush()

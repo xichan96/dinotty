@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SegmentedControl from '../components/ui/SegmentedControl.vue'
 
@@ -19,6 +19,13 @@ describe('SegmentedControl', () => {
       'Icon',
       'Both',
     ])
+    expect(wrapper.attributes('role')).toBe('radiogroup')
+    expect(wrapper.findAll('button').map((button) => button.attributes('role'))).toEqual([
+      'radio',
+      'radio',
+      'radio',
+      'radio',
+    ])
   })
 
   it('emits the clicked option value', async () => {
@@ -29,14 +36,36 @@ describe('SegmentedControl', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([['icon']])
   })
 
-  it('marks only the selected option with aria-selected', () => {
+  it('marks only the selected option with aria-checked', () => {
     const wrapper = mount(SegmentedControl, { props: { modelValue: 'tab', options } })
 
-    expect(wrapper.findAll('button').map((button) => button.attributes('aria-selected'))).toEqual([
+    expect(wrapper.findAll('button').map((button) => button.attributes('aria-checked'))).toEqual([
       'false',
       'true',
       'false',
       'false',
+    ])
+  })
+
+  it('uses a roving tabindex for the selected option', () => {
+    const wrapper = mount(SegmentedControl, { props: { modelValue: 'icon', options } })
+
+    expect(wrapper.findAll('button').map((button) => button.attributes('tabindex'))).toEqual([
+      '-1',
+      '-1',
+      '0',
+      '-1',
+    ])
+  })
+
+  it('makes the first option focusable when the value matches no option', () => {
+    const wrapper = mount(SegmentedControl, { props: { modelValue: 'missing', options } })
+
+    expect(wrapper.findAll('button').map((button) => button.attributes('tabindex'))).toEqual([
+      '0',
+      '-1',
+      '-1',
+      '-1',
     ])
   })
 
@@ -51,18 +80,41 @@ describe('SegmentedControl', () => {
     ])
   })
 
-  it('moves left and right without wrapping at the ends', async () => {
+  it('moves with arrow keys without wrapping at the ends', async () => {
     const wrapper = mount(SegmentedControl, { props: { modelValue: 'tab', options } })
     const buttons = wrapper.findAll('button')
 
     await buttons[1].trigger('keydown', { key: 'ArrowLeft' })
     await buttons[1].trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.emitted('update:modelValue')).toEqual([['off'], ['icon']])
+    await buttons[1].trigger('keydown', { key: 'ArrowUp' })
+    await buttons[1].trigger('keydown', { key: 'ArrowDown' })
+    expect(wrapper.emitted('update:modelValue')).toEqual([['off'], ['icon'], ['off'], ['icon']])
 
     await wrapper.setProps({ modelValue: 'off' })
     await buttons[0].trigger('keydown', { key: 'ArrowLeft' })
     await wrapper.setProps({ modelValue: 'both' })
     await buttons[3].trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.emitted('update:modelValue')).toEqual([['off'], ['icon']])
+    expect(wrapper.emitted('update:modelValue')).toEqual([['off'], ['icon'], ['off'], ['icon']])
+  })
+
+  it('moves to the first and last options with Home and End', async () => {
+    const wrapper = mount(SegmentedControl, { props: { modelValue: 'tab', options } })
+    const buttons = wrapper.findAll('button')
+
+    await buttons[1].trigger('keydown', { key: 'Home' })
+    await buttons[1].trigger('keydown', { key: 'End' })
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['off'], ['both']])
+  })
+
+  it('focuses the option selected with the keyboard', async () => {
+    const wrapper = mount(SegmentedControl, { props: { modelValue: 'tab', options } })
+    const buttons = wrapper.findAll('button')
+    const focus = vi.spyOn(buttons[2].element, 'focus')
+
+    await buttons[1].trigger('keydown', { key: 'ArrowRight' })
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['icon']])
+    expect(focus).toHaveBeenCalledOnce()
   })
 })

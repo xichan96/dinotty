@@ -829,14 +829,27 @@ const tabs = computed(() => [
   border-color: rgba(255, 100, 100, 0.4);
 }
 
-.ak-wyg-fixed-cluster {
-  pointer-events: none;
+.ak-wyg-bottom-cluster {
   opacity: 0.92;
   margin-top: 2px;
 }
 
-.ak-wyg-fixed-cluster .mkb-btn {
-  cursor: default;
+.ak-wyg-bottom-cluster .ak-wyg-row-outer {
+  gap: 4px;
+}
+
+.ak-wyg-bottom-cluster .mkb-action-grid-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.ak-wyg-enter {
+  padding-right: 0;
+}
+
+.ak-wyg-add-bottom-row {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .ak-actions {

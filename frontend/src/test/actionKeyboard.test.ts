@@ -4,6 +4,7 @@ import {
   DEFAULT_ACTION_BOTTOM,
   DEFAULT_ACTION_KEYBOARD,
   effectiveActionKeyboard,
+  ensureBottom,
   normalizeActionKeyboard,
   settings,
   type ActionKey,
@@ -246,6 +247,25 @@ describe('effectiveActionKeyboard', () => {
       expect(effective.bottom).toEqual(bottom)
       expect(effective.bottom).not.toBe(DEFAULT_ACTION_BOTTOM)
       expect(effective.bottom).not.toHaveProperty('enter_width')
+    } finally {
+      settings.action_keyboard = previous
+    }
+  })
+})
+
+describe('ensureBottom', () => {
+  it('materializes a mutable deep clone without corrupting the factory footer', () => {
+    const previous = settings.action_keyboard
+    const freshFactoryCopy = structuredClone(DEFAULT_ACTION_BOTTOM)
+    try {
+      settings.action_keyboard = { rows: [] }
+      const bottom = ensureBottom()
+      bottom.rows[0][0].label = 'changed'
+      bottom.enter.label = 'changed enter'
+
+      expect(bottom).not.toBe(DEFAULT_ACTION_BOTTOM)
+      expect(bottom.rows).not.toBe(DEFAULT_ACTION_BOTTOM.rows)
+      expect(JSON.stringify(DEFAULT_ACTION_BOTTOM)).toBe(JSON.stringify(freshFactoryCopy))
     } finally {
       settings.action_keyboard = previous
     }

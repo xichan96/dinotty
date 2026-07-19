@@ -211,16 +211,70 @@
           </button>
         </div>
 
-        <div class="mkb-action-bottom ak-wyg-fixed-cluster">
+        <div
+          class="mkb-action-bottom ak-wyg-bottom-cluster"
+          :style="{ '--ak-enter-width': (actionBottom.enter_width ?? 0.28) * 100 + '%' }"
+        >
           <div class="mkb-action-grid">
-            <div class="mkb-btn mkb-mod mkb-action-btn">yes</div>
-            <div class="mkb-btn mkb-mod mkb-action-btn">no</div>
-            <div class="mkb-btn mkb-mod mkb-action-arrow">↑</div>
-            <div class="mkb-btn mkb-mod mkb-action-btn mkb-action-continue">continue</div>
-            <div class="mkb-btn mkb-mod mkb-action-arrow">↓</div>
+            <div
+              v-for="(row, ri) in actionBottom.rows"
+              :key="ri"
+              class="ak-wyg-row-outer"
+            >
+              <div class="mkb-action-grid-row">
+                <div
+                  v-for="(key, ki) in row"
+                  :key="akItemKey(key)"
+                  class="ak-wyg-slot"
+                  :style="bottomPreviewSlotStyle(ri, ki)"
+                >
+                  <div
+                    class="mkb-btn ak-wyg-key"
+                    :class="[bottomPreviewDef(ri, ki).cls, footerStructuralClass(key)]"
+                  >
+                    <span class="ak-wyg-label" @click="editBottomKey(ri, ki)">{{
+                      previewLabel(key)
+                    }}</span>
+                    <button type="button" class="ak-key-del" @click.stop="removeBottomKey(ri, ki)">
+                      ✕
+                    </button>
+                    <div
+                      class="ak-key-resize"
+                      :title="t('settings.dragResize')"
+                      @pointerdown="akBottomResizePointerDown(ri, ki, $event)"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="mkb-btn mkb-mod ak-wyg-add-key"
+                  @click="addBottomKey(ri)"
+                >
+                  +
+                </button>
+              </div>
+              <button
+                type="button"
+                class="ak-wyg-remove-row"
+                :title="t('settings.deleteRow')"
+                @click="removeBottomRow(ri)"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div class="mkb-btn mkb-mod mkb-action-enter mkb-return">↵</div>
+          <div
+            class="mkb-btn ak-wyg-key mkb-action-enter mkb-return ak-wyg-enter"
+            :class="bottomEnterPreviewDef.cls"
+          >
+            <span class="ak-wyg-label" @click="editBottomEnter">{{
+              previewLabel(actionBottom.enter)
+            }}</span>
+          </div>
         </div>
+        <button type="button" class="shortcut-add ak-wyg-add-bottom-row" @click="addBottomRow">
+          + {{ t('settings.addRow') }}
+        </button>
       </div>
       <div class="ak-actions">
         <button class="shortcut-add" @click="addActionRow">{{ t('settings.addRow') }}</button>
@@ -271,14 +325,14 @@
             <span>{{ t('settings.label') }}</span>
             <input v-model="akEdit.label" class="shortcut-input" />
           </label>
-          <label v-if="akEdit.scope !== 'toolbar'" class="ak-field">
+          <label v-if="akEdit.scope !== 'toolbar' && !akIsEnterEdit" class="ak-field">
             <span>{{ t('actionKb.kind') }}</span>
             <select v-model="akEdit.kind" class="shortcut-input">
               <option value="send">{{ t('actionKb.kind.send') }}</option>
               <option value="action">{{ t('actionKb.kind.action') }}</option>
             </select>
           </label>
-          <template v-if="akEdit.kind === 'send'">
+          <template v-if="akEdit.kind === 'send' && !akIsEnterEdit">
             <label class="ak-field">
               <span>{{ t('settings.send') }}</span>
               <textarea
@@ -308,7 +362,7 @@
               aria-hidden="true"
             />
           </template>
-          <label v-else class="ak-field">
+          <label v-else-if="!akIsEnterEdit" class="ak-field">
             <span>{{ t('actionKb.action') }}</span>
             <select v-model="akEdit.action" class="shortcut-input">
               <option value="" disabled>{{ t('actionKb.selectAction') }}</option>
@@ -324,10 +378,10 @@
               <option value="danger">{{ t('settings.style.danger') }}</option>
             </select>
           </label>
-          <label v-if="akEdit.kind === 'send'" class="shortcut-check">
+          <label v-if="akEdit.kind === 'send' && !akIsEnterEdit" class="shortcut-check">
             <input type="checkbox" v-model="akEdit.auto_enter" /> {{ t('settings.appendEnter') }}
           </label>
-          <label v-if="akEdit.kind === 'send'" class="shortcut-check">
+          <label v-if="akEdit.kind === 'send' && !akIsEnterEdit" class="shortcut-check">
             <input type="checkbox" v-model="akEdit.repeat" /> {{ t('settings.repeatHold') }}
           </label>
           <div class="ak-modal-actions">
@@ -422,11 +476,17 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
-import { useSettings, DEFAULT_ACTION_KEYBOARD } from '../../composables/useSettings'
+import {
+  useSettings,
+  DEFAULT_ACTION_KEYBOARD,
+  DEFAULT_ACTION_BOTTOM,
+  effectiveActionKeyboard,
+  ensureBottom,
+} from '../../composables/useSettings'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
-import type { ActionKey } from '../../composables/useSettings'
+import type { ActionBottomCluster, ActionKey } from '../../composables/useSettings'
 import type { KeyBinding } from '../../composables/useKeybindings'
 import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
 import { APP_ACTIONS, APP_ACTION_IDS } from '../../utils/appActionCatalog'
@@ -592,8 +652,12 @@ async function sendOpenApiTest() {
 }
 
 const actionRows = computed(() => {
-  return (settings.action_keyboard ?? DEFAULT_ACTION_KEYBOARD).rows
+  return effectiveActionKeyboard().rows
 })
+
+const actionBottom = computed<ActionBottomCluster>(() =>
+  effectiveActionKeyboard().bottom ?? DEFAULT_ACTION_BOTTOM
+)
 
 const toolbarQuickKeys = computed(() => settings.toolbar_quick_keys ?? [])
 const toolbarPreviewSlotStyle = { flexGrow: 1, flexBasis: '0', minWidth: '0' }
@@ -608,8 +672,23 @@ function previewToolbarDef(key: ActionKey) {
   return actionKeyToKeyDef(key)
 }
 
+function bottomPreviewDef(ri: number, ki: number) {
+  return actionKeyToKeyDef(actionBottom.value.rows[ri][ki])
+}
+
+const bottomEnterPreviewDef = computed(() => actionKeyToKeyDef(actionBottom.value.enter))
+
+function footerStructuralClass(key: ActionKey) {
+  return Array.from(key.label).length === 1 ? 'mkb-action-arrow' : 'mkb-action-btn'
+}
+
 function akPreviewSlotStyle(ri: number, ki: number) {
   const d = previewDef(ri, ki)
+  return { flexGrow: d.g ?? 1, flexBasis: '0', minWidth: '0' }
+}
+
+function bottomPreviewSlotStyle(ri: number, ki: number) {
+  const d = bottomPreviewDef(ri, ki)
   return { flexGrow: d.g ?? 1, flexBasis: '0', minWidth: '0' }
 }
 
@@ -683,6 +762,22 @@ function resolveAutoEnterForEdit(key: ActionKey): boolean {
 function removeActionKey(ri: number, ki: number) {
   ensureActionKeyboard()
   settings.action_keyboard!.rows[ri].splice(ki, 1)
+}
+
+function addBottomRow() {
+  ensureBottom().rows.push([])
+}
+
+function removeBottomRow(ri: number) {
+  ensureBottom().rows.splice(ri, 1)
+}
+
+function addBottomKey(ri: number) {
+  ensureBottom().rows[ri].push({ label: 'new', send: '', auto_enter: true })
+}
+
+function removeBottomKey(ri: number, ki: number) {
+  ensureBottom().rows[ri].splice(ki, 1)
 }
 
 function addToolbarQuickKey() {
@@ -775,7 +870,39 @@ function akResizePointerDown(ri: number, ki: number, e: PointerEvent) {
   window.addEventListener('pointercancel', end)
 }
 
-type AkEditScope = 'action' | 'toolbar'
+function akBottomResizePointerDown(ri: number, ki: number, e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  const key = ensureBottom().rows[ri][ki]
+  const startX = e.clientX
+  const startGrow = key.grow != null && key.grow > 0 ? key.grow : 1
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture(e.pointerId)
+  akResizePid = e.pointerId
+
+  const clamp = (v: number) => Math.min(6, Math.max(0.5, Math.round(v * 4) / 4))
+
+  const onMove = (ev: PointerEvent) => {
+    if (ev.pointerId !== akResizePid) return
+    key.grow = clamp(startGrow + (ev.clientX - startX) / 28)
+  }
+  const end = (ev: PointerEvent) => {
+    if (ev.pointerId !== akResizePid) return
+    try {
+      el.releasePointerCapture(ev.pointerId)
+    } catch {}
+    akResizePid = -1
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', end)
+    window.removeEventListener('pointercancel', end)
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', end)
+  window.addEventListener('pointercancel', end)
+}
+
+type AkEditScope = 'action' | 'bottom' | 'bottom-enter' | 'toolbar'
 
 const akEdit = ref<{
   scope: AkEditScope
@@ -794,6 +921,7 @@ const akEdit = ref<{
 } | null>(null)
 const akRecording = ref(false)
 const recordFocusSinkRef = ref<HTMLElement | null>(null)
+const akIsEnterEdit = computed(() => akEdit.value?.scope === 'bottom-enter')
 
 const akCanSave = computed(() => {
   if (!akEdit.value) return false
@@ -823,10 +951,56 @@ function editActionKey(ri: number, ki: number) {
   }
 }
 
+function editBottomKey(ri: number, ki: number) {
+  const key = actionBottom.value.rows[ri][ki]
+  if (!key) return
+  akEdit.value = {
+    scope: 'bottom',
+    ri,
+    ki,
+    label: key.label,
+    kind: key.kind === 'action' ? 'action' : 'send',
+    action: key.action || '',
+    sendRaw: escapeForDisplay(key.send),
+    style: key.style || '',
+    repeat: key.repeat || false,
+    auto_enter: resolveAutoEnterForEdit(key),
+    special: key.special,
+    grow: key.grow,
+    icon: key.icon,
+  }
+}
+
+function editBottomEnter() {
+  const key = actionBottom.value.enter
+  akEdit.value = {
+    scope: 'bottom-enter',
+    ri: -1,
+    ki: -1,
+    label: key.label,
+    kind: 'send',
+    action: '',
+    sendRaw: '\\r',
+    style: key.style || '',
+    repeat: false,
+    auto_enter: false,
+  }
+}
+
 function saveActionKey() {
   if (!akEdit.value || !akCanSave.value) return
   const edit = akEdit.value
   const { ri, ki } = edit
+  if (edit.scope === 'bottom-enter') {
+    ensureBottom().enter = {
+      label: edit.label,
+      kind: 'send',
+      send: '\r',
+      style: edit.style || undefined,
+    }
+    akEdit.value = null
+    return
+  }
   const label = edit.scope === 'toolbar' ? edit.label.trim() : edit.label
   const next: ActionKey = edit.kind === 'action'
     ? {
@@ -854,6 +1028,8 @@ function saveActionKey() {
     } else if (settings.toolbar_quick_keys.length < 5) {
       settings.toolbar_quick_keys.push(next)
     }
+  } else if (edit.scope === 'bottom') {
+    ensureBottom().rows[ri][ki] = next
   } else {
     ensureActionKeyboard()
     settings.action_keyboard!.rows[ri][ki] = next

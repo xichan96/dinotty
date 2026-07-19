@@ -317,6 +317,22 @@ export function effectiveActionKeyboard(): ActionKeyboardConfig {
   return { rows: cfg.rows ?? [], bottom: cfg.bottom ?? DEFAULT_ACTION_BOTTOM }
 }
 
+export function ensureBottom(): ActionBottomCluster {
+  if (
+    !settings.action_keyboard ||
+    typeof settings.action_keyboard !== 'object' ||
+    Array.isArray(settings.action_keyboard)
+  ) {
+    settings.action_keyboard = {
+      rows: DEFAULT_ACTION_KEYBOARD.rows.map((row) => row.map((key) => ({ ...key }))),
+    }
+  }
+  if (!settings.action_keyboard.bottom) {
+    settings.action_keyboard.bottom = structuredClone(DEFAULT_ACTION_BOTTOM)
+  }
+  return settings.action_keyboard.bottom
+}
+
 export const settings = reactive<SettingsData>({
   theme: { preset: 'dark', custom: null },
   custom_themes: [],

@@ -3,6 +3,7 @@ import {
   WORKSPACE_COLORS,
   autoMonogram,
   capMonogram,
+  contrastRatio,
   fnv1a32,
   isValidHex,
   outlineColor,
@@ -92,10 +93,14 @@ describe('workspace icon helpers', () => {
   })
 
   it('darkens a yellow outline until it contrasts against a light background', () => {
-    expect(outlineColor('#FFD23F', '#FFFFFF')).toBe('#997E26')
+    const result = outlineColor('#FFD23F', '#FFFFFF')
+    expect(result).toBe('#997E26')
+    expect(contrastRatio(result, '#FFFFFF')).toBeGreaterThanOrEqual(3)
   })
 
   it('chooses a contrasting outline direction for a mid-tone background', () => {
-    expect(outlineColor('#999999', '#999999')).toBe('#3D3D3D')
+    const result = outlineColor('#999999', '#999999')
+    expect(result).toBe('#3D3D3D')
+    expect(contrastRatio(result, '#999999')).toBeGreaterThanOrEqual(3)
   })
 })

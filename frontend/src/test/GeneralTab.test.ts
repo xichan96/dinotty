@@ -39,7 +39,11 @@ vi.mock('../utils/clipboard', () => ({
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import GeneralTab from '../components/settings/GeneralTab.vue'
-import { __resetSettingsLoadStateForTest, loadSettings, settings } from '../composables/useSettings'
+import {
+  __resetSettingsLoadStateForTest,
+  loadSettings,
+  settings,
+} from '../composables/useSettings'
 
 // Spec: openspec/changes/confirm-before-close-tab/spec.md
 //   "### Requirement: Setting UI In General Settings"

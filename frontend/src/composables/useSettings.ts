@@ -419,21 +419,14 @@ export async function saveSettings() {
     const payload = JSON.parse(JSON.stringify(settings)) as SettingsData
     const notification = payload.notification as unknown as Record<string, unknown>
     for (const key of [
-      'presentation_enabled',
-      'channels',
-      'sounds',
-      'dnd_level',
-      'ignore_current_tab',
-      'quiet_hours',
-      'coalesce_window_ms',
+      'presentation_enabled', 'channels', 'sounds', 'dnd_level', 'ignore_current_tab',
+      'quiet_hours', 'coalesce_window_ms',
     ]) {
       delete notification[key]
     }
     if (loadedNotificationPresentationEcho) {
       if (Object.prototype.hasOwnProperty.call(loadedNotificationPresentationEcho, 'channels')) {
-        notification.channels = JSON.parse(
-          JSON.stringify(loadedNotificationPresentationEcho.channels)
-        )
+        notification.channels = JSON.parse(JSON.stringify(loadedNotificationPresentationEcho.channels))
       }
       if (Object.prototype.hasOwnProperty.call(loadedNotificationPresentationEcho, 'sounds')) {
         notification.sounds = JSON.parse(JSON.stringify(loadedNotificationPresentationEcho.sounds))

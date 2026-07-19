@@ -462,8 +462,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'keybinding.switchTab': 'Switch to Tab (⌘1~9)',
     'keybinding.missionControl': 'Mission Control',
     'keybinding.superviseTabs': 'Supervise Tabs',
-    'keybinding.superviseTabsHint':
-      'On Windows, press Alt+` (with Alt-as-Cmd) — Ctrl+` also matches.',
+    'keybinding.superviseTabsHint': 'On Windows, press Alt+` (with Alt-as-Cmd) — Ctrl+` also matches.',
     'keybinding.sshConnect': 'SSH Connection',
     'keybinding.fontSizeUp': 'Increase Font Size',
     'keybinding.fontSizeDown': 'Decrease Font Size',

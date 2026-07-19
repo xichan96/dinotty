@@ -67,7 +67,7 @@ export function resolveColor(ws: { color?: string; id: string }): string {
   return isValidHex(ws.color) ? ws.color! : paletteColorFor(ws.id)
 }
 
-function relativeLuminance(hex: string): number {
+export function relativeLuminance(hex: string): number {
   const linearize = (channel: number) => {
     const value = channel / 255
     return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
@@ -76,7 +76,7 @@ function relativeLuminance(hex: string): number {
   return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
 }
 
-function contrastRatio(a: string, b: string): number {
+export function contrastRatio(a: string, b: string): number {
   const aLuminance = relativeLuminance(a)
   const bLuminance = relativeLuminance(b)
   return (Math.max(aLuminance, bLuminance) + 0.05) / (Math.min(aLuminance, bLuminance) + 0.05)

@@ -174,18 +174,15 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
 
   it('renders and persists the four workspace badge modes', async () => {
     const wrapper = mount(GeneralTab)
-    const select = wrapper.find<HTMLSelectElement>('[data-setting="workspace-badge-mode"]')
+    const control = wrapper.find('[data-setting="workspace-badge-mode"]')
 
-    expect(select.exists()).toBe(true)
-    expect(select.findAll('option').map((option) => option.attributes('value'))).toEqual([
-      'off',
-      'tab',
-      'icon',
-      'both',
-    ])
-    expect(select.element.value).toBe('off')
+    expect(control.exists()).toBe(true)
+    const buttons = control.findAll('button')
+    expect(buttons).toHaveLength(4)
+    expect(buttons.every((button) => button.text().trim().length > 0)).toBe(true)
+    expect(buttons[0].attributes('aria-selected')).toBe('true')
 
-    await select.setValue('both')
+    await buttons[3].trigger('click')
     await flush()
 
     expect(settings.workspace_badge_mode).toBe('both')

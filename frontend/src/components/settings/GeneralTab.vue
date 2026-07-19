@@ -55,20 +55,13 @@
 
       <section class="settings-section">
         <h3>{{ t('settings.workspaceBadge') }}</h3>
-        <div class="settings-row">
-          <label>{{ t('settings.workspaceBadge.mode') }}</label>
-          <select
-            data-setting="workspace-badge-mode"
-            class="shortcut-input"
-            :value="wsBadgeEffective.mode"
-            @change="onWsBadgeModeChange($event)"
-          >
-            <option value="off">{{ t('settings.workspaceBadge.mode.off') }}</option>
-            <option value="tab">{{ t('settings.workspaceBadge.mode.tab') }}</option>
-            <option value="icon">{{ t('settings.workspaceBadge.mode.icon') }}</option>
-            <option value="both">{{ t('settings.workspaceBadge.mode.both') }}</option>
-          </select>
-        </div>
+        <SegmentedControl
+          data-setting="workspace-badge-mode"
+          :model-value="wsBadgeEffective.mode"
+          :options="wsBadgeModeOptions"
+          :aria-label="t('settings.workspaceBadge.mode')"
+          @update:model-value="onWsBadgeModeChange"
+        />
         <p class="settings-hint">{{ t('settings.workspaceBadge.hint') }}</p>
       </section>
     </div>
@@ -513,6 +506,7 @@ import { useIsMobile } from '../../composables/useIsMobile'
 import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
 import { uiConfirm } from '../../composables/useConfirm'
 import CollapsibleSection from './CollapsibleSection.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import { copyToClipboard } from '../../utils/clipboard'
 import { useToast } from 'vue-toastification'
 import { isTauri } from '../../composables/useTransport'
@@ -535,9 +529,15 @@ const toast = useToast()
 const wsBadgeEffective = computed(() =>
   resolveWorkspaceBadgeMode(settings.workspace_badge_mode, isMobile.value)
 )
+const wsBadgeModeOptions = computed(() => [
+  { value: 'off', label: t('settings.workspaceBadge.mode.off') },
+  { value: 'tab', label: t('settings.workspaceBadge.mode.tab') },
+  { value: 'icon', label: t('settings.workspaceBadge.mode.icon') },
+  { value: 'both', label: t('settings.workspaceBadge.mode.both') },
+])
 
-function onWsBadgeModeChange(e: Event) {
-  settings.workspace_badge_mode = (e.target as HTMLSelectElement).value as WorkspaceBadgeMode
+function onWsBadgeModeChange(value: string) {
+  settings.workspace_badge_mode = value as WorkspaceBadgeMode
   saveSettings()
 }
 

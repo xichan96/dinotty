@@ -56,15 +56,18 @@
       <section class="settings-section">
         <h3>{{ t('settings.workspaceBadge') }}</h3>
         <div class="settings-row">
-          <label>{{ t('settings.workspaceBadge.show') }}</label>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              :checked="wsBadgeEffective"
-              @change="onWsBadgeToggle($event)"
-            />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          </label>
+          <label>{{ t('settings.workspaceBadge.mode') }}</label>
+          <select
+            data-setting="workspace-badge-mode"
+            class="shortcut-input"
+            :value="wsBadgeEffective.mode"
+            @change="onWsBadgeModeChange($event)"
+          >
+            <option value="off">{{ t('settings.workspaceBadge.mode.off') }}</option>
+            <option value="tab">{{ t('settings.workspaceBadge.mode.tab') }}</option>
+            <option value="icon">{{ t('settings.workspaceBadge.mode.icon') }}</option>
+            <option value="both">{{ t('settings.workspaceBadge.mode.both') }}</option>
+          </select>
         </div>
         <p class="settings-hint">{{ t('settings.workspaceBadge.hint') }}</p>
       </section>
@@ -504,8 +507,10 @@ import QRCode from 'qrcode'
 import { Eye, EyeOff, Copy, Check, Pencil, RefreshCw, Save, X, FolderOpen } from 'lucide-vue-next'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettings } from '../../composables/useSettings'
+import type { WorkspaceBadgeMode } from '../../composables/useSettings'
 import { useI18n } from '../../composables/useI18n'
 import { useIsMobile } from '../../composables/useIsMobile'
+import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
 import { uiConfirm } from '../../composables/useConfirm'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { copyToClipboard } from '../../utils/clipboard'
@@ -527,12 +532,12 @@ const { t } = useI18n()
 const { isMobile } = useIsMobile()
 const toast = useToast()
 
-const wsBadgeEffective = computed(
-  () => settings.show_workspace_badge_on_tab ?? isMobile.value
+const wsBadgeEffective = computed(() =>
+  resolveWorkspaceBadgeMode(settings.workspace_badge_mode, isMobile.value)
 )
 
-function onWsBadgeToggle(e: Event) {
-  settings.show_workspace_badge_on_tab = (e.target as HTMLInputElement).checked
+function onWsBadgeModeChange(e: Event) {
+  settings.workspace_badge_mode = (e.target as HTMLSelectElement).value as WorkspaceBadgeMode
   saveSettings()
 }
 

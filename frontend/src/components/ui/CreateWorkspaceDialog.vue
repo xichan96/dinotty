@@ -70,6 +70,40 @@
             @keydown.enter="onSubmit"
           />
 
+          <label class="cw-label"
+            >{{ t('workspace.abbr') }}
+            <span class="cw-optional">{{ t('workspace.abbrHint') }}</span></label
+          >
+          <input
+            v-model="abbr"
+            class="cw-input"
+            :placeholder="monogramPlaceholder"
+            maxlength="3"
+            @keydown.enter="onSubmit"
+          />
+
+          <label class="cw-label">{{ t('workspace.color') }}</label>
+          <div class="cw-color-row">
+            <button
+              v-for="preset in WORKSPACE_COLORS"
+              :key="preset"
+              type="button"
+              :class="['cw-color-swatch', { selected: color === preset }]"
+              :style="{ backgroundColor: preset }"
+              :aria-label="preset"
+              @click="color = preset"
+            />
+            <input
+              v-model="color"
+              class="cw-input cw-color-input"
+              placeholder="#RRGGBB"
+              maxlength="7"
+              @keydown.enter="onSubmit"
+            />
+            <button type="button" class="cw-default-btn" @click="color = ''">
+              {{ t('workspace.colorDefault') }}
+            </button>
+          </div>
           <p v-if="error" class="cw-error">{{ error }}</p>
         </div>
         <div class="cw-footer">
@@ -101,6 +135,7 @@ import { useWorkspaces } from '../../composables/useWorkspaces'
 import { useSettings } from '../../composables/useSettings'
 import { isTauri, tauriInvoke } from '../../composables/useTransport'
 import type { Workspace } from '../../types/workspace'
+import { autoMonogram, WORKSPACE_COLORS } from '../../utils/workspaceIcon'
 import FilePickerModal from '../preview/FilePickerModal.vue'
 
 const { t } = useI18n()
@@ -127,9 +162,12 @@ const selectedConnectionId = ref('')
 const remotePath = ref('/home')
 const path = ref('')
 const name = ref('')
+const abbr = ref('')
+const color = ref<string | undefined>(undefined)
 const error = ref('')
 const pathInput = ref<HTMLInputElement | null>(null)
 const showPicker = ref(false)
+const monogramPlaceholder = computed(() => autoMonogram(name.value || ''))
 
 const canSubmit = computed(() => {
   if (isEdit.value) return !!name.value.trim()
@@ -137,17 +175,23 @@ const canSubmit = computed(() => {
   return !!path.value.trim()
 })
 
-watch(() => props.visible, (v) => {
+watch(
+  () => props.visible,
+  (v) => {
   if (v) {
     if (props.workspace) {
       path.value = props.workspace.path
       name.value = props.workspace.name
+        abbr.value = props.workspace.abbr ?? ''
+        color.value = props.workspace.color
       mode.value = props.workspace.connection_id ? 'remote' : 'local'
       selectedConnectionId.value = props.workspace.connection_id ?? ''
       remotePath.value = props.workspace.path
     } else {
       path.value = ''
       name.value = ''
+        abbr.value = ''
+        color.value = undefined
       mode.value = 'local'
       selectedConnectionId.value = ''
       remotePath.value = '/home'
@@ -155,7 +199,8 @@ watch(() => props.visible, (v) => {
     error.value = ''
     nextTick(() => pathInput.value?.focus())
   }
-})
+  }
+)
 
 async function toggleBrowser() {
   if (isTauri()) {
@@ -205,20 +250,31 @@ async function onSubmit() {
     if (isEdit.value && props.workspace) {
       await updateWorkspace(props.workspace.id, {
         name: name.value.trim(),
+        abbr: abbr.value,
+        color: color.value ?? '',
       })
     } else if (mode.value === 'remote') {
       const profile = sshProfiles.value.find((p: any) => p.id === selectedConnectionId.value)
       autoFillNameFromRemote(profile)
+      const overrides = {
+        abbr: abbr.value || undefined,
+        color: color.value || undefined,
+      }
       const ws = await createWorkspace(
         remotePath.value.trim(),
         name.value.trim() || undefined,
         selectedConnectionId.value,
+        overrides
       )
       emit('created', ws.id)
     } else {
       const p = path.value.trim()
       autoFillName()
-      const ws = await createWorkspace(p, name.value.trim() || undefined, undefined)
+      const overrides = {
+        abbr: abbr.value || undefined,
+        color: color.value || undefined,
+      }
+      const ws = await createWorkspace(p, name.value.trim() || undefined, undefined, overrides)
       emit('created', ws.id)
     }
     emit('close')
@@ -312,6 +368,43 @@ async function onSubmit() {
 .cw-input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.cw-color-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cw-color-swatch {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cw-color-swatch.selected {
+  border-color: var(--fg-bright);
+  box-shadow: 0 0 0 1px var(--bg-surface);
+}
+.cw-color-input {
+  width: 78px;
+  flex: 0 1 78px;
+  padding: 5px 6px;
+}
+.cw-default-btn {
+  flex-shrink: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cw-default-btn:hover {
+  border-color: var(--accent);
+  color: var(--fg);
 }
 .cw-browse-btn {
   flex-shrink: 0;

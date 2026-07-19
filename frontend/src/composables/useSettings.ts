@@ -8,6 +8,8 @@ import OpencodeLogo from '../components/icons/OpencodeLogo.vue'
 import { isWindowsClient } from '../utils/clientPlatform'
 import type { KeyBinding } from './useKeybindings'
 import type { SavedTheme } from './useDeviceThemeSelection'
+export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
+
 export interface SettingsData {
   theme: {
     preset: string
@@ -42,7 +44,7 @@ export interface SettingsData {
   upload_cap_count: number
   keyboard_sound: boolean
   show_virtual_keyboard: boolean
-  show_workspace_badge_on_tab: boolean | null
+  workspace_badge_mode: WorkspaceBadgeMode | null
   confirm_before_close_tab: boolean
   space_confirms_dialogs: boolean
   windowsAltAsCmd: boolean
@@ -243,7 +245,7 @@ export const settings = reactive<SettingsData>({
   upload_cap_count: 100,
   keyboard_sound: false,
   show_virtual_keyboard: false,
-  show_workspace_badge_on_tab: null,
+  workspace_badge_mode: null,
   confirm_before_close_tab: true,
   space_confirms_dialogs: false,
   windowsAltAsCmd: isWindowsClient,
@@ -417,14 +419,21 @@ export async function saveSettings() {
     const payload = JSON.parse(JSON.stringify(settings)) as SettingsData
     const notification = payload.notification as unknown as Record<string, unknown>
     for (const key of [
-      'presentation_enabled', 'channels', 'sounds', 'dnd_level', 'ignore_current_tab',
-      'quiet_hours', 'coalesce_window_ms',
+      'presentation_enabled',
+      'channels',
+      'sounds',
+      'dnd_level',
+      'ignore_current_tab',
+      'quiet_hours',
+      'coalesce_window_ms',
     ]) {
       delete notification[key]
     }
     if (loadedNotificationPresentationEcho) {
       if (Object.prototype.hasOwnProperty.call(loadedNotificationPresentationEcho, 'channels')) {
-        notification.channels = JSON.parse(JSON.stringify(loadedNotificationPresentationEcho.channels))
+        notification.channels = JSON.parse(
+          JSON.stringify(loadedNotificationPresentationEcho.channels)
+        )
       }
       if (Object.prototype.hasOwnProperty.call(loadedNotificationPresentationEcho, 'sounds')) {
         notification.sounds = JSON.parse(JSON.stringify(loadedNotificationPresentationEcho.sounds))

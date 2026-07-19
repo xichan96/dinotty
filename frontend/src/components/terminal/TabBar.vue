@@ -3,7 +3,14 @@
     <!-- Mobile compact mode -->
     <template v-if="isMobile">
       <button class="mc-trigger" @click="$emit('open-overview')">
-        <LayoutDashboard :size="16" />
+      <WorkspaceBadge
+        v-if="showWsMonogram && activeWorkspaceColor"
+        :abbr="activeWorkspaceAbbr"
+        :color="activeWorkspaceColor"
+        :size="16"
+        card-bg-var="--tab-bg"
+      />
+      <LayoutDashboard v-else :size="16" />
       </button>
       <span class="current-tab-index">{{ currentTabIndex }}</span>
       <span
@@ -25,7 +32,14 @@
     <!-- Desktop mode: full tab list -->
     <template v-else>
     <button class="mc-trigger desktop-mc" @click="$emit('open-overview')">
-      <LayoutDashboard :size="16" />
+        <WorkspaceBadge
+          v-if="showWsMonogram && activeWorkspaceColor"
+          :abbr="activeWorkspaceAbbr"
+          :color="activeWorkspaceColor"
+          :size="16"
+          card-bg-var="--tab-bg"
+        />
+        <LayoutDashboard v-else :size="16" />
     </button>
     <div id="tabs-list" ref="tabsListRef">
       <div
@@ -192,6 +206,8 @@ import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard, Globe, Se
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 import { useSettingsStore } from '../../stores'
+import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
+import WorkspaceBadge from '../WorkspaceBadge.vue'
 
 const { t } = useI18n()
 const { getBinding, formatBinding } = useKeybindings()
@@ -236,6 +252,8 @@ const props = withDefaults(
     isMobile?: boolean
     currentTabTitle?: string
     currentTabIndex?: number
+    activeWorkspaceAbbr?: string
+    activeWorkspaceColor?: string
   }>(),
   {
     indicators: () => ({}),
@@ -245,12 +263,16 @@ const props = withDefaults(
     isMobile: false,
     currentTabTitle: '',
     currentTabIndex: 0,
+    activeWorkspaceAbbr: '',
+    activeWorkspaceColor: undefined,
   }
 )
 
-const showWsBadge = computed(
-  () => settingsStore.settings.show_workspace_badge_on_tab ?? props.isMobile
+const wsBadgeMode = computed(() =>
+  resolveWorkspaceBadgeMode(settingsStore.settings.workspace_badge_mode, props.isMobile)
 )
+const showWsBadge = computed(() => wsBadgeMode.value.showTabBadge)
+const showWsMonogram = computed(() => wsBadgeMode.value.showMonogram)
 
 const currentWorkspace = computed(() => {
   const tab = props.tabs.find((t) => t.paneId === props.activePaneId)

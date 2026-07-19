@@ -16,8 +16,17 @@ use zeroize::Zeroize;
 
 use crate::session::SessionManager;
 
-pub const CURRENT_SETTINGS_VERSION: u32 = 4;
+pub const CURRENT_SETTINGS_VERSION: u32 = 5;
 const LEGACY_UPLOAD_DIR: &str = "~/.dinotty/uploads";
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceBadgeMode {
+    Off,
+    Tab,
+    Icon,
+    Both,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -60,8 +69,11 @@ pub struct Settings {
     pub keyboard_sound: bool,
     #[serde(default)]
     pub show_virtual_keyboard: bool,
-    #[serde(default)]
+    // Legacy v4 input retained only so v5 migration can deserialize it.
+    #[serde(default, skip_serializing)]
     pub show_workspace_badge_on_tab: Option<bool>,
+    #[serde(default)]
+    pub workspace_badge_mode: Option<WorkspaceBadgeMode>,
     #[serde(default, rename = "windowsAltAsCmd")]
     pub windows_alt_as_cmd: bool,
     #[serde(default = "default_true")]
@@ -886,6 +898,7 @@ impl Default for Settings {
             keyboard_sound: false,
             show_virtual_keyboard: false,
             show_workspace_badge_on_tab: None,
+            workspace_badge_mode: None,
             windows_alt_as_cmd: false,
             confirm_before_close_tab: true,
             space_confirms_dialogs: false,
@@ -1008,7 +1021,21 @@ fn migrate_settings(settings: &mut Settings) -> bool {
     // v4: show_workspace_badge_on_tab is now Option<bool>. The previous default was `true`
     // for all clients; treat that legacy default as "not explicitly set" so the device-based
     // default (mobile portrait on, desktop off) applies. An explicit `Some(false)` is kept.
-    if settings.show_workspace_badge_on_tab == Some(true) {
+    if settings.settings_version < 4 && settings.show_workspace_badge_on_tab == Some(true) {
+        settings.show_workspace_badge_on_tab = None;
+    }
+    // v5: replace the tab-badge boolean with a four-state workspace badge mode.
+    // Preserve explicit v4 choices while leaving an unset value device-aware.
+    if settings.settings_version < 5 {
+        if settings.workspace_badge_mode.is_none() {
+            settings.workspace_badge_mode = settings.show_workspace_badge_on_tab.map(|show| {
+                if show {
+                    WorkspaceBadgeMode::Tab
+                } else {
+                    WorkspaceBadgeMode::Off
+                }
+            });
+        }
         settings.show_workspace_badge_on_tab = None;
     }
     settings.settings_version = CURRENT_SETTINGS_VERSION;

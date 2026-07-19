@@ -39,11 +39,7 @@ vi.mock('../utils/clipboard', () => ({
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import GeneralTab from '../components/settings/GeneralTab.vue'
-import {
-  __resetSettingsLoadStateForTest,
-  loadSettings,
-  settings,
-} from '../composables/useSettings'
+import { __resetSettingsLoadStateForTest, loadSettings, settings } from '../composables/useSettings'
 
 // Spec: openspec/changes/confirm-before-close-tab/spec.md
 //   "### Requirement: Setting UI In General Settings"
@@ -54,6 +50,7 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     // Reset the shared reactive settings to the documented default.
     settings.confirm_before_close_tab = true
     settings.space_confirms_dialogs = false
+    settings.workspace_badge_mode = null
     settings.upload_dir = ''
     generalMocks.uploadStatus = 200
     generalMocks.defaultDir = '/tmp/dinotty'
@@ -168,6 +165,32 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     expect(putCall).toBeDefined()
     expect(JSON.parse(putCall![1]!.body as string)).toMatchObject({
       space_confirms_dialogs: true,
+    })
+  })
+
+  it('renders and persists the four workspace badge modes', async () => {
+    const wrapper = mount(GeneralTab)
+    const select = wrapper.find<HTMLSelectElement>('[data-setting="workspace-badge-mode"]')
+
+    expect(select.exists()).toBe(true)
+    expect(select.findAll('option').map((option) => option.attributes('value'))).toEqual([
+      'off',
+      'tab',
+      'icon',
+      'both',
+    ])
+    expect(select.element.value).toBe('off')
+
+    await select.setValue('both')
+    await flush()
+
+    expect(settings.workspace_badge_mode).toBe('both')
+    const putCall = generalMocks.authFetch.mock.calls.find(
+      ([url, init]) => url === '/api/settings' && init?.method === 'PUT'
+    )
+    expect(putCall).toBeDefined()
+    expect(JSON.parse(putCall![1]!.body as string)).toMatchObject({
+      workspace_badge_mode: 'both',
     })
   })
 

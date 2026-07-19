@@ -134,6 +134,32 @@ fn current_settings_keep_explicit_legacy_upload_dir() {
 }
 
 #[test]
+fn v5_migrates_all_legacy_workspace_badge_values_idempotently() {
+    for (legacy, expected) in [
+        (Some(false), Some(WorkspaceBadgeMode::Off)),
+        (Some(true), Some(WorkspaceBadgeMode::Tab)),
+        (None, None),
+    ] {
+        let mut settings = Settings {
+            settings_version: 4,
+            show_workspace_badge_on_tab: legacy,
+            workspace_badge_mode: None,
+            ..Settings::default()
+        };
+
+        assert!(migrate_settings(&mut settings));
+        assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
+        assert_eq!(settings.workspace_badge_mode, expected);
+        assert_eq!(settings.show_workspace_badge_on_tab, None);
+
+        let migrated = serde_json::to_string(&settings).unwrap();
+        assert!(!migrated.contains("show_workspace_badge_on_tab"));
+        assert!(!migrate_settings(&mut settings));
+        assert_eq!(serde_json::to_string(&settings).unwrap(), migrated);
+    }
+}
+
+#[test]
 fn legacy_text_config_without_custom_fonts_deserializes_to_none() {
     let settings: Settings = serde_json::from_str(r#"{"text":{"font_family":"Monaco"}}"#).unwrap();
     assert_eq!(settings.text.custom_fonts, None);

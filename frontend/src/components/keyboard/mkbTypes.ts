@@ -1,6 +1,7 @@
 export interface KeyDef {
   l: string // label
   s?: string // send character
+  act?: string // app action id
   sl?: string // shift label
   sp?: string // special action
   g?: number // flex-grow

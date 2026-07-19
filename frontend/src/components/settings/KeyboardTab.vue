@@ -963,7 +963,8 @@ function keyEventToLabel(e: KeyboardEvent): string {
   return parts.join('+')
 }
 
-function escapeForDisplay(s: string): string {
+function escapeForDisplay(s: string | undefined): string {
+  if (s === undefined) return ''
   return s.replace(/[\x00-\x1f\x7f]/g, (c) => {
     const code = c.charCodeAt(0)
     if (code === 0x1b) return '\\e'

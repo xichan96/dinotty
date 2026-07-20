@@ -9,6 +9,7 @@ export interface KeyDef {
   id?: string // DOM id
   repeat?: boolean // key repeat
   icon?: object // lucide icon component
+  aria?: string // accessible name
 }
 
 export interface ModState {

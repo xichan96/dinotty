@@ -886,13 +886,21 @@ impl Serialize for ActionKey {
             && self.action.as_deref().is_some_and(|action| !action.trim().is_empty());
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("label", &self.label)?;
-        map.serialize_entry("kind", &self.kind)?;
-        map.serialize_entry("action", &self.action)?;
+        if let Some(kind) = &self.kind {
+            map.serialize_entry("kind", kind)?;
+        }
+        if let Some(action) = &self.action {
+            map.serialize_entry("action", action)?;
+        }
         if let Some(display) = &self.display {
             map.serialize_entry("display", display)?;
         }
-        map.serialize_entry("style", &self.style)?;
-        map.serialize_entry("grow", &self.grow)?;
+        if let Some(style) = &self.style {
+            map.serialize_entry("style", style)?;
+        }
+        if let Some(grow) = &self.grow {
+            map.serialize_entry("grow", grow)?;
+        }
         if !is_valid_action {
             map.serialize_entry("send", &self.send)?;
             map.serialize_entry("repeat", &self.repeat)?;

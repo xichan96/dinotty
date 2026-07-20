@@ -4,6 +4,8 @@
     :id="k.id"
     :disabled="isDisabled"
     :style="{ flexGrow: k.g ?? 1, flexBasis: '0' }"
+    :aria-label="k.aria || k.l || undefined"
+    :title="k.aria || undefined"
     @touchstart.prevent="onTouchDown"
     @mousedown.prevent="onMouseDown"
     @touchend.prevent="onUp"

@@ -530,10 +530,10 @@ export async function loadSettings() {
   if (!hasAuthToken()) return
   let requestStarted = false
   try {
-    await getApiBase()
     loadGeneration++
     loadsInFlight++
     requestStarted = true
+    await getApiBase()
     const res = await authFetch(apiUrl('/api/settings'))
     if (res.ok) {
       const data = await res.json()
@@ -577,6 +577,12 @@ export async function saveSettings() {
       return
     }
     const payload = JSON.parse(JSON.stringify(settings)) as SettingsData
+    if (payload.action_keyboard) {
+      payload.action_keyboard = cloneWithoutIcons(payload.action_keyboard)
+    }
+    if (payload.action_keyboard_user_default) {
+      payload.action_keyboard_user_default = cloneWithoutIcons(payload.action_keyboard_user_default)
+    }
     const notification = payload.notification as unknown as Record<string, unknown>
     for (const key of [
       'presentation_enabled', 'channels', 'sounds', 'dnd_level', 'ignore_current_tab',

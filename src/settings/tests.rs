@@ -497,6 +497,21 @@ fn action_keyboard_serde_round_trips_old_and_new_shapes() {
 }
 
 #[test]
+fn action_keyboard_plain_send_omits_absent_optional_fields() {
+    let config = parse_action_keyboard(r#"{"rows":[[{"label":"esc","send":"\u001b"}]]}"#);
+    let serialized = serde_json::to_value(&config).unwrap();
+    let key = &serialized["rows"][0][0];
+
+    assert!(key.get("kind").is_none());
+    assert!(key.get("action").is_none());
+    assert!(key.get("style").is_none());
+    assert!(key.get("grow").is_none());
+
+    let round_trip: ActionKeyboardConfig = serde_json::from_value(serialized).unwrap();
+    assert_eq!(round_trip, config);
+}
+
+#[test]
 fn action_keyboard_serde_ignores_unknown_fields_and_accepts_unknown_kind() {
     let config = parse_action_keyboard(
         r#"{

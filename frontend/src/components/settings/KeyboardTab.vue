@@ -203,7 +203,13 @@
                     <span class="ak-wyg-label" @click="editActionKey(ri, ki)">{{
                       previewLabel(key)
                     }}</span>
-                    <button type="button" class="ak-key-del" @click.stop="removeActionKey(ri, ki)">
+                    <button
+                      type="button"
+                      class="ak-key-del"
+                      :title="t('settings.deleteKey')"
+                      :aria-label="t('settings.deleteKey')"
+                      @click.stop="removeActionKey(ri, ki)"
+                    >
                       ✕
                     </button>
                     <div
@@ -275,7 +281,13 @@
                       <span class="ak-wyg-label" @click="editBottomKey(ri, ki)">{{
                         previewLabel(key)
                       }}</span>
-                      <button type="button" class="ak-key-del" @click.stop="removeBottomKey(ri, ki)">
+                      <button
+                        type="button"
+                        class="ak-key-del"
+                        :title="t('settings.deleteKey')"
+                        :aria-label="t('settings.deleteKey')"
+                        @click.stop="removeBottomKey(ri, ki)"
+                      >
                         ✕
                       </button>
                       <div

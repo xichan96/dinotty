@@ -31,7 +31,7 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
     const def: KeyDef = action
       ? ak.display === 'text'
         ? { l: ak.label || '', act: action.id, cls }
-        : { l: '', act: action.id, cls, icon: action.icon }
+        : { l: '', act: action.id, cls, icon: action.icon, aria: t(action.labelKey) }
       : {
           l: ak.action ? `${t('actionKb.unsupported')}: ${ak.action}` : t('actionKb.unsupported'),
           cls: `${cls} mkb-disabled`,

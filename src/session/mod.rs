@@ -385,7 +385,7 @@ impl Session {
         let (scrollback_chunks, snapshot) = {
             let screen = self.screen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let chunks = screen.snapshot_scrollback_chunks(200);
-            let snap = screen.snapshot();
+            let snap = screen.snapshot_for_replay();
             (chunks, snap)
         };
 

@@ -125,11 +125,41 @@ impl ScreenBuffer {
         }
     }
 
-    fn resize(&mut self, cols: usize, rows: usize) {
+    fn resize(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        mut scrollback: Option<&mut VecDeque<Vec<Cell>>>,
+    ) {
         let old_rows = self.cells.len();
         let old_cols = if old_rows > 0 { self.cells[0].len() } else { 0 };
 
-        if rows != old_rows {
+        if rows < old_rows {
+            let mut excess = old_rows - rows;
+            // Trim blank rows below the cursor from the bottom first.
+            while excess > 0
+                && self.cells.len() > self.cursor.row + 1
+                && self.cells.last().is_some_and(|last| {
+                    last.iter().all(|c| (c.ch == ' ' || c.ch == '\0') && !has_attrs(&c.attrs))
+                })
+            {
+                self.cells.pop();
+                excess -= 1;
+            }
+            // Rows that still don't fit move from the top into scrollback
+            // (primary screen only) instead of truncating the bottom, where
+            // the most recent output and the prompt live.
+            for _ in 0..excess {
+                let row = self.cells.remove(0);
+                if let Some(sb) = scrollback.as_deref_mut() {
+                    sb.push_back(row);
+                    if sb.len() > 10000 {
+                        sb.pop_front();
+                    }
+                }
+                self.cursor.row = self.cursor.row.saturating_sub(1);
+            }
+        } else if rows > old_rows {
             self.cells.resize(rows, vec![Cell::default(); cols]);
         }
         if cols != old_cols {
@@ -139,6 +169,7 @@ impl ScreenBuffer {
         }
         self.cols = cols;
         self.rows = rows;
+        self.scroll_top = 0;
         self.scroll_bottom = rows - 1;
         if self.cursor.row >= rows {
             self.cursor.row = rows - 1;
@@ -384,13 +415,16 @@ impl VirtualScreen {
     pub fn resize(&mut self, cols: usize, rows: usize) {
         self.cols = cols;
         self.rows = rows;
-        self.primary.resize(cols, rows);
-        self.alternate.resize(cols, rows);
+        self.primary.resize(cols, rows, Some(&mut self.scrollback));
+        self.alternate.resize(cols, rows, None);
     }
 
     #[must_use]
     pub fn snapshot_scrollback_chunks(&self, chunk_lines: usize) -> Vec<String> {
-        if self.using_alternate || self.scrollback.is_empty() {
+        // Scrollback belongs to the primary screen and is replayed even while
+        // the alternate screen is active — the client resets xterm before the
+        // replay, so skipping it would erase the visible history.
+        if self.scrollback.is_empty() {
             return Vec::new();
         }
         let mut chunks = Vec::new();
@@ -430,6 +464,47 @@ impl VirtualScreen {
         chunks
     }
 
+    /// Snapshot for the reconnect replay path. Unlike [`Self::snapshot`], this
+    /// assumes the client has just written the scrollback chunks into a
+    /// freshly reset terminal, so it first scrolls the scrollback tail out of
+    /// the viewport (the absolute-addressed redraw below would otherwise
+    /// overwrite the last screenful of history before it ever reaches the
+    /// client's scrollback buffer). When the alternate screen is active it
+    /// also repaints the primary buffer before entering it, so leaving the
+    /// alternate screen reveals the pre-reconnect content instead of a blank
+    /// primary screen.
+    #[must_use]
+    pub fn snapshot_for_replay(&self) -> String {
+        let mut out = String::with_capacity(self.cols * self.rows * 4);
+
+        out.push_str("\x1b[?25l"); // hide cursor during draw
+
+        // The last min(scrollback, rows-1) replayed lines are still in the
+        // viewport (chunks end with \r\n, so the bottom row is the cursor's
+        // blank line). Scroll them into the client's scrollback before
+        // redrawing over them.
+        let pending = self.scrollback.len().min(self.rows.saturating_sub(1));
+        if pending > 0 {
+            let _ = write!(out, "\x1b[{};1H", self.rows);
+            for _ in 0..pending {
+                out.push('\n');
+            }
+        }
+
+        out.push_str("\x1b[0m"); // reset all attributes
+        render_buffer(&self.primary, &mut out);
+        restore_cursor_state(&self.primary, &mut out);
+        if self.using_alternate {
+            out.push_str("\x1b[?1049h"); // enter alternate screen (saves primary cursor)
+            out.push_str("\x1b[0m");
+            render_buffer(&self.alternate, &mut out);
+            restore_cursor_state(&self.alternate, &mut out);
+        }
+        out.push_str("\x1b[?25h"); // show cursor
+
+        out
+    }
+
     #[must_use]
     pub fn snapshot(&self) -> String {
         let buf = if self.using_alternate { &self.alternate } else { &self.primary };
@@ -442,44 +517,8 @@ impl VirtualScreen {
             out.push_str("\x1b[?1049h"); // enter alternate screen
         }
 
-        // Render each row
-        let mut prev_attrs = CellAttrs::default();
-        for (row_idx, row) in buf.cells.iter().enumerate() {
-            let _ = write!(out, "\x1b[{};1H\x1b[2K", row_idx + 1); // move to row start + erase line
-
-            // Find last non-space column to avoid trailing spaces
-            let last_content = row
-                .iter()
-                .rposition(|c| (c.ch != ' ' && c.ch != '\0') || has_attrs(&c.attrs))
-                .map_or(0, |i| i + 1);
-
-            for cell in &row[..last_content] {
-                if cell.ch == '\0' {
-                    continue;
-                }
-                if !attrs_eq(&cell.attrs, &prev_attrs) {
-                    out.push_str(&encode_sgr(&cell.attrs));
-                    prev_attrs = cell.attrs;
-                }
-                cell.write_to(&mut out);
-            }
-
-            // Reset attrs at end of row
-            if has_attrs(&prev_attrs) {
-                out.push_str("\x1b[0m");
-                prev_attrs = CellAttrs::default();
-            }
-        }
-
-        out.push_str("\x1b[0m");
-
-        // Restore scroll region if non-default
-        if buf.scroll_top != 0 || buf.scroll_bottom != buf.rows - 1 {
-            let _ = write!(out, "\x1b[{};{}r", buf.scroll_top + 1, buf.scroll_bottom + 1);
-        }
-
-        // Restore cursor position
-        let _ = write!(out, "\x1b[{};{}H", buf.cursor.row + 1, buf.cursor.col + 1);
+        render_buffer(buf, &mut out);
+        restore_cursor_state(buf, &mut out);
         out.push_str("\x1b[?25h"); // show cursor
 
         out
@@ -508,7 +547,7 @@ impl VirtualScreen {
 
     #[must_use]
     pub fn snapshot_scrollback_plain(&self, max_lines: Option<usize>) -> Vec<String> {
-        if self.using_alternate || self.scrollback.is_empty() {
+        if self.scrollback.is_empty() {
             return Vec::new();
         }
         let skip =
@@ -559,6 +598,47 @@ impl VirtualScreen {
         let buf = if self.using_alternate { &self.alternate } else { &self.primary };
         (buf.cursor.row, buf.cursor.col)
     }
+}
+
+/// Render every row of `buf` with absolute addressing (`CSI row;1 H` +
+/// erase-line), skipping trailing blanks, and leave attributes reset.
+fn render_buffer(buf: &ScreenBuffer, out: &mut String) {
+    let mut prev_attrs = CellAttrs::default();
+    for (row_idx, row) in buf.cells.iter().enumerate() {
+        let _ = write!(out, "\x1b[{};1H\x1b[2K", row_idx + 1); // move to row start + erase line
+
+        // Find last non-space column to avoid trailing spaces
+        let last_content = row
+            .iter()
+            .rposition(|c| (c.ch != ' ' && c.ch != '\0') || has_attrs(&c.attrs))
+            .map_or(0, |i| i + 1);
+
+        for cell in &row[..last_content] {
+            if cell.ch == '\0' {
+                continue;
+            }
+            if !attrs_eq(&cell.attrs, &prev_attrs) {
+                out.push_str(&encode_sgr(&cell.attrs));
+                prev_attrs = cell.attrs;
+            }
+            cell.write_to(out);
+        }
+
+        // Reset attrs at end of row
+        if has_attrs(&prev_attrs) {
+            out.push_str("\x1b[0m");
+            prev_attrs = CellAttrs::default();
+        }
+    }
+    out.push_str("\x1b[0m");
+}
+
+/// Restore `buf`'s scroll region (if non-default) and cursor position.
+fn restore_cursor_state(buf: &ScreenBuffer, out: &mut String) {
+    if buf.scroll_top != 0 || buf.scroll_bottom != buf.rows - 1 {
+        let _ = write!(out, "\x1b[{};{}r", buf.scroll_top + 1, buf.scroll_bottom + 1);
+    }
+    let _ = write!(out, "\x1b[{};{}H", buf.cursor.row + 1, buf.cursor.col + 1);
 }
 
 fn has_attrs(a: &CellAttrs) -> bool {
@@ -1254,5 +1334,127 @@ mod csi_dispatch_tests {
         assert!(!vs.is_using_alternate());
         vs.feed(b"\x1b[?1049h");
         assert!(vs.is_using_alternate());
+    }
+}
+
+// Reconnect replay + resize history preservation. The client resets xterm on
+// Reconnected, then the server replays scrollback chunks followed by
+// snapshot_for_replay() — these tests pin the escape-sequence contract that
+// keeps the replayed scrollback out of the redraw's way, and that resize
+// never silently drops screen content.
+#[cfg(test)]
+mod replay_and_resize_tests {
+    use super::*;
+
+    fn feed_lines(vs: &mut VirtualScreen, n: usize) {
+        for i in 0..n {
+            vs.feed(format!("l{i}\r\n").as_bytes());
+        }
+    }
+
+    // After the scrollback chunks are written into a freshly reset terminal,
+    // the tail of the scrollback still sits in the viewport. The replay
+    // snapshot must scroll it out (cursor to bottom row + one LF per pending
+    // line) before redrawing with absolute addressing, or those lines are
+    // overwritten and never reach the client's scrollback buffer.
+    #[test]
+    fn replay_snapshot_scrolls_short_scrollback_out_of_viewport() {
+        let mut vs = VirtualScreen::new(20, 6);
+        feed_lines(&mut vs, 8); // 6 rows -> 3 lines scrolled into scrollback
+        assert_eq!(vs.scrollback_len(), 3);
+        let snap = vs.snapshot_for_replay();
+        let expected = format!("\x1b[?25l\x1b[6;1H{}", "\n".repeat(3));
+        assert!(
+            snap.starts_with(&expected),
+            "replay snapshot must scroll the 3 pending scrollback lines out first, got: {:?}",
+            &snap[..expected.len().min(snap.len())]
+        );
+    }
+
+    // With a full viewport of scrollback tail, rows-1 lines are pending.
+    #[test]
+    fn replay_snapshot_scrolls_full_viewport_of_scrollback_out() {
+        let mut vs = VirtualScreen::new(20, 6);
+        feed_lines(&mut vs, 20);
+        assert_eq!(vs.scrollback_len(), 15);
+        let snap = vs.snapshot_for_replay();
+        let expected = format!("\x1b[?25l\x1b[6;1H{}", "\n".repeat(5));
+        assert!(
+            snap.starts_with(&expected),
+            "replay snapshot must scroll rows-1 pending lines out first"
+        );
+    }
+
+    #[test]
+    fn replay_snapshot_without_scrollback_has_no_padding() {
+        let mut vs = VirtualScreen::new(20, 6);
+        vs.feed(b"hi");
+        assert_eq!(vs.scrollback_len(), 0);
+        let snap = vs.snapshot_for_replay();
+        assert!(
+            snap.starts_with("\x1b[?25l\x1b[0m"),
+            "no scrollback -> no scroll padding before the redraw"
+        );
+    }
+
+    // Scrollback belongs to the primary screen and must be replayed even when
+    // the session is currently in the alternate screen — the client just reset
+    // xterm, so skipping it here loses the entire visible history once the
+    // alternate-screen app exits.
+    #[test]
+    fn scrollback_is_replayed_while_in_alternate_screen() {
+        let mut vs = VirtualScreen::new(20, 6);
+        feed_lines(&mut vs, 10);
+        vs.feed(b"\x1b[?1049h");
+        assert!(vs.is_using_alternate());
+        assert!(
+            !vs.snapshot_scrollback_chunks(200).is_empty(),
+            "primary scrollback must be replayed while in alternate screen"
+        );
+    }
+
+    // In alternate-screen mode the replay must paint the primary buffer
+    // first, then enter the alternate screen and paint it — so that a later
+    // DECRST 1049 reveals the pre-reconnect primary content instead of a
+    // blank screen.
+    #[test]
+    fn replay_snapshot_paints_primary_before_entering_alternate() {
+        let mut vs = VirtualScreen::new(30, 6);
+        vs.feed(b"primary-content\r\n");
+        vs.feed(b"\x1b[?1049h");
+        vs.feed(b"alt-content");
+        let snap = vs.snapshot_for_replay();
+        let alt_enter = snap.find("\x1b[?1049h").expect("replay must enter alternate screen");
+        let primary = snap.find("primary-content").expect("replay must include primary screen");
+        let alt = snap.find("alt-content").expect("replay must include alternate screen");
+        assert!(primary < alt_enter, "primary content must be painted before entering alt screen");
+        assert!(alt > alt_enter, "alt content must be painted after entering alt screen");
+    }
+
+    // Shrinking rows must push the top rows into scrollback (like a real
+    // terminal), not truncate the bottom of the screen where the most recent
+    // output lives.
+    #[test]
+    fn resize_shrink_pushes_top_rows_into_scrollback() {
+        let mut vs = VirtualScreen::new(10, 4);
+        vs.feed(b"l1\r\nl2\r\nl3\r\nl4");
+        assert_eq!(vs.scrollback_len(), 0);
+        vs.resize(10, 2);
+        assert_eq!(vs.scrollback_len(), 2, "top rows must move into scrollback on shrink");
+        assert_eq!(vs.snapshot_scrollback_plain(None), vec!["l1".to_string(), "l2".to_string()]);
+        assert_eq!(vs.snapshot_plain(), "l3\nl4", "bottom rows must stay on screen");
+        assert_eq!(vs.primary.cursor.row, 1, "cursor must follow the content up");
+    }
+
+    // Blank rows below the cursor are removed first, so a mostly-empty screen
+    // shrinks without polluting scrollback.
+    #[test]
+    fn resize_shrink_trims_blank_bottom_rows_before_scrollback() {
+        let mut vs = VirtualScreen::new(10, 4);
+        vs.feed(b"top");
+        vs.resize(10, 2);
+        assert_eq!(vs.scrollback_len(), 0, "blank bottom rows must be trimmed, not scrolled back");
+        assert_eq!(vs.snapshot_plain(), "top\n");
+        assert_eq!(vs.primary.cursor.row, 0);
     }
 }

@@ -43,7 +43,7 @@ export interface KeyBindingDef {
   sequence?: string
 }
 
-const defs: KeyBindingDef[] = [
+export const defs: KeyBindingDef[] = [
   {
     id: 'togglePalette',
     defaultBinding: { key: 'k', shift: false },

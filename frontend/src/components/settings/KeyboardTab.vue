@@ -161,6 +161,12 @@
     <CollapsibleSection :title="t('settings.actionKeyboard')" level="group" default-open>
       <p class="settings-hint">{{ t('settings.akHint') }}</p>
       <div class="ak-wysiwyg">
+        <div class="ak-zone-head">
+          <span class="ak-zone-title">{{ t('settings.akZoneMain') }}</span>
+          <button class="shortcut-add" :title="t('settings.addRow')" @click="addActionRow">
+            {{ t('settings.akAddRowMain') }}
+          </button>
+        </div>
         <div v-for="(row, ri) in actionRows" :key="ri" class="ak-wyg-row-outer">
           <div class="mkb-row-wrap">
             <div class="mkb-row">
@@ -228,6 +234,7 @@
           </button>
         </div>
 
+        <div class="ak-zone-sep"></div>
         <div
           class="mkb-action-bottom ak-wyg-bottom-cluster"
           :style="{ '--ak-enter-width': (actionBottom.enter_width ?? 0.28) * 100 + '%' }"
@@ -311,12 +318,19 @@
             }}</span>
           </div>
         </div>
-        <button type="button" class="shortcut-add ak-wyg-add-bottom-row" @click="addBottomRow">
-          {{ t('settings.addRow') }}
-        </button>
+        <div class="ak-zone-head">
+          <span class="ak-zone-title">{{ t('settings.akZoneBottom') }}</span>
+          <button
+            type="button"
+            class="shortcut-add"
+            :title="t('settings.addRow')"
+            @click="addBottomRow"
+          >
+            {{ t('settings.akAddRowBottom') }}
+          </button>
+        </div>
       </div>
       <div class="ak-actions">
-        <button class="shortcut-add" @click="addActionRow">{{ t('settings.addRow') }}</button>
         <button
           type="button"
           class="shortcut-add ak-reset"
@@ -435,6 +449,13 @@
               </option>
             </select>
           </label>
+          <label v-if="akEdit.kind === 'action' && !akIsEnterEdit" class="ak-field">
+            <span>{{ t('actionKb.display') }}</span>
+            <select v-model="akEdit.display" class="shortcut-input">
+              <option value="icon">{{ t('actionKb.display.icon') }}</option>
+              <option value="text">{{ t('actionKb.display.text') }}</option>
+            </select>
+          </label>
           <label class="ak-field">
             <span>{{ t('settings.style') }}</span>
             <select v-model="akEdit.style" class="shortcut-input">
@@ -537,6 +558,30 @@
     </CollapsibleSection>
   </div>
 </template>
+
+<script lang="ts">
+export function akDropGripThreshold(width: number): number {
+  const GRIP = 16
+  return Math.min(GRIP, width / 2)
+}
+
+// Returns the insertion slot on the target's before/after side.
+export function akResolveDropIndex(
+  pointerX: number,
+  rect: { left: number; right: number; width: number },
+  targetIndex: number,
+  direction: 'before' | 'after' | 'unknown',
+): number {
+  const threshold = akDropGripThreshold(rect.width)
+  if (direction === 'after') {
+    return pointerX >= rect.left + threshold ? targetIndex + 1 : targetIndex
+  }
+  if (direction === 'before') {
+    return pointerX <= rect.right - threshold ? targetIndex : targetIndex + 1
+  }
+  return pointerX >= rect.left + rect.width / 2 ? targetIndex + 1 : targetIndex
+}
+</script>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, toRaw } from 'vue'
@@ -865,6 +910,7 @@ function addToolbarQuickKey() {
     label: '',
     kind: 'send',
     action: '',
+    display: 'icon',
     sendRaw: '',
     style: '',
     repeat: false,
@@ -883,6 +929,7 @@ function editToolbarQuickKey(ki: number) {
     label: key.label,
     kind: 'send',
     action: '',
+    display: 'icon',
     sendRaw: escapeForDisplay(key.send),
     style: key.style || '',
     repeat: key.repeat || false,
@@ -1018,7 +1065,7 @@ function akResolveElementLoc(element: Element, needsIndex: boolean): AkLoc | nul
   return { zone, row, index }
 }
 
-function akResolveDropTarget(e: PointerEvent): AkLoc | null {
+function akResolveDropTarget(e: PointerEvent, currentLoc: AkLoc): AkLoc | null {
   const hit = document.elementFromPoint(e.clientX, e.clientY)
   if (!hit) return null
 
@@ -1027,7 +1074,14 @@ function akResolveDropTarget(e: PointerEvent): AkLoc | null {
     const loc = akResolveElementLoc(keyElement, true)
     if (!loc) return null
     const rect = keyElement.getBoundingClientRect()
-    if (e.clientX >= rect.left + rect.width / 2) loc.index++
+    const direction = loc.zone === currentLoc.zone && loc.row === currentLoc.row
+      ? loc.index < currentLoc.index
+        ? 'before'
+        : loc.index > currentLoc.index
+          ? 'after'
+          : 'unknown'
+      : 'unknown'
+    loc.index = akResolveDropIndex(e.clientX, rect, loc.index, direction)
     return loc
   }
 
@@ -1133,7 +1187,7 @@ function akGesturePointerMove(e: PointerEvent) {
   e.preventDefault()
 
   if (gesture.kind === 'drag') {
-    const target = akResolveDropTarget(e)
+    const target = akResolveDropTarget(e, gesture.currentLoc)
     if (target) akMoveDraggedKey(gesture, target)
     return
   }
@@ -1215,6 +1269,7 @@ const akEdit = ref<{
   label: string
   kind: 'send' | 'action'
   action: string
+  display: 'icon' | 'text'
   sendRaw: string
   style: string
   repeat: boolean
@@ -1245,6 +1300,7 @@ function editActionKey(ri: number, ki: number) {
     label: key.label,
     kind: key.kind === 'action' ? 'action' : 'send',
     action: key.action || '',
+    display: key.display ?? 'icon',
     sendRaw: escapeForDisplay(key.send),
     style: key.style || '',
     repeat: key.repeat || false,
@@ -1265,6 +1321,7 @@ function editBottomKey(ri: number, ki: number) {
     label: key.label,
     kind: key.kind === 'action' ? 'action' : 'send',
     action: key.action || '',
+    display: key.display ?? 'icon',
     sendRaw: escapeForDisplay(key.send),
     style: key.style || '',
     repeat: key.repeat || false,
@@ -1284,6 +1341,7 @@ function editBottomEnter() {
     label: key.label,
     kind: 'send',
     action: '',
+    display: 'icon',
     sendRaw: '\\r',
     style: key.style || '',
     repeat: false,
@@ -1311,6 +1369,7 @@ function saveActionKey() {
         label,
         kind: 'action',
         action: edit.action,
+        display: edit.display,
         style: edit.style || undefined,
         grow: edit.grow,
       }

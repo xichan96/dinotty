@@ -181,6 +181,7 @@ export interface ActionKey {
   label: string
   kind?: 'send' | 'action'
   action?: string
+  display?: 'icon' | 'text'
   send?: string
   style?: string
   repeat?: boolean
@@ -249,6 +250,8 @@ function normalizeActionKey(key: ActionKey): void {
   if (typeof key.kind === 'string' && key.kind !== 'send' && key.kind !== 'action') {
     key.kind = 'send'
   }
+
+  if (key.display !== 'icon' && key.display !== 'text') delete key.display
 
   if (key.kind !== 'action' || typeof key.action !== 'string' || key.action.trim() === '') return
   delete key.send

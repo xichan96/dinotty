@@ -706,10 +706,28 @@ const tabs = computed(() => [
   flex-direction: column;
   gap: 4px;
   padding: 8px 6px 10px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+.ak-zone-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ak-zone-title {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--fg-muted);
+  letter-spacing: 0.04em;
+}
+
+.ak-zone-sep {
+  border-top: 1px dashed var(--border);
+  margin: 6px 0 2px;
 }
 
 .ak-wyg-row-outer {
@@ -896,14 +914,16 @@ const tabs = computed(() => [
   background: rgba(77, 127, 255, 0.4);
 }
 
-.ak-wyg-add-bottom-row {
-  align-self: flex-start;
-  margin-top: 2px;
-}
-
 .ak-actions {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Preset buttons sit closer to the keyboard box above (8px) than to the
+   toolbar-shortcuts heading below (16px) — a deliberate 1:2 ratio. */
+.ak-actions + h4 {
+  margin-top: 16px;
 }
 
 .ak-reset {

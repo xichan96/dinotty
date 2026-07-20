@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Bell, Columns3, Globe } from 'lucide-vue-next'
 import {
   cloneWithoutIcons,
   DEFAULT_ACTION_BOTTOM,
@@ -14,10 +15,105 @@ import {
   type ActionKey,
   type ActionKeyboardConfig,
 } from '../composables/useSettings'
+import { actionKeyToKeyDef } from '../utils/actionKeyDef'
+import { APP_ACTIONS, getAppAction } from '../utils/appActionCatalog'
+import { akDropGripThreshold, akResolveDropIndex } from '../components/settings/KeyboardTab.vue'
 
 function normalize(cfg: ActionKeyboardConfig): ActionKeyboardConfig {
   return normalizeActionKeyboard(cfg) as ActionKeyboardConfig
 }
+
+describe('app action catalog', () => {
+  it('matches the 18 supported app keybinding registry entries in order', () => {
+    expect(APP_ACTIONS.map(({ id }) => id)).toEqual([
+      'togglePalette',
+      'openBookmarks',
+      'newTab',
+      'closeTab',
+      'splitHorizontal',
+      'splitVertical',
+      'toggleBroadcast',
+      'toggleZoom',
+      'equalizePanes',
+      'focusNextPane',
+      'focusPrevPane',
+      'searchTerminal',
+      'missionControl',
+      'superviseTabs',
+      'sshConnect',
+      'fontSizeUp',
+      'fontSizeDown',
+      'fontSizeReset',
+    ])
+    expect(APP_ACTIONS).toHaveLength(18)
+  })
+
+  it('uses the registry icons for actions whose old catalog icons differed', () => {
+    expect(getAppAction('superviseTabs')?.icon).toBe(Bell)
+    expect(getAppAction('sshConnect')?.icon).toBe(Globe)
+    expect(getAppAction('equalizePanes')?.icon).toBe(Columns3)
+  })
+})
+
+describe('actionKeyToKeyDef action display', () => {
+  it('renders icon mode with the registry icon and an empty label', () => {
+    const def = actionKeyToKeyDef({
+      label: 'Ignored label',
+      kind: 'action',
+      action: 'newTab',
+      display: 'icon',
+    })
+
+    expect(def.l).toBe('')
+    expect(def.icon).toBe(getAppAction('newTab')?.icon)
+  })
+
+  it('renders text mode with the user label and no icon', () => {
+    const def = actionKeyToKeyDef({
+      label: 'My New Tab',
+      kind: 'action',
+      action: 'newTab',
+      display: 'text',
+    })
+
+    expect(def.l).toBe('My New Tab')
+    expect(def).not.toHaveProperty('icon')
+  })
+})
+
+describe('action keyboard drop threshold', () => {
+  it('uses the 16px grip width and degrades to midpoint for narrow keys', () => {
+    expect(akDropGripThreshold(80)).toBe(16)
+    expect(akDropGripThreshold(32)).toBe(16)
+    expect(akDropGripThreshold(20)).toBe(10)
+  })
+
+  it('commits after a right-side target at its left grip threshold', () => {
+    const rect = { left: 0, right: 100, width: 100 }
+    expect(akResolveDropIndex(15, rect, 4, 'after')).toBe(4)
+    expect(akResolveDropIndex(17, rect, 4, 'after')).toBe(5)
+  })
+
+  it('commits before a left-side target at the mirrored right grip threshold', () => {
+    const rect = { left: 0, right: 100, width: 100 }
+    expect(akResolveDropIndex(85, rect, 4, 'before')).toBe(5)
+    expect(akResolveDropIndex(83, rect, 4, 'before')).toBe(4)
+  })
+
+  it('uses the midpoint when target direction is unknown', () => {
+    const rect = { left: 0, right: 100, width: 100 }
+    expect(akResolveDropIndex(49, rect, 4, 'unknown')).toBe(4)
+    expect(akResolveDropIndex(51, rect, 4, 'unknown')).toBe(5)
+  })
+
+  it('limits both directional thresholds to the center of narrow keys', () => {
+    const rect = { left: 0, right: 20, width: 20 }
+    expect(akResolveDropIndex(9, rect, 4, 'after')).toBe(4)
+    expect(akResolveDropIndex(10, rect, 4, 'after')).toBe(5)
+    expect(akResolveDropIndex(11, rect, 4, 'before')).toBe(5)
+    expect(akResolveDropIndex(10, rect, 4, 'before')).toBe(4)
+  })
+})
 
 describe('normalizeActionKeyboard', () => {
   it('keeps null distinct from an explicitly empty config', () => {
@@ -110,6 +206,21 @@ describe('normalizeActionKeyboard', () => {
       send: 'kept',
       special: 'bookmarks',
     })
+  })
+
+  it('keeps valid display modes and drops bogus or absent values without defaults', () => {
+    const keys = [
+      { label: 'icon', kind: 'action', action: 'newTab', display: 'icon' },
+      { label: 'text', kind: 'action', action: 'newTab', display: 'text' },
+      { label: 'bogus', kind: 'action', action: 'newTab', display: 'bogus' },
+      { label: 'absent', kind: 'action', action: 'newTab' },
+    ] as unknown as ActionKey[]
+
+    normalize({ rows: [keys] })
+
+    expect(keys.map((key) => key.display)).toEqual(['icon', 'text', undefined, undefined])
+    expect(keys[2]).not.toHaveProperty('display')
+    expect(keys[3]).not.toHaveProperty('display')
   })
 
   it('keeps action-kind keys with missing or blank action unchanged', () => {

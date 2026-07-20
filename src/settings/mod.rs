@@ -862,6 +862,8 @@ pub struct ActionKey {
     #[serde(default)]
     pub action: Option<String>,
     #[serde(default)]
+    pub display: Option<String>,
+    #[serde(default)]
     pub send: String,
     #[serde(default)]
     pub style: Option<String>,
@@ -886,6 +888,9 @@ impl Serialize for ActionKey {
         map.serialize_entry("label", &self.label)?;
         map.serialize_entry("kind", &self.kind)?;
         map.serialize_entry("action", &self.action)?;
+        if let Some(display) = &self.display {
+            map.serialize_entry("display", display)?;
+        }
         map.serialize_entry("style", &self.style)?;
         map.serialize_entry("grow", &self.grow)?;
         if !is_valid_action {
@@ -924,6 +929,10 @@ fn normalize_action_key(key: &mut ActionKey) {
         key.kind = Some("send".to_string());
     }
 
+    if !matches!(key.display.as_deref(), Some("icon" | "text")) {
+        key.display = None;
+    }
+
     let is_valid_action = key.kind.as_deref() == Some("action")
         && key.action.as_deref().is_some_and(|action| !action.trim().is_empty());
     if is_valid_action {
@@ -939,6 +948,7 @@ fn default_action_enter(label: String) -> ActionKey {
         label,
         kind: Some("send".to_string()),
         action: None,
+        display: None,
         send: "\r".to_string(),
         style: None,
         repeat: false,
@@ -1525,6 +1535,65 @@ pub async fn get_log(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod action_key_display_tests {
+    use super::{normalize_action_keyboards, ActionKeyboardConfig, Settings};
+
+    fn parse_config(json: &str) -> ActionKeyboardConfig {
+        serde_json::from_str(json).expect("action keyboard config should deserialize")
+    }
+
+    #[test]
+    fn valid_display_values_survive_put_normalization_and_round_trip() {
+        let config = parse_config(
+            r#"{"rows":[[
+                {"label":"Icon","kind":"action","action":"newTab","display":"icon"},
+                {"label":"Text","kind":"action","action":"newTab","display":"text"}
+            ]]}"#,
+        );
+        let mut settings = Settings {
+            action_keyboard: Some(config.clone()),
+            action_keyboard_user_default: Some(config),
+            ..Settings::default()
+        };
+
+        normalize_action_keyboards(&mut settings);
+        let wire = serde_json::to_string(&settings).unwrap();
+        let round_tripped: Settings = serde_json::from_str(&wire).unwrap();
+
+        for config in [
+            round_tripped.action_keyboard.unwrap(),
+            round_tripped.action_keyboard_user_default.unwrap(),
+        ] {
+            assert_eq!(config.rows[0][0].display.as_deref(), Some("icon"));
+            assert_eq!(config.rows[0][1].display.as_deref(), Some("text"));
+        }
+    }
+
+    #[test]
+    fn bogus_display_normalizes_to_none_without_rejecting_payload() {
+        let mut config = parse_config(
+            r#"{"rows":[[{"label":"Future","kind":"action","action":"newTab","display":"bogus"}]]}"#,
+        );
+
+        config.normalize();
+
+        assert_eq!(config.rows[0][0].display, None);
+    }
+
+    #[test]
+    fn absent_display_is_omitted_from_serialized_output() {
+        let mut config = parse_config(
+            r#"{"rows":[[{"label":"New tab","kind":"action","action":"newTab","display":"bogus"}]]}"#,
+        );
+        config.normalize();
+
+        let wire = serde_json::to_value(&config).unwrap();
+
+        assert!(wire["rows"][0][0].get("display").is_none());
+    }
+}
 
 #[cfg(test)]
 mod space_confirms_dialogs_tests {

@@ -29,7 +29,9 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
   if (ak.kind === 'action') {
     const action = ak.action ? getAppAction(ak.action) : undefined
     const def: KeyDef = action
-      ? { l: ak.label || '', act: action.id, cls, icon: action.icon }
+      ? ak.display === 'text'
+        ? { l: ak.label || '', act: action.id, cls }
+        : { l: '', act: action.id, cls, icon: action.icon }
       : {
           l: ak.action ? `${t('actionKb.unsupported')}: ${ak.action}` : t('actionKb.unsupported'),
           cls: `${cls} mkb-disabled`,

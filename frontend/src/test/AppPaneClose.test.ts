@@ -127,6 +127,7 @@ const BINDING_KEYS: Record<string, string> = {
   fontSizeReset: '0',
 }
 vi.mock('../composables/useKeybindings', () => ({
+  defs: [],
   useKeybindings: () => ({
     getBinding: (id: string) => ({ key: BINDING_KEYS[id] ?? 'x', shift: false }),
     formatBinding: (b: any) => b.key,

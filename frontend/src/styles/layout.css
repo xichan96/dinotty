@@ -31,12 +31,30 @@
   display: none;
 }
 
+#tabs-list.fade-start {
+  mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 100%);
+}
+
+#tabs-list.fade-end {
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+#tabs-list.fade-start.fade-end {
+  mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+}
+
 .tab {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 14px;
-  min-width: 120px;
+  /* flex: 1 1 0 plus an explicit min-width gives uniform shrink-then-scroll;
+     min-width: auto silently disables shrink because the title width becomes the floor. */
+  flex: 1 1 0;
+  min-width: 80px;
   max-width: 200px;
   height: 100%;
   background: var(--tab-bg);
@@ -46,7 +64,6 @@
   cursor: pointer;
   transition: background 0.1s;
   position: relative;
-  flex-shrink: 0;
   touch-action: pan-x;
 }
 .tab:hover {
@@ -68,6 +85,7 @@
 
 .tab-title {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -140,7 +158,7 @@
 
 @media (max-width: 600px) {
   .tab {
-    min-width: 72px;
+    min-width: 64px;
     padding: 0 8px;
   }
 }

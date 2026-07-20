@@ -160,12 +160,22 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { Motion, AnimatePresence } from 'motion-v'
-import { X, Puzzle, Pencil, Square, Plus } from 'lucide-vue-next'
+import {
+  X,
+  Puzzle,
+  Pencil,
+  Square,
+  Plus,
+  Layers,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+} from 'lucide-vue-next'
 import type { TabCard, PanePreviewNode } from '../../composables/useTabPreview'
 import SplitPreviewNode from './SplitPreviewNode.vue'
 import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 import { useI18n } from '../../composables/useI18n'
+import { uiConfirm } from '../../composables/useConfirm'
 import { uiPrompt } from '../../composables/usePrompt'
 
 const { t } = useI18n()
@@ -193,6 +203,7 @@ const emit = defineEmits<{
   close: []
   activate: [paneId: string]
   'close-tab': [paneId: string]
+  'close-tabs': [paneIds: string[]]
   'rename-tab': [paneId: string, title: string]
   'new-tab': []
 }>()
@@ -206,6 +217,36 @@ const ctxItems = ref<ContextMenuItem[]>([])
 function openCardCtx(e: MouseEvent, card: TabCard) {
   ctxX.value = e.clientX
   ctxY.value = e.clientY
+  const idx = props.cards.findIndex((c) => c.paneId === card.paneId)
+  const workspaceTabs = props.cards.filter((c) => c.type !== 'plugin')
+  const leftTabs = props.cards.slice(0, idx).filter((c) => c.type !== 'plugin')
+  const rightTabs = props.cards.slice(idx + 1).filter((c) => c.type !== 'plugin')
+  const closeWorkspaceLabel = t('overview.closeWorkspaceTabs')
+  const closeLeftLabel = t('overview.closeTabsLeft')
+  const closeRightLabel = t('overview.closeTabsRight')
+
+  async function confirmCloseTabs(label: string, targets: TabCard[]) {
+    const ok = await uiConfirm(
+      t('overview.confirmCloseTabs').replace('{count}', String(targets.length)),
+      {
+        title: label,
+        confirmText: t('overview.closeTabsConfirm'),
+        cancelText: t('filePreview.cancel'),
+      },
+    )
+    if (!ok) return
+    emit('close-tabs', targets.map((c) => c.paneId))
+  }
+
+  function currentSideTabs(side: 'left' | 'right'): TabCard[] | null {
+    const currentCards = props.cards
+    const currentIdx = currentCards.findIndex((c) => c.paneId === card.paneId)
+    if (currentIdx === -1) return null
+    const sideCards =
+      side === 'left' ? currentCards.slice(0, currentIdx) : currentCards.slice(currentIdx + 1)
+    return sideCards.filter((c) => c.type !== 'plugin')
+  }
+
   ctxItems.value = [
     {
       label: t('palette.rename'),
@@ -221,7 +262,36 @@ function openCardCtx(e: MouseEvent, card: TabCard) {
       },
     },
     {
-      label: 'Close',
+      label: closeWorkspaceLabel,
+      icon: Layers,
+      disabled: workspaceTabs.length === 0,
+      action: () => confirmCloseTabs(
+        closeWorkspaceLabel,
+        props.cards.filter((c) => c.type !== 'plugin'),
+      ),
+    },
+    {
+      label: closeLeftLabel,
+      icon: ArrowLeftToLine,
+      disabled: leftTabs.length === 0,
+      action: () => {
+        const targets = currentSideTabs('left')
+        if (targets === null) return
+        void confirmCloseTabs(closeLeftLabel, targets)
+      },
+    },
+    {
+      label: closeRightLabel,
+      icon: ArrowRightToLine,
+      disabled: rightTabs.length === 0,
+      action: () => {
+        const targets = currentSideTabs('right')
+        if (targets === null) return
+        void confirmCloseTabs(closeRightLabel, targets)
+      },
+    },
+    {
+      label: t('overview.closeTab'),
       icon: Square,
       danger: true,
       action: () => emit('close-tab', card.paneId),

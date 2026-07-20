@@ -47,6 +47,7 @@
             :embedded="true"
             @activate="(id: string) => $emit('activate', id)"
             @close-tab="(id: string) => $emit('close-tab', id)"
+            @close-tabs="(ids: string[]) => $emit('close-tabs', ids)"
             @rename-tab="onRenameTab"
             @new-tab="onNewTabForSelected"
           />
@@ -90,6 +91,7 @@ const emit = defineEmits<{
   close: []
   activate: [paneId: string]
   'close-tab': [paneId: string]
+  'close-tabs': [paneIds: string[]]
   'new-tab': [cwd?: string]
   'new-tab-ssh': [connectionId: string, initialCwd?: string]
   'rename-tab': [paneId: string, title: string]

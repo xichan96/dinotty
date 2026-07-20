@@ -41,7 +41,11 @@
         />
         <LayoutDashboard v-else :size="16" />
     </button>
-    <div id="tabs-list" ref="tabsListRef">
+    <div
+      id="tabs-list"
+      ref="tabsListRef"
+      :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd }"
+    >
       <div
         v-for="tab in tabs"
         :key="tab.paneId"
@@ -52,6 +56,7 @@
         @touchstart="onTabTouchStart($event, tab.paneId)"
         @click="onTabClick($event, tab.paneId)"
         @touchend.prevent="onTabTouchEnd($event, tab.paneId)"
+        @contextmenu.prevent="openTabCtx($event, tab)"
       >
         <span class="tab-index">{{ tab.index }}</span>
         <span
@@ -198,16 +203,41 @@
     </div>
     <slot name="right"></slot>
   </div>
+  <ContextMenu
+    :visible="ctxVisible"
+    :x="ctxX"
+    :y="ctxY"
+    :items="ctxItems"
+    @close="ctxVisible = false"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
-import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard, Globe, Server } from 'lucide-vue-next'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import {
+  X,
+  Terminal,
+  Puzzle,
+  Columns2,
+  Rows2,
+  Radio,
+  LayoutDashboard,
+  Globe,
+  Server,
+  Pencil,
+  Layers,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  Square,
+} from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 import { useSettingsStore } from '../../stores'
 import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
+import { uiConfirm } from '../../composables/useConfirm'
 import WorkspaceBadge from '../WorkspaceBadge.vue'
+import ContextMenu from '../ui/ContextMenu.vue'
+import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 
 const { t } = useI18n()
 const { getBinding, formatBinding } = useKeybindings()
@@ -287,9 +317,68 @@ const emit = defineEmits<{
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
   'open-overview': []
+  'close-tabs': [paneIds: string[]]
 }>()
 
 const tabsListRef = ref<HTMLElement | null>(null)
+const fadeStart = ref(false)
+const fadeEnd = ref(false)
+const ctxVisible = ref(false)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxItems = ref<ContextMenuItem[]>([])
+
+function updateFades() {
+  const tabsList = tabsListRef.value
+  if (!tabsList) return
+
+  const { scrollLeft, scrollWidth, clientWidth } = tabsList
+  fadeStart.value = scrollLeft > 1
+  fadeEnd.value = scrollLeft + clientWidth < scrollWidth - 1
+}
+
+function onTabsWheel(e: WheelEvent) {
+  const tabsList = tabsListRef.value
+  if (!tabsList) return
+  if (tabsList.scrollWidth <= tabsList.clientWidth) return
+  let deltaX = e.deltaX
+  let deltaY = e.deltaY
+  if (e.deltaMode === 1) {
+    deltaX *= 16
+    deltaY *= 16
+  } else if (e.deltaMode === 2) {
+    deltaX *= tabsList.clientWidth
+    deltaY *= tabsList.clientWidth
+  }
+  const delta = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY
+  if (delta === 0) return
+  e.preventDefault()
+  tabsList.scrollLeft += delta
+  updateFades()
+}
+
+watch(
+  () => props.tabs.length,
+  () => {
+    nextTick(updateFades)
+  }
+)
+
+watch(
+  tabsListRef,
+  (tabsList, previousTabsList) => {
+    previousTabsList?.removeEventListener('scroll', updateFades)
+    previousTabsList?.removeEventListener('wheel', onTabsWheel)
+    tabsList?.addEventListener('scroll', updateFades, { passive: true })
+    tabsList?.addEventListener('wheel', onTabsWheel, { passive: false })
+    nextTick(updateFades)
+  },
+  { immediate: true },
+)
+
+onMounted(() => {
+  window.addEventListener('resize', updateFades)
+})
 
 function findTabElement(paneId: string): HTMLElement | undefined {
   return Array.from(tabsListRef.value?.querySelectorAll<HTMLElement>('.tab[data-pane-id]') ?? [])
@@ -329,6 +418,84 @@ function startEdit(tab: TabInfo) {
       input.select()
     }
   })
+}
+
+function openTabCtx(e: MouseEvent, tab: TabInfo) {
+  ctxX.value = e.clientX
+  ctxY.value = e.clientY
+  const idx = props.tabs.findIndex((t) => t.paneId === tab.paneId)
+  const workspaceTabs = props.tabs.filter((t) => t.type !== 'plugin')
+  const leftTabs = props.tabs.slice(0, idx).filter((t) => t.type !== 'plugin')
+  const rightTabs = props.tabs.slice(idx + 1).filter((t) => t.type !== 'plugin')
+  const closeWorkspaceLabel = t('overview.closeWorkspaceTabs')
+  const closeLeftLabel = t('overview.closeTabsLeft')
+  const closeRightLabel = t('overview.closeTabsRight')
+
+  async function confirmCloseTabs(label: string, targets: TabInfo[]) {
+    const ok = await uiConfirm(
+      t('overview.confirmCloseTabs').replace('{count}', String(targets.length)),
+      {
+        title: label,
+        confirmText: t('overview.closeTabsConfirm'),
+        cancelText: t('filePreview.cancel'),
+      },
+    )
+    if (!ok) return
+    emit('close-tabs', targets.map((x) => x.paneId))
+  }
+
+  function currentSideTabs(side: 'left' | 'right'): TabInfo[] | null {
+    const currentTabs = props.tabs
+    const currentIdx = currentTabs.findIndex((t) => t.paneId === tab.paneId)
+    if (currentIdx === -1) return null
+    const sideTabs =
+      side === 'left' ? currentTabs.slice(0, currentIdx) : currentTabs.slice(currentIdx + 1)
+    return sideTabs.filter((t) => t.type !== 'plugin')
+  }
+
+  ctxItems.value = [
+    {
+      label: t('palette.rename'),
+      icon: Pencil,
+      action: () => startEdit(tab),
+    },
+    {
+      label: closeWorkspaceLabel,
+      icon: Layers,
+      disabled: workspaceTabs.length === 0,
+      action: () => confirmCloseTabs(
+        closeWorkspaceLabel,
+        props.tabs.filter((t) => t.type !== 'plugin'),
+      ),
+    },
+    {
+      label: closeLeftLabel,
+      icon: ArrowLeftToLine,
+      disabled: leftTabs.length === 0,
+      action: () => {
+        const targets = currentSideTabs('left')
+        if (targets === null) return
+        void confirmCloseTabs(closeLeftLabel, targets)
+      },
+    },
+    {
+      label: closeRightLabel,
+      icon: ArrowRightToLine,
+      disabled: rightTabs.length === 0,
+      action: () => {
+        const targets = currentSideTabs('right')
+        if (targets === null) return
+        void confirmCloseTabs(closeRightLabel, targets)
+      },
+    },
+    {
+      label: t('overview.closeTab'),
+      icon: Square,
+      danger: true,
+      action: () => emit('close', tab.paneId),
+    },
+  ]
+  ctxVisible.value = true
 }
 
 function finishEdit(paneId: string) {
@@ -421,7 +588,7 @@ function getPointerPos(e: MouseEvent | TouchEvent): { clientX: number; clientY: 
 }
 
 function onTabMouseDown(e: MouseEvent, paneId: string) {
-  if (e.button !== 0) return
+  if (e.button !== 0 || e.ctrlKey) return
   suppressClick = false
   startDrag(e, paneId, false)
 }
@@ -525,6 +692,9 @@ function cleanup() {
 
 onBeforeUnmount(() => {
   cleanup()
+  tabsListRef.value?.removeEventListener('scroll', updateFades)
+  tabsListRef.value?.removeEventListener('wheel', onTabsWheel)
+  window.removeEventListener('resize', updateFades)
   document.removeEventListener('mousedown', onDocMouseDown)
   document.removeEventListener('mousedown', onDocMenuMouseDown)
   document.removeEventListener('touchstart', onDocTouchStart)

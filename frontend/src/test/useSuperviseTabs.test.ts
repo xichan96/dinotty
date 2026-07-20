@@ -53,8 +53,30 @@ function pluginTab(id: string): Tab {
   return { type: 'plugin', paneId: id, title: id, pluginId: id }
 }
 
+function terminalTab(id: string): Tab {
+  return {
+    type: 'terminal',
+    paneId: id,
+    layout: {
+      type: 'leaf',
+      paneId: `${id}-leaf`,
+      title: id,
+      ratio: 1,
+      zoomed: false,
+    },
+    activePaneId: `${id}-leaf`,
+    paneMru: [`${id}-leaf`],
+    broadcastMode: false,
+    broadcastActivity: 0,
+    previewVisible: false,
+    previewAddress: '',
+    previewUrl: '',
+    previewKind: 'web',
+  }
+}
+
 function setup(ids = ['a', 'b', 'c'], activePaneId = 'a') {
-  mocks.session.tabs.splice(0, mocks.session.tabs.length, ...ids.map(pluginTab))
+  mocks.session.tabs.splice(0, mocks.session.tabs.length, ...ids.map(terminalTab))
   mocks.session.activePaneId = activePaneId
   mocks.workspaces.value = []
   mocks.matchWorkspace.mockReset().mockReturnValue(null)
@@ -77,6 +99,17 @@ describe('useSuperviseTabs lifecycle', () => {
     for (const scope of scopes.splice(0)) scope.stop()
     vi.clearAllTimers()
     vi.useRealTimers()
+  })
+
+  it('excludes plugin tabs from supervised candidates', async () => {
+    const { supervise } = setup(['a', 'b'])
+    mocks.session.tabs.splice(1, 0, pluginTab('plugin'))
+    const activate = vi.fn().mockResolvedValue(false)
+
+    await supervise(activate)
+
+    expect(activate).toHaveBeenCalledOnce()
+    expect(activate).toHaveBeenCalledWith('b')
   })
 
   it('settles reversed activations under their own tokens and promotes both successes', async () => {

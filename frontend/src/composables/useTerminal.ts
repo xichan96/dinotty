@@ -1834,6 +1834,18 @@ export class TerminalInstance {
       if (this._wheelBypass) return true
       if (!this.xterm) return true
 
+      // xterm.js 5.5.0 hardcodes alt-screen wheel-to-arrow conversion with no
+      // option (upstream issue #5194); keep this after _wheelBypass so touchScroll's
+      // synthetic full-screen scrolling can still use that native conversion.
+      if (
+        this.xterm.buffer.active.type === 'alternate' &&
+        this._isWheelReportedByApp() === false
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        return false
+      }
+
       // Track user scroll intent to maintain the cross-batch viewport pin.
       // macOS trackpad inertia produces sub-pixel deltaY<0 events that set
       // xterm's isUserScrolling=true; without this filter, a single inertia
@@ -1922,6 +1934,22 @@ export class TerminalInstance {
       )
     }
     return 0
+  }
+
+  private _isWheelReportedByApp(): boolean | undefined {
+    try {
+      const core = (this.xterm as any)?._core
+      const svc =
+        core?.coreMouseService ??
+        core?.mouseService ??
+        core?.services?.coreMouseService
+      const activeProtocol = svc?.activeProtocol ?? svc?._activeProtocol
+      if (typeof activeProtocol !== 'string') return undefined
+      const events = svc?._protocols?.[activeProtocol]?.events
+      return typeof events === 'number' ? (events & 16) !== 0 : undefined
+    } catch {
+      return undefined
+    }
   }
 
   isMouseModeEnabled(): boolean {

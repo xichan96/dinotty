@@ -26,8 +26,10 @@ export function useSyncWebSocket(opts: {
   persist: () => void
   focusActive: () => void
   newTab: () => Promise<void>
+  loadedPlugins: ReadonlyMap<string, { manifest: { name: string } }>
+  initialPluginLoad: () => Promise<void>
 }) {
-  const { termRefs, persist, focusActive, newTab } = opts
+  const { termRefs, persist, focusActive, newTab, loadedPlugins, initialPluginLoad } = opts
   const session = useSessionStore()
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
@@ -41,6 +43,7 @@ export function useSyncWebSocket(opts: {
   // Grace period: tabs created within the last 5s are protected from tab_list pruning.
   // This prevents a race where tab_list arrives before the REST-driven tab_created.
   const recentlyCreated = new Map<string, number>()
+  const invalidCachedPluginPaneIds = new Set<string>()
   const GRACE_MS = 5000
 
   function markRecentlyCreated(tabId: string) {
@@ -81,10 +84,12 @@ export function useSyncWebSocket(opts: {
       const raw = localStorage.getItem('dinotty_tabs')
       if (!raw) return null
       const { tabs: savedTabs } = JSON.parse(raw)
-      const direct = savedTabs?.find((t: any) => t.paneId === paneId)
+      // Plugin pane IDs must never be treated as saved terminal layout IDs.
+      const terminalTabs = savedTabs?.filter((t: { type?: string }) => t.type !== 'plugin')
+      const direct = terminalTabs?.find((t: any) => t.paneId === paneId)
       if (direct) return direct
       return (
-        savedTabs?.find((t: any) => {
+        terminalTabs?.find((t: any) => {
           if (!t.layout) return false
           const leaves = getAllLeaves(t.layout)
           return leaves.some((l: any) => l.paneId === paneId)
@@ -114,6 +119,69 @@ export function useSyncWebSocket(opts: {
       console.log('[sync] connected')
       syncConnected.value = true
       syncReconnectDelay = 1000
+    }
+
+    function restorePluginTabs() {
+      const restored = new Map<string, string>()
+      try {
+        const raw = localStorage.getItem('dinotty_tabs')
+        if (!raw) return
+        const { tabs: savedTabs } = JSON.parse(raw)
+        for (const saved of savedTabs ?? []) {
+          if (
+            saved.type !== 'plugin' ||
+            invalidCachedPluginPaneIds.has(saved.paneId) ||
+            tabs.value.some((tab) => tab.paneId === saved.paneId)
+          ) {
+            continue
+          }
+          const plugin = loadedPlugins.get(saved.pluginId)
+          tabs.value.push({
+            type: 'plugin',
+            paneId: saved.paneId,
+            title: plugin?.manifest.name ?? saved.title ?? saved.pluginId,
+            pluginId: saved.pluginId,
+            workspaceId: saved.workspaceId,
+          })
+          restored.set(saved.paneId, saved.pluginId)
+        }
+      } catch {
+        return
+      }
+
+      if (restored.size === 0) return
+      void initialPluginLoad()
+        .then(async () => {
+          let changed = false
+          for (const [paneId, pluginId] of restored) {
+            const idx = tabs.value.findIndex(
+              (tab) => tab.type === 'plugin' && tab.paneId === paneId && tab.pluginId === pluginId,
+            )
+            if (idx === -1) continue
+            const plugin = loadedPlugins.get(pluginId)
+            if (!plugin) {
+              invalidCachedPluginPaneIds.add(paneId)
+              tabs.value.splice(idx, 1)
+              changed = true
+              continue
+            }
+            const tab = tabs.value[idx]
+            if (tab.type === 'plugin' && tab.title !== plugin.manifest.name) {
+              tab.title = plugin.manifest.name
+              changed = true
+            }
+          }
+          if (!changed) return
+          if (tabs.value.length === 0) await newTab()
+          if (!activePaneId.value || !tabs.value.some((tab) => tab.paneId === activePaneId.value)) {
+            activePaneId.value = tabs.value[0]?.paneId ?? null
+          }
+          persist()
+          nextTick(() => focusActive())
+        })
+        .catch(() => {
+          // A failed initial load is not authoritative evidence that plugins were uninstalled.
+        })
     }
 
     function handleMsg(e: { data: string }) {
@@ -187,26 +255,7 @@ export function useSyncWebSocket(opts: {
           }
         }
 
-        // Restore plugin tabs from localStorage
-        try {
-          const raw = localStorage.getItem('dinotty_tabs')
-          if (raw) {
-            const { tabs: savedTabs } = JSON.parse(raw)
-            for (const st of savedTabs) {
-              if (st.type === 'plugin' && !tabs.value.some((t) => t.paneId === st.paneId)) {
-                tabs.value.push({
-                  type: 'plugin',
-                  paneId: st.paneId,
-                  title: st.title || st.pluginId,
-                  pluginId: st.pluginId,
-                  workspaceId: st.workspaceId,
-                })
-              }
-            }
-          }
-        } catch {
-          /* noop */
-        }
+        restorePluginTabs()
 
         // Remove terminal tabs whose leaf paneIds are no longer on the server
         const serverTabIds = new Set(msg.tabs.map((t) => t.tab_id))

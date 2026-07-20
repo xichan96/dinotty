@@ -411,6 +411,17 @@ const clearActiveReadContext = setActiveReadContext({
 })
 const stopForegroundGainSubscription = onAppForegroundGain(evaluateActiveRead)
 const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = usePluginLoader()
+let initialPluginLoad: Promise<void> | null = null
+function loadPluginsInitially() {
+  if (!initialPluginLoad) {
+    const load = loadAll()
+    initialPluginLoad = load
+    void load.catch(() => {
+      if (initialPluginLoad === load) initialPluginLoad = null
+    })
+  }
+  return initialPluginLoad
+}
 const { isMobile } = useIsMobile()
 
 // Workspace filtering
@@ -639,6 +650,8 @@ const syncWs = useSyncWebSocket({
   persist,
   focusActive,
   newTab: async () => { await newTab() },
+  loadedPlugins,
+  initialPluginLoad: loadPluginsInitially,
 })
 
 // Set up SSH keyboard-interactive auth handler
@@ -1122,6 +1135,7 @@ async function closeTab(tabId: string) {
   if (idx === -1) return
 
   tabs.value.splice(idx, 1)
+  if (tab.type === 'plugin') persistNow()
 
   // If this was the last tab, create a new one
   if (tabs.value.length === 0) {
@@ -1137,7 +1151,7 @@ async function closeTab(tabId: string) {
     activePaneId.value = tabs.value[newIdx].paneId
   }
 
-  persist()
+  if (tab.type !== 'plugin') persist()
   nextTick(() => focusActive())
 }
 
@@ -1287,7 +1301,7 @@ async function onLoginSuccess() {
   ui.setAuthenticated(true)
   await getApiBase()
   await settingsStore.load()
-  void loadAll()
+  void loadPluginsInitially()
   void syncWs.connectSyncWS()
   initMonitorHistory()
 }
@@ -2050,7 +2064,7 @@ onMounted(async () => {
     await settingsStore.load()
     void syncWs.connectSyncWS()
     initMonitorHistory()
-    void loadAll()
+    void loadPluginsInitially()
     // Fallback: if sync WS hasn't delivered tabs within 3s, load via REST
     setTimeout(async () => {
       if (tabs.value.length === 0 && !syncWs.isConnected()) {

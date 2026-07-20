@@ -5,13 +5,16 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 // readyState. We set readyState=CONNECTING (0) so the fallback timer
 // fires apiListTabs and populates tabs.
 const originalWebSocket = (global as any).WebSocket
+let latestMockWebSocket: MockWebSocket | null = null
 class MockWebSocket {
   public readyState = 0
   public onopen: any = null
   public onmessage: any = null
   public onclose: any = null
   public onerror: any = null
-  constructor(public url: string) {}
+  constructor(public url: string) {
+    latestMockWebSocket = this
+  }
   close() {}
 }
 ;(global as any).WebSocket = MockWebSocket as any
@@ -83,6 +86,8 @@ const mocks = vi.hoisted(() => {
     resetNotificationRequestIds: () => {
       notificationRequestIdCounter = 0
     },
+    loadedPlugins: new Map<string, any>(),
+    loadAllPlugins: vi.fn(async () => {}),
   }
 })
 
@@ -172,8 +177,8 @@ vi.mock('../composables/useAppForeground', () => ({
 }))
 vi.mock('../composables/usePluginLoader', () => ({
   usePluginLoader: () => ({
-    loadedPlugins: new Map(),
-    loadAll: vi.fn(),
+    loadedPlugins: mocks.loadedPlugins,
+    loadAll: mocks.loadAllPlugins,
     getPluginContext: vi.fn(),
     pluginList: { value: [], __v_isRef: true },
     allCommands: { value: [], __v_isRef: true },
@@ -380,6 +385,9 @@ afterEach(() => {
   mocks.apiDeactivateWorkspace.mockResolvedValue(undefined)
   mocks.mintNotificationRequestId.mockClear()
   mocks.resetNotificationRequestIds()
+  mocks.loadedPlugins.clear()
+  mocks.loadAllPlugins.mockReset()
+  mocks.loadAllPlugins.mockResolvedValue(undefined)
 })
 
 describe('App.vue - activateTab cross-workspace', () => {
@@ -493,6 +501,120 @@ describe('App.vue - activateTab cross-workspace', () => {
     expect(mocks.apiActivateWorkspace).toHaveBeenCalledWith('ws-other')
     expect(workspaceState.activeWorkspaceId.value).toBe('ws-other')
     expect(mocks.scrollTabIntoView).toHaveBeenCalledWith('terminal-other')
+  })
+})
+
+describe('App.vue - tab persistence', () => {
+  it('persists terminal and plugin tabs and indexes the full list', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const terminal = session.tabs[0]
+    const splitContainer = wrapper.findComponent(SplitContainerStub)
+    if (!terminal || terminal.type !== 'terminal') throw new Error('expected seeded terminal tab')
+    session.setTabs([
+      {
+        type: 'plugin',
+        paneId: 'plugin:memory',
+        title: 'Memory',
+        pluginId: 'memory',
+        workspaceId: 'workspace-1',
+      },
+      terminal,
+    ])
+    session.setActivePane(terminal.paneId)
+
+    splitContainer.vm.$emit('divider-drag-end')
+    window.dispatchEvent(new Event('beforeunload'))
+    session.setTabs([terminal])
+
+    const saved = JSON.parse(localStorageMock.getItem('dinotty_tabs')!)
+    expect(saved.tabs.map((tab: Tab) => tab.type)).toEqual(['plugin', 'terminal'])
+    expect(saved.tabs[0]).toEqual({
+      type: 'plugin',
+      paneId: 'plugin:memory',
+      title: 'Memory',
+      pluginId: 'memory',
+      workspaceId: 'workspace-1',
+    })
+    expect(saved.activeIdx).toBe(1)
+  })
+
+  it('does not resurrect a plugin when tab_list arrives immediately after close', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const terminal = session.tabs[0]
+    const splitContainer = wrapper.findComponent(SplitContainerStub)
+    if (!terminal || terminal.type !== 'terminal') throw new Error('expected seeded terminal tab')
+    mocks.loadedPlugins.set('memory', {
+      manifest: { id: 'memory', name: 'Memory' },
+    })
+    session.setTabs([
+      terminal,
+      { type: 'plugin', paneId: 'plugin:memory', title: 'Memory', pluginId: 'memory' },
+    ])
+    session.setActivePane('plugin:memory')
+    splitContainer.vm.$emit('divider-drag-end')
+    window.dispatchEvent(new Event('beforeunload'))
+    expect(JSON.parse(localStorageMock.getItem('dinotty_tabs')!).tabs).toHaveLength(2)
+
+    await (wrapper.vm as any).closeTab('plugin:memory')
+
+    expect(JSON.parse(localStorageMock.getItem('dinotty_tabs')!).tabs).toHaveLength(1)
+    latestMockWebSocket?.onmessage?.({
+      data: JSON.stringify({
+        type: 'tab_list',
+        tabs: [
+          {
+            tab_id: terminal.paneId,
+            pane_id: terminal.activePaneId,
+            active_pane_id: terminal.activePaneId,
+            layout: terminal.layout,
+          },
+        ],
+        active_pane_id: terminal.activePaneId,
+      }),
+    })
+    await Promise.resolve()
+
+    expect(session.tabs.some((tab) => tab.paneId === 'plugin:memory')).toBe(false)
+  })
+
+  it('retries a rejected initial plugin load and completes reconciliation on a later tab_list', async () => {
+    mocks.loadAllPlugins.mockRejectedValueOnce(new Error('temporary plugin load failure'))
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const terminal = session.tabs[0]
+    if (!terminal || terminal.type !== 'terminal') throw new Error('expected seeded terminal tab')
+    expect(mocks.loadAllPlugins).toHaveBeenCalledOnce()
+
+    localStorage.setItem(
+      'dinotty_tabs',
+      JSON.stringify({
+        tabs: [{ type: 'plugin', paneId: 'plugin:legacy', title: 'Legacy', pluginId: 'legacy' }],
+        activeIdx: 0,
+      }),
+    )
+
+    latestMockWebSocket?.onmessage?.({
+      data: JSON.stringify({
+        type: 'tab_list',
+        tabs: [
+          {
+            tab_id: terminal.paneId,
+            pane_id: terminal.activePaneId,
+            active_pane_id: terminal.activePaneId,
+            layout: terminal.layout,
+          },
+        ],
+        active_pane_id: terminal.activePaneId,
+      }),
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mocks.loadAllPlugins).toHaveBeenCalledTimes(2)
+    expect(session.tabs.some((tab) => tab.paneId === 'plugin:legacy')).toBe(false)
+    expect(wrapper.exists()).toBe(true)
   })
 })
 

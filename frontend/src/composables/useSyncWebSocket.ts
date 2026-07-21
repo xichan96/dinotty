@@ -1,7 +1,7 @@
 import { nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { SyncServerMsg, SyncClientMsg } from '../types/protocol'
-import type { TerminalTab } from '../types/pane'
+import type { Tab, TerminalTab } from '../types/pane'
 import { getAllLeaves, findLeaf, migrateTab, migratePreviewToLeaf, ensureSplitRoot } from '../types/pane'
 import {
   initializePaneMru,
@@ -21,6 +21,7 @@ import { handlePluginChanged } from './usePluginLoader'
 import { useWorkspaces } from './useWorkspaces'
 import { apiCreatePluginTab } from './useTabApi'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
+import { pickSuccessorTab } from '../utils/tabSuccessor'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 
 export function useSyncWebSocket(opts: {
@@ -34,7 +35,12 @@ export function useSyncWebSocket(opts: {
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
   const { syncConnected } = storeToRefs(ui)
-  const { workspaces, activeWorkspaceId } = useWorkspaces()
+  const { workspaces, activeWorkspaceId, matchWorkspace } = useWorkspaces()
+
+  function workspaceIdOfTab(tab: Tab): string | null {
+    if (tab.type === 'plugin') return tab.workspaceId ?? null
+    return matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)?.id ?? null
+  }
 
   let syncWs: WebSocket | null = null
   let suppressSync = false
@@ -321,6 +327,10 @@ export function useSyncWebSocket(opts: {
         )
         if (tabIdx !== -1) {
           const tab = tabs.value[tabIdx] as TerminalTab
+          const closedWorkspaceId = workspaceIdOfTab(tab)
+          const workspaceIdxBefore = tabs.value
+            .slice(0, tabIdx)
+            .filter((candidate) => workspaceIdOfTab(candidate) === closedWorkspaceId).length
           for (const leaf of getAllLeaves(tab.layout)) {
             delete termRefs[leaf.paneId]
             clearFileWorkspaceState(leaf.paneId)
@@ -329,7 +339,14 @@ export function useSyncWebSocket(opts: {
           if (tabs.value.length === 0) {
             newTab()
           } else if (activePaneId.value === tab.paneId) {
-            activePaneId.value = tabs.value[Math.min(tabIdx, tabs.value.length - 1)].paneId
+            const successor = pickSuccessorTab(
+              tabs.value,
+              closedWorkspaceId,
+              workspaceIdxBefore,
+              tabIdx,
+              workspaceIdOfTab
+            )
+            activePaneId.value = successor?.paneId ?? null
             persist()
             nextTick(() => focusActive())
           }

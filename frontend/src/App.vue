@@ -318,6 +318,7 @@ import { useSyncWebSocket } from './composables/useSyncWebSocket'
 import { isWebPreviewInput } from './utils/previewRouting'
 import { isWindowsClient } from './utils/clientPlatform'
 import { nextRevealNavGen, currentRevealNavGen } from './utils/navGen'
+import { pickSuccessorTab } from './utils/tabSuccessor'
 import { initMonitorHistory } from './composables/useMonitor'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
 import { useToast } from 'vue-toastification'
@@ -424,6 +425,12 @@ const { isMobile } = useIsMobile()
 
 // Workspace filtering
 const { workspaces, activeWorkspaceId, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace, cancelPendingWorkspaceActivation } = useWorkspaces()
+
+function workspaceIdOfTab(tab: Tab): string | null {
+  if (tab.type === 'plugin') return tab.workspaceId ?? null
+  return matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)?.id ?? null
+}
+
 const activeWorkspace = computed(() => workspaces.value.find((w) => w.id === activeWorkspaceId.value))
 const activeWorkspaceAbbr = computed(() =>
   activeWorkspace.value ? resolveAbbr(activeWorkspace.value) : ''
@@ -1199,6 +1206,11 @@ async function closeTab(tabId: string) {
   const idx = tabs.value.findIndex((t) => t.paneId === tabId)
   if (idx === -1) return
 
+  const closedWorkspaceId = workspaceIdOfTab(tab)
+  const workspaceIdxBefore = tabs.value
+    .slice(0, idx)
+    .filter((candidate) => workspaceIdOfTab(candidate) === closedWorkspaceId).length
+
   tabs.value.splice(idx, 1)
   if (tab.type === 'plugin') persistNow()
 
@@ -1209,11 +1221,17 @@ async function closeTab(tabId: string) {
   }
 
   if (activePaneId.value === tabId) {
-    const newIdx = Math.min(idx, tabs.value.length - 1)
+    const successor = pickSuccessorTab(
+      tabs.value,
+      closedWorkspaceId,
+      workspaceIdxBefore,
+      idx,
+      workspaceIdOfTab
+    )
     // Close-induced reselection is the newest navigation: supersede any in-flight
     // deferred/supervised hop so a late older-generation commit cannot clobber it.
     nextRevealNavGen()
-    activePaneId.value = tabs.value[newIdx].paneId
+    activePaneId.value = successor?.paneId ?? null
   }
 
   if (tab.type !== 'plugin') persist()

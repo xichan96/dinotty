@@ -9,7 +9,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
     time::Instant,
@@ -56,7 +56,7 @@ pub enum SshCmd {
     Close,
 }
 
-/// Force-flush `sync_buffer` when accumulated data exceeds this limit (256KB).
+/// Force-flush buffered synchronized output at this limit (256KB).
 /// Prevents massive single payloads that freeze the frontend UI thread.
 const SYNC_BUFFER_LIMIT: usize = 256 * 1024;
 /// Maximum size of a single chunk sent to clients during flush.
@@ -74,6 +74,13 @@ pub enum SessionStatus {
 pub struct CwdState {
     pub cwd: PathBuf,
     pub sniff_buf: Vec<u8>,
+}
+
+#[derive(Default)]
+pub struct SyncState {
+    active: bool,
+    buffer: Vec<String>,
+    bytes: usize,
 }
 
 pub struct PendingCommandResult {
@@ -94,11 +101,11 @@ pub enum SessionClientEvent {
         pane_id: String,
     },
     /// DEC mode 2026 transaction boundary. `SyncBegin` is enqueued BEFORE any
-    /// subsequent Output (which goes to the `sync_buffer` while `sync_active` is
-    /// true); `SyncEnd` is enqueued AFTER `flush_sync_buffer` drains the buffer,
-    /// so the on-wire order is [buffered Output chunks] → `SyncEnd` → [post-sync
-    /// live Output]. Frontend uses these to divert Output into a transaction
-    /// buffer and write it to xterm as a single batch, eliminating per-chunk
+    /// subsequent Output (which is buffered while synchronized output is
+    /// active); `SyncEnd` is enqueued AFTER that buffer is drained, so the
+    /// on-wire order is [buffered Output chunks] → `SyncEnd` → [post-sync live
+    /// Output]. Frontend uses these to divert Output into a transaction buffer
+    /// and write it to xterm as a single batch, eliminating per-chunk
     /// intermediate rAF repaints during a synchronized redraw.
     SyncBegin,
     SyncEnd,
@@ -143,12 +150,10 @@ pub struct Session {
     #[allow(clippy::type_complexity)]
     pub tauri_on_exit: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
     pub cwd_state: Mutex<CwdState>,
-    /// DEC mode 2026: synchronized output active flag
-    pub sync_active: AtomicBool,
-    /// Buffered output while synchronized output mode is active
-    pub sync_buffer: Mutex<Vec<String>>,
-    /// Running byte count of `sync_buffer` to avoid O(n) sum on every broadcast
-    pub sync_buffer_bytes: AtomicUsize,
+    /// DEC mode 2026 state. Always acquire this before `clients` when both are needed.
+    pub sync: Mutex<SyncState>,
+    #[cfg(test)]
+    pub(crate) sync_disable_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Sender for debounced resize requests (None = no pending resize)
     pub(crate) resize_tx: watch::Sender<Option<(u64, u16, u16)>>,
     /// Channel to send commands (input/resize/close) to the SSH reader task.
@@ -369,7 +374,7 @@ impl Session {
         // PTY + size + screen resize (async — uses backend lock). Resize also
         // breaks sync mode if active (apply_and_broadcast_resize / Step 1b),
         // but resize_async does not break sync itself — handle that here.
-        if self.sync_active.load(Ordering::Relaxed) {
+        if self.is_sync_active() {
             self.set_sync_mode(false);
         }
         self.resize_async(cols, rows).await?;
@@ -452,12 +457,12 @@ impl Session {
         // terminal to end sync mode on resize, and doing so prevents the
         // buffer-stuck bug where a PTY that goes silent mid-sync (e.g. Claude
         // Code waiting on an API response during a window resize) leaves
-        // sync_active=true forever and the client sees a frozen screen.
+        // synchronized output active forever and the client sees a frozen screen.
         //
         // We flush BEFORE resizing so clients receive the pre-resize buffered
         // output at the old dimensions, then the resize event, then
         // post-resize output at the new dimensions — coherent ordering.
-        if self.sync_active.load(Ordering::Relaxed) {
+        if self.is_sync_active() {
             tracing::debug!("apply_and_broadcast_resize: breaking sync mode for resize, pane=?");
             self.set_sync_mode(false);
         }
@@ -553,40 +558,52 @@ impl Session {
         if self.is_exited() {
             return;
         }
-        if self.sync_active.load(Ordering::Relaxed) {
-            let mut buf =
-                self.sync_buffer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut sync = self.sync.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if sync.active {
             let len = msg.len();
-            buf.push(msg.to_string());
-            let total = self.sync_buffer_bytes.fetch_add(len, Ordering::Relaxed) + len;
-            if total < SYNC_BUFFER_LIMIT {
+            sync.buffer.push(msg.to_string());
+            sync.bytes += len;
+            if sync.bytes < SYNC_BUFFER_LIMIT {
                 return;
             }
-            drop(buf);
-            self.flush_sync_buffer();
+            self.flush_sync_buffer_locked(&mut sync);
             return;
         }
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         Self::send_chunk_to_clients(&mut clients, msg);
     }
 
+    pub fn is_sync_active(&self) -> bool {
+        self.sync.lock().unwrap_or_else(std::sync::PoisonError::into_inner).active
+    }
+
     /// Enable or disable synchronized output mode (DEC mode 2026).
-    /// When enabling: mark `sync_active` first (so subsequent `broadcast()` calls
-    /// divert Output to `sync_buffer` instead of going direct), then enqueue
-    /// `SyncBegin` to clients — it lands in the per-client mpsc channel before
-    /// any buffered Output could be flushed.
-    /// When disabling: flush `sync_buffer` (buffered chunks land in client
-    /// channels), enqueue `SyncEnd`, THEN clear `sync_active` so the broadcast
-    /// task resumes direct sends. The on-wire order per client is therefore
-    /// [buffered Output] → `SyncEnd` → [post-sync live Output].
+    /// When enabling: mark the sync state active, then enqueue `SyncBegin` while
+    /// holding the sync guard, so no subsequent Output can overtake it.
+    /// When disabling: mark inactive, flush buffered Output, and enqueue
+    /// `SyncEnd` while holding the same guard. A concurrent `broadcast()` then
+    /// lands after `SyncEnd` in each client's mpsc channel.
     pub fn set_sync_mode(&self, active: bool) {
+        let mut sync = self.sync.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if active {
-            self.sync_active.store(true, Ordering::Relaxed);
+            sync.active = true;
             self.enqueue_control(&SessionClientEvent::SyncBegin);
         } else {
-            self.flush_sync_buffer();
+            if !sync.active {
+                return;
+            }
+            sync.active = false;
+            self.flush_sync_buffer_locked(&mut sync);
+            #[cfg(test)]
+            if let Some(hook) = self
+                .sync_disable_hook
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                hook();
+            }
             self.enqueue_control(&SessionClientEvent::SyncEnd);
-            self.sync_active.store(false, Ordering::Relaxed);
         }
     }
 
@@ -606,13 +623,13 @@ impl Session {
     /// Flush buffered output accumulated during synchronized output mode.
     /// Breaks large payloads into chunks to avoid freezing the frontend UI thread.
     pub fn flush_sync_buffer(&self) {
-        let data: Vec<String> = {
-            let mut buf =
-                self.sync_buffer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let d = std::mem::take(&mut *buf);
-            self.sync_buffer_bytes.store(0, Ordering::Relaxed);
-            d
-        };
+        let mut sync = self.sync.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.flush_sync_buffer_locked(&mut sync);
+    }
+
+    fn flush_sync_buffer_locked(&self, sync: &mut SyncState) {
+        let data = std::mem::take(&mut sync.buffer);
+        sync.bytes = 0;
         if data.is_empty() {
             return;
         }
@@ -1639,14 +1656,15 @@ impl SessionManager {
 #[cfg(test)]
 mod tests;
 
-/// Covers `kill_and_remove`'s attention-ledger wiring specifically (session/tests.rs is out of
-/// scope for this change and only covers layout helpers). A stub `Session` with
-/// `SessionBackend::Exited` avoids spawning a real PTY/child process.
+/// Session regressions that use a stub with `SessionBackend::Exited` to avoid
+/// spawning a real PTY/child process.
 #[cfg(test)]
-mod kill_and_remove_notifier_tests {
+mod session_stub_tests {
     use super::*;
     use crate::notification::NotificationBroadcast;
-    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::mpsc as std_mpsc;
+    use std::time::Duration;
 
     fn stub_session() -> Arc<Session> {
         let (resize_tx, _resize_rx) = watch::channel(None);
@@ -1665,9 +1683,8 @@ mod kill_and_remove_notifier_tests {
             shell_type: "test".to_string(),
             tauri_on_exit: Mutex::new(None),
             cwd_state: Mutex::new(CwdState { cwd: PathBuf::from("/"), sniff_buf: Vec::new() }),
-            sync_active: AtomicBool::new(false),
-            sync_buffer: Mutex::new(Vec::new()),
-            sync_buffer_bytes: AtomicUsize::new(0),
+            sync: Mutex::new(SyncState::default()),
+            sync_disable_hook: Mutex::new(None),
             resize_tx,
             ssh_cmd_tx: Mutex::new(None),
             ssh_handle: tokio::sync::Mutex::new(None),
@@ -1678,6 +1695,107 @@ mod kill_and_remove_notifier_tests {
             output_rx: Mutex::new(Some(output_rx)),
             pending_results: Mutex::new(Vec::new()),
         })
+    }
+
+    fn add_ready_client(session: &Session) -> mpsc::Receiver<SessionClientEvent> {
+        let (client_id, rx) = session.add_client();
+        let clients = session.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        clients
+            .iter()
+            .find(|client| client.id == client_id)
+            .expect("newly added client must exist")
+            .snapshot_pending
+            .store(false, Ordering::Relaxed);
+        rx
+    }
+
+    fn assert_output(event: SessionClientEvent, expected: &str) {
+        match event {
+            SessionClientEvent::Output(output) => assert_eq!(output, expected),
+            _ => panic!("expected Output event"),
+        }
+    }
+
+    #[test]
+    fn sync_wire_order_is_begin_buffer_end_live() {
+        let session = stub_session();
+        let mut rx = add_ready_client(&session);
+
+        session.set_sync_mode(true);
+        session.broadcast("BUF");
+        session.set_sync_mode(false);
+        session.broadcast("LIVE");
+
+        assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncBegin)));
+        assert_output(rx.try_recv().expect("buffered output"), "BUF");
+        assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncEnd)));
+        assert_output(rx.try_recv().expect("live output"), "LIVE");
+        assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn sync_teardown_blocks_concurrent_broadcast_until_after_sync_end() {
+        let session = stub_session();
+        let mut rx = add_ready_client(&session);
+        session.set_sync_mode(true);
+        session.broadcast("BUF");
+
+        let weak_session = Arc::downgrade(&session);
+        let (started_tx, started_rx) = std_mpsc::channel();
+        let (finished_tx, finished_rx) = std_mpsc::channel();
+        let thread_handle = Arc::new(Mutex::new(None));
+        let hook_thread_handle = Arc::clone(&thread_handle);
+        *session.sync_disable_hook.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(Box::new(move || {
+                let broadcast_session = weak_session.upgrade().expect("session remains alive");
+                let handle = std::thread::spawn(move || {
+                    started_tx.send(()).expect("teardown hook remains alive");
+                    broadcast_session.broadcast("LIVE");
+                    let _ = finished_tx.send(());
+                });
+                *hook_thread_handle.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(handle);
+
+                started_rx
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("concurrent broadcaster must start");
+                assert!(
+                    matches!(
+                        finished_rx.recv_timeout(Duration::from_millis(100)),
+                        Err(std_mpsc::RecvTimeoutError::Timeout)
+                    ),
+                    "concurrent broadcast passed the sync guard before teardown completed"
+                );
+            }));
+
+        session.set_sync_mode(false);
+        thread_handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .expect("hook spawned broadcaster")
+            .join()
+            .expect("concurrent broadcaster completed");
+
+        assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncBegin)));
+        assert_output(rx.try_recv().expect("buffered output"), "BUF");
+        assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncEnd)));
+        assert_output(rx.try_recv().expect("live output"), "LIVE");
+        assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn double_sync_disable_emits_exactly_one_sync_end() {
+        let session = stub_session();
+        let mut rx = add_ready_client(&session);
+
+        session.set_sync_mode(true);
+        session.set_sync_mode(false);
+        session.set_sync_mode(false);
+
+        assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncBegin)));
+        assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncEnd)));
+        assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
     }
 
     #[tokio::test]

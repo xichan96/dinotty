@@ -1,7 +1,7 @@
 #![allow(clippy::too_many_lines)]
 use crate::event_bus::BusEvent;
 use crate::platform::shell;
-use crate::session::{Session, SessionBackend, SessionManager, SessionStatus, SyncMsg};
+use crate::session::{Session, SessionBackend, SessionManager, SessionStatus, SyncMsg, SyncState};
 use crate::vt_screen::VirtualScreen;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
@@ -27,7 +27,7 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
     // Watchdog timer: force-flush the sync buffer if the PTY goes silent
     // mid-sync-mode. Without this, the timeout check below only fires when
     // output_rx.recv() returns a new message — a silent PTY (e.g. Claude
-    // Code waiting on an API response mid-redraw) leaves sync_active=true
+    // Code waiting on an API response mid-redraw) leaves sync mode active
     // forever, buffering all subsequent output and freezing the client
     // until a manual refresh. Polling every 100ms is cheap and well below
     // the 500ms timeout threshold.
@@ -50,7 +50,7 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
                     batch.extend_from_slice(&data);
                 }
 
-                if session.sync_active.load(std::sync::atomic::Ordering::Relaxed) {
+                if session.is_sync_active() {
                     if let Some(started) = sync_started_at {
                         if started.elapsed() > sync_timeout {
                             tracing::warn!(
@@ -120,7 +120,7 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
                 // PTY-silent watchdog: if sync mode is still active past the
                 // timeout with no new output, force-flush so the client
                 // unblocks. This is the path that was missing before.
-                if session.sync_active.load(std::sync::atomic::Ordering::Relaxed) {
+                if session.is_sync_active() {
                     if let Some(started) = sync_started_at {
                         if started.elapsed() > sync_timeout {
                             tracing::warn!(
@@ -297,9 +297,9 @@ pub fn create_session(
             cwd: initial_cwd,
             sniff_buf: Vec::new(),
         }),
-        sync_active: std::sync::atomic::AtomicBool::new(false),
-        sync_buffer: std::sync::Mutex::new(Vec::new()),
-        sync_buffer_bytes: std::sync::atomic::AtomicUsize::new(0),
+        sync: std::sync::Mutex::new(SyncState::default()),
+        #[cfg(test)]
+        sync_disable_hook: std::sync::Mutex::new(None),
         resize_tx,
         ssh_cmd_tx: std::sync::Mutex::new(None),
         ssh_handle: tokio::sync::Mutex::new(None),

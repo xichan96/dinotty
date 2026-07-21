@@ -30,7 +30,7 @@ pub struct CommandResult {
 /// Tracks a pending command for collecting output
 struct PendingCommand {
     start_time: Instant,
-    output_buf: String,
+    output_buf: Vec<u8>,
 }
 
 /// DEC mode 2026 synchronized output events
@@ -247,7 +247,10 @@ impl VirtualScreen {
 
     /// Get the collected stdout from the current/last command
     pub fn take_command_output(&mut self) -> String {
-        self.pending_command.as_mut().map(|p| std::mem::take(&mut p.output_buf)).unwrap_or_default()
+        self.pending_command
+            .as_mut()
+            .map(|p| String::from_utf8_lossy(&std::mem::take(&mut p.output_buf)).into_owned())
+            .unwrap_or_default()
     }
 
     /// Check if shell integration (OSC 133) has been detected
@@ -323,13 +326,16 @@ impl VirtualScreen {
     pub fn begin_command_tracking(&mut self) {
         self.command_state = CommandState::CommandStart;
         self.pending_command =
-            Some(PendingCommand { start_time: Instant::now(), output_buf: String::new() });
+            Some(PendingCommand { start_time: Instant::now(), output_buf: Vec::new() });
     }
 
     /// Force-finish command tracking (e.g. on timeout). Returns collected output.
     pub fn finish_command_tracking(&mut self, exit_code: i32) -> (String, CommandResult) {
         let pending = self.pending_command.take();
-        let stdout = pending.as_ref().map(|p| p.output_buf.clone()).unwrap_or_default();
+        let stdout = pending
+            .as_ref()
+            .map(|p| String::from_utf8_lossy(&p.output_buf).into_owned())
+            .unwrap_or_default();
         let duration_ms = pending.map_or(0, |p| p.start_time.elapsed().as_millis() as u64);
 
         let result = CommandResult { exit_code, duration_ms, method: "timeout".to_string() };
@@ -347,7 +353,7 @@ impl VirtualScreen {
                 // Only collect printable ASCII and UTF-8 text, skip ESC sequences
                 for &b in data {
                     if b >= 0x20 && b != 0x7f {
-                        pending.output_buf.push(b as char);
+                        pending.output_buf.push(b);
                     }
                 }
                 // Cap buffer at 1MB
@@ -856,7 +862,7 @@ impl Perform for ScreenPerformer<'_> {
                 }
                 *self.command_state = CommandState::CommandStart;
                 *self.pending_command =
-                    Some(PendingCommand { start_time: Instant::now(), output_buf: String::new() });
+                    Some(PendingCommand { start_time: Instant::now(), output_buf: Vec::new() });
             }
             b"D" => {
                 // Command finished
@@ -877,7 +883,9 @@ impl Perform for ScreenPerformer<'_> {
                 let stdout = self
                     .pending_command
                     .as_mut()
-                    .map(|p| std::mem::take(&mut p.output_buf))
+                    .map(|p| {
+                        String::from_utf8_lossy(&std::mem::take(&mut p.output_buf)).into_owned()
+                    })
                     .unwrap_or_default();
 
                 self.command_results.push(CommandResult {
@@ -1334,6 +1342,40 @@ mod csi_dispatch_tests {
         assert!(!vs.is_using_alternate());
         vs.feed(b"\x1b[?1049h");
         assert!(vs.is_using_alternate());
+    }
+
+    #[test]
+    fn feed_survives_multibyte_output_exceeding_cap() {
+        let mut vs = VirtualScreen::new(80, 24);
+        vs.begin_command_tracking();
+        assert_eq!(vs.command_state, CommandState::CommandStart);
+        assert!(vs.pending_command.is_some());
+
+        // The odd-length ASCII prefix made the old String drain land inside a
+        // multi-byte char, while 1024-byte reads split the Chinese UTF-8 input.
+        let mut bulk = b"PTY".to_vec();
+        while bulk.len() <= 1024 * 1024 {
+            bulk.extend_from_slice("你好世界".as_bytes());
+        }
+
+        let mut chunks = bulk.chunks(1024);
+        let first_chunk = chunks.next().unwrap();
+        assert!(std::str::from_utf8(first_chunk).is_err());
+        vs.feed(first_chunk);
+        assert!(!vs.pending_command.as_ref().unwrap().output_buf.is_empty());
+        for chunk in chunks {
+            vs.feed(chunk);
+        }
+
+        // A separate post-cap feed must still reach the parser rather than
+        // repeatedly panicking in the collection branch.
+        vs.feed(b"\r\nPOST_CAP_MARKER\r\n");
+        assert!(vs.snapshot_plain().contains("POST_CAP_MARKER"));
+
+        let output = vs.take_command_output();
+        assert!(std::str::from_utf8(output.as_bytes()).is_ok());
+        assert!(output.contains("你好"));
+        assert!(output.contains("世界"));
     }
 }
 

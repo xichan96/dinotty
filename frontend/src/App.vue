@@ -333,6 +333,7 @@ import {
 } from './composables/useNotification'
 import { useNotificationPresentation } from './composables/useNotificationPresentation'
 import { getIsAppForeground, onAppForegroundGain } from './composables/useAppForeground'
+import { getEffectiveSuperviseReload } from './composables/useDeviceSuperviseReload'
 import { usePluginLoader } from './composables/usePluginLoader'
 import PluginView from './components/plugin/PluginView.vue'
 import {
@@ -1932,7 +1933,12 @@ const keyActions: Record<string, () => void> = {
     termRefs[tab.activePaneId]?.toggleSearch()
   },
   missionControl: () => openOverview(),
-  superviseTabs: () => void supervise((id) => activateTab(id, { defer: true })),
+  superviseTabs: () =>
+    void supervise((id) => activateTab(id, { defer: true }))
+      .then((activated) => {
+        if (activated && getEffectiveSuperviseReload()) reloadApp()
+      })
+      .catch(console.error),
   sshConnect: () => sshPanelRef.value?.open(),
   fontSizeUp: () => adjustActiveTerminalFontSize(1),
   fontSizeDown: () => adjustActiveTerminalFontSize(-1),

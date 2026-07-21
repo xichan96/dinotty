@@ -81,6 +81,8 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub confirm_before_close_tab: bool,
     #[serde(default)]
+    pub reload_after_supervise_tabs: bool,
+    #[serde(default)]
     pub space_confirms_dialogs: bool,
     #[serde(default = "default_locale")]
     pub locale: String,
@@ -1068,6 +1070,7 @@ impl Default for Settings {
             workspace_badge_mode: None,
             windows_alt_as_cmd: false,
             confirm_before_close_tab: true,
+            reload_after_supervise_tabs: false,
             space_confirms_dialogs: false,
             locale: default_locale(),
             panel_position: PanelPosition::default(),

@@ -47,6 +47,7 @@ export interface SettingsData {
   show_virtual_keyboard: boolean
   workspace_badge_mode: WorkspaceBadgeMode | null
   confirm_before_close_tab: boolean
+  reload_after_supervise_tabs: boolean
   space_confirms_dialogs: boolean
   windowsAltAsCmd: boolean
   locale: string
@@ -384,6 +385,7 @@ export const settings = reactive<SettingsData>({
   show_virtual_keyboard: false,
   workspace_badge_mode: null,
   confirm_before_close_tab: true,
+  reload_after_supervise_tabs: false,
   space_confirms_dialogs: false,
   windowsAltAsCmd: isWindowsClient,
   locale: 'zh',
@@ -582,6 +584,7 @@ export async function saveSettings() {
     if (payload.action_keyboard_user_default) {
       payload.action_keyboard_user_default = cloneWithoutIcons(payload.action_keyboard_user_default)
     }
+    delete (payload as unknown as Record<string, unknown>).reload_after_supervise_tabs
     const notification = payload.notification as unknown as Record<string, unknown>
     for (const key of [
       'presentation_enabled', 'channels', 'sounds', 'dnd_level', 'ignore_current_tab',

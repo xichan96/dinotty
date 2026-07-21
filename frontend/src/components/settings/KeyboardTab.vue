@@ -79,6 +79,36 @@
             <p v-if="def.id === 'superviseTabs' && isWindowsClient" class="settings-hint">
               {{ t('keybinding.superviseTabsHint') }}
             </p>
+            <template v-if="def.id === 'superviseTabs'">
+              <div class="settings-row">
+                <label>{{ t('keybinding.superviseTabsReload') }}</label>
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    v-model="reloadAfterSuperviseTabs"
+                    data-setting="reload-after-supervise-tabs"
+                  />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </label>
+                <button
+                  v-if="hasOverride()"
+                  type="button"
+                  class="setting-reset"
+                  title="reset to default"
+                  aria-label="reset to default"
+                  @click="resetOverride()"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                </button>
+              </div>
+              <p class="settings-hint" data-hint="reload-after-supervise-tabs">
+                {{ t('keybinding.superviseTabsReloadHint') }}
+                {{ t('keybinding.superviseTabsReloadDeviceHint') }}
+              </p>
+            </template>
           </template>
         </CollapsibleSection>
 
@@ -624,8 +654,10 @@ import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
 import { APP_ACTIONS, APP_ACTION_IDS } from '../../utils/appActionCatalog'
 import { getApiBase, apiUrl, authFetch } from '../../composables/apiBase'
 import { isWindowsClient } from '../../utils/clientPlatform'
+import { useDeviceSuperviseReload } from '../../composables/useDeviceSuperviseReload'
 
 const { settings, saveSettings } = useSettings()
+const { hasOverride, reloadAfterSuperviseTabs, resetOverride } = useDeviceSuperviseReload()
 const { t } = useI18n()
 const { defs, getBinding, formatBinding, isReadOnly } = useKeybindings()
 const appDefs = computed(() => defs.filter((def) => (def.kind ?? 'app') === 'app'))

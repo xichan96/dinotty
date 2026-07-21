@@ -24,7 +24,7 @@ function normalize(cfg: ActionKeyboardConfig): ActionKeyboardConfig {
 }
 
 describe('app action catalog', () => {
-  it('matches the 19 supported app keybinding registry entries in order', () => {
+  it('matches the 20 supported app keybinding registry entries in order', () => {
     expect(APP_ACTIONS.map(({ id }) => id)).toEqual([
       'togglePalette',
       'openBookmarks',
@@ -44,9 +44,10 @@ describe('app action catalog', () => {
       'sshConnect',
       'fontSizeUp',
       'fontSizeDown',
+      'reloadApp',
       'fontSizeReset',
     ])
-    expect(APP_ACTIONS).toHaveLength(19)
+    expect(APP_ACTIONS).toHaveLength(20)
   })
 
   it('uses the registry icons for actions whose old catalog icons differed', () => {

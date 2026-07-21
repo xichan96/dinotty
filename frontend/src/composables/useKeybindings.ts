@@ -24,6 +24,7 @@ import {
   ArrowRightToLine,
   Delete,
   Layers,
+  RefreshCw,
 } from 'lucide-vue-next'
 
 export interface KeyBinding {
@@ -159,6 +160,12 @@ export const defs: KeyBindingDef[] = [
     defaultBinding: { key: '-', shift: false },
     icon: ArrowDown,
     titleKey: 'keybinding.fontSizeDown',
+  },
+  {
+    id: 'reloadApp',
+    defaultBinding: { key: 'r', shift: false },
+    icon: RefreshCw,
+    titleKey: 'keybinding.reloadApp',
   },
   {
     id: 'fontSizeReset',

@@ -34,6 +34,37 @@ fn settings_empty_json_is_valid() {
     assert_eq!(settings.upload_dir, default_upload_dir());
 }
 
+#[test]
+fn old_settings_without_default_workspace_identity_still_deserialize() {
+    let settings: Settings = serde_json::from_str(r#"{"default_workspace_root":"/tmp/work"}"#)
+        .expect("settings written before default workspace identity should still parse");
+
+    assert_eq!(settings.default_workspace_root.as_deref(), Some("/tmp/work"));
+    assert_eq!(settings.default_workspace_name, None);
+    assert_eq!(settings.default_workspace_abbr, None);
+    assert_eq!(settings.default_workspace_color, None);
+    assert_eq!(settings.default_workspace_tab_badge, None);
+}
+
+#[test]
+fn default_workspace_identity_survives_settings_round_trip() {
+    let settings = Settings {
+        default_workspace_name: Some("Home".into()),
+        default_workspace_abbr: Some("HM".into()),
+        default_workspace_color: Some("#123456".into()),
+        default_workspace_tab_badge: Some(false),
+        ..Settings::default()
+    };
+
+    let serialized = serde_json::to_string(&settings).unwrap();
+    let restored: Settings = serde_json::from_str(&serialized).unwrap();
+
+    assert_eq!(restored.default_workspace_name.as_deref(), Some("Home"));
+    assert_eq!(restored.default_workspace_abbr.as_deref(), Some("HM"));
+    assert_eq!(restored.default_workspace_color.as_deref(), Some("#123456"));
+    assert_eq!(restored.default_workspace_tab_badge, Some(false));
+}
+
 // 验证后端能反序列化前端使用的 windowsAltAsCmd camelCase 字段。
 #[test]
 fn settings_deserializes_windows_alt_as_cmd_camel_case() {

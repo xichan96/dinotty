@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useWorkspaces } from '../useWorkspaces'
+import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../useWorkspaces'
+import { settings } from '../useSettings'
 import type { Workspace } from '../../types/workspace'
 import type { TerminalTab } from '../../types/pane'
 import type { TabInfo } from '../../components/terminal/TabBar.vue'
@@ -23,14 +24,37 @@ function makeTab(paneId: string, cwd?: string): TerminalTab {
 }
 
 describe('useWorkspaces', () => {
-  const { workspaces, matchWorkspace, filterTabs } = useWorkspaces()
+  const { workspaces, activeWorkspaceId, activeWorkspace, matchWorkspace, filterTabs } = useWorkspaces()
 
   beforeEach(() => {
+    settings.default_workspace_root = null
+    settings.default_workspace_name = null
+    settings.default_workspace_abbr = null
+    settings.default_workspace_color = null
+    settings.default_workspace_tab_badge = null
+    activeWorkspaceId.value = null
     workspaces.value = [
       { id: 'ws1', name: 'dinotty', path: '/Users/talentc/rust/dinotty', order: 0 },
       { id: 'ws2', name: 'my-app', path: '/Users/talentc/projects/my-app', order: 1 },
       { id: 'ws3', name: 'rust', path: '/Users/talentc/rust', order: 2 },
     ]
+  })
+
+  it('uses the default workspace entity when no workspace id is active', () => {
+    settings.default_workspace_name = 'Home'
+    settings.default_workspace_abbr = 'HM'
+    settings.default_workspace_color = '#123456'
+    settings.default_workspace_root = '/Users/me'
+
+    expect(activeWorkspace.value).toEqual({
+      id: DEFAULT_WORKSPACE_ID,
+      name: 'Home',
+      path: '/Users/me',
+      order: 0,
+      abbr: 'HM',
+      color: '#123456',
+      tab_badge: true,
+    })
   })
 
   describe('matchWorkspace', () => {

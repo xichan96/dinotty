@@ -40,6 +40,10 @@ export interface SettingsData {
   upload_dir: string
   default_base_dir?: string | null
   default_workspace_root?: string | null
+  default_workspace_name?: string | null
+  default_workspace_abbr?: string | null
+  default_workspace_color?: string | null
+  default_workspace_tab_badge?: boolean | null
   upload_cap_mb: number
   upload_file_cap_mb: number
   upload_cap_count: number

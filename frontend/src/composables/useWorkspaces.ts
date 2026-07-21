@@ -10,10 +10,29 @@ import {
   apiDeactivateWorkspace,
   apiReorderWorkspaces,
 } from './useWorkspaceApi'
+import { settings } from './useSettings'
+import { useI18n } from './useI18n'
+
+export const DEFAULT_WORKSPACE_ID = '__default__'
 
 const workspaces = ref<Workspace[]>([])
 const activeWorkspaceId = ref<string | null>(null)
+const { t } = useI18n()
 let wsNavGen = 0
+
+export const defaultWorkspace = computed<Workspace>(() => ({
+  id: DEFAULT_WORKSPACE_ID,
+  name: settings.default_workspace_name?.trim() || t('workspace.all'),
+  path: settings.default_workspace_root?.trim() || '',
+  order: 0,
+  ...(settings.default_workspace_abbr?.trim()
+    ? { abbr: settings.default_workspace_abbr.trim() }
+    : {}),
+  ...(settings.default_workspace_color?.trim()
+    ? { color: settings.default_workspace_color.trim() }
+    : {}),
+  tab_badge: settings.default_workspace_tab_badge !== false,
+}))
 
 export function useWorkspaces() {
   async function loadWorkspaces() {
@@ -130,17 +149,21 @@ export function useWorkspaces() {
     })
   }
 
-  const activeWorkspacePath = computed(
-    () => workspaces.value.find((w) => w.id === activeWorkspaceId.value)?.path
+  const activeWorkspace = computed(() =>
+    activeWorkspaceId.value === null
+      ? defaultWorkspace.value
+      : workspaces.value.find((w) => w.id === activeWorkspaceId.value)
   )
 
-  const activeWorkspaceName = computed(
-    () => workspaces.value.find((w) => w.id === activeWorkspaceId.value)?.name
-  )
+  const activeWorkspacePath = computed(() => activeWorkspace.value?.path || undefined)
+
+  const activeWorkspaceName = computed(() => activeWorkspace.value?.name)
 
   return {
     workspaces,
+    defaultWorkspace,
     activeWorkspaceId,
+    activeWorkspace,
     activeWorkspacePath,
     activeWorkspaceName,
     loadWorkspaces,

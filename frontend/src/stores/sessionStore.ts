@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed, nextTick } from 'vue'
 import type { Tab, TerminalTab, PluginTab } from '../types/pane'
+import type { Workspace } from '../types/workspace'
 import type { TabInfo } from '../components/terminal/TabBar.vue'
 import { findLeaf, findFirstLeaf, getAllLeaves } from '../types/pane'
-import { useWorkspaces } from '../composables/useWorkspaces'
+import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../composables/useWorkspaces'
+import { resolveAbbr, resolveColor } from '../utils/workspaceIcon'
 
 export const useSessionStore = defineStore('session', () => {
   // ── State ──────────────────────────────────────────────
@@ -16,17 +18,24 @@ export const useSessionStore = defineStore('session', () => {
   /** Currently active tab (or undefined) */
   const activeTab = computed(() => tabs.value.find((t) => t.paneId === activePaneId.value))
 
-  const { workspaces, matchWorkspace } = useWorkspaces()
+  const { workspaces, defaultWorkspace, matchWorkspace } = useWorkspaces()
 
-  function buildWorkspace(ws: { id: string; abbr?: string; name: string; color?: string; connection_id?: string }): TabInfo['workspace'] {
+  function buildWorkspace(ws: Workspace): TabInfo['workspace'] {
     const fallback = Array.from(ws.name).slice(0, 3).join('')
+    const isDefault = ws.id === DEFAULT_WORKSPACE_ID
     return {
       id: ws.id,
-      abbr: ws.abbr || fallback || undefined,
+      abbr: isDefault ? resolveAbbr(ws) : ws.abbr || fallback || undefined,
       name: ws.name,
-      color: ws.color,
+      color: isDefault ? resolveColor(ws) : ws.color,
       remote: !!ws.connection_id,
     }
+  }
+
+  function visibleWorkspaceBadge(ws: Workspace): TabInfo['workspace'] {
+    return ws.id === DEFAULT_WORKSPACE_ID && ws.tab_badge === false
+      ? undefined
+      : buildWorkspace(ws)
   }
 
   /** Tab list for TabBar component */
@@ -43,11 +52,13 @@ export const useSessionStore = defineStore('session', () => {
         shellType: t.type === 'terminal' ? findLeaf(t.layout, t.activePaneId)?.shell_type : undefined,
       }
       if (t.type === 'terminal') {
-        const ws = matchWorkspace(t.cwd ?? '', t.connectionId, t.workspaceId)
-        if (ws) info.workspace = buildWorkspace(ws)
-      } else if (t.workspaceId) {
-        const ws = workspaces.value.find((w) => w.id === t.workspaceId)
-        if (ws) info.workspace = buildWorkspace(ws)
+        const ws = matchWorkspace(t.cwd ?? '', t.connectionId, t.workspaceId) ?? defaultWorkspace.value
+        info.workspace = visibleWorkspaceBadge(ws)
+      } else {
+        const ws = t.workspaceId
+          ? workspaces.value.find((w) => w.id === t.workspaceId)
+          : defaultWorkspace.value
+        if (ws) info.workspace = visibleWorkspaceBadge(ws)
       }
       return info
     })

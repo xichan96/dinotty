@@ -59,6 +59,14 @@ pub struct Settings {
     pub default_base_dir: Option<String>,
     #[serde(default)]
     pub default_workspace_root: Option<String>,
+    #[serde(default)]
+    pub default_workspace_name: Option<String>,
+    #[serde(default)]
+    pub default_workspace_abbr: Option<String>,
+    #[serde(default)]
+    pub default_workspace_color: Option<String>,
+    #[serde(default)]
+    pub default_workspace_tab_badge: Option<bool>,
     #[serde(default = "default_upload_cap_mb")]
     pub upload_cap_mb: u64,
     #[serde(default = "default_upload_cap_count")]
@@ -1061,6 +1069,10 @@ impl Default for Settings {
             upload_dir: default_upload_dir(),
             default_base_dir: None,
             default_workspace_root: None,
+            default_workspace_name: None,
+            default_workspace_abbr: None,
+            default_workspace_color: None,
+            default_workspace_tab_badge: None,
             upload_cap_mb: default_upload_cap_mb(),
             upload_cap_count: default_upload_cap_count(),
             upload_file_cap_mb: 0,

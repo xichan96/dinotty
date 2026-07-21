@@ -423,8 +423,7 @@ const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = us
 const { isMobile } = useIsMobile()
 
 // Workspace filtering
-const { workspaces, activeWorkspaceId, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace, cancelPendingWorkspaceActivation } = useWorkspaces()
-const activeWorkspace = computed(() => workspaces.value.find((w) => w.id === activeWorkspaceId.value))
+const { workspaces, activeWorkspaceId, activeWorkspace, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace, cancelPendingWorkspaceActivation } = useWorkspaces()
 const activeWorkspaceAbbr = computed(() =>
   activeWorkspace.value ? resolveAbbr(activeWorkspace.value) : ''
 )

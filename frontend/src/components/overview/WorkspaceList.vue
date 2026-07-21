@@ -5,9 +5,14 @@
         class="mc-ws-list-item"
         :class="{ selected: selectedId === '__all__' }"
         @click="$emit('select', '__all__')"
+        @contextmenu.prevent="openCtx($event, defaultWorkspace)"
       >
-        <span class="mc-ws-dot">&#9733;</span>
-        <span class="mc-ws-name">{{ t('workspace.all') }}</span>
+        <WorkspaceBadge
+          :abbr="resolveAbbr(defaultWorkspace)"
+          :color="resolveColor(defaultWorkspace)"
+          :size="18"
+        />
+        <span class="mc-ws-name">{{ defaultWorkspace.name }}</span>
         <span v-if="allCount" class="mc-ws-count">{{ allCount }}</span>
       </button>
 
@@ -52,7 +57,7 @@ import { ref } from 'vue'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
-import { useWorkspaces } from '../../composables/useWorkspaces'
+import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../../composables/useWorkspaces'
 import type { Workspace } from '../../types/workspace'
 import { resolveAbbr, resolveColor } from '../../utils/workspaceIcon'
 import WorkspaceBadge from '../WorkspaceBadge.vue'
@@ -60,7 +65,7 @@ import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 
 const { t } = useI18n()
-const { deleteWorkspace } = useWorkspaces()
+const { defaultWorkspace, deleteWorkspace } = useWorkspaces()
 
 const props = defineProps<{
   workspaces: Workspace[]
@@ -88,11 +93,13 @@ function openCtx(e: MouseEvent, ws: Workspace) {
   ctxY.value = e.clientY
   ctxItems.value = [
     {
-      label: t('palette.rename'),
+      label: ws.id === DEFAULT_WORKSPACE_ID ? t('workspace.editDefault') : t('palette.rename'),
       icon: Pencil,
       action: () => emit('rename', ws.id),
     },
-    {
+  ]
+  if (ws.id !== DEFAULT_WORKSPACE_ID) {
+    ctxItems.value.push({
       label: t('workspace.delete'),
       icon: Trash2,
       danger: true,
@@ -108,8 +115,8 @@ function openCtx(e: MouseEvent, ws: Workspace) {
           console.error('Failed to delete workspace:', err)
         }
       },
-    },
-  ]
+    })
+  }
   ctxVisible.value = true
 }
 </script>

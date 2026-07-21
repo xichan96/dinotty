@@ -7,4 +7,6 @@ export interface Workspace {
   connection_id?: string
   abbr?: string
   color?: string
+  /** Per-workspace override for tab badge rendering. */
+  tab_badge?: boolean
 }

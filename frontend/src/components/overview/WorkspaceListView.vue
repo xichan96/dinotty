@@ -14,24 +14,24 @@
       </button>
     </div>
 
-    <div v-if="workspaces.length === 0 && allCount === 0" class="mc-ws-mobile-empty">
-      <p class="mc-ws-empty-text">{{ t('workspace.firstUse') }}</p>
-      <button class="mc-ws-mobile-add" @click="$emit('add')">
-        <Plus :size="16" />
-        {{ t('workspace.add') }}
-      </button>
-    </div>
-
-    <div v-else class="mc-ws-mobile-items">
+    <div class="mc-ws-mobile-items">
       <button
         class="mc-ws-mobile-item"
         :class="{ active: activeId === '__all__' }"
         @click="$emit('selectAll')"
+        @contextmenu.prevent="showCtx(defaultWorkspace, $event.clientX, $event.clientY)"
+        @touchstart.passive="onTouchStart($event, defaultWorkspace)"
+        @touchend="onTouchEnd"
+        @touchmove.passive="onTouchMove"
       >
-        <span class="mc-ws-mobile-dot">★</span>
+        <WorkspaceBadge
+          :abbr="resolveAbbr(defaultWorkspace)"
+          :color="resolveColor(defaultWorkspace)"
+          :size="18"
+        />
         <div class="mc-ws-mobile-info">
-          <span class="mc-ws-mobile-name">{{ t('workspace.all') }}</span>
-          <span class="mc-ws-mobile-path">~/</span>
+          <span class="mc-ws-mobile-name">{{ defaultWorkspace.name }}</span>
+          <span class="mc-ws-mobile-path">{{ defaultWorkspace.path }}</span>
         </div>
         <span v-if="allCount" class="mc-ws-mobile-count">{{ allCount }}</span>
       </button>
@@ -41,10 +41,17 @@
         class="mc-ws-mobile-item"
         :class="{ active: ws.id === activeId }"
         @click="$emit('drilldown', ws.id)"
+        @contextmenu.prevent="showCtx(ws, $event.clientX, $event.clientY)"
         @touchstart.passive="onTouchStart($event, ws)"
         @touchend="onTouchEnd"
         @touchmove.passive="onTouchMove"
       >
+        <WorkspaceBadge
+          :remote="!!ws.connection_id"
+          :abbr="resolveAbbr(ws)"
+          :color="resolveColor(ws)"
+          :size="18"
+        />
         <div class="mc-ws-mobile-info">
           <span class="mc-ws-mobile-name">{{ ws.name }}</span>
           <span class="mc-ws-mobile-path">{{ ws.path }}</span>
@@ -73,13 +80,15 @@ import { Motion } from 'motion-v'
 import { Plus, Pencil, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
-import { useWorkspaces } from '../../composables/useWorkspaces'
+import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../../composables/useWorkspaces'
 import type { Workspace } from '../../types/workspace'
+import { resolveAbbr, resolveColor } from '../../utils/workspaceIcon'
+import WorkspaceBadge from '../WorkspaceBadge.vue'
 import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 
 const { t } = useI18n()
-const { deleteWorkspace } = useWorkspaces()
+const { defaultWorkspace, deleteWorkspace } = useWorkspaces()
 
 const props = defineProps<{
   workspaces: Workspace[]
@@ -107,11 +116,13 @@ function showCtx(ws: Workspace, x: number, y: number) {
   ctxY.value = y
   ctxItems.value = [
     {
-      label: t('palette.rename'),
+      label: ws.id === DEFAULT_WORKSPACE_ID ? t('workspace.editDefault') : t('palette.rename'),
       icon: Pencil,
       action: () => emit('rename', ws.id),
     },
-    {
+  ]
+  if (ws.id !== DEFAULT_WORKSPACE_ID) {
+    ctxItems.value.push({
       label: t('workspace.delete'),
       icon: Trash2,
       danger: true,
@@ -127,8 +138,8 @@ function showCtx(ws: Workspace, x: number, y: number) {
           console.error('Failed to delete workspace:', err)
         }
       },
-    },
-  ]
+    })
+  }
   ctxVisible.value = true
 }
 

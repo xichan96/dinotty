@@ -22,6 +22,7 @@ import { useWorkspaces } from './useWorkspaces'
 import { apiCreatePluginTab } from './useTabApi'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
 import { pickSuccessorTab } from '../utils/tabSuccessor'
+import { currentRevealNavGen, nextRevealNavGen } from '../utils/navGen'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 
 export function useSyncWebSocket(opts: {
@@ -35,7 +36,13 @@ export function useSyncWebSocket(opts: {
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
   const { syncConnected } = storeToRefs(ui)
-  const { workspaces, activeWorkspaceId, matchWorkspace } = useWorkspaces()
+  const {
+    workspaces,
+    activeWorkspaceId,
+    activateWorkspace,
+    cancelPendingWorkspaceActivation,
+    matchWorkspace,
+  } = useWorkspaces()
 
   function workspaceIdOfTab(tab: Tab): string | null {
     if (tab.type === 'plugin') return tab.workspaceId ?? null
@@ -124,7 +131,7 @@ export function useSyncWebSocket(opts: {
       syncReconnectDelay = 1000
     }
 
-    function handleMsg(e: { data: string }) {
+    async function handleMsg(e: { data: string }) {
       let msg: SyncServerMsg
       try {
         msg = JSON.parse(e.data)
@@ -339,14 +346,33 @@ export function useSyncWebSocket(opts: {
           if (tabs.value.length === 0) {
             newTab()
           } else if (activePaneId.value === tab.paneId) {
-            const successor = pickSuccessorTab(
+            let successor = pickSuccessorTab(
               tabs.value,
               closedWorkspaceId,
               workspaceIdxBefore,
               tabIdx,
               workspaceIdOfTab
             )
-            activePaneId.value = successor?.paneId ?? null
+            const gen = nextRevealNavGen()
+            const successorWorkspaceId = successor ? workspaceIdOfTab(successor) : null
+            if (successor && successorWorkspaceId !== activeWorkspaceId.value) {
+              let workspaceCommitted = false
+              try {
+                workspaceCommitted = await activateWorkspace(successorWorkspaceId)
+              } catch {
+                // Keep the current workspace and select one of its remaining tabs below.
+              }
+              if (!workspaceCommitted || gen !== currentRevealNavGen()) {
+                successor = tabs.value.find(
+                  (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
+                )
+              }
+            } else {
+              cancelPendingWorkspaceActivation()
+            }
+            if (gen === currentRevealNavGen()) {
+              activePaneId.value = successor?.paneId ?? null
+            }
             persist()
             nextTick(() => focusActive())
           }
@@ -478,7 +504,9 @@ export function useSyncWebSocket(opts: {
       }
     }
 
-    syncWs.onmessage = (e) => handleMsg(e)
+    syncWs.onmessage = (e) => {
+      void handleMsg(e)
+    }
 
     syncWs.onclose = (e) => {
       console.warn('[sync] disconnected', e.code, e.reason)

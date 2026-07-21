@@ -1219,7 +1219,7 @@ async function closeTab(tabId: string) {
   }
 
   if (activePaneId.value === tabId) {
-    const successor = pickSuccessorTab(
+    let successor = pickSuccessorTab(
       tabs.value,
       closedWorkspaceId,
       workspaceIdxBefore,
@@ -1228,8 +1228,26 @@ async function closeTab(tabId: string) {
     )
     // Close-induced reselection is the newest navigation: supersede any in-flight
     // deferred/supervised hop so a late older-generation commit cannot clobber it.
-    nextRevealNavGen()
-    activePaneId.value = successor?.paneId ?? null
+    const gen = nextRevealNavGen()
+    const successorWorkspaceId = successor ? workspaceIdOfTab(successor) : null
+    if (successor && successorWorkspaceId !== activeWorkspaceId.value) {
+      let workspaceCommitted = false
+      try {
+        workspaceCommitted = await activateWorkspace(successorWorkspaceId)
+      } catch {
+        // Keep the current workspace and select one of its remaining tabs below.
+      }
+      if (!workspaceCommitted || gen !== currentRevealNavGen()) {
+        successor = tabs.value.find(
+          (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
+        )
+      }
+    } else {
+      cancelPendingWorkspaceActivation()
+    }
+    if (gen === currentRevealNavGen()) {
+      activePaneId.value = successor?.paneId ?? null
+    }
   }
 
   if (tab.type !== 'plugin') persist()

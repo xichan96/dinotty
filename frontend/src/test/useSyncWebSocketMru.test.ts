@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { PaneLayout, TerminalTab } from '../types/pane'
 
+const mocks = vi.hoisted(() => ({
+  apiActivateWorkspace: vi.fn(async () => {}),
+}))
+
 let socket: MockWebSocket
 class MockWebSocket {
   static OPEN = 1
@@ -25,8 +29,18 @@ vi.mock('../composables/apiBase', () => ({
 }))
 vi.mock('../composables/useTransport', () => ({ isTauri: () => false }))
 vi.mock('../composables/usePluginLoader', () => ({ handlePluginChanged: vi.fn() }))
+vi.mock('../composables/useWorkspaceApi', () => ({
+  apiListWorkspaces: vi.fn(async () => []),
+  apiCreateWorkspace: vi.fn(),
+  apiUpdateWorkspace: vi.fn(),
+  apiDeleteWorkspace: vi.fn(),
+  apiActivateWorkspace: mocks.apiActivateWorkspace,
+  apiDeactivateWorkspace: vi.fn(async () => {}),
+  apiReorderWorkspaces: vi.fn(),
+}))
 
 import { useSyncWebSocket } from '../composables/useSyncWebSocket'
+import { useWorkspaces } from '../composables/useWorkspaces'
 import { useSessionStore } from '../stores/sessionStore'
 
 function leaf(paneId: string): PaneLayout {
@@ -87,7 +101,12 @@ async function setup() {
 }
 
 describe('useSyncWebSocket pane MRU', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    const workspaceState = useWorkspaces()
+    workspaceState.workspaces.value = []
+    workspaceState.activeWorkspaceId.value = null
+  })
 
   it('uses and focuses the MRU fallback when a focused pane exits', async () => {
     const { tab, emitLayout, focusActive } = await setup()
@@ -127,5 +146,52 @@ describe('useSyncWebSocket pane MRU', () => {
     tab.paneMru = ['b', 'b', 'a', 'c']
     emitLayout(layout('a', 'b', 'c'), 'b')
     expect(tab.paneMru).toEqual(['b', 'a', 'c'])
+  })
+
+  it('moves to the successor workspace when sync closes its last active tab', async () => {
+    setActivePinia(createPinia())
+    const session = useSessionStore()
+    const workspaceState = useWorkspaces()
+    workspaceState.workspaces.value = [
+      { id: 'workspace-a', name: 'Workspace A', path: '/workspace/a', order: 0 },
+      { id: 'workspace-b', name: 'Workspace B', path: '/workspace/b', order: 1 },
+    ]
+    workspaceState.activeWorkspaceId.value = 'workspace-a'
+    const workspaceTab = (paneId: string, cwd: string): TerminalTab => ({
+      type: 'terminal',
+      paneId,
+      layout: leaf(`${paneId}-leaf`),
+      activePaneId: `${paneId}-leaf`,
+      paneMru: [`${paneId}-leaf`],
+      broadcastMode: false,
+      broadcastActivity: 0,
+      previewVisible: false,
+      previewAddress: '',
+      previewUrl: '',
+      previewKind: 'web',
+      cwd,
+    })
+    session.tabs = [
+      workspaceTab('workspace-a-only-tab', '/workspace/a'),
+      workspaceTab('workspace-b-successor', '/workspace/b'),
+    ]
+    session.activePaneId = 'workspace-a-only-tab'
+    const subject = useSyncWebSocket({
+      termRefs: {},
+      persist: vi.fn(),
+      focusActive: vi.fn(),
+      newTab: vi.fn(),
+    })
+    await subject.connectSyncWS()
+
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'tab_closed', pane_id: 'workspace-a-only-tab' }),
+    })
+    await vi.waitFor(() => {
+      expect(workspaceState.activeWorkspaceId.value).toBe('workspace-b')
+    })
+
+    expect(mocks.apiActivateWorkspace).toHaveBeenCalledWith('workspace-b')
+    expect(session.activePaneId).toBe('workspace-b-successor')
   })
 })

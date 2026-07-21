@@ -754,6 +754,50 @@ describe('App.vue - onClosePane routes through confirmation gate', () => {
 
     expect(session.activePaneId).toBe('workspace-a-successor')
   })
+
+  it('moves to the successor workspace when closing its active workspace last tab', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const workspaceState = useWorkspaces()
+    workspaceState.workspaces.value = [
+      { id: 'workspace-a', name: 'Workspace A', path: '/workspace/a', order: 0 },
+      { id: 'workspace-b', name: 'Workspace B', path: '/workspace/b', order: 1 },
+    ]
+    workspaceState.activeWorkspaceId.value = 'workspace-a'
+    const terminalTab = (paneId: string, cwd: string): Tab => ({
+      type: 'terminal',
+      paneId,
+      layout: {
+        type: 'leaf',
+        paneId: `${paneId}-leaf`,
+        title: paneId,
+        ratio: 1,
+        zoomed: false,
+      },
+      activePaneId: `${paneId}-leaf`,
+      paneMru: [`${paneId}-leaf`],
+      broadcastMode: false,
+      broadcastActivity: 0,
+      previewVisible: false,
+      previewAddress: '',
+      previewUrl: '',
+      previewKind: 'web',
+      cwd,
+    })
+    session.setTabs([
+      terminalTab('workspace-a-only-tab', '/workspace/a'),
+      terminalTab('workspace-b-successor', '/workspace/b'),
+    ])
+    session.setActivePane('workspace-a-only-tab')
+
+    const app = wrapper.vm as unknown as { closeTab: (tabId: string) => Promise<void> }
+    await app.closeTab('workspace-a-only-tab')
+    await nextTick()
+
+    expect(mocks.apiActivateWorkspace).toHaveBeenCalledWith('workspace-b')
+    expect(workspaceState.activeWorkspaceId.value).toBe('workspace-b')
+    expect(session.activePaneId).toBe('workspace-b-successor')
+  })
 })
 
 describe('App.vue - notification badge visibility', () => {

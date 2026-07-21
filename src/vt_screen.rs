@@ -40,6 +40,71 @@ pub enum SyncEvent {
     Stop,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum MouseProtocol {
+    #[default]
+    None,
+    X10,
+    Normal,
+    Button,
+    Any,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum MouseEncoding {
+    #[default]
+    Default,
+    Sgr,
+    SgrPixels,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PrivateModes {
+    mouse: MouseProtocol,
+    encoding: MouseEncoding,
+    cursor_keys: bool,
+    keypad: bool,
+    bracketed_paste: bool,
+    focus_event: bool,
+}
+
+impl PrivateModes {
+    fn soft_reset(&mut self) {
+        self.cursor_keys = false;
+        self.keypad = false;
+        self.bracketed_paste = false;
+        self.focus_event = false;
+    }
+
+    fn write_replay(self, out: &mut String) {
+        // Install the encoding first so a mouse event racing replay cannot be
+        // emitted using the wrong wire format.
+        match self.encoding {
+            MouseEncoding::Default => {}
+            MouseEncoding::Sgr => out.push_str("\x1b[?1006h"),
+            MouseEncoding::SgrPixels => out.push_str("\x1b[?1016h"),
+        }
+        match self.mouse {
+            MouseProtocol::None => {}
+            MouseProtocol::X10 => out.push_str("\x1b[?9h"),
+            MouseProtocol::Normal => out.push_str("\x1b[?1000h"),
+            MouseProtocol::Button => out.push_str("\x1b[?1002h"),
+            MouseProtocol::Any => out.push_str("\x1b[?1003h"),
+        }
+        if self.cursor_keys {
+            out.push_str("\x1b[?1h");
+        }
+        if self.keypad {
+            out.push_str("\x1b[?66h");
+        }
+        if self.bracketed_paste {
+            out.push_str("\x1b[?2004h");
+        }
+        // Focus events (1004) are tracked but intentionally not replayed: a
+        // reconnect can otherwise trigger a focus-report feedback storm.
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct CellAttrs {
     pub fg: Option<Color>,
@@ -213,6 +278,7 @@ pub struct VirtualScreen {
     last_output_time: Option<Instant>,
     // DEC mode 2026 synchronized output events
     sync_events: Vec<SyncEvent>,
+    private_modes: PrivateModes,
 }
 
 impl VirtualScreen {
@@ -232,6 +298,7 @@ impl VirtualScreen {
             command_results: Vec::new(),
             last_output_time: None,
             sync_events: Vec::new(),
+            private_modes: PrivateModes::default(),
         }
     }
 
@@ -367,6 +434,7 @@ impl VirtualScreen {
             pending_command: &mut self.pending_command,
             command_results: &mut self.command_results,
             sync_events: &mut self.sync_events,
+            private_modes: &mut self.private_modes,
         };
 
         for &byte in data {
@@ -388,6 +456,7 @@ impl VirtualScreen {
                         pending_command: &mut self.pending_command,
                         command_results: &mut self.command_results,
                         sync_events: &mut self.sync_events,
+                        private_modes: &mut self.private_modes,
                     };
                 } else if !enter && performer.using_alternate {
                     let saved = self.saved_cursor.clone();
@@ -402,6 +471,7 @@ impl VirtualScreen {
                         pending_command: &mut self.pending_command,
                         command_results: &mut self.command_results,
                         sync_events: &mut self.sync_events,
+                        private_modes: &mut self.private_modes,
                     };
                     if let Some(ref s) = saved {
                         performer.screen.cursor = s.clone();
@@ -493,12 +563,16 @@ impl VirtualScreen {
 
         out.push_str("\x1b[0m"); // reset all attributes
         render_buffer(&self.primary, &mut out);
-        restore_cursor_state(&self.primary, &mut out);
         if self.using_alternate {
+            restore_cursor_state(&self.primary, &mut out);
             out.push_str("\x1b[?1049h"); // enter alternate screen (saves primary cursor)
             out.push_str("\x1b[0m");
             render_buffer(&self.alternate, &mut out);
+            self.private_modes.write_replay(&mut out);
             restore_cursor_state(&self.alternate, &mut out);
+        } else {
+            self.private_modes.write_replay(&mut out);
+            restore_cursor_state(&self.primary, &mut out);
         }
         out.push_str("\x1b[?25h"); // show cursor
 
@@ -518,6 +592,7 @@ impl VirtualScreen {
         }
 
         render_buffer(buf, &mut out);
+        self.private_modes.write_replay(&mut out);
         restore_cursor_state(buf, &mut out);
         out.push_str("\x1b[?25h"); // show cursor
 
@@ -722,6 +797,7 @@ struct ScreenPerformer<'a> {
     pending_command: &'a mut Option<PendingCommand>,
     command_results: &'a mut Vec<CommandResult>,
     sync_events: &'a mut Vec<SyncEvent>,
+    private_modes: &'a mut PrivateModes,
 }
 
 impl Perform for ScreenPerformer<'_> {
@@ -902,26 +978,51 @@ impl Perform for ScreenPerformer<'_> {
             match action {
                 'h' => {
                     for &p in &ps {
-                        if p == 1049 || p == 47 || p == 1047 {
-                            self.pending_switch = Some(true);
-                        } else if p == 2026 {
-                            self.sync_events.push(SyncEvent::Start);
+                        match p {
+                            1 => self.private_modes.cursor_keys = true,
+                            9 => self.private_modes.mouse = MouseProtocol::X10,
+                            47 | 1047 | 1049 => self.pending_switch = Some(true),
+                            66 => self.private_modes.keypad = true,
+                            1000 => self.private_modes.mouse = MouseProtocol::Normal,
+                            1002 => self.private_modes.mouse = MouseProtocol::Button,
+                            1003 => self.private_modes.mouse = MouseProtocol::Any,
+                            1004 => self.private_modes.focus_event = true,
+                            1006 => self.private_modes.encoding = MouseEncoding::Sgr,
+                            1016 => self.private_modes.encoding = MouseEncoding::SgrPixels,
+                            2004 => self.private_modes.bracketed_paste = true,
+                            2026 => self.sync_events.push(SyncEvent::Start),
+                            _ => {}
                         }
                     }
                     return;
                 }
                 'l' => {
                     for &p in &ps {
-                        if p == 1049 || p == 47 || p == 1047 {
-                            self.pending_switch = Some(false);
-                        } else if p == 2026 {
-                            self.sync_events.push(SyncEvent::Stop);
+                        match p {
+                            1 => self.private_modes.cursor_keys = false,
+                            9 | 1000 | 1002 | 1003 => {
+                                self.private_modes.mouse = MouseProtocol::None;
+                            }
+                            47 | 1047 | 1049 => self.pending_switch = Some(false),
+                            66 => self.private_modes.keypad = false,
+                            1004 => self.private_modes.focus_event = false,
+                            1006 | 1016 => {
+                                self.private_modes.encoding = MouseEncoding::Default;
+                            }
+                            2004 => self.private_modes.bracketed_paste = false,
+                            2026 => self.sync_events.push(SyncEvent::Stop),
+                            _ => {}
                         }
                     }
                     return;
                 }
                 _ => {}
             }
+            return;
+        }
+
+        if intermediates == b"!" && action == 'p' {
+            self.private_modes.soft_reset();
             return;
         }
 
@@ -1148,6 +1249,10 @@ impl Perform for ScreenPerformer<'_> {
                     self.screen.cursor.row -= 1;
                 }
             }
+            ([], b'c') => {
+                // RIS - hard reset private modes
+                *self.private_modes = PrivateModes::default();
+            }
             _ => {}
         }
     }
@@ -1263,8 +1368,216 @@ impl ScreenPerformer<'_> {
 mod csi_dispatch_tests {
     use super::*;
 
+    const REPLAY_SEQUENCES: [&str; 10] = [
+        "\x1b[?9h",
+        "\x1b[?1000h",
+        "\x1b[?1002h",
+        "\x1b[?1003h",
+        "\x1b[?1006h",
+        "\x1b[?1016h",
+        "\x1b[?1h",
+        "\x1b[?66h",
+        "\x1b[?2004h",
+        "\x1b[?1004h",
+    ];
+
     fn cell(vs: &VirtualScreen, row: usize, col: usize) -> &Cell {
         &vs.primary.cells[row][col]
+    }
+
+    fn set_all_tracked_modes(vs: &mut VirtualScreen) {
+        vs.feed(b"\x1b[?1003;1016;1;66;2004;1004h");
+    }
+
+    #[test]
+    fn private_mode_set_reset_pairing_round_trips_each_family() {
+        for (mode, expected) in [
+            (9, MouseProtocol::X10),
+            (1000, MouseProtocol::Normal),
+            (1002, MouseProtocol::Button),
+            (1003, MouseProtocol::Any),
+        ] {
+            let mut vs = VirtualScreen::new(20, 5);
+            vs.feed(format!("\x1b[?{mode}h").as_bytes());
+            assert_eq!(vs.private_modes.mouse, expected);
+            vs.feed(format!("\x1b[?{mode}l").as_bytes());
+            assert_eq!(vs.private_modes.mouse, MouseProtocol::None);
+        }
+
+        for (mode, expected) in [(1006, MouseEncoding::Sgr), (1016, MouseEncoding::SgrPixels)] {
+            let mut vs = VirtualScreen::new(20, 5);
+            vs.feed(format!("\x1b[?{mode}h").as_bytes());
+            assert_eq!(vs.private_modes.encoding, expected);
+            vs.feed(format!("\x1b[?{mode}l").as_bytes());
+            assert_eq!(vs.private_modes.encoding, MouseEncoding::Default);
+        }
+
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?1;66;2004;1004h");
+        assert!(vs.private_modes.cursor_keys);
+        assert!(vs.private_modes.keypad);
+        assert!(vs.private_modes.bracketed_paste);
+        assert!(vs.private_modes.focus_event);
+        vs.feed(b"\x1b[?1;66;2004;1004l");
+        assert_eq!(vs.private_modes, PrivateModes::default());
+    }
+
+    #[test]
+    fn private_mode_switch_within_mouse_family_keeps_only_last_value() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?1000h\x1b[?1003h");
+
+        assert_eq!(vs.private_modes.mouse, MouseProtocol::Any);
+        let snapshot = vs.snapshot();
+        assert!(snapshot.contains("\x1b[?1003h"));
+        assert!(!snapshot.contains("\x1b[?1000h"));
+
+        vs.feed(b"\x1b[?1000l");
+        assert_eq!(vs.private_modes.mouse, MouseProtocol::None);
+
+        vs.feed(b"\x1b[?1006h\x1b[?1016h\x1b[?1006l");
+        assert_eq!(vs.private_modes.encoding, MouseEncoding::Default);
+    }
+
+    #[test]
+    fn multi_param_private_mode_set_and_reset_processes_every_parameter() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?1000;1006h");
+        assert_eq!(vs.private_modes.mouse, MouseProtocol::Normal);
+        assert_eq!(vs.private_modes.encoding, MouseEncoding::Sgr);
+
+        vs.feed(b"\x1b[?1000;1006l");
+        assert_eq!(vs.private_modes.mouse, MouseProtocol::None);
+        assert_eq!(vs.private_modes.encoding, MouseEncoding::Default);
+    }
+
+    #[test]
+    fn private_mode_csi_can_be_split_across_feed_calls() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?1000;10");
+        assert_eq!(vs.private_modes, PrivateModes::default());
+        vs.feed(b"06h");
+
+        assert_eq!(vs.private_modes.mouse, MouseProtocol::Normal);
+        assert_eq!(vs.private_modes.encoding, MouseEncoding::Sgr);
+    }
+
+    #[test]
+    fn ris_clears_all_private_modes_but_decstr_preserves_mouse_families() {
+        let mut vs = VirtualScreen::new(20, 5);
+        set_all_tracked_modes(&mut vs);
+        vs.feed(b"\x1b[!p");
+
+        assert_eq!(vs.private_modes.mouse, MouseProtocol::Any);
+        assert_eq!(vs.private_modes.encoding, MouseEncoding::SgrPixels);
+        assert!(!vs.private_modes.cursor_keys);
+        assert!(!vs.private_modes.keypad);
+        assert!(!vs.private_modes.bracketed_paste);
+        assert!(!vs.private_modes.focus_event);
+
+        set_all_tracked_modes(&mut vs);
+        vs.feed(b"\x1bc");
+        assert_eq!(vs.private_modes, PrivateModes::default());
+    }
+
+    #[test]
+    fn alternate_screen_enter_exit_does_not_change_private_modes() {
+        let mut vs = VirtualScreen::new(20, 5);
+        set_all_tracked_modes(&mut vs);
+        let expected = vs.private_modes;
+
+        vs.feed(b"\x1b[?1049h");
+        assert!(vs.is_using_alternate());
+        assert_eq!(vs.private_modes, expected);
+        vs.feed(b"\x1b[?1049l");
+        assert!(!vs.is_using_alternate());
+        assert_eq!(vs.private_modes, expected);
+    }
+
+    #[test]
+    fn excluded_private_mode_sequences_are_not_tracked_or_replayed() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?2;3;6;7;8;12;25;45;67;1005;1015;1048;2026h");
+
+        assert_eq!(vs.private_modes, PrivateModes::default());
+        assert_eq!(vs.drain_sync_events(), vec![SyncEvent::Start]);
+
+        let snapshot = vs.snapshot();
+        for mode in [2, 3, 6, 7, 8, 12, 45, 67, 1005, 1015, 1048, 2026] {
+            let sequence = format!("\x1b[?{mode}h");
+            assert!(!snapshot.contains(&sequence), "unexpected replay sequence {sequence:?}");
+        }
+        assert_eq!(
+            snapshot.matches("\x1b[?25h").count(),
+            1,
+            "mode 25 must only be shown by the render layer"
+        );
+    }
+
+    #[test]
+    fn snapshot_replays_modes_after_render_before_scroll_region_and_cursor() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"content\x1b[2;4r\x1b[?1003h\x1b[3;5H");
+
+        let snapshot = vs.snapshot();
+        let final_render_row = snapshot.find("\x1b[5;1H\x1b[2K").unwrap();
+        let mode = snapshot.find("\x1b[?1003h").unwrap();
+        let scroll_region = snapshot.find("\x1b[2;4r").unwrap();
+        let final_cursor = snapshot.find("\x1b[3;5H").unwrap();
+        assert!(final_render_row < mode);
+        assert!(mode < scroll_region);
+        assert!(scroll_region < final_cursor);
+    }
+
+    #[test]
+    fn snapshot_replays_mouse_encoding_before_protocol() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?1000;1006h");
+
+        let snapshot = vs.snapshot();
+        let encoding_offset = snapshot.find("\x1b[?1006h").unwrap();
+        let protocol_offset = snapshot.find("\x1b[?1000h").unwrap();
+        assert!(encoding_offset < protocol_offset);
+    }
+
+    #[test]
+    fn reconnect_snapshot_replays_mouse_encoding_before_protocol() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b[?1000;1006h");
+
+        let snapshot = vs.snapshot_for_replay();
+        let encoding_offset = snapshot.find("\x1b[?1006h").unwrap();
+        let protocol_offset = snapshot.find("\x1b[?1000h").unwrap();
+        assert!(encoding_offset < protocol_offset);
+    }
+
+    #[test]
+    fn snapshot_with_default_private_modes_emits_no_replay_sequences() {
+        let snapshot = VirtualScreen::new(20, 5).snapshot();
+        for sequence in REPLAY_SEQUENCES {
+            assert!(!snapshot.contains(sequence), "unexpected replay sequence {sequence:?}");
+        }
+    }
+
+    #[test]
+    fn replaying_snapshot_twice_is_idempotent_and_omits_focus_event_mode() {
+        let mut source = VirtualScreen::new(20, 5);
+        set_all_tracked_modes(&mut source);
+        let snapshot = source.snapshot();
+        assert!(!snapshot.contains("\x1b[?1004h"));
+
+        let mut replayed = VirtualScreen::new(20, 5);
+        replayed.feed(snapshot.as_bytes());
+        let after_first_replay = replayed.private_modes;
+        assert_eq!(after_first_replay.mouse, MouseProtocol::Any);
+        assert_eq!(after_first_replay.encoding, MouseEncoding::SgrPixels);
+        assert!(after_first_replay.cursor_keys);
+        assert!(after_first_replay.keypad);
+        assert!(after_first_replay.bracketed_paste);
+        assert!(!after_first_replay.focus_event);
+
+        replayed.feed(snapshot.as_bytes());
+        assert_eq!(replayed.private_modes, after_first_replay);
     }
 
     // `CSI > 4 ; 2 m` (XTMODKEYS) must NOT be parsed as SGR — regression for the

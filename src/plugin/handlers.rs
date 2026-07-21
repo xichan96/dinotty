@@ -154,6 +154,7 @@ pub async fn plugin_exec(
     cmd.args(&body.args);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
+    cmd.kill_on_drop(true);
     if let Some(ref cwd) = body.cwd {
         cmd.current_dir(cwd);
     }

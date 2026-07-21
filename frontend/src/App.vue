@@ -1197,6 +1197,7 @@ async function closeTab(tabId: string) {
   if (idx === -1) return
 
   tabs.value.splice(idx, 1)
+  if (tab.type === 'plugin') persistNow()
 
   // If this was the last tab, create a new one
   if (tabs.value.length === 0) {
@@ -1212,7 +1213,7 @@ async function closeTab(tabId: string) {
     activePaneId.value = tabs.value[newIdx].paneId
   }
 
-  persist()
+  if (tab.type !== 'plugin') persist()
   nextTick(() => focusActive())
 }
 

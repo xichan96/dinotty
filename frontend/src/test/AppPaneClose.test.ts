@@ -504,6 +504,50 @@ afterAll(() => {
   else (global as any).localStorage = originalLocalStorage
 })
 
+describe('App.vue - plugin tab close persistence', () => {
+  const terminalTab = (paneId: string): Tab => ({
+    type: 'terminal',
+    paneId,
+    layout: { type: 'leaf', paneId: `${paneId}-leaf`, title: paneId, ratio: 1, zoomed: false },
+    activePaneId: `${paneId}-leaf`,
+    paneMru: [`${paneId}-leaf`],
+    broadcastMode: false,
+    broadcastActivity: 0,
+    previewVisible: false,
+    previewAddress: '',
+    previewUrl: '',
+    previewKind: 'web',
+  })
+
+  it('flushes plugin tab closures synchronously to avoid resurrect race', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const terminal = session.tabs[0]
+    if (!terminal || terminal.type !== 'terminal') {
+      throw new Error('expected seeded terminal tab')
+    }
+    session.setTabs([
+      terminal,
+      { type: 'plugin', paneId: 'plugin:memory', title: 'Memory', pluginId: 'memory' },
+    ])
+    session.setActivePane('plugin:memory')
+
+    const splitContainer = wrapper.findComponent(SplitContainerStub)
+    splitContainer.vm.$emit('divider-drag-end')
+    window.dispatchEvent(new Event('beforeunload'))
+    expect(JSON.parse(localStorageMock.getItem('dinotty_tabs')!).tabs).toHaveLength(2)
+
+    await (wrapper.vm as any).closeTab('plugin:memory')
+
+    // Synchronous flush: localStorage must reflect the close immediately,
+    // not after a 200ms debounce. Otherwise a tab_list arriving in the
+    // window would re-read stale storage and resurrect the closed plugin tab.
+    const saved = JSON.parse(localStorageMock.getItem('dinotty_tabs')!)
+    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs[0].paneId).toBe(terminal.paneId)
+  })
+})
+
 describe('App.vue - onClosePane routes through confirmation gate', () => {
   beforeEach(() => {
     settings.confirm_before_close_tab = true

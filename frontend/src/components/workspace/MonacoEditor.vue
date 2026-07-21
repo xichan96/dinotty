@@ -20,6 +20,7 @@ import {
   type GitChange,
   type GitDiffData,
 } from './gitDecorations'
+import { registerEditor, unregisterEditor } from '../../composables/useEditorRegistry'
 
 const props = withDefaults(
   defineProps<{
@@ -28,6 +29,7 @@ const props = withDefaults(
     readonly?: boolean
     filePath?: string
     paneId?: string
+    leafId?: string
   }>(),
   { language: 'plaintext', readonly: false }
 )
@@ -91,6 +93,10 @@ onMounted(() => {
     emit('update:modelValue', val)
     scheduleCheck(props.paneId, props.filePath, props.language)
   })
+
+  if (props.leafId) {
+    registerEditor(props.leafId, editor)
+  }
 
   registerLanguageCompletions(props.language)
 
@@ -233,6 +239,9 @@ onBeforeUnmount(() => {
   disposeSyntaxCheck()
   closeDiffWidget()
   unsubTheme()
+  if (props.leafId) {
+    unregisterEditor(props.leafId)
+  }
   editor?.dispose()
   editor = null
 })
@@ -276,7 +285,10 @@ watch(
   }
 )
 
-defineExpose({ refreshGitDecorations: loadGitDecorations })
+defineExpose({
+  refreshGitDecorations: loadGitDecorations,
+  getEditor: () => editor,
+})
 </script>
 
 <style scoped>

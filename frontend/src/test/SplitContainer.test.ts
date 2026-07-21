@@ -28,6 +28,7 @@ describe('SplitContainer shell info', function splitContainerShellInfoSuite() {
         activePaneId: 'pane-1',
         broadcastMode: false,
         broadcastActivity: 0,
+        tabId: 'tab-1',
       },
       global: {
         stubs: {

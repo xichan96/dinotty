@@ -116,6 +116,7 @@
             :readonly="!!meta?.truncated"
             :file-path="filePath"
             :pane-id="paneId"
+            :leaf-id="leafId"
             @update:model-value="$emit('update:editorText', $event)"
             @save="$emit('saveEditor')"
             @selection-change="(p) => $emit('selection-change', p)"
@@ -179,6 +180,7 @@
             :readonly="!!meta?.truncated"
             :file-path="filePath"
             :pane-id="paneId"
+            :leaf-id="leafId"
             @update:model-value="$emit('update:editorText', $event)"
             @save="$emit('saveEditor')"
             @selection-change="(p) => $emit('selection-change', p)"
@@ -244,6 +246,7 @@ const props = defineProps<{
   officeHtml: string
   paneId?: string
   filePath?: string
+  leafId?: string
 }>()
 
 const language = computed(() => props.meta?.language || 'plaintext')

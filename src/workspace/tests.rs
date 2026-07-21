@@ -349,3 +349,86 @@ async fn free_browse_allows_normal_dir() {
     let resp = workspace_list(State(manager), axum::extract::Query(q)).await;
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+#[test]
+fn byte_offset_to_column_ascii() {
+    let line = b"fn main() {}";
+    assert_eq!(byte_offset_to_column(line, 0), 1);
+    assert_eq!(byte_offset_to_column(line, 3), 4);
+    assert_eq!(byte_offset_to_column(line, 6), 7);
+}
+
+#[test]
+fn byte_offset_to_column_multibyte_bmp() {
+    // "中fn" - "中" is 3 UTF-8 bytes, 1 UTF-16 unit (BMP).
+    let line = "中fn".as_bytes();
+    assert_eq!(byte_offset_to_column(line, 0), 1);
+    assert_eq!(byte_offset_to_column(line, 3), 2);
+}
+
+#[test]
+fn byte_offset_to_column_offset_clamped() {
+    let line = b"abc";
+    assert_eq!(byte_offset_to_column(line, 99), 4);
+}
+
+#[test]
+fn parse_rg_json_extracts_match_fields() {
+    let stdout = r#"{"type":"begin","data":{"path":{"text":"src/main.rs"}}}
+{"type":"match","data":{"path":{"text":"src/main.rs"},"lines":{"text":"fn main() {}\n"},"line_number":1,"absolute_offset":0,"submatches":[{"match":{"text":"fn"},"start":0,"end":2}]}}
+{"type":"end","data":{"path":{"text":"src/main.rs"}}}
+"#;
+
+    let matches = parse_rg_json(stdout, 100);
+    assert_eq!(matches.len(), 1);
+    let m = &matches[0];
+    assert_eq!(m.file_path, "src/main.rs");
+    assert_eq!(m.line, 1);
+    assert_eq!(m.column, 1);
+    assert_eq!(m.line_text, "fn main() {}");
+}
+
+#[test]
+fn parse_rg_json_strips_dot_slash_prefix() {
+    let stdout = r#"{"type":"match","data":{"path":{"text":"./src/lib.rs"},"lines":{"text":"pub fn x()\n"},"line_number":5,"absolute_offset":42,"submatches":[{"match":{"text":"fn"},"start":4,"end":6}]}}
+"#;
+    let matches = parse_rg_json(stdout, 100);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].file_path, "src/lib.rs");
+    assert_eq!(matches[0].line, 5);
+    assert_eq!(matches[0].column, 5);
+}
+
+#[test]
+fn parse_rg_json_skips_non_match_types() {
+    let stdout = r#"{"type":"begin","data":{"path":{"text":"a.rs"}}}
+{"type":"match","data":{"path":{"text":"a.rs"},"lines":{"text":"x\n"},"line_number":1,"absolute_offset":0,"submatches":[{"match":{"text":"x"},"start":0,"end":1}]}}
+{"type":"end","data":{"path":{"text":"a.rs"}}}
+{"type":"summary","data":{"elapsed_total":{"secs":0,"nanos":1},"stats":{}}}
+"#;
+    let matches = parse_rg_json(stdout, 100);
+    assert_eq!(matches.len(), 1);
+}
+
+#[test]
+fn parse_rg_json_respects_max() {
+    let mut stdout = String::new();
+    for i in 0..10 {
+        stdout.push_str(&format!(
+            r#"{{"type":"match","data":{{"path":{{"text":"f{i}.rs"}},"lines":{{"text":"x\n"}},"line_number":1,"absolute_offset":0,"submatches":[{{"match":{{"text":"x"}},"start":0,"end":1}}]}}}}
+"#
+        ));
+    }
+    let matches = parse_rg_json(&stdout, 3);
+    assert_eq!(matches.len(), 3);
+}
+
+#[test]
+fn parse_rg_json_handles_multibyte_line() {
+    // "中fn" - "中" at col 1, "fn" starts at byte offset 3 = col 2.
+    let stdout = r#"{"type":"match","data":{"path":{"text":"a.rs"},"lines":{"text":"中fn\n"},"line_number":1,"absolute_offset":0,"submatches":[{"match":{"text":"fn"},"start":3,"end":5}]}}
+"#;
+    let matches = parse_rg_json(stdout, 100);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].column, 2);
+}

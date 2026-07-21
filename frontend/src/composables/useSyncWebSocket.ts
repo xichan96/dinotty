@@ -2,7 +2,7 @@ import { nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { SyncServerMsg, SyncClientMsg } from '../types/protocol'
 import type { TerminalTab } from '../types/pane'
-import { getAllLeaves, findLeaf, migrateTab, ensureSplitRoot } from '../types/pane'
+import { getAllLeaves, findLeaf, migrateTab, migratePreviewToLeaf, ensureSplitRoot } from '../types/pane'
 import {
   initializePaneMru,
   reconcilePaneMru,
@@ -19,6 +19,7 @@ import {
 import { isTauri } from './useTransport'
 import { handlePluginChanged } from './usePluginLoader'
 import { useWorkspaces } from './useWorkspaces'
+import { apiCreatePluginTab } from './useTabApi'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 
 export function useSyncWebSocket(opts: {
@@ -143,8 +144,13 @@ export function useSyncWebSocket(opts: {
             !localTabIds.has(tab.tab_id)
           ) {
             const serverLayout = tab.layout ?? null
-            const saved = !serverLayout ? getSavedTab(tab.pane_id) : null
-            const migrated = saved ? migrateTab(saved) : null
+            // Always look up the saved entry so we can restore fields the
+            // backend does not track (workspaceId, customTitle, preview
+            // state). The server layout still takes precedence for the
+            // layout itself when present.
+            const saved = getSavedTab(tab.pane_id)
+            const migratedRaw = saved ? migrateTab(saved) : null
+            const migrated = migratedRaw ? migratePreviewToLeaf(migratedRaw) : null
             tabs.value.push({
               type: 'terminal',
               paneId: tab.tab_id,
@@ -183,25 +189,29 @@ export function useSyncWebSocket(opts: {
               customTitle: migrated?.customTitle,
               cwd: tab.cwd,
               connectionId: tab.connection_id,
+              workspaceId: migrated?.workspaceId,
             })
           }
         }
 
-        // Restore plugin tabs from localStorage
+        // Migrate legacy plugin tabs from localStorage: convert to TerminalTab
+        // with a plugin leaf and register with the backend so they gain a
+        // `tab_layouts` entry (required for Mode A drag-and-drop merge).
         try {
           const raw = localStorage.getItem('dinotty_tabs')
           if (raw) {
             const { tabs: savedTabs } = JSON.parse(raw)
             for (const st of savedTabs) {
-              if (st.type === 'plugin' && !tabs.value.some((t) => t.paneId === st.paneId)) {
-                tabs.value.push({
-                  type: 'plugin',
-                  paneId: st.paneId,
-                  title: st.title || st.pluginId,
-                  pluginId: st.pluginId,
-                  workspaceId: st.workspaceId,
-                })
-              }
+              if (st.type !== 'plugin') continue
+              if (tabs.value.some((t) => t.paneId === st.paneId)) continue
+              const migrated = migrateTab(st)
+              tabs.value.push(migrated)
+              // Fire-and-forget: the backend `insert_tab` is idempotent, so
+              // re-registering an already-tracked plugin tab is a no-op.
+              void apiCreatePluginTab(st.pluginId, {
+                title: st.title ?? st.pluginId,
+                tabId: st.paneId,
+              }).catch((e) => console.warn('[sync] plugin tab register failed:', e))
             }
           }
         } catch {
@@ -298,12 +308,16 @@ export function useSyncWebSocket(opts: {
           nextTick(() => focusActive())
         }
       } else if (msg.type === 'tab_closed') {
-        let tabIdx = tabs.value.findIndex((t) => t.type === 'terminal' && t.paneId === msg.pane_id)
-        if (tabIdx === -1) {
-          tabIdx = tabs.value.findIndex(
-            (t) => t.type === 'terminal' && !!findLeaf(t.layout, msg.pane_id)
-          )
-        }
+        // Match by tab paneId only. The backend always broadcasts
+        // `tab_closed` with the tab's paneId (a.k.a. tab_id), never a leaf
+        // paneId. A previous fallback that searched layouts by leaf paneId
+        // was liable to remove the wrong tab after a Mode A merge: the src
+        // plugin tab's paneId equals its leaf paneId, so once the plugin leaf
+        // was inserted into the dst tab the fallback would find and destroy
+        // the dst tab.
+        const tabIdx = tabs.value.findIndex(
+          (t) => t.type === 'terminal' && t.paneId === msg.pane_id
+        )
         if (tabIdx !== -1) {
           const tab = tabs.value[tabIdx] as TerminalTab
           for (const leaf of getAllLeaves(tab.layout)) {
@@ -334,13 +348,25 @@ export function useSyncWebSocket(opts: {
           }
         }
       } else if (msg.type === 'layout_updated') {
-        const targetTab = tabs.value.find((t) => {
-          if (t.type !== 'terminal') return false
-          if (t.paneId === msg.pane_id) return true
+        // Two-pass match: prefer paneId, fall back to leaf overlap only if no
+        // paneId match. A single-pass `find()` with OR-ed conditions can pick
+        // the wrong tab during Mode A merge: after the src tab's leaves are
+        // spliced into dst, src also matches the leaf-overlap check. If src
+        // is iterated first, it gets selected as `targetTab`, and the filter
+        // below then removes dst (its leaves are now in src). When
+        // `TabClosed(src)` arrives next, src is also removed - both tabs
+        // vanish. Prioritizing paneId match avoids this.
+        let targetTab = tabs.value.find(
+          (t): t is TerminalTab => t.type === 'terminal' && t.paneId === msg.pane_id
+        )
+        if (!targetTab) {
           const incomingLeafIds = getAllLeaves(msg.layout).map((l: any) => l.paneId)
-          const localLeafIds = getAllLeaves(t.layout).map((l) => l.paneId)
-          return incomingLeafIds.some((id: string) => localLeafIds.includes(id))
-        }) as TerminalTab | undefined
+          targetTab = tabs.value.find((t): t is TerminalTab => {
+            if (t.type !== 'terminal') return false
+            const localLeafIds = getAllLeaves(t.layout).map((l) => l.paneId)
+            return incomingLeafIds.some((id: string) => localLeafIds.includes(id))
+          })
+        }
         if (targetTab) {
           const incomingLeafIds = getAllLeaves(msg.layout).map((l: any) => l.paneId)
           const localLeafIds = getAllLeaves(targetTab.layout).map((l) => l.paneId)

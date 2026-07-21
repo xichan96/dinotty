@@ -17,10 +17,13 @@
     <PaneHeader
       v-if="showHeader"
       :pane-id="leaf.paneId"
+      :tab-id="tabId"
       :title="leaf.title || 'Terminal'"
       :is-active="leaf.paneId === activePaneId"
       :direction="parentDirection"
       @reorder="(src, tgt, pos) => emit('reorder', src, tgt, pos)"
+      @drop-on-tab="(srcTab, srcPane, dstTab, pos) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)"
+      @drop-extract="(srcTab, srcPane, idx) => emit('dropExtract', srcTab, srcPane, idx)"
     />
     <button
       v-if="allowClose"
@@ -69,17 +72,17 @@
         <circle cx="12" cy="12" r="2" fill="currentColor" />
       </svg>
     </div>
-    <TerminalPane
-      :ref="(el: any) => emit('register', leaf!.paneId, el)"
-      :pane-id="leaf.paneId"
-      :ssh-host="leaf.shell_type === 'ssh' ? leaf.title : undefined"
-      @title-change="(title: string) => emit('titleChange', leaf!.paneId, title)"
-      @shell-info="(shell: string) => emit('shellInfo', leaf!.paneId, shell)"
-      @input="(data: string) => emit('input', leaf!.paneId, data)"
+    <PaneContent
+      :leaf="leaf"
+      @register="(id: string, el: any) => emit('register', id, el)"
+      @title-change="(id: string, title: string) => emit('titleChange', id, title)"
+      @shell-info="(id: string, shell: string) => emit('shellInfo', id, shell)"
+      @input="(id: string, data: string) => emit('input', id, data)"
       @file-click="(path: string) => emit('fileClick', path)"
-      @preview-link="(url: string) => emit('previewLink', leaf!.paneId, url)"
+      @preview-link="(id: string, url: string) => emit('previewLink', id, url)"
       @link-activate="emit('linkActivate')"
-      @reconnect="emit('reconnect', leaf!.paneId)"
+      @close="(id: string) => emit('close', id)"
+      @reconnect="(id: string) => emit('reconnect', id)"
       @split-horizontal="emit('splitHorizontal')"
       @split-vertical="emit('splitVertical')"
       @toggle-broadcast="emit('toggleBroadcast')"
@@ -101,6 +104,7 @@
         :show-header="allowClose"
         :allow-close="allowClose"
         :parent-direction="split!.direction"
+        :tab-id="tabId"
         :style="getChildStyle(idx)"
         @register="(id: string, el: any) => emit('register', id, el)"
         @title-change="(id: string, title: string) => emit('titleChange', id, title)"
@@ -112,6 +116,8 @@
         @preview-link="(id: string, url: string) => emit('previewLink', id, url)"
         @link-activate="emit('linkActivate')"
         @reorder="(src: string, tgt: string, pos: DropPosition) => emit('reorder', src, tgt, pos)"
+        @drop-on-tab="(srcTab: string, srcPane: string, dstTab: string, pos: DropPosition) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)"
+        @drop-extract="(srcTab: string, srcPane: string, idx: number) => emit('dropExtract', srcTab, srcPane, idx)"
         @split-horizontal="emit('splitHorizontal')"
         @split-vertical="emit('splitVertical')"
         @toggle-broadcast="emit('toggleBroadcast')"
@@ -135,7 +141,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { PaneLayout, LeafPane, DropPosition } from '../../types/pane'
-import TerminalPane from '../terminal/TerminalPane.vue'
+import PaneContent from './PaneContent.vue'
 import SplitDivider from './SplitDivider.vue'
 import PaneHeader from './PaneHeader.vue'
 import { useI18n } from '../../composables/useI18n'
@@ -148,6 +154,7 @@ const props = defineProps<{
   showHeader?: boolean
   allowClose?: boolean
   parentDirection?: 'horizontal' | 'vertical'
+  tabId: string
 }>()
 
 const emit = defineEmits<{
@@ -161,6 +168,8 @@ const emit = defineEmits<{
   previewLink: [paneId: string, url: string]
   linkActivate: []
   reorder: [sourcePaneId: string, targetPaneId: string, position: DropPosition]
+  dropOnTab: [sourceTabId: string, sourcePaneId: string, dstTabId: string, position: DropPosition]
+  dropExtract: [sourceTabId: string, sourcePaneId: string, targetIndex: number]
   dividerDragEnd: []
   reconnect: [paneId: string]
   splitHorizontal: []

@@ -235,6 +235,7 @@ cargo run
 
 - [方案对比](docs/comparison.md) — 与 ttyd/gotty/Wetty 及其他 AI Coding 远程方案的差异
 - [部署指南](docs/deployment.md) — systemd、Docker、Windows 原生运行、跨平台构建、配置说明
+- [文件编辑器](docs/file-editor.md) — 分屏、多光标编辑、Cursor Group 跨文件同步
 - [通知系统](docs/notifications.md) — HTTP API、Claude Code 集成、Open API
 - [插件系统](docs/plugins.md) — 安装、清单、API、内置插件
 - [插件开发](docs/plugin-development.md) — 完整的插件开发文档

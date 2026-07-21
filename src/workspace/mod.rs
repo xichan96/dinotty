@@ -16,6 +16,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::platform::process::CommandNoWindowExt;
 use crate::session::SessionManager;
 use crate::settings::{default_upload_dir, Settings, SettingsState};
 use crate::workspace_mgmt::is_sensitive;
@@ -660,6 +661,146 @@ pub async fn workspace_list(
     list.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
     let path_display = q.path.trim().trim_start_matches('/').to_string();
     Json(ListResponse { cwd: cwd_display, path: path_display, entries: list }).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct WorkspaceSearchBody {
+    pub pane_id: String,
+    pub path: String,
+    pub query: String,
+    #[serde(default)]
+    pub file_pattern: Option<String>,
+    #[serde(default)]
+    pub max_results: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct SearchMatch {
+    pub file_path: String,
+    pub line: u32,
+    pub column: u32,
+    pub line_text: String,
+}
+
+#[derive(Serialize)]
+pub struct SearchResponse {
+    pub matches: Vec<SearchMatch>,
+}
+
+/// Cross-workspace text search via ripgrep.
+///
+/// Returns 502 if ripgrep is not on PATH (Windows users must install it manually).
+pub async fn workspace_search(
+    State(manager): State<Arc<SessionManager>>,
+    Json(body): Json<WorkspaceSearchBody>,
+) -> Response {
+    if ssh_session(&manager, &body.pane_id).is_some() {
+        return json_err(StatusCode::BAD_REQUEST, "search not supported for SSH sessions");
+    }
+    if Path::new(&body.path).is_absolute() {
+        return json_err(StatusCode::BAD_REQUEST, "path must be relative to workspace");
+    }
+    let root = try_res!(get_root(&manager, &body.pane_id));
+    let target = try_res!(normalize_join(&root, &body.path));
+    try_res!(path_must_be_under(&root, &target));
+    if !target.exists() {
+        return json_err(StatusCode::NOT_FOUND, "path not found");
+    }
+    if !target.is_dir() {
+        return json_err(StatusCode::BAD_REQUEST, "not a directory");
+    }
+    let query = body.query.trim();
+    if query.is_empty() {
+        return Json(SearchResponse { matches: vec![] }).into_response();
+    }
+    let max = body.max_results.unwrap_or(100).clamp(1, 500);
+
+    let mut cmd = tokio::process::Command::new("rg");
+    cmd.no_window();
+    cmd.current_dir(&root);
+    cmd.args(["--json", "--word-regexp", "-F", query, body.path.trim().trim_start_matches('/')]);
+    if let Some(ref pat) = body.file_pattern {
+        cmd.args(["--glob", pat]);
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    for key in crate::pty::claude_session_env_keys_to_strip() {
+        cmd.env_remove(key);
+    }
+
+    let timeout_dur = std::time::Duration::from_secs(10);
+    let output = match tokio::time::timeout(timeout_dur, cmd.output()).await {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => {
+            if e.kind() == ErrorKind::NotFound {
+                return json_err(StatusCode::BAD_GATEWAY, "ripgrep not installed");
+            }
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+        }
+        Err(_) => return json_err(StatusCode::GATEWAY_TIMEOUT, "search timeout"),
+    };
+
+    // rg exits non-zero when no matches; ignore exit code and parse stdout.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let matches = parse_rg_json(&stdout, max);
+    Json(SearchResponse { matches }).into_response()
+}
+
+// Line numbers and byte offsets from ripgrep are always small (file-size bounded);
+// narrowing to u32/usize is safe in practice.
+#[allow(clippy::cast_possible_truncation)]
+fn parse_rg_json(stdout: &str, max: usize) -> Vec<SearchMatch> {
+    let mut results = Vec::with_capacity(max.min(256));
+    for line in stdout.lines() {
+        if results.len() >= max {
+            break;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(serde_json::Value::as_str) != Some("match") {
+            continue;
+        }
+        let Some(data) = v.get("data") else { continue };
+        let file_path = data
+            .pointer("/path/text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim_start_matches("./")
+            .to_string();
+        let line_number =
+            data.get("line_number").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
+        let line_text = data
+            .pointer("/lines/text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim_end_matches('\n')
+            .to_string();
+        let byte_offset_in_line =
+            data.pointer("/submatches/0/start").and_then(serde_json::Value::as_u64).unwrap_or(0)
+                as usize;
+        let column = byte_offset_to_column(line_text.as_bytes(), byte_offset_in_line);
+
+        results.push(SearchMatch { file_path, line: line_number, column, line_text });
+    }
+    results
+}
+
+/// Convert a UTF-8 byte offset (relative to line start) into a 1-based column
+/// measured in UTF-16 code units (Monaco's coordinate system).
+/// Falls back to byte index + 1 when input is pure ASCII.
+fn byte_offset_to_column(line_bytes: &[u8], byte_offset: usize) -> u32 {
+    let offset = byte_offset.min(line_bytes.len());
+    let mut col: u32 = 1;
+    let mut i = 0;
+    while i < offset {
+        // UTF-8 continuation byte: 0b10xxxxxx
+        if line_bytes[i] & 0xC0 != 0x80 {
+            col += 1;
+        }
+        i += 1;
+    }
+    col
 }
 
 pub(super) fn detect_language(path: &Path) -> &'static str {

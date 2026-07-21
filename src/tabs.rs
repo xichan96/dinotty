@@ -45,6 +45,55 @@ pub struct CreateTabRequest {
     pub title: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct CreatePluginPaneRequest {
+    pub plugin_id: String,
+    pub target_pane_id: String,
+    pub direction: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateFilesPaneRequest {
+    pub path: String,
+    pub target_pane_id: String,
+    pub direction: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateWebPaneRequest {
+    pub url: String,
+    pub target_pane_id: String,
+    pub direction: String,
+}
+
+#[derive(Deserialize)]
+pub struct MovePaneRequest {
+    pub source_tab_id: String,
+    /// When present, Mode B (single pane move). When absent, Mode A (whole tab as subtree).
+    #[serde(default)]
+    pub source_pane_id: Option<String>,
+    pub target_pane_id: String,
+    pub direction: String,
+}
+
+#[derive(Deserialize)]
+pub struct ExtractPaneRequest {
+    pub source_tab_id: String,
+    pub pane_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreatePluginTabRequest {
+    pub plugin_id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Optional tab ID to reuse (used when migrating frontend-only plugin
+    /// tabs so they gain a backend `tab_layouts` entry without changing
+    /// paneId). If omitted, a new UUID is generated.
+    #[serde(default)]
+    pub tab_id: Option<String>,
+}
+
 fn deserialize_optional_argv<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -382,6 +431,544 @@ pub async fn split_pane(
     Json(serde_json::json!({
         "new_pane_id": new_pane_id,
         "layout": new_layout,
+    }))
+    .into_response()
+}
+
+// ─── POST /api/tabs/{tab_id}/pane/plugin|files|web ────────────────
+
+/// Shared helper: insert a non-terminal leaf (plugin/files/web) into the
+/// layout by splitting the target pane. Does NOT create a PTY session.
+fn insert_non_terminal_pane(
+    manager: &SessionManager,
+    tab_id: &str,
+    target_pane_id: &str,
+    direction: &str,
+    new_leaf: serde_json::Value,
+    new_pane_id: &str,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // NOTE: must drop the DashMap Ref before `manager.insert_tab` writes back
+    // to the same shard, otherwise the read lock blocks the write lock and the
+    // handler deadlocks. Use `match` so the Ref is dropped at the end of the
+    // expression, not held for the rest of the function.
+    let tab_val = match manager.tab_layouts.get(tab_id) {
+        Some(v) => v.value().clone(),
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "tab not found" })),
+            ))
+        }
+    };
+
+    let Some(layout) = tab_val.get("layout") else {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "tab has no layout" })),
+        ));
+    };
+    let layout = layout.clone();
+
+    let leaf_ids = session::collect_leaf_pane_ids(&layout);
+    if !leaf_ids.contains(&target_pane_id.to_string()) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "pane not found in tab" })),
+        ));
+    }
+
+    let Some(new_layout) =
+        session::insert_subtree_into_layout(&layout, target_pane_id, direction, new_leaf)
+    else {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "failed to update layout" })),
+        ));
+    };
+
+    let active_pane_id = new_pane_id.to_string();
+    manager.insert_tab(
+        tab_id.to_string(),
+        serde_json::json!({
+            "layout": new_layout.clone(),
+            "active_pane_id": active_pane_id.clone(),
+        }),
+    );
+
+    manager.broadcast_sync(&SyncMsg::LayoutUpdated {
+        pane_id: tab_id.to_string(),
+        layout: new_layout.clone(),
+        active_pane_id,
+    });
+
+    Ok(Json(serde_json::json!({
+        "new_pane_id": new_pane_id,
+        "layout": new_layout,
+    })))
+}
+
+#[allow(clippy::unused_async)]
+pub async fn create_plugin_pane(
+    State(manager): State<Arc<SessionManager>>,
+    Path(tab_id): Path<String>,
+    Json(req): Json<CreatePluginPaneRequest>,
+) -> impl IntoResponse {
+    let new_pane_id = uuid::Uuid::new_v4().to_string();
+    let new_leaf = serde_json::json!({
+        "type": "leaf",
+        "kind": "plugin",
+        "paneId": new_pane_id,
+        "title": req.plugin_id.clone(),
+        "ratio": 1,
+        "zoomed": false,
+        "pluginId": req.plugin_id.clone(),
+    });
+
+    match insert_non_terminal_pane(
+        &manager,
+        &tab_id,
+        &req.target_pane_id,
+        &req.direction,
+        new_leaf,
+        &new_pane_id,
+    ) {
+        Ok(resp) => resp.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+// ─── POST /api/tabs/plugin ───────────────────────────────────────
+
+/// Create a new tab whose root layout is a single plugin leaf (no PTY).
+/// Used so plugin tabs gain a backend `tab_layouts` entry, enabling Mode A
+/// drag-and-drop merge with other tabs.
+#[allow(clippy::unused_async)]
+pub async fn create_plugin_tab(
+    State(manager): State<Arc<SessionManager>>,
+    Json(req): Json<CreatePluginTabRequest>,
+) -> impl IntoResponse {
+    let tab_id = req.tab_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // Frontend convention: plugin tab uses the same ID for the tab and its
+    // single leaf pane, so existing paneId-based lookups keep working.
+    let pane_id = tab_id.clone();
+    let title = req.title.unwrap_or_else(|| req.plugin_id.clone());
+
+    let layout = serde_json::json!({
+        "type": "leaf",
+        "kind": "plugin",
+        "paneId": pane_id,
+        "title": title,
+        "ratio": 1,
+        "zoomed": false,
+        "pluginId": req.plugin_id,
+    });
+
+    manager.insert_tab(
+        tab_id.clone(),
+        serde_json::json!({
+            "layout": layout.clone(),
+            "active_pane_id": pane_id,
+        }),
+    );
+
+    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(pane_id.clone());
+
+    manager.broadcast_sync(&SyncMsg::TabCreated {
+        tab_id: tab_id.clone(),
+        pane_id: pane_id.clone(),
+        layout: Some(layout.clone()),
+        cwd: None,
+        connection_id: None,
+    });
+
+    Json(serde_json::json!({
+        "tab_id": tab_id,
+        "pane_id": pane_id,
+        "layout": layout,
+    }))
+    .into_response()
+}
+
+#[allow(clippy::unused_async)]
+pub async fn create_files_pane(
+    State(manager): State<Arc<SessionManager>>,
+    Path(tab_id): Path<String>,
+    Json(req): Json<CreateFilesPaneRequest>,
+) -> impl IntoResponse {
+    let new_pane_id = uuid::Uuid::new_v4().to_string();
+    let new_leaf = serde_json::json!({
+        "type": "leaf",
+        "kind": "files",
+        "paneId": new_pane_id,
+        "title": req.path.clone(),
+        "ratio": 1,
+        "zoomed": false,
+        "path": req.path.clone(),
+    });
+
+    match insert_non_terminal_pane(
+        &manager,
+        &tab_id,
+        &req.target_pane_id,
+        &req.direction,
+        new_leaf,
+        &new_pane_id,
+    ) {
+        Ok(resp) => resp.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+#[allow(clippy::unused_async)]
+pub async fn create_web_pane(
+    State(manager): State<Arc<SessionManager>>,
+    Path(tab_id): Path<String>,
+    Json(req): Json<CreateWebPaneRequest>,
+) -> impl IntoResponse {
+    let new_pane_id = uuid::Uuid::new_v4().to_string();
+    let new_leaf = serde_json::json!({
+        "type": "leaf",
+        "kind": "web",
+        "paneId": new_pane_id,
+        "title": req.url.clone(),
+        "ratio": 1,
+        "zoomed": false,
+        "url": req.url.clone(),
+    });
+
+    match insert_non_terminal_pane(
+        &manager,
+        &tab_id,
+        &req.target_pane_id,
+        &req.direction,
+        new_leaf,
+        &new_pane_id,
+    ) {
+        Ok(resp) => resp.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+// ─── POST /api/tabs/{dst_tab_id}/pane/move ────────────────────────
+
+#[allow(clippy::unused_async, clippy::too_many_lines)]
+pub async fn move_pane(
+    State(manager): State<Arc<SessionManager>>,
+    Path(dst_tab_id): Path<String>,
+    Json(req): Json<MovePaneRequest>,
+) -> impl IntoResponse {
+    // Reject same-tab moves.
+    if req.source_tab_id == dst_tab_id {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "source and destination tab must differ" })),
+        )
+            .into_response();
+    }
+
+    // Load source tab layout.
+    let src_val = match manager.tab_layouts.get(&req.source_tab_id) {
+        Some(v) => v.value().clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "source tab not found" })),
+            )
+                .into_response();
+        }
+    };
+    let src_layout = match src_val.get("layout") {
+        Some(l) => l.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "source tab has no layout" })),
+            )
+                .into_response();
+        }
+    };
+
+    // Load destination tab layout.
+    let dst_val = match manager.tab_layouts.get(&dst_tab_id) {
+        Some(v) => v.value().clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "destination tab not found" })),
+            )
+                .into_response();
+        }
+    };
+    let dst_layout = match dst_val.get("layout") {
+        Some(l) => l.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "destination tab has no layout" })),
+            )
+                .into_response();
+        }
+    };
+
+    // Verify target pane exists in destination layout.
+    let dst_leaf_ids = session::collect_leaf_pane_ids(&dst_layout);
+    if !dst_leaf_ids.contains(&req.target_pane_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "target pane not found in destination tab" })),
+        )
+            .into_response();
+    }
+
+    match req.source_pane_id {
+        // Mode A: move whole source tab as subtree.
+        None => {
+            let subtree = src_layout.clone();
+            let Some(new_dst_layout) = session::insert_subtree_into_layout(
+                &dst_layout,
+                &req.target_pane_id,
+                &req.direction,
+                subtree,
+            ) else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "failed to insert subtree" })),
+                )
+                    .into_response();
+            };
+
+            let active_pane_id = session::first_leaf_id(&new_dst_layout)
+                .unwrap_or_else(|| req.target_pane_id.clone());
+
+            // Remove source tab (PTY sessions are preserved).
+            manager.remove_tab(&req.source_tab_id);
+
+            manager.insert_tab(
+                dst_tab_id.clone(),
+                serde_json::json!({
+                    "layout": new_dst_layout.clone(),
+                    "active_pane_id": active_pane_id.clone(),
+                }),
+            );
+
+            // Broadcast: dst layout first, then src tab closed.
+            manager.broadcast_sync(&SyncMsg::LayoutUpdated {
+                pane_id: dst_tab_id.clone(),
+                layout: new_dst_layout.clone(),
+                active_pane_id: active_pane_id.clone(),
+            });
+            manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: req.source_tab_id.clone() });
+
+            Json(serde_json::json!({
+                "layout": new_dst_layout,
+                "active_pane_id": active_pane_id,
+                "mode": "a",
+            }))
+            .into_response()
+        }
+        // Mode B: move single pane across tabs.
+        Some(source_pane_id) => {
+            // Source must have at least 2 leaves.
+            let src_leaf_ids = session::collect_leaf_pane_ids(&src_layout);
+            if src_leaf_ids.len() < 2 {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "source tab must have at least 2 panes to move one out"
+                    })),
+                )
+                    .into_response();
+            }
+            if !src_leaf_ids.contains(&source_pane_id) {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({ "error": "source pane not found in source tab" })),
+                )
+                    .into_response();
+            }
+
+            // Extract the leaf to be moved.
+            let Some(moved_leaf) = session::extract_leaf_from_layout(&src_layout, &source_pane_id)
+            else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "failed to extract source leaf" })),
+                )
+                    .into_response();
+            };
+
+            // Remove from source layout.
+            let Some(new_src_layout) =
+                session::remove_pane_from_layout(&src_layout, &source_pane_id)
+            else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "failed to update source layout" })),
+                )
+                    .into_response();
+            };
+
+            // Insert into destination layout.
+            let Some(new_dst_layout) = session::insert_subtree_into_layout(
+                &dst_layout,
+                &req.target_pane_id,
+                &req.direction,
+                moved_leaf,
+            ) else {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "failed to update destination layout" })),
+                )
+                    .into_response();
+            };
+
+            let active_pane_id = source_pane_id.clone();
+
+            manager.insert_tab(
+                req.source_tab_id.clone(),
+                serde_json::json!({
+                    "layout": new_src_layout.clone(),
+                    "active_pane_id": session::first_leaf_id(&new_src_layout)
+                        .unwrap_or_else(|| req.target_pane_id.clone()),
+                }),
+            );
+            manager.insert_tab(
+                dst_tab_id.clone(),
+                serde_json::json!({
+                    "layout": new_dst_layout.clone(),
+                    "active_pane_id": active_pane_id.clone(),
+                }),
+            );
+
+            manager.broadcast_sync(&SyncMsg::LayoutUpdated {
+                pane_id: req.source_tab_id.clone(),
+                layout: new_src_layout.clone(),
+                active_pane_id: session::first_leaf_id(&new_src_layout)
+                    .unwrap_or_else(|| req.target_pane_id.clone()),
+            });
+            manager.broadcast_sync(&SyncMsg::LayoutUpdated {
+                pane_id: dst_tab_id.clone(),
+                layout: new_dst_layout.clone(),
+                active_pane_id: active_pane_id.clone(),
+            });
+
+            Json(serde_json::json!({
+                "source_layout": new_src_layout,
+                "layout": new_dst_layout,
+                "active_pane_id": active_pane_id,
+                "mode": "b",
+            }))
+            .into_response()
+        }
+    }
+}
+
+// ─── POST /api/tabs/extract ───────────────────────────────────────
+
+#[allow(clippy::unused_async)]
+pub async fn extract_pane(
+    State(manager): State<Arc<SessionManager>>,
+    Json(req): Json<ExtractPaneRequest>,
+) -> impl IntoResponse {
+    // Load source tab layout.
+    let src_val = match manager.tab_layouts.get(&req.source_tab_id) {
+        Some(v) => v.value().clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "source tab not found" })),
+            )
+                .into_response();
+        }
+    };
+    let src_layout = match src_val.get("layout") {
+        Some(l) => l.clone(),
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "source tab has no layout" })),
+            )
+                .into_response();
+        }
+    };
+
+    // Source must have at least 2 leaves.
+    let src_leaf_ids = session::collect_leaf_pane_ids(&src_layout);
+    if src_leaf_ids.len() < 2 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "source tab must have at least 2 panes to extract one"
+            })),
+        )
+            .into_response();
+    }
+    if !src_leaf_ids.contains(&req.pane_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "pane not found in source tab" })),
+        )
+            .into_response();
+    }
+
+    // Extract the leaf.
+    let Some(moved_leaf) = session::extract_leaf_from_layout(&src_layout, &req.pane_id) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "failed to extract leaf" })),
+        )
+            .into_response();
+    };
+
+    // Remove from source layout.
+    let Some(new_src_layout) = session::remove_pane_from_layout(&src_layout, &req.pane_id) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "failed to update source layout" })),
+        )
+            .into_response();
+    };
+
+    // Create new tab with the extracted leaf as root layout.
+    let new_tab_id = uuid::Uuid::new_v4().to_string();
+    let new_layout = moved_leaf;
+    let active_pane_id = req.pane_id.clone();
+
+    manager.insert_tab(
+        req.source_tab_id.clone(),
+        serde_json::json!({
+            "layout": new_src_layout.clone(),
+            "active_pane_id": session::first_leaf_id(&new_src_layout)
+                .unwrap_or_else(|| req.pane_id.clone()),
+        }),
+    );
+    manager.insert_tab(
+        new_tab_id.clone(),
+        serde_json::json!({
+            "layout": new_layout.clone(),
+            "active_pane_id": active_pane_id.clone(),
+        }),
+    );
+
+    manager.broadcast_sync(&SyncMsg::LayoutUpdated {
+        pane_id: req.source_tab_id.clone(),
+        layout: new_src_layout.clone(),
+        active_pane_id: session::first_leaf_id(&new_src_layout)
+            .unwrap_or_else(|| req.pane_id.clone()),
+    });
+    manager.broadcast_sync(&SyncMsg::TabCreated {
+        tab_id: new_tab_id.clone(),
+        pane_id: active_pane_id.clone(),
+        layout: Some(new_layout.clone()),
+        cwd: None,
+        connection_id: None,
+    });
+
+    Json(serde_json::json!({
+        "new_tab_id": new_tab_id,
+        "pane_id": active_pane_id,
+        "source_layout": new_src_layout,
     }))
     .into_response()
 }

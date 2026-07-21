@@ -389,6 +389,8 @@ import { useFileNavigation, useSelectedPath } from '../../composables/useFileNav
 import { useFileWorkspaceLayout } from '../../composables/useFileWorkspaceLayout'
 import { useFileWatch } from '../../composables/useFileWatch'
 import { useEditorSplit } from '../../composables/useEditorSplit'
+import { setActiveLeaf } from '../../composables/useEditorRegistry'
+import { setEditorSplitForCursorGroup } from '../../composables/useCursorGroup'
 import { useFileOperations } from '../../composables/useFileOperations'
 import type { DropPosition } from '../../types/pane'
 import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
@@ -448,6 +450,11 @@ watch(
 watch(
   () => editorSplit.activeLeaf.value?.isDir,
   (isDir) => { selectedIsDir.value = isDir ?? false }
+)
+watch(
+  () => editorSplit.activeEditorLeafId.value,
+  (id) => { setActiveLeaf(id ?? null) },
+  { immediate: true }
 )
 
 const ops = useFileOperations({
@@ -1005,6 +1012,7 @@ onMounted(() => {
   window.addEventListener('scroll', onCloseContextScroll, true)
   ops.setActiveWorkspace()
   void getApiBase()
+  setEditorSplitForCursorGroup(editorSplit)
 })
 
 onBeforeUnmount(() => {
@@ -1014,6 +1022,8 @@ onBeforeUnmount(() => {
   ops.teardownWorkspaceDragDrop()
   ops.clearActiveWorkspace()
   fileWatch.disconnectTreeWatchSocket()
+  setEditorSplitForCursorGroup(null)
+  setActiveLeaf(null)
 })
 
 defineExpose({

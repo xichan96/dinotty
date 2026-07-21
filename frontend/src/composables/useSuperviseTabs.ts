@@ -67,10 +67,12 @@ export function useSuperviseTabs() {
       orderedTabIds.add(tab.paneId)
     }
 
-    return orderedTabs.map((tab) => ({
-      id: tab.paneId,
-      reminderAt: reminderAt(tab),
-    }))
+    return orderedTabs
+      .filter((tab) => tab.type !== 'plugin')
+      .map((tab) => ({
+        id: tab.paneId,
+        reminderAt: reminderAt(tab),
+      }))
   }
 
   async function supervise(activate: (id: string) => Promise<boolean>): Promise<void> {

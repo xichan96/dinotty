@@ -23,6 +23,7 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   Delete,
+  Layers,
 } from 'lucide-vue-next'
 
 export interface KeyBinding {
@@ -115,6 +116,12 @@ export const defs: KeyBindingDef[] = [
     defaultBinding: { key: 'f', shift: false },
     icon: Search,
     titleKey: 'keybinding.searchTerminal',
+  },
+  {
+    id: 'addCursorsInFiles',
+    defaultBinding: { key: 'l', shift: true },
+    icon: Layers,
+    titleKey: 'keybinding.addCursorsInFiles',
   },
   {
     id: 'switchTab',

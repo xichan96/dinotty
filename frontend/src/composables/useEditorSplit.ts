@@ -133,6 +133,43 @@ export function useEditorSplit(opts: { paneId: () => string }) {
     activeEditorLeafId.value = leafId
   }
 
+  /** Build a balanced binary split tree from a list of files */
+  function buildBalancedTree(
+    files: Array<{ filePath: string; isDir: boolean }>,
+    direction: 'horizontal' | 'vertical'
+  ): EditorPaneLayout {
+    if (files.length === 1) {
+      return createEditorLeaf(files[0].filePath, files[0].isDir)
+    }
+    const mid = Math.ceil(files.length / 2)
+    const left = buildBalancedTree(files.slice(0, mid), direction)
+    const right = buildBalancedTree(files.slice(mid), direction)
+    return {
+      type: 'editor-split',
+      id: genEditorSplitId(),
+      direction,
+      children: [left, right],
+      ratios: [0.5, 0.5],
+    }
+  }
+
+  /**
+   * Replace the layout with N balanced split panes, one per file.
+   * Returns leaf ids in the same order as input files so callers can map
+   * (file, line, col) -> leafId for cursor placement.
+   */
+  function openFilesInBalancedSplit(
+    files: Array<{ filePath: string; isDir: boolean }>,
+    direction: 'horizontal' | 'vertical' = 'horizontal'
+  ): string[] {
+    if (files.length === 0) return []
+    const tree = buildBalancedTree(files, direction)
+    editorLayout.value = tree
+    const leaves = getAllEditorLeaves(tree)
+    activeEditorLeafId.value = leaves[0]?.id ?? null
+    return leaves.map((l) => l.id)
+  }
+
   return {
     editorLayout,
     activeEditorLeafId,
@@ -143,5 +180,6 @@ export function useEditorSplit(opts: { paneId: () => string }) {
     openFileInNewPane,
     closeEditorPane,
     focusEditorPane,
+    openFilesInBalancedSplit,
   }
 }

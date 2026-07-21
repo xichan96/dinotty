@@ -1,6 +1,6 @@
 <template>
   <div v-if="monitorSettings.enabled || warning.message.value" class="status-bar">
-    <div class="status-bar-left">
+    <div v-if="leftItems.length" class="status-bar-left">
       <StatusBarItemRenderer
         v-for="item in leftItems"
         :key="item.id"

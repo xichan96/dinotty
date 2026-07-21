@@ -625,6 +625,14 @@
     display: flex;
     flex-direction: column;
   }
+  .mc-ws-list-item:first-child {
+    padding-right: 60px;
+    min-height: 46px;
+  }
+  .mc-close-btn {
+    width: 44px;
+    height: 44px;
+  }
   .mc-right-panel {
     flex: 1;
     min-height: 0;

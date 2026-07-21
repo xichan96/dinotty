@@ -13,6 +13,7 @@
       {{ dropZone === 'center' ? t('filePreview.dropReplace') : t('filePreview.dropSplit') }}
     </div>
     <div v-if="showHeader" class="editor-pane-header">
+      <span v-if="isInActiveGroup" class="editor-pane-group-band"></span>
       <span class="editor-pane-title" :title="displayTitle">
         {{ displayTitle || t('filePreview.pickFile') }}
         <span v-if="editor.editorDirty.value" class="editor-pane-dirty">●</span>
@@ -30,6 +31,7 @@
       ref="previewContentRef"
       :pane-id="paneId"
       :file-path="filePath ?? undefined"
+      :leaf-id="leafId"
       :preview-loading="previewLoading"
       :preview-err="previewErr"
       :selected-rel="filePath"
@@ -71,6 +73,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
+import * as monaco from 'monaco-editor'
 import { useI18n } from '../../composables/useI18n'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
 import type { DropPosition } from '../../types/pane'
@@ -78,6 +81,8 @@ import { isTauri } from '../../composables/useTransport'
 import { createFileEditor } from '../../composables/useFileEditor'
 import { useOfficePreview } from '../../composables/useOfficePreview'
 import { useAudioPlayer } from '../../composables/useAudioPlayer'
+import { whenEditorReady } from '../../composables/useEditorRegistry'
+import { useCursorGroup, isCursorBroadcasting } from '../../composables/useCursorGroup'
 import FilePreviewContent from './FilePreviewContent.vue'
 
 const props = defineProps<{
@@ -146,6 +151,14 @@ const previewErr = ref('')
 
 const selectedRel: Ref<string | null> = computed(() => props.filePath)
 const selectedIsDir: Ref<boolean> = computed(() => props.isDir)
+
+const cursorGroup = useCursorGroup()
+const isInActiveGroup = computed(() => {
+  const id = cursorGroup.activeGroupId.value
+  if (!id) return false
+  const g = cursorGroup.groups.value.find((x) => x.id === id)
+  return !!g?.entries.some((e) => e.leafId === props.leafId)
+})
 
 const editor = createFileEditor({
   paneId: () => props.paneId,
@@ -264,12 +277,33 @@ function onNativeFileDrop(e: Event) {
   emit('file-drop', detail.leafId || props.leafId, detail.rel, detail.position as DropPosition)
 }
 
+const editorEventDisposers: monaco.IDisposable[] = []
+
 onMounted(() => {
   paneEl.value?.addEventListener('file-drop', onNativeFileDrop)
+  whenEditorReady(props.leafId).then((editor) => {
+    editorEventDisposers.push(
+      editor.onDidChangeModelContent((e) => {
+        if (isCursorBroadcasting(props.leafId)) return
+        cursorGroup.broadcastChange(props.leafId, e.changes)
+      }),
+      editor.onKeyDown((e) => {
+        if (e.keyCode !== monaco.KeyCode.KeyZ) return
+        if (!(e.ctrlKey || e.metaKey)) return
+        if (!isInActiveGroup.value) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.shiftKey) cursorGroup.groupRedo()
+        else cursorGroup.groupUndo()
+      })
+    )
+  })
 })
 
 onBeforeUnmount(() => {
   paneEl.value?.removeEventListener('file-drop', onNativeFileDrop)
+  for (const d of editorEventDisposers) d.dispose()
+  editorEventDisposers.length = 0
 })
 </script>
 
@@ -299,6 +333,14 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border, #333);
   flex-shrink: 0;
   min-height: 28px;
+}
+
+.editor-pane-group-band {
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--accent, #4d80ff);
+  flex-shrink: 0;
 }
 
 .editor-pane-title {

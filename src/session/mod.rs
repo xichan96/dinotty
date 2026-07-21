@@ -604,7 +604,8 @@ impl Session {
     }
 
     /// Flush buffered output accumulated during synchronized output mode.
-    /// Breaks large payloads into chunks to avoid freezing the frontend UI thread.
+    /// Breaks large payloads into chunks at UTF-8 character boundaries to avoid
+    /// freezing the frontend UI thread.
     pub fn flush_sync_buffer(&self) {
         let data: Vec<String> = {
             let mut buf =
@@ -618,13 +619,14 @@ impl Session {
         }
         let combined = data.join("");
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if combined.len() <= FLUSH_CHUNK_SIZE {
-            Self::send_chunk_to_clients(&mut clients, &combined);
-        } else {
-            for chunk in combined.as_bytes().chunks(FLUSH_CHUNK_SIZE) {
-                let s = String::from_utf8_lossy(chunk).into_owned();
-                Self::send_chunk_to_clients(&mut clients, &s);
+        let mut start = 0;
+        while start < combined.len() {
+            let mut end = (start + FLUSH_CHUNK_SIZE).min(combined.len());
+            while end > start && !combined.is_char_boundary(end) {
+                end -= 1;
             }
+            Self::send_chunk_to_clients(&mut clients, &combined[start..end]);
+            start = end;
         }
     }
 
@@ -1678,6 +1680,31 @@ mod kill_and_remove_notifier_tests {
             output_rx: Mutex::new(Some(output_rx)),
             pending_results: Mutex::new(Vec::new()),
         })
+    }
+
+    #[test]
+    fn flush_sync_buffer_preserves_multibyte_across_chunk_boundary() {
+        let session = stub_session();
+        let (_, mut rx) = session.add_client();
+        session.clients.lock().unwrap()[0].snapshot_pending.store(false, Ordering::Relaxed);
+
+        let input = format!("{}界tail", "a".repeat(FLUSH_CHUNK_SIZE - 1));
+        session.sync_buffer.lock().unwrap().push(input.clone());
+        session.sync_buffer_bytes.store(input.len(), Ordering::Relaxed);
+
+        session.flush_sync_buffer();
+
+        let received: String = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                SessionClientEvent::Output(data) => Some(data),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !received.contains('\u{FFFD}'),
+            "flushed output contains U+FFFD replacement character"
+        );
+        assert_eq!(received, input);
     }
 
     #[tokio::test]

@@ -339,6 +339,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.tab.monitor': 'Monitor',
     'settings.keyboard.feedback': 'Key Feedback',
     'settings.keyboard.sound': 'Click sound on key press',
+    'settings.keyboard.keepOnScroll': 'Keep keyboard open while scrolling',
+    'settings.keyboard.keepOnScrollHint':
+      'Scroll back through history without dismissing the keyboard',
     'settings.keyboard.openApi': 'Open API',
     'settings.keyboard.openApiHint':
       'Allow external devices to send input to the terminal via HTTP API.',
@@ -1016,6 +1019,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.tab.monitor': '监控',
     'settings.keyboard.feedback': '按键反馈',
     'settings.keyboard.sound': '按键音效',
+    'settings.keyboard.keepOnScroll': '滚动时保持键盘',
+    'settings.keyboard.keepOnScrollHint': '上翻查看历史输出时不再收起键盘',
     'settings.keyboard.openApi': '开放接口',
     'settings.keyboard.openApiHint': '允许外部设备通过 HTTP API 向终端发送输入。',
     'settings.keyboard.openApiEnabled': '启用开放接口',

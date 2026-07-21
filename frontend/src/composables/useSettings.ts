@@ -45,6 +45,7 @@ export interface SettingsData {
   upload_cap_count: number
   keyboard_sound: boolean
   show_virtual_keyboard: boolean
+  keyboard_keep_on_scroll: boolean
   workspace_badge_mode: WorkspaceBadgeMode | null
   confirm_before_close_tab: boolean
   space_confirms_dialogs: boolean
@@ -382,6 +383,7 @@ export const settings = reactive<SettingsData>({
   upload_cap_count: 100,
   keyboard_sound: false,
   show_virtual_keyboard: false,
+  keyboard_keep_on_scroll: false,
   workspace_badge_mode: null,
   confirm_before_close_tab: true,
   space_confirms_dialogs: false,

@@ -500,6 +500,18 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
+      <div class="settings-row">
+        <label>{{ t('settings.keyboard.keepOnScroll') }}</label>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            v-model="settings.keyboard_keep_on_scroll"
+            @change="saveSettings()"
+          />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <p class="settings-hint">{{ t('settings.keyboard.keepOnScrollHint') }}</p>
     </div>
 
     <CollapsibleSection :title="t('settings.keyboard.openApi')" level="group" default-open>

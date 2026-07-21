@@ -163,7 +163,7 @@ fn spawn_tauri_write_task(session: Arc<dinotty_server::session::Session>, pane_i
                 write_session.write_input_async(batch.as_bytes()).await
             } else {
                 let ws = Arc::clone(&write_session);
-                tokio::task::spawn_blocking(move || ws.write_input_sync(batch.as_bytes()))
+                tokio::task::spawn_blocking(move || ws.write_input_blocking(batch.as_bytes()))
                     .await
                     .unwrap_or_else(|e| Err(e.to_string()))
             };

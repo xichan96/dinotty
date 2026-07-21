@@ -266,6 +266,24 @@ impl Session {
         let Ok(mut backend) = self.backend.try_lock() else {
             return Err("backend lock held".into());
         };
+        Self::write_input_locked(&mut backend, data)
+    }
+
+    /// Write input while waiting for the backend lock from a blocking thread.
+    ///
+    /// Callers MUST be inside `tokio::task::spawn_blocking` (or otherwise off-runtime), because
+    /// `blocking_lock` panics when called on a Tokio worker thread. Waiting is intentional: a
+    /// superseded connection's writer may wait and write its already-dequeued batch slightly late
+    /// instead of failing fast.
+    ///
+    /// # Errors
+    /// Returns an error if the backend is not local or the write fails.
+    pub fn write_input_blocking(&self, data: &[u8]) -> Result<(), String> {
+        let mut backend = self.backend.blocking_lock();
+        Self::write_input_locked(&mut backend, data)
+    }
+
+    fn write_input_locked(backend: &mut SessionBackend, data: &[u8]) -> Result<(), String> {
         match &mut *backend {
             SessionBackend::Local { writer, .. } => {
                 writer.write_all(data).map_err(|e| e.to_string())?;

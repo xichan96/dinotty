@@ -639,7 +639,7 @@ async fn handle_socket(
                     write_session.write_input_async(batch.as_bytes()).await
                 } else {
                     let ws = Arc::clone(&write_session);
-                    tokio::task::spawn_blocking(move || ws.write_input_sync(batch.as_bytes()))
+                    tokio::task::spawn_blocking(move || ws.write_input_blocking(batch.as_bytes()))
                         .await
                         .unwrap_or_else(|e| Err(e.to_string()))
                 };
@@ -804,7 +804,7 @@ async fn handle_socket(
                 write_session.write_input_async(batch.as_bytes()).await
             } else {
                 let ws = Arc::clone(&write_session);
-                tokio::task::spawn_blocking(move || ws.write_input_sync(batch.as_bytes()))
+                tokio::task::spawn_blocking(move || ws.write_input_blocking(batch.as_bytes()))
                     .await
                     .unwrap_or_else(|e| Err(e.to_string()))
             };
@@ -1193,7 +1193,7 @@ pub async fn handle_open_api_ws(socket: WebSocket, manager: Arc<SessionManager>,
                 write_session.write_input_async(batch.as_bytes()).await
             } else {
                 let ws = Arc::clone(&write_session);
-                tokio::task::spawn_blocking(move || ws.write_input_sync(batch.as_bytes()))
+                tokio::task::spawn_blocking(move || ws.write_input_blocking(batch.as_bytes()))
                     .await
                     .unwrap_or_else(|e| Err(e.to_string()))
             };

@@ -378,58 +378,58 @@ pub fn create_session(
                     // CWD sniffing (before lock, uses its own cwd_state lock)
                     reader_session.on_pty_output(data);
 
-                    // Feed to virtual screen + extract command results + handle sync events
-                    {
+                    // Feed to virtual screen + extract command results + collect sync events
+                    let feed_result = {
                         let mut screen = reader_session
                             .screen
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             screen.feed(data);
                             let results = screen.drain_command_results();
                             let outputs: Vec<String> =
                                 (0..results.len()).map(|_| screen.take_command_output()).collect();
                             let sync = screen.drain_sync_events();
                             (results.into_iter().zip(outputs).collect::<Vec<_>>(), sync)
-                        }));
-                        match result {
-                            Ok((command_results, sync_events)) => {
-                                // Handle sync events immediately (while still holding lock
-                                // prevents race between sync start and broadcast task wakeup)
-                                for event in sync_events {
-                                    match event {
-                                        crate::vt_screen::SyncEvent::Start => {
-                                            reader_session.set_sync_mode(true);
-                                        }
-                                        crate::vt_screen::SyncEvent::Stop => {
-                                            reader_session.set_sync_mode(false);
-                                        }
+                        }))
+                    };
+                    match feed_result {
+                        Ok((command_results, sync_events)) => {
+                            // Apply sync transitions before publishing this read to output_tx.
+                            // The broadcast task cannot observe these bytes until send() below.
+                            for event in sync_events {
+                                match event {
+                                    crate::vt_screen::SyncEvent::Start => {
+                                        reader_session.set_sync_mode(true);
                                     }
-                                }
-                                // Queue command results for broadcast task
-                                if !command_results.is_empty() {
-                                    let mut pending = reader_session
-                                        .pending_results
-                                        .lock()
-                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                    for (result, stdout) in command_results {
-                                        pending.push(crate::session::PendingCommandResult {
-                                            exit_code: result.exit_code,
-                                            duration_ms: result.duration_ms,
-                                            stdout,
-                                            method: result.method,
-                                        });
+                                    crate::vt_screen::SyncEvent::Stop => {
+                                        reader_session.set_sync_mode(false);
                                     }
                                 }
                             }
-                            Err(e) => {
-                                let msg = e
-                                    .downcast_ref::<String>()
-                                    .map(String::as_str)
-                                    .or_else(|| e.downcast_ref::<&str>().copied())
-                                    .unwrap_or("unknown");
-                                error!("feed() PANICKED: {}, {}B, pane={}", msg, n, reader_pane);
+                            // Queue command results for broadcast task
+                            if !command_results.is_empty() {
+                                let mut pending = reader_session
+                                    .pending_results
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                                for (result, stdout) in command_results {
+                                    pending.push(crate::session::PendingCommandResult {
+                                        exit_code: result.exit_code,
+                                        duration_ms: result.duration_ms,
+                                        stdout,
+                                        method: result.method,
+                                    });
+                                }
                             }
+                        }
+                        Err(e) => {
+                            let msg = e
+                                .downcast_ref::<String>()
+                                .map(String::as_str)
+                                .or_else(|| e.downcast_ref::<&str>().copied())
+                                .unwrap_or("unknown");
+                            error!("feed() PANICKED: {}, {}B, pane={}", msg, n, reader_pane);
                         }
                     }
 

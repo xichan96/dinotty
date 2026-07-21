@@ -1,0 +1,23 @@
+[package]
+name = "dinotty-mobile"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Standalone crate — intentionally detached from the repo's root workspace so
+# the Android toolchain never has to cross-compile the desktop/server crates.
+[workspace]
+
+[lib]
+name = "dinotty_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

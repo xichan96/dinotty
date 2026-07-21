@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.dinotty_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Android 15+ forces edge-to-edge, which puts the webview content
+             underneath the system navigation bar and hides Dinotty's bottom
+             action row. Opt out so content is laid out between the bars. -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
+    </style>
+</resources>

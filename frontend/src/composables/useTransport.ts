@@ -11,7 +11,20 @@ export interface Transport {
 
 export function isTauri(): boolean {
   const w = window as any
-  return !!(w.__TAURI_INTERNALS__?.invoke || w.__TAURI__?.core?.invoke)
+  const hasIpc = !!(w.__TAURI_INTERNALS__?.invoke || w.__TAURI__?.core?.invoke)
+  if (!hasIpc) return false
+  // Tauri injects its IPC bootstrap into every page the webview loads,
+  // including remotely-served ones (e.g. the Android thin client pointed at a
+  // Dinotty server). Tauri mode is only valid on the app's own bundled/dev
+  // origins; a remote origin must use browser mode (cookies + WebSocket) —
+  // its host has none of the desktop IPC commands.
+  const { protocol, hostname } = location
+  return (
+    protocol === 'tauri:' ||
+    hostname === 'tauri.localhost' ||
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1'
+  )
 }
 
 export function tauriInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Dinotty</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #101014;
+      color: #e6e6ea;
+      font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      padding: 24px;
+      padding-top: env(safe-area-inset-top);
+    }
+    .card { width: 100%; max-width: 420px; }
+    h1 { font-size: 28px; margin-bottom: 4px; letter-spacing: 1px; }
+    .sub { color: #8a8a94; font-size: 13px; margin-bottom: 24px; }
+    label { display: block; font-size: 13px; color: #a0a0aa; margin-bottom: 8px; }
+    input {
+      width: 100%;
+      padding: 13px 14px;
+      font-size: 16px;
+      border-radius: 10px;
+      border: 1px solid #2c2c34;
+      background: #1a1a20;
+      color: #e6e6ea;
+      outline: none;
+    }
+    input:focus { border-color: #4c8dff; }
+    .btn {
+      width: 100%;
+      margin-top: 14px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      background: #4c8dff;
+      color: #fff;
+    }
+    .btn:active { opacity: 0.85; }
+    .list { margin-top: 22px; }
+    .list-title { font-size: 12px; color: #6c6c76; margin-bottom: 8px; }
+    .server {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 12px;
+      margin-bottom: 8px;
+      border: 1px solid #2c2c34;
+      border-radius: 10px;
+      background: #17171d;
+    }
+    .server.active { border-color: #4c8dff; }
+    .server .addr {
+      flex: 1;
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #d0d0d8;
+    }
+    .server .del {
+      border: none;
+      background: transparent;
+      color: #6c6c76;
+      font-size: 17px;
+      padding: 4px 8px;
+    }
+    .hint { margin-top: 14px; font-size: 12px; color: #6c6c76; line-height: 1.6; }
+    .err { margin-top: 12px; font-size: 13px; color: #ff6b6b; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Dinotty</h1>
+    <div class="sub">连接到你的 Dinotty 服务器</div>
+    <label for="server">服务器地址（可粘贴带 token 的完整网址）</label>
+    <input id="server" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
+           spellcheck="false" placeholder="http://100.86.95.56:8999" />
+    <button class="btn" id="connect">连接</button>
+    <div class="err" id="err"></div>
+    <div class="list" id="listWrap" style="display:none">
+      <div class="list-title">已保存的服务器（点击切换）</div>
+      <div id="list"></div>
+    </div>
+    <div class="hint">
+      局域网填 192.168.x.x，跨网络填 Tailscale 的 100.x.x.x 地址（两端登录同一
+      Tailscale 账号）。连接后按安卓返回键（或重开 App）可回到此页切换服务器。
+    </div>
+  </div>
+  <script>
+    const LAST_KEY = 'dinotty_server_url'
+    const LIST_KEY = 'dinotty_servers'
+    const input = document.getElementById('server')
+    const err = document.getElementById('err')
+    const listWrap = document.getElementById('listWrap')
+    const listEl = document.getElementById('list')
+
+    function loadServers() {
+      try {
+        const arr = JSON.parse(localStorage.getItem(LIST_KEY) || '[]')
+        return Array.isArray(arr) ? arr : []
+      } catch {
+        return []
+      }
+    }
+
+    function saveServers(arr) {
+      localStorage.setItem(LIST_KEY, JSON.stringify(arr))
+    }
+
+    function normalize(raw) {
+      let url = raw.trim()
+      if (!url) return null
+      if (!/^https?:\/\//i.test(url)) url = 'http://' + url
+      try {
+        const u = new URL(url)
+        if (!u.port && u.protocol === 'http:') u.port = '8999'
+        // Keep path and query intact — the server's QR/share URL carries the
+        // auth token as ?token=..., which must survive normalization.
+        return u.href
+      } catch {
+        return null
+      }
+    }
+
+    function go(url) {
+      localStorage.setItem(LAST_KEY, url)
+      const servers = loadServers()
+      if (!servers.includes(url)) {
+        servers.unshift(url)
+        saveServers(servers.slice(0, 10))
+      }
+      // Cache-buster: the WebView may hold a stale cached index.html from
+      // before a server update; a unique query forces a fresh document so the
+      // UI always matches the server version.
+      const u = new URL(url)
+      u.searchParams.set('_r', Date.now().toString(36))
+      // location.href (not replace) keeps this page in history so the
+      // Android back button returns here to switch servers.
+      location.href = u.href
+    }
+
+    function shortLabel(url) {
+      try {
+        const u = new URL(url)
+        return u.host + (u.search ? '（含令牌）' : '')
+      } catch {
+        return url
+      }
+    }
+
+    function renderList() {
+      const servers = loadServers()
+      const last = localStorage.getItem(LAST_KEY)
+      listWrap.style.display = servers.length ? 'block' : 'none'
+      listEl.innerHTML = ''
+      for (const s of servers) {
+        const row = document.createElement('div')
+        row.className = 'server' + (s === last ? ' active' : '')
+        const addr = document.createElement('div')
+        addr.className = 'addr'
+        addr.textContent = shortLabel(s)
+        addr.addEventListener('click', () => go(s))
+        const del = document.createElement('button')
+        del.className = 'del'
+        del.textContent = '✕'
+        del.addEventListener('click', () => {
+          saveServers(loadServers().filter((x) => x !== s))
+          renderList()
+        })
+        row.appendChild(addr)
+        row.appendChild(del)
+        listEl.appendChild(row)
+      }
+    }
+
+    document.getElementById('connect').addEventListener('click', () => {
+      const url = normalize(input.value)
+      if (!url) {
+        err.textContent = '地址格式不对，例如：http://100.86.95.56:8999'
+        err.style.display = 'block'
+        return
+      }
+      go(url)
+    })
+
+    renderList()
+    const saved = localStorage.getItem(LAST_KEY)
+    if (saved) {
+      input.value = saved
+    }
+  </script>
+</body>
+</html>

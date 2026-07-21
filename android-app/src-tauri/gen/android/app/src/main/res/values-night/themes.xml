@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.dinotty_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Keep in sync with values/themes.xml: opt out of forced
+             edge-to-edge so the system nav bar doesn't cover the UI. -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
+    </style>
+</resources>

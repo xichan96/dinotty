@@ -255,7 +255,7 @@ jobs:
           }
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: dinotty-${{ matrix.platform }}
           path: dist/package-artifacts/*
@@ -273,13 +273,13 @@ jobs:
       contents: write
     steps:
       - name: Download package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           pattern: dinotty-*
           path: release-assets
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           name: Dinotty ${{ needs.prepare.outputs.release_tag }}

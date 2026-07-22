@@ -798,6 +798,51 @@ describe('App.vue - onClosePane routes through confirmation gate', () => {
     expect(workspaceState.activeWorkspaceId.value).toBe('workspace-b')
     expect(session.activePaneId).toBe('workspace-b-successor')
   })
+
+  it('uses a positional fallback when the successor workspace hop fails', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const workspaceState = useWorkspaces()
+    workspaceState.workspaces.value = [
+      { id: 'workspace-a', name: 'Workspace A', path: '/workspace/a', order: 0 },
+      { id: 'workspace-b', name: 'Workspace B', path: '/workspace/b', order: 1 },
+    ]
+    workspaceState.activeWorkspaceId.value = 'workspace-a'
+    const terminalTab = (paneId: string, cwd: string): Tab => ({
+      type: 'terminal',
+      paneId,
+      layout: {
+        type: 'leaf',
+        paneId: `${paneId}-leaf`,
+        title: paneId,
+        ratio: 1,
+        zoomed: false,
+      },
+      activePaneId: `${paneId}-leaf`,
+      paneMru: [`${paneId}-leaf`],
+      broadcastMode: false,
+      broadcastActivity: 0,
+      previewVisible: false,
+      previewAddress: '',
+      previewUrl: '',
+      previewKind: 'web',
+      cwd,
+    })
+    session.setTabs([
+      terminalTab('workspace-a-only-tab', '/workspace/a'),
+      terminalTab('workspace-b-fallback', '/workspace/b'),
+    ])
+    session.setActivePane('workspace-a-only-tab')
+    mocks.apiActivateWorkspace.mockRejectedValueOnce(new Error('activation failed'))
+
+    const app = wrapper.vm as unknown as { closeTab: (tabId: string) => Promise<void> }
+    await app.closeTab('workspace-a-only-tab')
+    await nextTick()
+
+    expect(mocks.apiActivateWorkspace).toHaveBeenNthCalledWith(2, 'workspace-b')
+    expect(workspaceState.activeWorkspaceId.value).toBe('workspace-b')
+    expect(session.activePaneId).toBe('workspace-b-fallback')
+  })
 })
 
 describe('App.vue - notification badge visibility', () => {

@@ -390,7 +390,15 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         if (!workspaceCommitted || gen !== currentRevealNavGen()) {
           successor = tabs.value.find(
             (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
-          )
+          ) ?? tabs.value[Math.min(idx, tabs.value.length - 1)]
+          const fallbackWorkspaceId = successor ? workspaceIdOfTab(successor) : null
+          if (successor && fallbackWorkspaceId !== activeWorkspaceId.value) {
+            try {
+              await activateWorkspace(fallbackWorkspaceId)
+            } catch {
+              // Keep the positional fallback selected if its workspace hop also fails.
+            }
+          }
         }
       } else {
         cancelPendingWorkspaceActivation()

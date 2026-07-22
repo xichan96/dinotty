@@ -76,7 +76,7 @@
                 </template>
               </div>
             </div>
-            <p v-if="def.id === 'superviseTabs' && isWindowsClient" class="settings-hint">
+            <p v-if="def.id === 'superviseTabs'" class="settings-hint">
               {{ t('keybinding.superviseTabsHint') }}
             </p>
             <template v-if="def.id === 'superviseTabs'">

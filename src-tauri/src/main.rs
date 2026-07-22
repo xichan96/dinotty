@@ -597,11 +597,14 @@ fn close_window(app: AppHandle, state: State<'_, Arc<SessionManager>>) {
 /// login-shell PATH once at startup, before any PTY spawn or thread exists.
 #[cfg(target_os = "macos")]
 fn import_login_shell_path() {
+    use dinotty_server::platform::process::CommandNoWindowExt;
+
     const START_MARKER: &[u8] = b"__DINOTTY_PATH_START__";
     const END_MARKER: &[u8] = b"__DINOTTY_PATH_END__";
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let Ok(out) = std::process::Command::new(&shell)
+        .no_window()
         .args(["-lc", "printf '__DINOTTY_PATH_START__%s__DINOTTY_PATH_END__' \"$PATH\""])
         .output()
     else {

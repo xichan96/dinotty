@@ -70,7 +70,7 @@ A plugin's JS entry exports an `activate(context)` function. The `context` objec
 | | `storage.list()` | List all stored keys |
 | **Commands** | `commands.register(id, handler)` | Register a command palette command, returns `Disposable` |
 | **CLI exec** | `exec.run(args, options?)` | Run the plugin's CLI binary synchronously (`{code, stdout, stderr}`) |
-| | `exec.spawn(args)` | Stream CLI output over WebSocket (returns `ReadableStream`) |
+| | `exec.spawn(args, options?)` | Stream CLI output with optional `cwd` / `env` (returns `ReadableStream`) |
 | **UI** | `ui.notify(message, level?, title?)` | Show a notification (info / warn / error) with optional custom title |
 | | `ui.confirm(message)` | Show a confirm dialog, returns `Promise<boolean>` |
 | **Settings** | `settings.get()` | Read app settings |
@@ -95,7 +95,7 @@ For the full plugin development guide, see [plugin-development.md](plugin-develo
 
 Dinotty selects a native plugin target on the backend; it never trusts the remote browser platform. Supported keys are `windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, and `macos-aarch64`. `entries[current-target]` takes precedence over legacy `entry`. Unknown targets, missing entries, paths outside the plugin directory, escaping symlinks, and non-regular files are rejected.
 
-Long-running processes may declare `bin.lifecycle.stdinLease`. On stop, the host writes a JSON shutdown frame to stdin and force-terminates the process after `forceKillAfterMs`. Closing a browser or hot-reloading plugin UI does not own or stop a long-running process; explicit stop, plugin update/uninstall, and Dinotty shutdown do.
+Long-running processes may declare `bin.lifecycle.stdinLease`. On stop, the host writes a JSON shutdown frame to stdin and force-terminates the process after `forceKillAfterMs`. `bin.lifecycle.scope` defaults to `ui`; on UI hot reload the backend stops only processes whose recorded scope is `ui`. Set it to `host` to keep processes alive across browser disconnects and UI hot reloads; host-scoped processes stop on explicit stop, plugin update/uninstall, or Dinotty shutdown. Deadlines must satisfy `shutdownDeadlineMs <= 30000`, `forceKillAfterMs <= 60000`, and the shutdown deadline must not exceed the force-kill deadline. Host-targeted `entries` and new lifecycle fields require explicit native capability declarations and an install/update confirmation; this confirmation is not an OS sandbox.
 
 ## Plugin Repository
 

@@ -259,6 +259,19 @@ ctx.ui.notify('操作成功', 'info')   // 'info' | 'warn' | 'error'
 const ok = await ctx.ui.confirm('确定删除？')  // 返回 boolean
 ```
 
+### 语言
+
+`ctx.i18n` 只暴露 Dinotty 当前界面语言，不会向插件泄露完整应用设置。插件应自行维护翻译文案，并在卸载时释放监听器。
+
+```js
+const locale = ctx.i18n.getLocale() // 'zh' | 'en'
+
+const d = ctx.i18n.onDidChangeLocale((nextLocale) => {
+  console.log('界面语言已切换为', nextLocale)
+})
+d.dispose()
+```
+
 ### 设置
 
 ```js
@@ -502,6 +515,7 @@ Native 插件可以让宿主按服务端平台精确选择入口：
 
 ```json
 {
+  "permissions": ["native.execute", "process.long-running"],
   "bin": {
     "mode": "cli",
     "entry": "./bin/legacy-tool",
@@ -513,6 +527,7 @@ Native 插件可以让宿主按服务端平台精确选择入口：
       "macos-aarch64": "bin/macos-aarch64/tool"
     },
     "lifecycle": {
+      "scope": "host",
       "stdinLease": true,
       "shutdownDeadlineMs": 10000,
       "forceKillAfterMs": 15000
@@ -522,6 +537,8 @@ Native 插件可以让宿主按服务端平台精确选择入口：
 ```
 
 当前目标存在 `entries[target]` 时优先使用它，否则才回退到 legacy `entry`。入口必须是插件目录内的普通文件；绝对路径、`..`、目录外 symlink 和未知平台会 fail closed。`minAppVersion` 会在扫描、安装和运行前实际校验。
+
+`lifecycle.scope` 控制 managed process 与插件 UI 的关系：默认 `ui` 保持兼容行为，UI 热重载时只请求后端停止真实的 UI-scoped 进程；`host` 让进程跨 UI 热重载和浏览器断开继续运行，只在显式停止、插件更新/卸载或 Dinotty 退出时停止。scope 由后端进程记录并执行，不依赖浏览器缓存的 manifest。`stdinLease` 只定义停止协议，不隐含进程作用域。`shutdownDeadlineMs` 不能超过 30000，`forceKillAfterMs` 不能超过 60000，且前者不能大于后者。
 
 宿主运行 Native 命令时默认把工作目录设为插件目录，并注入以下不可由插件请求覆盖的环境变量：
 
@@ -538,7 +555,7 @@ DINOTTY_PARENT_PID
 
 `DINOTTY_ORIGIN` 使用 Dinotty 当前实际监听端口和 IPv4 loopback URL。长运行进程若启用 `stdinLease`，正常停止时会收到一行 `{"type":"shutdown","deadlineMs":...}`；宿主异常退出时 stdin EOF 也必须视为停止信号。stdout/stderr 会被宿主持续消费并只保留有界诊断缓冲，避免 pipe 写满卡死。
 
-`permissions` 中的 Native 权限目前主要用于声明和用户告知，不是操作系统级 sandbox。Native 二进制仍可能以当前用户权限访问其他网络或文件；插件 UI 不得声称宿主已经在 OS 层阻止这些访问。
+使用按平台 `entries` 或 `lifecycle` 的插件必须分别声明 `native.execute` 和 `process.long-running`；缺失或未知的 Native 权限会被拒绝。安装和更新时，管理界面会明确展示并要求确认这些能力。权限确认不是操作系统级 sandbox：Native 二进制仍可能以当前用户权限访问其他网络或文件，插件 UI 不得声称宿主已经在 OS 层阻止这些访问。仅使用 legacy `bin.entry` 且未启用新生命周期字段的旧插件继续按兼容模式运行。
 
 ### exec.run — 同步调用
 
@@ -567,7 +584,10 @@ const data = JSON.parse(res.stdout)
 适合长时间运行的命令（如 `watch`、持续日志）：
 
 ```js
-const handle = ctx.exec.spawn(['watch', '--interval', '1'])
+const handle = ctx.exec.spawn(['watch', '--interval', '1'], {
+  cwd: '/path/to/workspace',
+  env: { MODE: 'watch' }
+})
 
 const reader = handle.stdout.getReader()
 while (true) {

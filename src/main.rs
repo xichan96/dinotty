@@ -690,11 +690,8 @@ async fn main() {
     let git_info = read_git_info();
     tracing::info!("Git info: {}", git_info.version);
 
-    let plugins = Arc::new(plugin::PluginManager::new(
-        format!("http://127.0.0.1:{port}"),
-        git_info.version.clone(),
-        "server".into(),
-    ));
+    let plugins =
+        Arc::new(plugin::PluginManager::new(format!("http://127.0.0.1:{port}"), "server".into()));
     plugins.scan();
     tracing::info!("Loaded {} plugins", plugins.list().len());
 

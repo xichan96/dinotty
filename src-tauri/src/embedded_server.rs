@@ -516,7 +516,6 @@ pub fn run_server(
         let git_info = read_git_info();
         let plugins = Arc::new(PluginManager::new(
             format!("http://127.0.0.1:{local_port}"),
-            git_info.version.clone(),
             "desktop".into(),
         ));
         plugins.scan();

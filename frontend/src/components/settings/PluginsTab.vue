@@ -203,9 +203,14 @@
           <span class="plugin-card-version">v{{ p.version }}</span>
         </div>
         <p v-if="p.description" class="plugin-card-desc">{{ p.description }}</p>
+        <p v-if="p.error" class="plugin-card-error">{{ p.error }}</p>
+        <div v-if="p.permissions.length" class="plugin-permissions">
+          <span class="plugin-permissions-label">{{ t('settings.plugins.permissions') }}</span>
+          <code v-for="permission in p.permissions" :key="permission">{{ permission }}</code>
+        </div>
         <div class="plugin-card-actions">
           <button
-            v-if="p.state === 'active'"
+            v-if="p.state === 'active' && p.hasComponent"
             class="plugin-install-btn"
             :disabled="isBusy(p.id)"
             @click="emit('open-plugin', p.id)"
@@ -271,6 +276,7 @@ import { authFetch, apiUrl } from '../../composables/apiBase'
 import { usePluginLoader } from '../../composables/usePluginLoader'
 import { useMarketplace, type MarketPlugin } from '../../composables/useMarketplace'
 import { describeHttpError, describeRequestError } from '../../utils/httpError'
+import { uiConfirm } from '../../composables/useConfirm'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
 
@@ -316,6 +322,9 @@ const settingsPlugins = computed(() =>
     version: p.manifest.version,
     description: p.manifest.description,
     state: p.state,
+    error: p.error,
+    hasComponent: !!p.exports?.component,
+    permissions: p.manifest.permissions ?? [],
     isDevLink: p.isDevLink,
     marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
   }))
@@ -386,7 +395,10 @@ async function openDetail(mp: MarketPlugin) {
 }
 
 async function onMarketInstall(mp: MarketPlugin) {
-  const result = await installFromMarket(mp)
+  let result = await installFromMarket(mp)
+  if (result.permissions && (await confirmNativePermissions(result.permissions))) {
+    result = await installFromMarket(mp, true)
+  }
   if (result.ok) {
     setStatus(`Installed ${mp.name} v${mp.version}`, true)
     await loadAll()
@@ -402,7 +414,10 @@ async function onMarketInstall(mp: MarketPlugin) {
 }
 
 async function onUpdateFromRepo(mp: MarketPlugin) {
-  const result = await installFromMarket(mp)
+  let result = await installFromMarket(mp)
+  if (result.permissions && (await confirmNativePermissions(result.permissions))) {
+    result = await installFromMarket(mp, true)
+  }
   if (result.ok) {
     setStatus(`Updated ${mp.name} to v${mp.version}`, true)
     await unloadPlugin(mp.id)
@@ -417,16 +432,43 @@ function onPickerSelect(path: string) {
   installDirPath.value = path
 }
 
+async function requestedNativePermissions(res: Response): Promise<string[] | null> {
+  if (res.status !== 428) return null
+  const body = await res.json().catch(() => null)
+  return Array.isArray(body?.permissions) ? body.permissions : []
+}
+
+function confirmNativePermissions(permissions: string[]): Promise<boolean> {
+  return uiConfirm(
+    `${t('settings.plugins.nativePermissionWarning')}\n\n${permissions.join('\n')}`,
+    {
+      title: t('settings.plugins.nativePermissionTitle'),
+      confirmText: t('settings.plugins.nativePermissionApprove'),
+      cancelText: t('terminal.cancel'),
+    }
+  )
+}
+
 async function onInstallFromDir() {
   const path = installDirPath.value.trim()
   if (!path) return
   markBusy('dir-install')
   try {
-    const res = await authFetch(apiUrl('/api/plugins/install-dir'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, dev_link: devLinkMode.value }),
-    })
+    const request = (approveNative: boolean) =>
+      authFetch(apiUrl('/api/plugins/install-dir'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path,
+          dev_link: devLinkMode.value,
+          approve_native: approveNative,
+        }),
+      })
+    let res = await request(false)
+    const permissions = await requestedNativePermissions(res)
+    if (permissions && (await confirmNativePermissions(permissions))) {
+      res = await request(true)
+    }
     if (res.ok) {
       const manifest = await res.json()
       const mode = devLinkMode.value ? 'Linked' : 'Installed'
@@ -451,9 +493,19 @@ async function onUpdateFile(e: Event, id: string) {
   if (!file) return
   markBusy(`update:${id}`)
   try {
-    const form = new FormData()
-    form.append('file', file)
-    const res = await authFetch(apiUrl(`/api/plugins/${id}/update`), { method: 'POST', body: form })
+    const request = (approveNative: boolean) => {
+      const form = new FormData()
+      form.append('file', file)
+      return authFetch(
+        apiUrl(`/api/plugins/${id}/update?approve_native=${approveNative ? 'true' : 'false'}`),
+        { method: 'POST', body: form }
+      )
+    }
+    let res = await request(false)
+    const permissions = await requestedNativePermissions(res)
+    if (permissions && (await confirmNativePermissions(permissions))) {
+      res = await request(true)
+    }
     if (res.ok) {
       const manifest = await res.json()
       setStatus(`Updated ${manifest.name} to v${manifest.version}`, true)
@@ -478,17 +530,21 @@ function onUninstall(id: string) {
 async function doUninstall() {
   const id = confirmUninstall.value!
   confirmUninstall.value = null
-  await unloadPlugin(id)
-  const res = await authFetch(apiUrl(`/api/plugins/${id}`), { method: 'DELETE' })
-  if (res.ok) {
-    setStatus(`Uninstalled ${id}`, true)
-    await fetchMarket()
-    if (detailPlugin.value?.id === id) {
-      const updated = marketPlugins.value.find((p) => p.id === id)
-      if (updated) detailPlugin.value = updated
+  try {
+    const res = await authFetch(apiUrl(`/api/plugins/${id}`), { method: 'DELETE' })
+    if (res.ok) {
+      await unloadPlugin(id)
+      setStatus(`Uninstalled ${id}`, true)
+      await fetchMarket()
+      if (detailPlugin.value?.id === id) {
+        const updated = marketPlugins.value.find((p) => p.id === id)
+        if (updated) detailPlugin.value = updated
+      }
+    } else {
+      setStatus(await describeHttpError(res, 'Uninstall failed'), false)
     }
-  } else {
-    setStatus(await describeHttpError(res, 'Uninstall failed'), false)
+  } catch (error) {
+    setStatus(describeRequestError(error, 'Uninstall failed'), false)
   }
 }
 
@@ -719,6 +775,30 @@ async function onRefresh() {
   font-size: 12px;
   color: var(--text-secondary, #aaa);
   line-height: 1.5;
+}
+.plugin-card-error {
+  margin: 6px 0 10px;
+  font-size: 12px;
+  color: var(--color-red, #ef4444);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.plugin-permissions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 10px;
+  font-size: 11px;
+  color: var(--fg-muted, #858585);
+}
+.plugin-permissions code {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--fg);
+  background: var(--bg-hover);
 }
 .plugin-card-actions {
   display: flex;

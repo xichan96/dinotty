@@ -74,7 +74,10 @@ export function useMarketplace() {
     }
   }
 
-  async function installFromMarket(plugin: MarketPlugin): Promise<{ ok: boolean; error?: string }> {
+  async function installFromMarket(
+    plugin: MarketPlugin,
+    approveNative = false
+  ): Promise<{ ok: boolean; error?: string; permissions?: string[] }> {
     markInstalling(plugin.id)
     try {
       await getApiBase()
@@ -85,9 +88,16 @@ export function useMarketplace() {
           repo: plugin.repo,
           branch: plugin.branch,
           subdir: plugin.subdir,
+          approve_native: approveNative,
         }),
       })
       if (res.ok) return { ok: true }
+      if (res.status === 428) {
+        const body = await res.json().catch(() => null)
+        if (Array.isArray(body?.permissions)) {
+          return { ok: false, permissions: body.permissions }
+        }
+      }
       return { ok: false, error: await describeHttpError(res, 'Install failed') }
     } catch (error) {
       return { ok: false, error: describeRequestError(error, 'Install failed') }

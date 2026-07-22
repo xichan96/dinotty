@@ -70,7 +70,7 @@ curl.exe -X POST http://127.0.0.1:8999/api/plugins/dev-link `
 | | `storage.list()` | 列举所有已存储的 key |
 | **命令** | `commands.register(id, handler)` | 注册命令面板命令，返回 `Disposable` |
 | **CLI 执行** | `exec.run(args, options?)` | 调用插件附带的 CLI 二进制（同步，返回 `{code, stdout, stderr}`） |
-| | `exec.spawn(args)` | 流式调用 CLI（WebSocket，返回 `ReadableStream`） |
+| | `exec.spawn(args, options?)` | 流式调用 CLI，支持 `cwd` / `env`（WebSocket，返回 `ReadableStream`） |
 | **UI** | `ui.notify(message, level?, title?)` | 显示通知（info / warn / error），可选自定义标题 |
 | | `ui.confirm(message)` | 显示确认对话框，返回 `Promise<boolean>` |
 | **设置** | `settings.get()` | 读取应用设置 |
@@ -93,7 +93,7 @@ curl.exe -X POST http://127.0.0.1:8999/api/plugins/dev-link `
 
 Native 插件的平台由 Dinotty 后端判断，不使用远程浏览器的平台信息。支持的目标键为 `windows-x86_64`、`linux-x86_64`、`linux-aarch64`、`macos-x86_64` 和 `macos-aarch64`。`entries[当前目标]` 优先于 legacy `entry`；未知目标、缺失入口、目录外路径、symlink 逃逸和非普通文件都会被拒绝。
 
-长运行进程可以声明 `bin.lifecycle.stdinLease`。宿主停止进程时会向 stdin 写入 JSON shutdown frame，等待 `forceKillAfterMs` 后再强制终止。浏览器关闭和插件 UI 热重载不拥有长运行进程生命周期，不会自动停止进程；显式停止、插件更新/卸载以及 Dinotty 退出会停止它们。
+长运行进程可以声明 `bin.lifecycle.stdinLease`。宿主停止进程时会向 stdin 写入 JSON shutdown frame，等待 `forceKillAfterMs` 后再强制终止。`bin.lifecycle.scope` 默认为 `ui`，UI 热重载时由后端只停止 UI-scoped 进程；设为 `host` 后，进程会跨浏览器断开和 UI 热重载继续运行，只在显式停止、插件更新/卸载以及 Dinotty 退出时停止。停止期限必须满足 `shutdownDeadlineMs <= 30000`、`forceKillAfterMs <= 60000` 且前者不大于后者。使用按平台 `entries` 或新生命周期字段时必须声明相应 Native 权限，安装和更新会显示确认提示；这不代表 Native 程序受到操作系统级沙箱限制。
 
 ## 插件仓库
 

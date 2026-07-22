@@ -112,7 +112,12 @@ fn set_executable_impl(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let mut perms = std::fs::metadata(path)?.permissions();
-    perms.set_mode(0o755);
+    let current = perms.mode();
+    let desired = current | 0o111;
+    if current == desired {
+        return Ok(());
+    }
+    perms.set_mode(desired);
     std::fs::set_permissions(path, perms)
 }
 
@@ -219,5 +224,25 @@ mod tests {
         assert!(path_exists_or_symlink(&link));
 
         remove_symlink_or_file(&link).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_executable_preserves_permissions_and_skips_repeated_chmod() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let executable = tmp.path().join("tool");
+        std::fs::write(&executable, b"tool").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        super::set_executable(&executable).unwrap();
+        let first = std::fs::metadata(&executable).unwrap();
+        assert_eq!(first.permissions().mode() & 0o777, 0o751);
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        super::set_executable(&executable).unwrap();
+        let second = std::fs::metadata(&executable).unwrap();
+        assert_eq!((first.ctime(), first.ctime_nsec()), (second.ctime(), second.ctime_nsec()));
     }
 }

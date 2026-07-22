@@ -1,27 +1,73 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use dashmap::DashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use crate::platform::fs as platform_fs;
 use crate::session::SessionManager;
 
 use super::helpers::{
-    copy_dir_all, copy_plugin_dir, extract_tar_gz, resolve_binary, set_executable,
+    copy_plugin_dir, extract_tar_gz, require_native_approval, resolve_binary, set_executable,
     validate_manifest, validate_min_app_version,
 };
 use super::types::{
     HostTarget, ManagedProcess, PluginInfo, PluginManifest, PluginStateValue, ProcessControl,
+    ProcessLifecycleScope, ProcessState,
 };
 
 // ─── PluginManager ──────────────────────────────────────────────────────────
+
+pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn now_unix_seconds() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
+}
+
+fn collect_affected_plugin_ids(
+    plugin_dir: &Path,
+    staging_dir: &Path,
+    event: &notify::Event,
+    affected_ids: &mut HashSet<String>,
+) -> bool {
+    if event.paths.is_empty() {
+        return true;
+    }
+
+    let mut needs_full_reload = false;
+    for path in &event.paths {
+        if path.starts_with(staging_dir) {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(plugin_dir) else {
+            needs_full_reload = true;
+            continue;
+        };
+        let Some(std::path::Component::Normal(first)) = relative.components().next() else {
+            needs_full_reload = true;
+            continue;
+        };
+        let Some(plugin_id) = first.to_str() else {
+            needs_full_reload = true;
+            continue;
+        };
+        if !plugin_id.starts_with('.') {
+            affected_ids.insert(plugin_id.to_string());
+        }
+    }
+    needs_full_reload
+}
 
 pub struct PluginManager {
     pub plugin_dir: PathBuf,
     pub data_dir: PathBuf,
     pub registry: DashMap<String, PluginInfo>,
     pub processes: DashMap<String, DashMap<String, ManagedProcess>>,
+    pub operation_locks: DashMap<String, Weak<tokio::sync::RwLock<()>>>,
     pub host_target: Option<HostTarget>,
     pub host_origin: String,
     pub host_version: String,
@@ -32,44 +78,116 @@ pub type PluginManagerState = Arc<PluginManager>;
 
 impl PluginManager {
     #[must_use]
-    pub fn new(host_origin: String, host_version: String, host_mode: String) -> Self {
+    pub fn new(host_origin: String, host_mode: String) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
         Self {
             plugin_dir: home.join(".dinotty/plugins"),
             data_dir: home.join(".dinotty/plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            operation_locks: DashMap::new(),
             host_target: HostTarget::current(),
             host_origin,
-            host_version,
+            host_version: HOST_VERSION.into(),
             host_mode,
         }
     }
 
-    pub async fn kill_plugin_processes(&self, plugin_id: &str) {
-        if let Some((_, proc_map)) = self.processes.remove(plugin_id) {
-            let controls: Vec<_> = proc_map.iter().map(|entry| entry.control.clone()).collect();
-            let mut waiters = Vec::with_capacity(controls.len());
-            for control in controls {
-                let (finished, wait) = tokio::sync::oneshot::channel();
-                if control.send(ProcessControl::Stop { finished }).await.is_ok() {
-                    waiters.push(wait);
+    #[must_use]
+    pub fn operation_lock(&self, plugin_id: &str) -> Arc<tokio::sync::RwLock<()>> {
+        self.operation_locks.retain(|_, lock| lock.strong_count() > 0);
+        let mut entry = self.operation_locks.entry(plugin_id.to_string()).or_default();
+        if let Some(lock) = entry.upgrade() {
+            return lock;
+        }
+        let lock = Arc::new(tokio::sync::RwLock::new(()));
+        *entry = Arc::downgrade(&lock);
+        lock
+    }
+
+    /// # Errors
+    /// Returns an error if any managed process does not stop before its bounded deadline.
+    pub async fn kill_plugin_processes(&self, plugin_id: &str) -> Result<(), String> {
+        self.kill_plugin_processes_with_scope(plugin_id, None).await
+    }
+
+    /// # Errors
+    /// Returns an error if a matching managed process does not stop before its bounded deadline.
+    pub async fn kill_plugin_processes_with_scope(
+        &self,
+        plugin_id: &str,
+        scope: Option<ProcessLifecycleScope>,
+    ) -> Result<(), String> {
+        let Some(proc_map) = self.processes.get(plugin_id) else {
+            return Ok(());
+        };
+        let processes: Vec<_> = proc_map
+            .iter()
+            .filter(|entry| scope.is_none_or(|scope| entry.scope == scope))
+            .map(|entry| (entry.key().clone(), entry.control.clone(), entry.stop_timeout))
+            .collect();
+        drop(proc_map);
+
+        let mut waiters = Vec::with_capacity(processes.len());
+        let mut failed = Vec::new();
+        for (process_id, control, stop_timeout) in processes {
+            let (finished, wait) = tokio::sync::oneshot::channel();
+            match control.try_send(ProcessControl::Stop { finished }) {
+                Ok(()) => waiters.push((process_id, stop_timeout, wait)),
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    if let Some(proc_map) = self.processes.get(plugin_id) {
+                        proc_map.remove(&process_id);
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    failed.push(process_id);
                 }
             }
-            let _ = tokio::time::timeout(Duration::from_secs(16), async move {
-                for wait in waiters {
-                    let _ = wait.await;
+        }
+
+        let results = futures_util::future::join_all(waiters.into_iter().map(
+            |(process_id, stop_timeout, wait)| async move {
+                (process_id, tokio::time::timeout(stop_timeout, wait).await)
+            },
+        ))
+        .await;
+        for (process_id, result) in results {
+            let already_stopped = self.processes.get(plugin_id).is_none_or(|proc_map| {
+                proc_map
+                    .get(&process_id)
+                    .is_none_or(|entry| matches!(&entry.info.state, ProcessState::Exited))
+            });
+            if matches!(result, Ok(Ok(()))) || already_stopped {
+                if let Some(proc_map) = self.processes.get(plugin_id) {
+                    proc_map.remove(&process_id);
                 }
-            })
-            .await;
+            } else {
+                tracing::error!(
+                    plugin_id,
+                    process_id,
+                    "failed to stop managed plugin process before its deadline"
+                );
+                failed.push(process_id);
+            }
+        }
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("failed to stop plugin processes: {}", failed.join(", ")))
         }
     }
 
     pub async fn shutdown_all(&self) {
         let plugin_ids: Vec<String> =
             self.processes.iter().map(|entry| entry.key().clone()).collect();
-        for plugin_id in plugin_ids {
-            self.kill_plugin_processes(&plugin_id).await;
+        let results = futures_util::future::join_all(
+            plugin_ids.iter().map(|plugin_id| self.kill_plugin_processes(plugin_id)),
+        )
+        .await;
+        for (plugin_id, result) in plugin_ids.iter().zip(results) {
+            if let Err(error) = result {
+                tracing::error!(plugin_id, error, "failed to stop plugin during host shutdown");
+            }
         }
     }
 
@@ -116,6 +234,52 @@ impl PluginManager {
         Ok(())
     }
 
+    fn staging_dir(&self, prefix: &str) -> Result<tempfile::TempDir, String> {
+        let root = self.plugin_dir.join(".staging");
+        std::fs::create_dir_all(&root)
+            .map_err(|e| format!("failed to create plugin staging directory: {e}"))?;
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir_in(root)
+            .map_err(|e| format!("failed to create plugin staging directory: {e}"))
+    }
+
+    fn replace_with_staged(&self, id: &str, staged: &std::path::Path) -> Result<(), String> {
+        let plugin_path = self.plugin_dir.join(id);
+        let backup_slot = self.staging_dir(&format!("backup-{id}-"))?;
+        let backup_path = backup_slot.path().to_path_buf();
+        backup_slot.close().map_err(|e| format!("failed to reserve plugin backup path: {e}"))?;
+
+        let had_old = platform_fs::path_exists_or_symlink(&plugin_path);
+        if had_old {
+            std::fs::rename(&plugin_path, &backup_path)
+                .map_err(|e| format!("failed to stage existing plugin: {e}"))?;
+        }
+
+        if let Err(install_error) = std::fs::rename(staged, &plugin_path) {
+            if had_old {
+                if let Err(rollback_error) = std::fs::rename(&backup_path, &plugin_path) {
+                    return Err(format!(
+                        "failed to install update: {install_error}; rollback failed: {rollback_error}"
+                    ));
+                }
+            }
+            return Err(format!("failed to install update: {install_error}"));
+        }
+
+        if had_old {
+            if let Err(error) = platform_fs::remove_plugin_path(&backup_path) {
+                tracing::warn!(
+                    plugin_id = id,
+                    %error,
+                    backup = %backup_path.display(),
+                    "updated plugin but failed to remove backup"
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn scan(&self) {
         if !self.plugin_dir.exists() {
             return;
@@ -125,6 +289,10 @@ impl PluginManager {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
 
             // Skip broken symlinks
             if path.is_symlink() && !path.exists() {
@@ -184,6 +352,7 @@ impl PluginManager {
             return;
         }
         let plugin_dir = self.plugin_dir.clone();
+        let staging_dir = plugin_dir.join(".staging");
         let this = Arc::clone(self);
 
         tokio::spawn(async move {
@@ -218,29 +387,51 @@ impl PluginManager {
                     continue;
                 }
 
+                let mut affected_ids = HashSet::new();
+                let mut needs_full_reload = collect_affected_plugin_ids(
+                    &plugin_dir,
+                    &staging_dir,
+                    &event,
+                    &mut affected_ids,
+                );
+
                 let debounce = tokio::time::sleep(Duration::from_millis(500));
                 tokio::pin!(debounce);
                 loop {
                     tokio::select! {
                         () = &mut debounce => break,
                         next = rx.recv() => {
-                            if next.is_none() { return; }
+                            let Some(next) = next else { return; };
+                            if !matches!(next.kind, EventKind::Access(_)) {
+                                needs_full_reload |= collect_affected_plugin_ids(
+                                    &plugin_dir,
+                                    &staging_dir,
+                                    &next,
+                                    &mut affected_ids,
+                                );
+                            }
                         }
                     }
                 }
 
-                let old_ids: Vec<String> = this.registry.iter().map(|e| e.key().clone()).collect();
+                if affected_ids.is_empty() && !needs_full_reload {
+                    continue;
+                }
+
+                let old_ids: HashSet<String> =
+                    this.registry.iter().map(|e| e.key().clone()).collect();
 
                 this.registry.clear();
                 this.scan();
 
-                let new_ids: Vec<String> = this.registry.iter().map(|e| e.key().clone()).collect();
+                let new_ids: HashSet<String> =
+                    this.registry.iter().map(|e| e.key().clone()).collect();
 
                 for id in &new_ids {
-                    if old_ids.contains(id) {
-                        manager.broadcast_plugin_changed(id.clone(), "updated".into());
-                    } else {
+                    if !old_ids.contains(id) {
                         manager.broadcast_plugin_changed(id.clone(), "added".into());
+                    } else if needs_full_reload || affected_ids.contains(id) {
+                        manager.broadcast_plugin_changed(id.clone(), "updated".into());
                     }
                 }
                 for id in &old_ids {
@@ -257,11 +448,21 @@ impl PluginManager {
     /// # Errors
     /// Returns `Err` if the archive cannot be extracted, the manifest is invalid,
     /// or the plugin directory operations fail.
+    pub async fn install(&self, archive: &[u8]) -> Result<PluginManifest, String> {
+        self.install_with_approval(archive, false).await
+    }
+
+    /// Install an archive after the caller has explicitly approved native capabilities.
     ///
-    /// # Panics
-    /// Panics if `SystemTime::now()` fails (which should not happen).
-    pub fn install(&self, archive: &[u8]) -> Result<PluginManifest, String> {
-        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    /// # Errors
+    /// Returns `Err` if validation, approval, extraction, or installation fails.
+    pub(super) async fn install_with_approval(
+        &self,
+        archive: &[u8],
+        approve_native: bool,
+    ) -> Result<PluginManifest, String> {
+        std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
+        let tmp = self.staging_dir("install-")?;
         extract_tar_gz(archive, tmp.path())?;
 
         let manifest_path = tmp.path().join("plugin.json");
@@ -271,26 +472,23 @@ impl PluginManager {
             serde_json::from_str(&content).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
         self.validate_for_host(&manifest)?;
+        require_native_approval(&manifest, approve_native)?;
         self.prepare_binary(tmp.path(), &manifest)?;
 
+        let operation_lock = self.operation_lock(&manifest.id);
+        let _operation = operation_lock.write_owned().await;
         let dest = self.plugin_dir.join(&manifest.id);
-        if platform_fs::path_exists_or_symlink(&dest) {
+        if self.registry.contains_key(&manifest.id) || platform_fs::path_exists_or_symlink(&dest) {
             return Err(format!("plugin '{}' already installed, use update instead", manifest.id));
         }
 
-        std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
         std::fs::rename(tmp.path(), &dest).map_err(|e| e.to_string())?;
 
         self.registry.insert(
             manifest.id.clone(),
             PluginInfo {
                 manifest: manifest.clone(),
-                install_date: Some(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                ),
+                install_date: now_unix_seconds(),
                 state: PluginStateValue::Active,
                 error: None,
                 is_dev_link: false,
@@ -302,13 +500,23 @@ impl PluginManager {
 
     /// # Errors
     /// Returns `Err` if the manifest is invalid or the directory operations fail.
-    ///
-    /// # Panics
-    /// Panics if `SystemTime::now()` fails (which should not happen).
-    pub fn install_from_dir(
+    pub async fn install_from_dir(
         &self,
         src: &std::path::Path,
         dev_link: bool,
+    ) -> Result<PluginManifest, String> {
+        self.install_from_dir_with_approval(src, dev_link, false).await
+    }
+
+    /// Install a folder after the caller has explicitly approved native capabilities.
+    ///
+    /// # Errors
+    /// Returns `Err` if validation, approval, copying, or linking fails.
+    pub(super) async fn install_from_dir_with_approval(
+        &self,
+        src: &std::path::Path,
+        dev_link: bool,
+        approve_native: bool,
     ) -> Result<PluginManifest, String> {
         let manifest_path = src.join("plugin.json");
         let content = std::fs::read_to_string(&manifest_path)
@@ -317,40 +525,45 @@ impl PluginManager {
             serde_json::from_str(&content).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
         self.validate_for_host(&manifest)?;
+        require_native_approval(&manifest, approve_native)?;
         self.prepare_binary(src, &manifest)?;
-
-        let dest = self.plugin_dir.join(&manifest.id);
-        if platform_fs::path_exists_or_symlink(&dest) {
-            return Err(format!("plugin '{}' already installed, use update instead", manifest.id));
-        }
 
         std::fs::create_dir_all(&self.plugin_dir)
             .map_err(|e| format!("failed to create plugin directory: {e}"))?;
 
-        if dev_link {
-            platform_fs::create_dir_symlink(src, &dest)
-                .map_err(|e| format!("failed to create development link: {e}"))?;
+        let staged = if dev_link {
+            None
         } else {
-            if let Err(error) = copy_plugin_dir(src, &dest) {
-                let _ = platform_fs::remove_plugin_path(&dest);
+            let staged = self.staging_dir("folder-install-")?;
+            if let Err(error) = copy_plugin_dir(src, staged.path()) {
                 return Err(format!("failed to copy plugin files: {error}"));
             }
-            if let Err(error) = self.prepare_binary(&dest, &manifest) {
-                let _ = platform_fs::remove_plugin_path(&dest);
+            if let Err(error) = self.prepare_binary(staged.path(), &manifest) {
                 return Err(format!("failed to validate copied plugin files: {error}"));
             }
+            Some(staged)
+        };
+
+        let operation_lock = self.operation_lock(&manifest.id);
+        let _operation = operation_lock.write_owned().await;
+        let dest = self.plugin_dir.join(&manifest.id);
+        if self.registry.contains_key(&manifest.id) || platform_fs::path_exists_or_symlink(&dest) {
+            return Err(format!("plugin '{}' already installed, use update instead", manifest.id));
+        }
+
+        if let Some(staged) = staged {
+            std::fs::rename(staged.path(), &dest)
+                .map_err(|e| format!("failed to install copied plugin files: {e}"))?;
+        } else {
+            platform_fs::create_dir_symlink(src, &dest)
+                .map_err(|e| format!("failed to create development link: {e}"))?;
         }
 
         self.registry.insert(
             manifest.id.clone(),
             PluginInfo {
                 manifest: manifest.clone(),
-                install_date: Some(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                ),
+                install_date: now_unix_seconds(),
                 state: PluginStateValue::Active,
                 error: None,
                 is_dev_link: dev_link,
@@ -360,20 +573,67 @@ impl PluginManager {
         Ok(manifest)
     }
 
+    /// Install or update a packaged plugin directory using the same-filesystem staging area.
+    ///
+    /// # Errors
+    /// Returns `Err` when validation, process shutdown, or filesystem replacement fails.
+    pub(super) async fn upsert_from_dir(
+        &self,
+        src: &std::path::Path,
+        manifest: PluginManifest,
+        approve_native: bool,
+    ) -> Result<PluginManifest, String> {
+        self.validate_for_host(&manifest)?;
+        require_native_approval(&manifest, approve_native)?;
+        std::fs::create_dir_all(&self.plugin_dir)
+            .map_err(|e| format!("failed to create plugin directory: {e}"))?;
+        let staged = self.staging_dir("git-install-")?;
+        copy_plugin_dir(src, staged.path())?;
+        self.prepare_binary(staged.path(), &manifest)?;
+
+        let operation_lock = self.operation_lock(&manifest.id);
+        let _operation = operation_lock.write_owned().await;
+        let old_info = self.registry.get(&manifest.id).map(|info| info.clone());
+        if old_info.is_some()
+            || platform_fs::path_exists_or_symlink(&self.plugin_dir.join(&manifest.id))
+        {
+            self.kill_plugin_processes(&manifest.id).await?;
+        }
+        self.replace_with_staged(&manifest.id, staged.path())?;
+
+        let install_date = old_info.and_then(|info| info.install_date).or_else(now_unix_seconds);
+        self.registry.insert(
+            manifest.id.clone(),
+            PluginInfo {
+                manifest: manifest.clone(),
+                install_date,
+                state: PluginStateValue::Active,
+                error: None,
+                is_dev_link: false,
+            },
+        );
+        Ok(manifest)
+    }
+
     /// # Errors
     /// Returns `Err` if the plugin is not installed, the archive cannot be extracted,
     /// the manifest is invalid, or the directory operations fail.
-    pub fn update(&self, id: &str, archive: &[u8]) -> Result<PluginManifest, String> {
-        let old_info =
-            self.registry.get(id).ok_or_else(|| format!("plugin '{id}' not installed"))?.clone();
-        if old_info.is_dev_link {
-            return Err(
-                "cannot update a dev-link plugin; unlink it and install a packaged plugin instead"
-                    .into(),
-            );
-        }
+    pub async fn update(&self, id: &str, archive: &[u8]) -> Result<PluginManifest, String> {
+        self.update_with_approval(id, archive, false).await
+    }
 
-        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+    /// Update an archive after the caller has explicitly approved native capabilities.
+    ///
+    /// # Errors
+    /// Returns `Err` if validation, approval, process shutdown, or replacement fails.
+    pub(super) async fn update_with_approval(
+        &self,
+        id: &str,
+        archive: &[u8],
+        approve_native: bool,
+    ) -> Result<PluginManifest, String> {
+        std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
+        let tmp = self.staging_dir("update-")?;
         extract_tar_gz(archive, tmp.path())?;
 
         let manifest: PluginManifest = serde_json::from_str(
@@ -383,27 +643,25 @@ impl PluginManager {
         .map_err(|e| format!("invalid plugin.json: {e}"))?;
 
         self.validate_for_host(&manifest)?;
+        require_native_approval(&manifest, approve_native)?;
         if manifest.id != id {
             return Err("plugin id in archive does not match".into());
         }
         self.prepare_binary(tmp.path(), &manifest)?;
 
-        let plugin_path = self.plugin_dir.join(id);
-        let backup = tempfile::tempdir().map_err(|e| e.to_string())?;
-        if platform_fs::path_exists_or_symlink(&plugin_path) {
-            copy_dir_all(&plugin_path, backup.path())?;
-            platform_fs::remove_plugin_path(&plugin_path)?;
+        let operation_lock = self.operation_lock(id);
+        let _operation = operation_lock.write_owned().await;
+        let old_info =
+            self.registry.get(id).ok_or_else(|| format!("plugin '{id}' not installed"))?.clone();
+        if old_info.is_dev_link {
+            return Err(
+                "cannot update a dev-link plugin; unlink it and install a packaged plugin instead"
+                    .into(),
+            );
         }
+        self.kill_plugin_processes(id).await?;
 
-        if let Err(e) = std::fs::rename(tmp.path(), &plugin_path) {
-            if platform_fs::path_exists_or_symlink(&plugin_path) {
-                let _ = platform_fs::remove_plugin_path(&plugin_path);
-            }
-            if backup.path().exists() {
-                let _ = std::fs::rename(backup.path(), &plugin_path);
-            }
-            return Err(format!("failed to install update: {e}"));
-        }
+        self.replace_with_staged(id, tmp.path())?;
 
         self.registry.insert(
             id.to_string(),
@@ -422,7 +680,9 @@ impl PluginManager {
     /// # Errors
     /// Returns `Err` if the plugin directory cannot be removed.
     pub async fn delete(&self, id: &str, keep_data: bool) -> Result<(), String> {
-        self.kill_plugin_processes(id).await;
+        let operation_lock = self.operation_lock(id);
+        let _operation = operation_lock.write_owned().await;
+        self.kill_plugin_processes(id).await?;
 
         let plugin_path = self.plugin_dir.join(id);
         if platform_fs::path_exists_or_symlink(&plugin_path) {
@@ -443,10 +703,16 @@ impl PluginManager {
 
 #[cfg(test)]
 mod tests {
-    use super::PluginManager;
+    use super::{collect_affected_plugin_ids, PluginManager};
     use crate::platform::fs as platform_fs;
+    use crate::plugin::{
+        ManagedProcess, PluginInfo, PluginManifest, PluginStateValue, ProcessInfo, ProcessState,
+    };
     use dashmap::DashMap;
+    use std::collections::{HashSet, VecDeque};
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     fn test_manager(root: &Path) -> PluginManager {
         PluginManager {
@@ -454,6 +720,7 @@ mod tests {
             data_dir: root.join("plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            operation_locks: DashMap::new(),
             host_target: crate::plugin::HostTarget::current(),
             host_origin: "http://127.0.0.1:8999".into(),
             host_version: env!("CARGO_PKG_VERSION").into(),
@@ -471,6 +738,231 @@ mod tests {
         .unwrap();
         std::fs::write(src.join("source.txt"), "source stays").unwrap();
         src
+    }
+
+    fn register_plugin(manager: &PluginManager, id: &str) {
+        manager.registry.insert(
+            id.into(),
+            PluginInfo {
+                manifest: PluginManifest {
+                    id: id.into(),
+                    name: "Test Plugin".into(),
+                    version: "1.0.0".into(),
+                    min_app_version: None,
+                    description: None,
+                    icon: None,
+                    entry: None,
+                    bin: None,
+                    commands: None,
+                    styles: None,
+                    permissions: None,
+                },
+                install_date: None,
+                state: PluginStateValue::Active,
+                error: None,
+                is_dev_link: false,
+            },
+        );
+    }
+
+    fn register_fake_process(
+        manager: &PluginManager,
+        plugin_id: &str,
+        stop_timeout: Duration,
+    ) -> tokio::sync::mpsc::Receiver<crate::plugin::ProcessControl> {
+        let (control, receiver) = tokio::sync::mpsc::channel(1);
+        manager.processes.entry(plugin_id.into()).or_insert_with(DashMap::new).insert(
+            "42".into(),
+            ManagedProcess {
+                info: ProcessInfo {
+                    pid: 42,
+                    command: "test".into(),
+                    args: Vec::new(),
+                    state: ProcessState::Running,
+                    exit_code: None,
+                },
+                scope: crate::plugin::ProcessLifecycleScope::Ui,
+                control,
+                stop_timeout,
+                stdout: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
+                stderr: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
+            },
+        );
+        receiver
+    }
+
+    #[test]
+    fn operation_locks_release_unknown_plugin_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let lock = manager.operation_lock("missing-one");
+        assert!(manager.operation_locks.contains_key("missing-one"));
+        drop(lock);
+
+        let _next = manager.operation_lock("missing-two");
+        assert!(!manager.operation_locks.contains_key("missing-one"));
+        assert!(manager.operation_locks.contains_key("missing-two"));
+    }
+
+    #[test]
+    fn watcher_collects_only_plugins_named_by_event_paths() {
+        let root = PathBuf::from("plugins");
+        let staging = root.join(".staging");
+        let event = notify::Event::new(notify::EventKind::Any)
+            .add_path(root.join("plugin-a").join("main.js"))
+            .add_path(staging.join("install-123").join("plugin.json"));
+        let mut affected = HashSet::new();
+
+        let needs_full_reload = collect_affected_plugin_ids(&root, &staging, &event, &mut affected);
+
+        assert!(!needs_full_reload);
+        assert_eq!(affected, HashSet::from(["plugin-a".to_string()]));
+    }
+
+    #[test]
+    fn watcher_falls_back_for_unmapped_or_root_events() {
+        let root = PathBuf::from("plugins");
+        let staging = root.join(".staging");
+        for path in [root.clone(), PathBuf::from("external/plugin-a/main.js")] {
+            let event = notify::Event::new(notify::EventKind::Any).add_path(path);
+            let mut affected = HashSet::new();
+
+            assert!(collect_affected_plugin_ids(&root, &staging, &event, &mut affected));
+            assert!(affected.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn folder_install_waits_for_the_plugin_operation_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = Arc::new(test_manager(tmp.path()));
+        let src = write_plugin_source(tmp.path(), "locked-plugin");
+        let operation_lock = manager.operation_lock("locked-plugin");
+        let operation = operation_lock.write_owned().await;
+
+        let install_manager = Arc::clone(&manager);
+        let mut install =
+            tokio::spawn(async move { install_manager.install_from_dir(&src, false).await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut install).await.is_err(),
+            "folder install committed without waiting for the operation lock"
+        );
+
+        drop(operation);
+        let manifest = install.await.unwrap().unwrap();
+        assert_eq!(manifest.id, "locked-plugin");
+        assert!(manager.registry.contains_key("locked-plugin"));
+        assert!(manager.plugin_dir.join("locked-plugin").is_dir());
+    }
+
+    #[test]
+    fn staged_replace_swaps_plugin_and_removes_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let installed = manager.plugin_dir.join("swap-plugin");
+        std::fs::create_dir_all(&installed).unwrap();
+        std::fs::write(installed.join("old.txt"), "old").unwrap();
+
+        let staged = manager.staging_dir("test-swap-").unwrap();
+        std::fs::write(staged.path().join("new.txt"), "new").unwrap();
+        manager.replace_with_staged("swap-plugin", staged.path()).unwrap();
+
+        assert!(!installed.join("old.txt").exists());
+        assert_eq!(std::fs::read_to_string(installed.join("new.txt")).unwrap(), "new");
+        assert!(std::fs::read_dir(manager.plugin_dir.join(".staging")).unwrap().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn scoped_stop_does_not_signal_host_processes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let mut control = register_fake_process(&manager, "host-plugin", Duration::from_millis(20));
+        manager.processes.get("host-plugin").unwrap().get_mut("42").unwrap().scope =
+            crate::plugin::ProcessLifecycleScope::Host;
+
+        manager
+            .kill_plugin_processes_with_scope(
+                "host-plugin",
+                Some(crate::plugin::ProcessLifecycleScope::Ui),
+            )
+            .await
+            .unwrap();
+
+        assert!(control.try_recv().is_err());
+        assert!(manager.processes.get("host-plugin").unwrap().contains_key("42"));
+    }
+
+    #[tokio::test]
+    async fn invalid_update_does_not_stop_existing_process() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        register_plugin(&manager, "running-plugin");
+        let mut control =
+            register_fake_process(&manager, "running-plugin", Duration::from_millis(20));
+
+        assert!(manager.update("running-plugin", b"not a tar archive").await.is_err());
+        assert!(control.try_recv().is_err());
+        assert!(manager.processes.get("running-plugin").unwrap().contains_key("42"));
+    }
+
+    #[tokio::test]
+    async fn stop_timeout_keeps_process_tracked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let _control = register_fake_process(&manager, "stuck-plugin", Duration::from_millis(20));
+
+        assert!(manager.kill_plugin_processes("stuck-plugin").await.is_err());
+
+        assert!(manager.processes.get("stuck-plugin").unwrap().contains_key("42"));
+    }
+
+    #[tokio::test]
+    async fn acknowledged_stop_removes_process() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let mut control =
+            register_fake_process(&manager, "clean-plugin", Duration::from_millis(100));
+        tokio::spawn(async move {
+            if let Some(crate::plugin::ProcessControl::Stop { finished }) = control.recv().await {
+                let _ = finished.send(());
+            }
+        });
+
+        manager.kill_plugin_processes("clean-plugin").await.unwrap();
+
+        assert!(!manager.processes.get("clean-plugin").unwrap().contains_key("42"));
+    }
+
+    #[tokio::test]
+    async fn dropped_stop_acknowledgement_keeps_process_tracked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let mut control =
+            register_fake_process(&manager, "failed-plugin", Duration::from_millis(100));
+        tokio::spawn(async move {
+            if let Some(crate::plugin::ProcessControl::Stop { finished }) = control.recv().await {
+                drop(finished);
+            }
+        });
+
+        assert!(manager.kill_plugin_processes("failed-plugin").await.is_err());
+
+        assert!(manager.processes.get("failed-plugin").unwrap().contains_key("42"));
+    }
+
+    #[tokio::test]
+    async fn full_stop_channel_keeps_process_tracked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = test_manager(tmp.path());
+        let _control = register_fake_process(&manager, "busy-plugin", Duration::from_millis(100));
+        let sender =
+            manager.processes.get("busy-plugin").unwrap().get("42").unwrap().control.clone();
+        let (finished, _wait) = tokio::sync::oneshot::channel();
+        sender.try_send(crate::plugin::ProcessControl::Stop { finished }).unwrap();
+
+        assert!(manager.kill_plugin_processes("busy-plugin").await.is_err());
+
+        assert!(manager.processes.get("busy-plugin").unwrap().contains_key("42"));
     }
 
     fn unwrap_or_skip_symlink<T>(result: Result<T, String>) -> Option<T> {
@@ -499,13 +991,14 @@ mod tests {
     }
 
     // 验证 dev-link 安装后 registry 会标记 is_dev_link。
-    #[test]
-    fn install_from_dir_dev_link_marks_registry_entry() {
+    #[tokio::test]
+    async fn install_from_dir_dev_link_marks_registry_entry() {
         let tmp = tempfile::tempdir().unwrap();
         let manager = test_manager(tmp.path());
         let src = write_plugin_source(tmp.path(), "dev-plugin");
 
-        let Some(manifest) = unwrap_or_skip_symlink(manager.install_from_dir(&src, true)) else {
+        let Some(manifest) = unwrap_or_skip_symlink(manager.install_from_dir(&src, true).await)
+        else {
             return;
         };
 
@@ -521,7 +1014,7 @@ mod tests {
         let manager = test_manager(tmp.path());
         let src = write_plugin_source(tmp.path(), "linked-plugin");
 
-        if unwrap_or_skip_symlink(manager.install_from_dir(&src, true)).is_none() {
+        if unwrap_or_skip_symlink(manager.install_from_dir(&src, true).await).is_none() {
             return;
         }
         manager.delete("linked-plugin", true).await.unwrap();
@@ -550,8 +1043,8 @@ mod tests {
     }
 
     // 验证已有 broken symlink 时 dev-link 安装会拒绝，避免状态不一致。
-    #[test]
-    fn install_from_dir_dev_link_rejects_existing_broken_symlink() {
+    #[tokio::test]
+    async fn install_from_dir_dev_link_rejects_existing_broken_symlink() {
         let tmp = tempfile::tempdir().unwrap();
         let manager = test_manager(tmp.path());
         let src = write_plugin_source(tmp.path(), "stale-plugin");
@@ -561,7 +1054,7 @@ mod tests {
             return;
         };
 
-        let err = manager.install_from_dir(&src, true).unwrap_err();
+        let err = manager.install_from_dir(&src, true).await.unwrap_err();
 
         assert!(err.contains("already installed"), "unexpected error: {err}");
         assert!(platform_fs::path_exists_or_symlink(&link));

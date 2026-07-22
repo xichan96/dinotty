@@ -6,11 +6,9 @@ use axum::{
     Json,
 };
 
-use crate::platform::fs as platform_fs;
-
-use super::helpers::{copy_dir_all, extract_zip, find_plugin_root, plugin_err};
+use super::helpers::{extract_zip, find_plugin_root, native_approval_response, plugin_err};
 use super::manager::PluginManagerState;
-use super::types::{InstallGitRequest, PluginInfo, PluginManifest, PluginStateValue};
+use super::types::{InstallGitRequest, PluginManifest};
 
 /// # Panics
 /// Panics if `SystemTime::now()` fails (which should not happen).
@@ -60,76 +58,20 @@ pub async fn install_from_git(
         Ok(m) => m,
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &format!("invalid plugin.json: {e}")),
     };
-    if let Err(e) = pm.validate_for_host(&manifest) {
-        return plugin_err(StatusCode::BAD_REQUEST, &e);
-    }
-
-    let dest = pm.plugin_dir.join(&manifest.id);
-    let is_update =
-        pm.registry.contains_key(&manifest.id) || platform_fs::path_exists_or_symlink(&dest);
-
-    if is_update {
-        pm.kill_plugin_processes(&manifest.id).await;
-        let old_info = pm.registry.get(&manifest.id).map(|e| e.clone());
-        let backup = match tempfile::tempdir() {
-            Ok(b) => b,
-            Err(e) => return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-        };
-        if platform_fs::path_exists_or_symlink(&dest) {
-            if let Err(e) = copy_dir_all(&dest, backup.path()) {
-                return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
+    match pm.upsert_from_dir(&plugin_root, manifest, body.approve_native).await {
+        Ok(manifest) => Json(manifest).into_response(),
+        Err(e) => {
+            if let Some(response) = native_approval_response(&e) {
+                return response;
             }
-            if let Err(e) = platform_fs::remove_plugin_path(&dest) {
-                return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
-            }
+            let status = if e.starts_with("failed to stop plugin processes") {
+                StatusCode::CONFLICT
+            } else if e.contains("permission") || e.contains("binary") || e.contains("manifest") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            plugin_err(status, &e)
         }
-        if let Err(e) = copy_dir_all(&plugin_root, &dest) {
-            let _ = platform_fs::remove_plugin_path(&dest);
-            let _ = copy_dir_all(backup.path(), &dest);
-            return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("update failed: {e}"));
-        }
-        if let Err(e) = pm.prepare_binary(&dest, &manifest) {
-            let _ = platform_fs::remove_plugin_path(&dest);
-            let _ = copy_dir_all(backup.path(), &dest);
-            return plugin_err(StatusCode::BAD_REQUEST, &e);
-        }
-        pm.registry.insert(
-            manifest.id.clone(),
-            PluginInfo {
-                manifest: manifest.clone(),
-                install_date: old_info.and_then(|o| o.install_date),
-                state: PluginStateValue::Active,
-                error: None,
-                is_dev_link: false,
-            },
-        );
-        Json(manifest).into_response()
-    } else {
-        if let Err(e) = std::fs::create_dir_all(&pm.plugin_dir) {
-            return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
-        }
-        if let Err(e) = copy_dir_all(&plugin_root, &dest) {
-            return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
-        }
-        if let Err(e) = pm.prepare_binary(&dest, &manifest) {
-            let _ = platform_fs::remove_plugin_path(&dest);
-            return plugin_err(StatusCode::BAD_REQUEST, &e);
-        }
-        pm.registry.insert(
-            manifest.id.clone(),
-            PluginInfo {
-                manifest: manifest.clone(),
-                install_date: Some(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                ),
-                state: PluginStateValue::Active,
-                error: None,
-                is_dev_link: false,
-            },
-        );
-        Json(manifest).into_response()
     }
 }

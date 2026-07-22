@@ -18,10 +18,18 @@ use super::helpers::plugin_err;
 use super::manager::PluginManagerState;
 use super::types::{
     ExecRequest, ExecResult, ManagedProcess, PluginStateValue, ProcessControl, ProcessInfo,
-    ProcessLifecycleConfig, ProcessStartRequest, ProcessState, SpawnQuery,
+    ProcessLifecycleConfig, ProcessStartRequest, ProcessState, ProcessStopAllQuery, SpawnOptions,
+    SpawnQuery,
 };
 
 const PROCESS_LOG_BUFFER_BYTES: usize = 64 * 1024;
+const PROCESS_REAP_GRACE: Duration = Duration::from_secs(5);
+
+fn managed_process_stop_timeout(lifecycle: &ProcessLifecycleConfig) -> Duration {
+    Duration::from_millis(lifecycle.force_kill_after_ms)
+        + PROCESS_REAP_GRACE
+        + Duration::from_secs(2)
+}
 
 fn configure_plugin_command(
     cmd: &mut Command,
@@ -92,6 +100,11 @@ pub async fn plugin_exec(
     State(pm): State<PluginManagerState>,
     Json(body): Json<ExecRequest>,
 ) -> Response {
+    if !pm.registry.contains_key(&id) {
+        return plugin_err(StatusCode::NOT_FOUND, "plugin not found");
+    }
+    let operation_lock = pm.operation_lock(&id);
+    let _operation_guard = operation_lock.read_owned().await;
     let Some(info) = pm.registry.get(&id) else {
         return plugin_err(StatusCode::NOT_FOUND, "plugin not found");
     };
@@ -163,6 +176,11 @@ pub async fn plugin_spawn_ws(
     if !crate::auth::check_ws_origin(&headers, &allowed_origins, real_ip, &trusted_proxies) {
         return plugin_err(StatusCode::FORBIDDEN, "origin not allowed");
     }
+    if !pm.registry.contains_key(&id) {
+        return plugin_err(StatusCode::NOT_FOUND, "plugin not found");
+    }
+    let operation_lock = pm.operation_lock(&id);
+    let operation_guard = operation_lock.read_owned().await;
     let Some(info) = pm.registry.get(&id) else {
         return plugin_err(StatusCode::NOT_FOUND, "plugin not found");
     };
@@ -172,10 +190,10 @@ pub async fn plugin_spawn_ws(
             info.error.as_deref().unwrap_or("plugin is not active"),
         );
     }
-    match &info.manifest.bin {
-        Some(b) if b.mode == "cli" => {}
+    let lifecycle = match &info.manifest.bin {
+        Some(b) if b.mode == "cli" => b.lifecycle.clone().unwrap_or_default(),
         _ => return plugin_err(StatusCode::BAD_REQUEST, "plugin has no CLI bin"),
-    }
+    };
     let bin_path = match pm.resolve_plugin_binary(&id, &info.manifest) {
         Ok(path) => path,
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &e),
@@ -186,13 +204,22 @@ pub async fn plugin_spawn_ws(
         Ok(a) => a,
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &format!("invalid args: {e}")),
     };
+    let options: SpawnOptions = match params.options.as_deref() {
+        Some(options) => match serde_json::from_str(options) {
+            Ok(options) => options,
+            Err(e) => {
+                return plugin_err(StatusCode::BAD_REQUEST, &format!("invalid options: {e}"));
+            }
+        },
+        None => SpawnOptions::default(),
+    };
 
     ws.on_upgrade(move |mut socket| async move {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
         let mut cmd = Command::new(&bin_path);
         cmd.no_window();
-        if let Err(e) = configure_plugin_command(&mut cmd, &pm, &id, None) {
+        if let Err(e) = configure_plugin_command(&mut cmd, &pm, &id, options.env.as_ref()) {
             let _ = socket
                 .send(axum::extract::ws::Message::Text(
                     serde_json::json!({"type": "stderr", "data": e}).to_string(),
@@ -200,7 +227,15 @@ pub async fn plugin_spawn_ws(
                 .await;
             return;
         }
-        cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+        if let Some(cwd) = &options.cwd {
+            cmd.current_dir(cwd);
+        }
+        if lifecycle.stdin_lease {
+            cmd.stdin(Stdio::piped());
+        } else {
+            cmd.stdin(Stdio::null());
+        }
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -217,6 +252,18 @@ pub async fn plugin_spawn_ws(
                 return;
             }
         };
+
+        let Some(pid) = child.id() else {
+            let _ = socket
+                .send(axum::extract::ws::Message::Text(
+                    serde_json::json!({"type": "stderr", "data": "failed to get process id"})
+                        .to_string(),
+                ))
+                .await;
+            return;
+        };
+        let process_id = pid.to_string();
+        let mut stdin = child.stdin.take();
 
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
@@ -248,30 +295,81 @@ pub async fn plugin_spawn_ws(
             }
         });
 
-        loop {
+        let (control, mut control_rx) = tokio::sync::mpsc::channel(4);
+        pm.processes.entry(id.clone()).or_insert_with(DashMap::new).insert(
+            process_id.clone(),
+            ManagedProcess {
+                info: ProcessInfo {
+                    pid,
+                    command: bin_path.to_string_lossy().into_owned(),
+                    args: args.clone(),
+                    state: ProcessState::Running,
+                    exit_code: None,
+                },
+                scope: lifecycle.scope,
+                control,
+                stop_timeout: managed_process_stop_timeout(&lifecycle),
+                stdout: Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::new())),
+                stderr: Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::new())),
+            },
+        );
+        drop(operation_guard);
+
+        let mut stop_waiter = None;
+        let mut send_done = false;
+        let exit_code = loop {
             tokio::select! {
                 Some(msg) = rx.recv() => {
                     if socket.send(axum::extract::ws::Message::Text(msg)).await.is_err() {
                         let _ = child.kill().await;
-                        break;
+                        break None;
                     }
                 }
                 msg = socket.recv() => {
                     if msg.is_none() {
                         let _ = child.kill().await;
-                        break;
+                        break None;
                     }
                 }
                 status = child.wait() => {
-                    let code = status.ok().and_then(|s| s.code()).unwrap_or(-1);
-                    let _ = socket
-                        .send(axum::extract::ws::Message::Text(
-                            serde_json::json!({"type": "done", "code": code}).to_string(),
-                        ))
-                        .await;
-                    break;
+                    send_done = true;
+                    break status.ok().and_then(|s| s.code());
+                }
+                control = control_rx.recv() => {
+                    match control {
+                        Some(ProcessControl::Stop { finished }) => {
+                            stop_waiter = Some(finished);
+                            send_done = true;
+                            break stop_managed_child(
+                                &mut child,
+                                &mut stdin,
+                                &lifecycle,
+                                &id,
+                                pid,
+                            ).await;
+                        }
+                        None => {
+                            let _ = child.kill().await;
+                            break None;
+                        }
+                    }
                 }
             }
+        };
+
+        if let Some(proc_map) = pm.processes.get(&id) {
+            proc_map.remove(&process_id);
+        }
+        if let Some(finished) = stop_waiter {
+            let _ = finished.send(());
+        }
+        if send_done {
+            let _ = socket
+                .send(axum::extract::ws::Message::Text(
+                    serde_json::json!({"type": "done", "code": exit_code.unwrap_or(-1)})
+                        .to_string(),
+                ))
+                .await;
         }
     })
 }
@@ -301,16 +399,18 @@ async fn stop_managed_child(
             let _ = stdin.write_all(b"\n").await;
             let _ = stdin.shutdown().await;
         }
-        let force_after = Duration::from_millis(
-            lifecycle.force_kill_after_ms.max(lifecycle.shutdown_deadline_ms),
-        );
+        let force_after = Duration::from_millis(lifecycle.force_kill_after_ms);
         if let Ok(status) = tokio::time::timeout(force_after, child.wait()).await {
             return status.ok().and_then(|status| status.code());
         }
         tracing::warn!(plugin_id, pid, "plugin process exceeded graceful shutdown deadline");
     }
-    let _ = child.kill().await;
-    child.wait().await.ok().and_then(|status| status.code())
+    let _ = child.start_kill();
+    tokio::time::timeout(PROCESS_REAP_GRACE, child.wait())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|status| status.code())
 }
 
 async fn wait_for_managed_child(
@@ -378,6 +478,11 @@ pub async fn plugin_process_start(
     State((pm, manager)): State<(PluginManagerState, Arc<SessionManager>)>,
     Json(body): Json<ProcessStartRequest>,
 ) -> Response {
+    if !pm.registry.contains_key(&id) {
+        return plugin_err(StatusCode::NOT_FOUND, "plugin not found");
+    }
+    let operation_lock = pm.operation_lock(&id);
+    let _operation = operation_lock.read_owned().await;
     let Some(info) = pm.registry.get(&id) else {
         return plugin_err(StatusCode::NOT_FOUND, "plugin not found");
     };
@@ -401,11 +506,7 @@ pub async fn plugin_process_start(
     cmd.args(&body.args);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    let lifecycle = bin.lifecycle.unwrap_or(ProcessLifecycleConfig {
-        stdin_lease: false,
-        shutdown_deadline_ms: 10_000,
-        force_kill_after_ms: 15_000,
-    });
+    let lifecycle = bin.lifecycle.unwrap_or_default();
     if lifecycle.stdin_lease {
         cmd.stdin(Stdio::piped());
     } else {
@@ -446,7 +547,9 @@ pub async fn plugin_process_start(
             state: ProcessState::Running,
             exit_code: None,
         },
+        scope: lifecycle.scope,
         control,
+        stop_timeout: managed_process_stop_timeout(&lifecycle),
         stdout,
         stderr,
     };
@@ -504,21 +607,55 @@ pub async fn plugin_process_stop(
         return plugin_err(StatusCode::NOT_FOUND, "process not found");
     };
     let control = entry.control.clone();
+    let stop_timeout = entry.stop_timeout;
     drop(entry);
     let (finished, wait) = tokio::sync::oneshot::channel();
-    if control.send(ProcessControl::Stop { finished }).await.is_err() {
-        return plugin_err(StatusCode::CONFLICT, "process already exited");
+    match control.try_send(ProcessControl::Stop { finished }) {
+        Ok(()) => {}
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            proc_map.remove(&pid_str);
+            return plugin_err(StatusCode::CONFLICT, "process already exited");
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            return plugin_err(StatusCode::CONFLICT, "process stop already requested");
+        }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(16), wait).await;
-    StatusCode::NO_CONTENT.into_response()
+    drop(proc_map);
+    match tokio::time::timeout(stop_timeout, wait).await {
+        Ok(Ok(())) => {
+            if let Some(proc_map) = pm.processes.get(&id) {
+                proc_map.remove(&pid_str);
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(Err(_)) => {
+            let already_stopped = pm.processes.get(&id).is_none_or(|proc_map| {
+                proc_map
+                    .get(&pid_str)
+                    .is_none_or(|entry| matches!(&entry.info.state, ProcessState::Exited))
+            });
+            if already_stopped {
+                if let Some(proc_map) = pm.processes.get(&id) {
+                    proc_map.remove(&pid_str);
+                }
+                StatusCode::NO_CONTENT.into_response()
+            } else {
+                plugin_err(StatusCode::CONFLICT, "process stop acknowledgement was dropped")
+            }
+        }
+        Err(_) => plugin_err(StatusCode::GATEWAY_TIMEOUT, "timed out while stopping process"),
+    }
 }
 
 pub async fn plugin_process_stop_all(
     Path(id): Path<String>,
+    Query(query): Query<ProcessStopAllQuery>,
     State(pm): State<PluginManagerState>,
 ) -> Response {
-    pm.kill_plugin_processes(&id).await;
-    StatusCode::NO_CONTENT.into_response()
+    match pm.kill_plugin_processes_with_scope(&id, query.scope).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => plugin_err(StatusCode::GATEWAY_TIMEOUT, &e),
+    }
 }
 
 #[cfg(test)]
@@ -529,7 +666,7 @@ mod tests {
     };
     use crate::platform::process::CommandNoWindowExt;
     use crate::plugin::manager::PluginManager;
-    use crate::plugin::types::{ProcessControl, ProcessLifecycleConfig};
+    use crate::plugin::types::{ProcessControl, ProcessLifecycleConfig, ProcessLifecycleScope};
     use dashmap::DashMap;
     use std::path::Path;
     use std::process::Stdio;
@@ -544,6 +681,7 @@ mod tests {
             data_dir: root.join("plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            operation_locks: DashMap::new(),
             host_target: crate::plugin::HostTarget::current(),
             host_origin: "http://127.0.0.1:8999".into(),
             host_version: env!("CARGO_PKG_VERSION").into(),
@@ -606,6 +744,7 @@ mod tests {
         let stdout = child.stdout.take().unwrap();
         let mut output = BufReader::new(stdout).lines();
         let lifecycle = ProcessLifecycleConfig {
+            scope: ProcessLifecycleScope::Host,
             stdin_lease: true,
             shutdown_deadline_ms: 1_000,
             force_kill_after_ms: 2_000,

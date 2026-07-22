@@ -28,7 +28,7 @@
 | 范围 | 状态 | 已落地内容 | 仍需完成 |
 |---|---|---|---|
 | Phase 0 / fork | 部分完成 | `0.3.1` 源码、commit 和 crates.io SHA-256 已固定；实现持久取消、shutdown deadline、reactor 事件和 metadata/framing 校验；fork 单测通过；Windows 实机完成 Quick Tunnel API/DNS/QUIC/register、未认证公网 401 和约 7 秒有界停止烟测 | 持续 edge canary、UDP/7844 阻断矩阵、metadata property/fuzz 持续测试 |
-| Phase 1 / Dinotty 宿主 | 部分完成 | HostTarget resolver、目录逃逸检查、`minAppVersion`、实际 origin/保留环境注入、输出 drain、有界 ring buffer、stdin lifetime lease、更新/卸载/退出停止、UI unload 不停止全局进程 | Marketplace 服务端 artifact descriptor/安装、Native Artifact Signing RFC、native 权限确认 UI、三系统权限人工验证 |
+| Phase 1 / Dinotty 宿主 | 部分完成 | HostTarget resolver、目录逃逸检查、`minAppVersion`、实际 origin/保留环境注入、输出 drain、有界 ring buffer、stdin lifetime lease、更新/卸载/退出停止、后端 scope 过滤、Native 权限声明与确认 UI | Marketplace 服务端 artifact descriptor/安装、Native Artifact Signing RFC、发布者信任、三系统权限人工验证 |
 | Phase 2 / Supervisor | 开发闭环完成 | prepare/run/status/stop、单实例锁、私有 capability 控制通道、独立 Key/Session、两阶段轮换、Host/Origin/路由策略、HTTP/WS Bridge、Preview 默认拒绝、reactor 全耗尽 fail closed | 第 15 节全部边界/并发/长流测试和真实 Cloudflare 行为记录 |
 | Phase 3 / Plugin UI | 开发闭环完成 | 状态轮询、一次性 Key、两阶段轮换、Session 撤销、Preview 确认、诊断/限制提示；页面卸载只停止轮询 | 多浏览器和旧 generation 的端到端浏览器自动化测试 |
 | Phase 4 / 正式分发 | 阻塞 | 本机 `windows-x86_64` 开发 artifact 可构建 | RFC、五目标 CI、签名/公证、SBOM、provenance 和正式 Marketplace 发布 |
@@ -662,6 +662,7 @@ manifest 使用向后兼容的平台入口：
       "macos-aarch64": "bin/macos-aarch64/dinotty-quick-tunnel-supervisor"
     },
     "lifecycle": {
+      "scope": "host",
       "stdinLease": true,
       "shutdownDeadlineMs": 10000,
       "forceKillAfterMs": 15000
@@ -671,6 +672,8 @@ manifest 使用向后兼容的平台入口：
 ```
 
 legacy `bin.entry` 与新 `bin.entries` 均可存在，但 resolver 必须定义唯一优先级：当前 HostTarget 存在 `entries[target]` 时使用它，否则才使用 legacy `entry`；未知 target、选中入口缺失或两者解析到插件目录外时 fail closed。
+
+Cloudflare Supervisor 必须显式声明 `lifecycle.scope: "host"`，使其跨插件 UI 热重载和浏览器断开继续运行。未声明时宿主默认使用兼容性的 `ui` scope，并在 UI 热重载时停止 managed process。
 
 正式 Marketplace artifact 每个平台只包含当前目标的 Supervisor，manifest 可以保留其他平台的逻辑 entry，但安装器只要求选中 target 的入口存在。artifact descriptor 必须单独绑定 `pluginId`、`version`、`target`、`sha256`、压缩大小、解压上限、`minAppVersion`、选中 entry 和 `publisherKeyId`；浏览器安装时只提交插件 ID。
 
@@ -715,7 +718,7 @@ RFC 和宿主实现完成前，`../dinotty-cloudflare-tunnel` 只能开发安装
 | P0-4 | lifetime pipe、graceful stop、更新前停止和宿主退出清理 | `manager.rs`、`handlers.rs`、Server/Tauri shutdown | 正常/异常宿主退出均清理 Tunnel、Gateway 和 Bridge |
 | P0-5 | 注入稳定运行时目录、实际 origin 和宿主信息 | `handlers.rs`、插件开发文档 | 插件不推导 Dinotty 私有路径或假设端口 8999 |
 | P0-6 | 实际校验 `minAppVersion` | `helpers.rs`、`manager.rs`、安装/扫描 handlers | 阻止旧宿主运行新插件 |
-| P0-7 | native artifact 签名、发布者信任和权限确认 | Marketplace/安装 UI/后端验证 | registry 哈希不能独立抵御 registry 篡改 |
+| P0-7 | native artifact 签名和发布者信任 | Marketplace/安装 UI/后端验证 | 权限声明与确认已完成；registry 哈希仍不能独立抵御 registry 篡改 |
 
 managed process 必须由单一后端 task 拥有 `Child`，通过 channel 协调 wait、graceful stop 和 force kill，不能让 `wait().await` 持有停止接口需要的 mutex。stdout/stderr 必须分别持续 drain，并使用有界 ring buffer。
 

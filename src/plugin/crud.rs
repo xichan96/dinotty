@@ -10,10 +10,11 @@ use axum_extra::extract::Multipart;
 
 use crate::platform::fs as platform_fs;
 
-use super::helpers::plugin_err;
+use super::helpers::{native_approval_response, plugin_err, require_native_approval};
 use super::manager::PluginManagerState;
 use super::types::{
-    DeleteQuery, DevLinkRequest, InstallDirRequest, PluginInfo, PluginManifest, PluginStateValue,
+    DeleteQuery, DevLinkRequest, InstallDirRequest, NativeApprovalQuery, PluginInfo,
+    PluginManifest, PluginStateValue,
 };
 
 #[allow(clippy::unused_async)]
@@ -68,6 +69,7 @@ pub async fn plugin_asset(
 
 pub async fn install_plugin(
     State(pm): State<PluginManagerState>,
+    Query(query): Query<NativeApprovalQuery>,
     mut multipart: Multipart,
 ) -> Response {
     let field = match multipart.next_field().await {
@@ -80,15 +82,17 @@ pub async fn install_plugin(
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &e.to_string()),
     };
 
-    match pm.install(&data) {
+    match pm.install_with_approval(&data, query.approve_native).await {
         Ok(manifest) => Json(manifest).into_response(),
-        Err(e) => plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        Err(e) => native_approval_response(&e)
+            .unwrap_or_else(|| plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e)),
     }
 }
 
 pub async fn update_plugin(
     Path(id): Path<String>,
     State(pm): State<PluginManagerState>,
+    Query(query): Query<NativeApprovalQuery>,
     mut multipart: Multipart,
 ) -> Response {
     let field = match multipart.next_field().await {
@@ -101,10 +105,10 @@ pub async fn update_plugin(
         Err(e) => return plugin_err(StatusCode::BAD_REQUEST, &e.to_string()),
     };
 
-    pm.kill_plugin_processes(&id).await;
-    match pm.update(&id, &data) {
+    match pm.update_with_approval(&id, &data, query.approve_native).await {
         Ok(manifest) => Json(manifest).into_response(),
-        Err(e) => plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        Err(e) => native_approval_response(&e)
+            .unwrap_or_else(|| plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e)),
     }
 }
 
@@ -141,9 +145,24 @@ pub async fn dev_link_plugin(
     if let Err(e) = pm.validate_for_host(&manifest) {
         return plugin_err(StatusCode::BAD_REQUEST, &e);
     }
+    if let Err(e) = require_native_approval(&manifest, body.approve_native) {
+        return native_approval_response(&e)
+            .unwrap_or_else(|| plugin_err(StatusCode::BAD_REQUEST, &e));
+    }
+    if let Err(e) = pm.prepare_binary(&src, &manifest) {
+        return plugin_err(StatusCode::BAD_REQUEST, &e);
+    }
 
     let link = pm.plugin_dir.join(&manifest.id);
+    let operation_lock = pm.operation_lock(&manifest.id);
+    let _operation = operation_lock.write_owned().await;
     if platform_fs::path_exists_or_symlink(&link) {
+        if std::fs::symlink_metadata(&link).is_ok_and(|metadata| metadata.file_type().is_dir()) {
+            return plugin_err(StatusCode::CONFLICT, "a real plugin directory already exists");
+        }
+        if let Err(e) = pm.kill_plugin_processes(&manifest.id).await {
+            return plugin_err(StatusCode::CONFLICT, &e);
+        }
         if let Err(e) = platform_fs::remove_symlink_or_file(&link) {
             return plugin_err(StatusCode::CONFLICT, &e);
         }
@@ -170,7 +189,6 @@ pub async fn dev_link_plugin(
     Json(manifest).into_response()
 }
 
-#[allow(clippy::unused_async)]
 pub async fn install_from_dir(
     State(pm): State<PluginManagerState>,
     Json(body): Json<InstallDirRequest>,
@@ -183,9 +201,12 @@ pub async fn install_from_dir(
         return plugin_err(StatusCode::BAD_REQUEST, "path is not a directory");
     }
 
-    match pm.install_from_dir(&src, body.dev_link) {
+    match pm.install_from_dir_with_approval(&src, body.dev_link, body.approve_native).await {
         Ok(manifest) => Json(manifest).into_response(),
         Err(e) => {
+            if let Some(response) = native_approval_response(&e) {
+                return response;
+            }
             let status = if e.contains("already installed") {
                 StatusCode::CONFLICT
             } else if e.starts_with("failed to copy")
@@ -218,6 +239,7 @@ mod tests {
             data_dir: root.join("plugin-data"),
             registry: DashMap::new(),
             processes: DashMap::new(),
+            operation_locks: DashMap::new(),
             host_target: crate::plugin::HostTarget::current(),
             host_origin: "http://127.0.0.1:8999".into(),
             host_version: env!("CARGO_PKG_VERSION").into(),
@@ -248,7 +270,10 @@ mod tests {
 
         let response = dev_link_plugin(
             State(Arc::clone(&manager)),
-            Json(DevLinkRequest { path: src.to_string_lossy().into_owned() }),
+            Json(DevLinkRequest {
+                path: src.to_string_lossy().into_owned(),
+                approve_native: false,
+            }),
         )
         .await;
 

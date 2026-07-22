@@ -40,6 +40,8 @@ export interface MonitorSeries {
   visible?: () => boolean
 }
 
+export type PluginLocale = 'en' | 'zh'
+
 export interface PluginContext {
   // Vue 响应式 API
   reactive: <T extends object>(target: T) => UnwrapRef<T>
@@ -50,9 +52,15 @@ export interface PluginContext {
   onUnmounted: typeof import('vue').onUnmounted
   h: typeof import('vue').h
 
+  /** The Dinotty UI locale. Plugins own and render their translated strings. */
+  i18n: {
+    getLocale(): PluginLocale
+    onDidChangeLocale(callback: (locale: PluginLocale) => void): Disposable
+  }
+
   exec: {
     run(args: string[], options?: ExecOptions): Promise<ExecResult>
-    spawn(args: string[], options?: ExecOptions): SpawnHandle
+    spawn(args: string[], options?: ProcessStartOptions): SpawnHandle
   }
 
   terminal: {

@@ -430,6 +430,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.plugins.devBadge': 'dev',
     'settings.plugins.load': 'Load',
     'settings.plugins.openManagement': 'Open Management',
+    'settings.plugins.permissions': 'Declared capabilities',
+    'settings.plugins.nativePermissionTitle': 'Approve native capabilities',
+    'settings.plugins.nativePermissionWarning':
+      'This plugin can run a native program with your user account permissions. Dinotty does not provide an OS sandbox. Approve these capabilities?',
+    'settings.plugins.nativePermissionApprove': 'Approve and continue',
     'settings.plugins.update': 'Update',
     'settings.plugins.uninstall': 'Uninstall',
     'settings.plugins.confirmUninstall': 'Are you sure you want to uninstall this plugin?',
@@ -1116,6 +1121,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.plugins.devBadge': 'dev',
     'settings.plugins.load': '加载',
     'settings.plugins.openManagement': '打开管理页面',
+    'settings.plugins.permissions': '声明的能力',
+    'settings.plugins.nativePermissionTitle': '授权 Native 能力',
+    'settings.plugins.nativePermissionWarning':
+      '此插件可以使用当前用户权限运行本地程序，Dinotty 不提供操作系统级沙箱。是否授权以下能力？',
+    'settings.plugins.nativePermissionApprove': '授权并继续',
     'settings.plugins.update': '更新',
     'settings.plugins.uninstall': '卸载',
     'settings.plugins.confirmUninstall': '确定要卸载此插件吗？',

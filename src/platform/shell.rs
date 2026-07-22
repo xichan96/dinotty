@@ -223,7 +223,7 @@ fn root_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{shell_args, shell_type};
+    use super::{default_shell, notification_hook_shell, resolve_command, shell_args, shell_type};
 
     #[test]
     fn detects_windows_shell_types() {

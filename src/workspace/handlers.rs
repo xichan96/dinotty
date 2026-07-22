@@ -440,6 +440,7 @@ pub async fn workspace_reveal(
 #[cfg(target_os = "windows")]
 fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
     std::process::Command::new("explorer.exe")
+        .no_window()
         .arg(format!("/select,{}", path.display()))
         .spawn()
         .map(|_| ())
@@ -447,13 +448,13 @@ fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("open").arg("-R").arg(path).spawn().map(|_| ())
+    std::process::Command::new("open").no_window().arg("-R").arg(path).spawn().map(|_| ())
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or(path);
-    std::process::Command::new("xdg-open").arg(parent).spawn().map(|_| ())
+    std::process::Command::new("xdg-open").no_window().arg(parent).spawn().map(|_| ())
 }
 
 #[allow(clippy::unused_async)]

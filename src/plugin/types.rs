@@ -36,11 +36,32 @@ pub struct BinConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ProcessLifecycleConfig {
     #[serde(default)]
+    pub scope: ProcessLifecycleScope,
+    #[serde(default)]
     pub stdin_lease: bool,
     #[serde(default = "default_shutdown_deadline_ms")]
     pub shutdown_deadline_ms: u64,
     #[serde(default = "default_force_kill_after_ms")]
     pub force_kill_after_ms: u64,
+}
+
+impl Default for ProcessLifecycleConfig {
+    fn default() -> Self {
+        Self {
+            scope: ProcessLifecycleScope::Ui,
+            stdin_lease: false,
+            shutdown_deadline_ms: default_shutdown_deadline_ms(),
+            force_kill_after_ms: default_force_kill_after_ms(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProcessLifecycleScope {
+    #[default]
+    Ui,
+    Host,
 }
 
 const fn default_shutdown_deadline_ms() -> u64 {
@@ -156,6 +177,8 @@ pub struct CryptoHmacResponse {
 #[derive(Deserialize)]
 pub struct DevLinkRequest {
     pub path: String,
+    #[serde(default)]
+    pub approve_native: bool,
 }
 
 #[derive(Deserialize)]
@@ -163,6 +186,14 @@ pub struct InstallDirRequest {
     pub path: String,
     #[serde(default)]
     pub dev_link: bool,
+    #[serde(default)]
+    pub approve_native: bool,
+}
+
+#[derive(Default, Deserialize)]
+pub struct NativeApprovalQuery {
+    #[serde(default)]
+    pub approve_native: bool,
 }
 
 #[derive(Deserialize)]
@@ -174,6 +205,18 @@ pub struct DeleteQuery {
 #[derive(Deserialize)]
 pub struct SpawnQuery {
     pub args: String,
+    pub options: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+pub struct SpawnOptions {
+    pub cwd: Option<String>,
+    pub env: Option<HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+pub struct ProcessStopAllQuery {
+    pub scope: Option<ProcessLifecycleScope>,
 }
 
 #[derive(Deserialize)]
@@ -204,7 +247,9 @@ pub struct ProcessInfo {
 
 pub struct ManagedProcess {
     pub info: ProcessInfo,
+    pub scope: ProcessLifecycleScope,
     pub control: mpsc::Sender<ProcessControl>,
+    pub stop_timeout: std::time::Duration,
     pub stdout: Arc<TokioMutex<std::collections::VecDeque<u8>>>,
     pub stderr: Arc<TokioMutex<std::collections::VecDeque<u8>>>,
 }
@@ -252,6 +297,8 @@ pub struct InstallGitRequest {
     pub branch: String,
     #[serde(default)]
     pub subdir: Option<String>,
+    #[serde(default)]
+    pub approve_native: bool,
 }
 
 #[derive(Serialize)]

@@ -5,6 +5,7 @@ import { usePluginMonitorStore } from '../stores/pluginMonitor'
 import type { MonitorSeries } from '../stores/pluginMonitor'
 import { subscribe as eventSubscribe, emit as eventEmit } from './useEventBridge'
 import type { SyncEvent } from '../types/protocol'
+import { useI18n, type Locale } from './useI18n'
 import { describeHttpError } from '../utils/httpError'
 
 // Bypass Vite's static analysis of import()
@@ -46,9 +47,20 @@ export interface PluginManifest {
   description?: string
   icon?: string
   entry?: string
-  bin?: { mode: string; entry: string }
+  bin?: {
+    mode: string
+    entry?: string
+    entries?: Record<string, string>
+    lifecycle?: {
+      scope?: 'ui' | 'host'
+      stdinLease?: boolean
+      shutdownDeadlineMs?: number
+      forceKillAfterMs?: number
+    }
+  }
   commands?: Array<{ id: string; title: string }>
   styles?: string
+  permissions?: string[]
 }
 
 export interface Disposable {
@@ -67,6 +79,8 @@ export interface QuickPickOptions {
   items: () => QuickPickItem[] | Promise<QuickPickItem[]>
 }
 
+export type PluginLocale = Locale
+
 export interface PluginContext {
   reactive: typeof reactive
   ref: typeof ref
@@ -75,6 +89,11 @@ export interface PluginContext {
   onMounted: typeof onMounted
   onUnmounted: typeof onUnmounted
   h: typeof h
+
+  i18n: {
+    getLocale(): PluginLocale
+    onDidChangeLocale(callback: (locale: PluginLocale) => void): Disposable
+  }
 
   exec: {
     run(
@@ -229,6 +248,7 @@ function removePluginCSS(id: string) {
 // ─── Plugin Context Factory (module scope) ───────────────────────────────────
 
 function createPluginContext(pluginId: string): PluginContext {
+  const { locale } = useI18n()
   const exec: PluginContext['exec'] = {
     async run(args, options) {
       const res = await authFetch(apiUrl(`/api/plugins/${pluginId}/exec`), {
@@ -239,11 +259,13 @@ function createPluginContext(pluginId: string): PluginContext {
       if (!res.ok) throw new Error(await describeHttpError(res, 'Plugin command failed'))
       return res.json()
     },
-    spawn(args) {
+    spawn(args, options) {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const query = new URLSearchParams({ args: JSON.stringify(args) })
+      if (options) query.set('options', JSON.stringify(options))
       const ws = new WebSocket(
         wsUrlWithToken(
-          `${proto}//${location.host}/api/plugins/${pluginId}/spawn?args=${encodeURIComponent(JSON.stringify(args))}`
+          `${proto}//${location.host}/api/plugins/${pluginId}/spawn?${query.toString()}`
         )
       )
       let stdoutCtrl: ReadableStreamDefaultController<string>
@@ -298,9 +320,12 @@ function createPluginContext(pluginId: string): PluginContext {
       return {
         info: data,
         stop: async () => {
-          await authFetch(apiUrl(`/api/plugins/${pluginId}/process/${data.pid}`), {
+          const stopRes = await authFetch(apiUrl(`/api/plugins/${pluginId}/process/${data.pid}`), {
             method: 'DELETE',
           })
+          if (!stopRes.ok) {
+            throw new Error(await describeHttpError(stopRes, 'Unable to stop plugin process'))
+          }
         },
       }
     },
@@ -309,14 +334,16 @@ function createPluginContext(pluginId: string): PluginContext {
       return res.json()
     },
     async stop(pid) {
-      await authFetch(apiUrl(`/api/plugins/${pluginId}/process/${pid}`), {
+      const res = await authFetch(apiUrl(`/api/plugins/${pluginId}/process/${pid}`), {
         method: 'DELETE',
       })
+      if (!res.ok) throw new Error(await describeHttpError(res, 'Unable to stop plugin process'))
     },
     async stopAll() {
-      await authFetch(apiUrl(`/api/plugins/${pluginId}/process`), {
+      const res = await authFetch(apiUrl(`/api/plugins/${pluginId}/process`), {
         method: 'DELETE',
       })
+      if (!res.ok) throw new Error(await describeHttpError(res, 'Unable to stop plugin processes'))
     },
   }
 
@@ -402,6 +429,15 @@ function createPluginContext(pluginId: string): PluginContext {
     onMounted,
     onUnmounted,
     h,
+    i18n: {
+      getLocale: () => locale.value,
+      onDidChangeLocale(callback) {
+        const stop = watch(locale, (locale, previous) => {
+          if (locale !== previous) callback(locale)
+        })
+        return { dispose: stop }
+      },
+    },
     exec,
     process,
     crypto,
@@ -519,9 +555,18 @@ async function loadPlugin(id: string): Promise<LoadedPlugin> {
   return plugin
 }
 
-async function unloadPlugin(id: string) {
+async function unloadPlugin(id: string, options: { stopUiProcesses?: boolean } = {}) {
   const plugin = loadedPlugins.get(id)
   if (!plugin) return
+
+  if (options.stopUiProcesses) {
+    const res = await authFetch(apiUrl(`/api/plugins/${id}/process?scope=ui`), {
+      method: 'DELETE',
+    })
+    if (!res.ok) {
+      throw new Error(await describeHttpError(res, 'Unable to stop plugin UI processes'))
+    }
+  }
 
   // Unregister monitor series first so sampling stops touching plugin state
   usePluginMonitorStore().unregister(id)
@@ -566,10 +611,10 @@ export async function handlePluginChanged(pluginId: string, change: string) {
     for (const [id, ch] of tasks) {
       try {
         if (ch === 'deleted') {
-          await unloadPlugin(id)
+          await unloadPlugin(id, { stopUiProcesses: true })
         } else {
-          await unloadPlugin(id)
-          await loadPlugin(id)
+          await unloadPlugin(id, { stopUiProcesses: true })
+          await usePluginLoader().loadAll()
         }
       } catch (e: any) {
         console.error(`[plugin] hot-reload failed for ${id}:`, e.message)
@@ -598,10 +643,32 @@ export function usePluginLoader() {
 
       for (const item of list) {
         const id = item.manifest.id
-        if (loadedPlugins.has(id)) {
-          loadedPlugins.get(id)!.isDevLink = item.isDevLink
+        const existing = loadedPlugins.get(id)
+        if (item.state && item.state !== 'active') {
+          if (existing?.state === 'active') {
+            await unloadPlugin(id, { stopUiProcesses: true })
+          }
+          loadedPlugins.set(id, {
+            id,
+            manifest: item.manifest,
+            module: {
+              activate() {
+                return {}
+              },
+            },
+            exports: null,
+            state: 'error',
+            error: item.error || 'Plugin is not compatible with this host',
+            isDevLink: item.isDevLink,
+          })
           continue
         }
+        if (existing?.state === 'active') {
+          existing.manifest = item.manifest
+          existing.isDevLink = item.isDevLink
+          continue
+        }
+        if (existing) await unloadPlugin(id)
         try {
           await loadPlugin(id)
           const lp = loadedPlugins.get(id)

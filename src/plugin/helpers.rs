@@ -6,6 +6,9 @@ use axum::{
 
 use super::types::{BinConfig, HostTarget, PluginManifest};
 
+pub const NATIVE_EXECUTE_PERMISSION: &str = "native.execute";
+pub const LONG_RUNNING_PERMISSION: &str = "process.long-running";
+
 pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
     if manifest.id.is_empty() {
         return Err("id is required".into());
@@ -26,8 +29,69 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
         if bin.entry.is_none() && bin.entries.is_empty() {
             return Err("bin.entry or bin.entries is required".into());
         }
+        if let Some(lifecycle) = &bin.lifecycle {
+            if lifecycle.shutdown_deadline_ms > lifecycle.force_kill_after_ms {
+                return Err(
+                    "bin.lifecycle.shutdownDeadlineMs must not exceed forceKillAfterMs".into()
+                );
+            }
+            if lifecycle.shutdown_deadline_ms > 30_000 {
+                return Err("bin.lifecycle.shutdownDeadlineMs must not exceed 30000".into());
+            }
+            if lifecycle.force_kill_after_ms > 60_000 {
+                return Err("bin.lifecycle.forceKillAfterMs must not exceed 60000".into());
+            }
+        }
+
+        let permissions = manifest.permissions.as_deref().unwrap_or_default();
+        let uses_native_runtime = !bin.entries.is_empty() || bin.lifecycle.is_some();
+        if uses_native_runtime && !permissions.iter().any(|p| p == NATIVE_EXECUTE_PERMISSION) {
+            return Err(format!(
+                "native plugin features require permission '{NATIVE_EXECUTE_PERMISSION}'"
+            ));
+        }
+        if bin.lifecycle.is_some() && !permissions.iter().any(|p| p == LONG_RUNNING_PERMISSION) {
+            return Err(format!(
+                "managed process lifecycle requires permission '{LONG_RUNNING_PERMISSION}'"
+            ));
+        }
+    }
+
+    if let Some(permissions) = &manifest.permissions {
+        for permission in permissions {
+            if (permission.starts_with("native.") || permission.starts_with("process."))
+                && permission != NATIVE_EXECUTE_PERMISSION
+                && permission != LONG_RUNNING_PERMISSION
+            {
+                return Err(format!("unknown native permission '{permission}'"));
+            }
+        }
     }
     Ok(())
+}
+
+#[must_use]
+pub fn required_native_permissions(manifest: &PluginManifest) -> Vec<&str> {
+    let Some(bin) = &manifest.bin else {
+        return Vec::new();
+    };
+    if bin.entries.is_empty() && bin.lifecycle.is_none() {
+        return Vec::new();
+    }
+
+    let mut permissions = vec![NATIVE_EXECUTE_PERMISSION];
+    if bin.lifecycle.is_some() {
+        permissions.push(LONG_RUNNING_PERMISSION);
+    }
+    permissions
+}
+
+pub fn require_native_approval(manifest: &PluginManifest, approved: bool) -> Result<(), String> {
+    let permissions = required_native_permissions(manifest);
+    if permissions.is_empty() || approved {
+        return Ok(());
+    }
+    Err(format!("native permissions require approval: {}", permissions.join(", ")))
 }
 
 pub fn validate_min_app_version(
@@ -111,21 +175,6 @@ pub fn extract_tar_gz(data: &[u8], dest: &std::path::Path) -> Result<(), String>
     archive2.unpack(dest).map_err(|e| e.to_string())
 }
 
-pub fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_dir_all(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
 pub fn copy_plugin_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -158,7 +207,7 @@ pub fn copy_plugin_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<(
 }
 
 fn is_development_cache(path: &std::path::Path, name: &std::ffi::OsStr) -> bool {
-    if name == ".git" || name == "node_modules" {
+    if name == ".git" {
         return true;
     }
     name == "target"
@@ -167,6 +216,21 @@ fn is_development_cache(path: &std::path::Path, name: &std::ffi::OsStr) -> bool 
 
 pub fn plugin_err(status: StatusCode, msg: &str) -> Response {
     (status, Json(serde_json::json!({ "error": msg }))).into_response()
+}
+
+pub fn native_approval_response(error: &str) -> Option<Response> {
+    let permissions = error.strip_prefix("native permissions require approval: ")?;
+    let permissions: Vec<_> = permissions.split(", ").collect();
+    Some(
+        (
+            StatusCode::PRECONDITION_REQUIRED,
+            Json(serde_json::json!({
+                "error": "native permissions require approval",
+                "permissions": permissions,
+            })),
+        )
+            .into_response(),
+    )
 }
 
 pub fn is_safe_segment(s: &str) -> bool {
@@ -263,9 +327,13 @@ pub fn version_gt(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_plugin_dir, extract_tar_gz, extract_zip, resolve_binary, validate_min_app_version,
+        copy_plugin_dir, extract_tar_gz, extract_zip, require_native_approval, resolve_binary,
+        validate_manifest, validate_min_app_version, LONG_RUNNING_PERMISSION,
+        NATIVE_EXECUTE_PERMISSION,
     };
-    use crate::plugin::{BinConfig, HostTarget, PluginManifest};
+    use crate::plugin::{
+        BinConfig, HostTarget, PluginManifest, ProcessLifecycleConfig, ProcessLifecycleScope,
+    };
     use std::collections::HashMap;
     use std::io::{Cursor, Write};
 
@@ -413,6 +481,36 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_deadlines_are_bounded_and_ordered() {
+        let mut manifest = manifest(None);
+        manifest.bin = Some(BinConfig {
+            mode: "cli".into(),
+            entry: Some("bin/tool".into()),
+            entries: HashMap::new(),
+            lifecycle: Some(ProcessLifecycleConfig {
+                scope: ProcessLifecycleScope::Host,
+                stdin_lease: true,
+                shutdown_deadline_ms: 10_000,
+                force_kill_after_ms: 15_000,
+            }),
+        });
+        assert!(validate_manifest(&manifest).unwrap_err().contains(NATIVE_EXECUTE_PERMISSION));
+        manifest.permissions =
+            Some(vec![NATIVE_EXECUTE_PERMISSION.into(), LONG_RUNNING_PERMISSION.into()]);
+        assert!(validate_manifest(&manifest).is_ok());
+        assert!(require_native_approval(&manifest, false).is_err());
+        assert!(require_native_approval(&manifest, true).is_ok());
+
+        manifest.bin.as_mut().unwrap().lifecycle.as_mut().unwrap().shutdown_deadline_ms = 20_000;
+        manifest.bin.as_mut().unwrap().lifecycle.as_mut().unwrap().force_kill_after_ms = 10_000;
+        assert!(validate_manifest(&manifest).is_err());
+
+        manifest.bin.as_mut().unwrap().lifecycle.as_mut().unwrap().shutdown_deadline_ms = 30_000;
+        manifest.bin.as_mut().unwrap().lifecycle.as_mut().unwrap().force_kill_after_ms = 60_001;
+        assert!(validate_manifest(&manifest).is_err());
+    }
+
+    #[test]
     fn resolver_prefers_target_entry_and_rejects_escape() {
         let tmp = tempfile::tempdir().unwrap();
         let selected = tmp.path().join("bin").join("selected.exe");
@@ -469,7 +567,10 @@ mod tests {
             b"runtime asset"
         );
         assert!(!dest.join(".git").exists());
-        assert!(!dest.join("node_modules").exists());
+        assert_eq!(
+            std::fs::read(dest.join("node_modules/package/index.js")).unwrap(),
+            b"dependency cache"
+        );
         assert!(!dest.join("native/target").exists());
     }
 

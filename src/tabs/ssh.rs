@@ -18,7 +18,7 @@ pub async fn create_ssh_quick_tab(
     let params = req.to_params();
 
     // 创建 SSH 会话
-    let (_session, _shell_type) = match ssh::create_ssh_session(&manager, &pane_id, params, None)
+    let (session, _shell_type) = match ssh::create_ssh_session(&manager, &pane_id, params, None)
         .await
     {
         Ok(x) => x,
@@ -40,17 +40,22 @@ pub async fn create_ssh_quick_tab(
     });
 
     // 存储 tab
-    manager.insert_tab(
+    if !manager.insert_tab_for_session(
+        &pane_id,
+        &session,
         tab_id.clone(),
         serde_json::json!({
-            "layout": layout,
-            "active_pane_id": pane_id,
+            "layout": layout.clone(),
+            "active_pane_id": pane_id.clone(),
         }),
-    );
-
-    // 设为活动 tab
-    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(pane_id.clone());
+        pane_id.clone(),
+    ) {
+        return (
+            StatusCode::GONE,
+            Json(serde_json::json!({ "error": "SSH session exited before tab publication" })),
+        )
+            .into_response();
+    }
 
     // 广播
     manager.broadcast_sync(&SyncMsg::TabCreated {
@@ -106,7 +111,7 @@ pub async fn create_ssh_tab(
     let tab_title = format!("{}@{}", params.username, params.host);
 
     // 创建 SSH 会话
-    let (_session, _shell_type) = match ssh::create_ssh_session(&manager, &pane_id, params, None)
+    let (session, _shell_type) = match ssh::create_ssh_session(&manager, &pane_id, params, None)
         .await
     {
         Ok(x) => x,
@@ -128,17 +133,22 @@ pub async fn create_ssh_tab(
     });
 
     // 存储 tab
-    manager.insert_tab(
+    if !manager.insert_tab_for_session(
+        &pane_id,
+        &session,
         tab_id.clone(),
         serde_json::json!({
-            "layout": layout,
-            "active_pane_id": pane_id,
+            "layout": layout.clone(),
+            "active_pane_id": pane_id.clone(),
         }),
-    );
-
-    // 设为活动 tab
-    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(pane_id.clone());
+        pane_id.clone(),
+    ) {
+        return (
+            StatusCode::GONE,
+            Json(serde_json::json!({ "error": "SSH session exited before tab publication" })),
+        )
+            .into_response();
+    }
 
     // 广播
     manager.broadcast_sync(&SyncMsg::TabCreated {

@@ -21,7 +21,7 @@ use std::{
     io::Write,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -102,6 +102,8 @@ pub struct Session {
     pub tauri_client_id: Mutex<Option<u64>>,
     pub input_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
     pub status: Mutex<SessionStatus>,
+    /// Conservative lock-free mirror used only by lifecycle-locked reap claims.
+    pub(crate) is_connected: AtomicBool,
     pub size: Mutex<(u16, u16)>,
     pub exited: Mutex<bool>,
     #[allow(dead_code)]
@@ -144,6 +146,34 @@ pub struct Session {
 }
 
 impl Session {
+    /// Publish status without ever co-holding the manager lifecycle lock.
+    /// Connected is mirrored before the status value becomes visible; Detached
+    /// clears the mirror only after the status value is committed.
+    pub fn set_status(&self, status: SessionStatus) {
+        let mut current = self.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match status {
+            SessionStatus::Connected => {
+                self.is_connected.store(true, Ordering::Release);
+                *current = SessionStatus::Connected;
+            }
+            SessionStatus::Detached { since } => {
+                *current = SessionStatus::Detached { since };
+                self.is_connected.store(false, Ordering::Release);
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::Acquire)
+    }
+
+    /// Revert a failed attach publication after lifecycle membership validation.
+    pub fn mark_failed_attach(&self) {
+        self.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
+        self.mark_exited();
+    }
+
     /// Explicitly kill the child process. Safe to call multiple times (idempotent).
     /// After this, the PTY reader task's `reader.read()` will return Err/Ok(0),
     /// causing it to exit and drop its `Arc<Session>`, which triggers `Drop`.
@@ -201,6 +231,22 @@ impl Session {
             *backend = SessionBackend::Exited;
         }
         confirmed
+    }
+
+    /// Confirm a naturally-ended backend before its crash-recovery entry is removed.
+    /// Uncertainty is deliberately reported as false so boot recovery retains it.
+    pub fn natural_exit_confirmed(&self, pane_id: &str) -> bool {
+        let Ok(mut backend) = self.backend.try_lock() else {
+            return false;
+        };
+        match &mut *backend {
+            SessionBackend::Local { child, .. } => match child.try_wait() {
+                Ok(Some(_)) => ledger::termination_confirmed(pane_id),
+                Ok(None) | Err(_) => false,
+            },
+            SessionBackend::Ssh => ledger::termination_confirmed(pane_id),
+            SessionBackend::Exited => ledger::termination_confirmed(pane_id),
+        }
     }
 
     /// 同步清理后端（用于 `kill_child` 和 Drop）
@@ -742,6 +788,7 @@ mod session_stub_tests {
             tauri_client_id: Mutex::new(None),
             input_tx: Mutex::new(None),
             status: Mutex::new(SessionStatus::Connected),
+            is_connected: AtomicBool::new(true),
             size: Mutex::new((80, 24)),
             exited: Mutex::new(false),
             shell_type: "test".to_string(),
@@ -844,6 +891,94 @@ mod session_stub_tests {
         assert_eq!(closed["type"], "tab_closed");
         assert_eq!(closed["pane_id"], pane_id);
         assert!(rx.try_recv().is_err(), "no ghost-tab layout update should follow closure");
+    }
+
+    #[test]
+    fn reap_claim_removes_exact_detached_generation_under_lifecycle() {
+        let manager = SessionManager::new();
+        let pane_id = "reap-pane";
+        let session = stub_session();
+        assert!(manager.insert_session(pane_id.to_string(), Arc::clone(&session)));
+        session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
+        let since = std::time::Instant::now() - Duration::from_secs(61);
+        manager.age_unowned_for_test(pane_id, since);
+
+        assert!(manager.try_reap_session_for_test(
+            pane_id,
+            &session,
+            since + Duration::from_secs(61)
+        ));
+        assert!(!manager.sessions.contains_key(pane_id));
+    }
+
+    #[test]
+    fn layout_only_close_prunes_non_terminal_leaves_and_broadcasts() {
+        let manager = SessionManager::new();
+        let tab_id = "tools-tab";
+        manager.update_layout(
+            tab_id.to_string(),
+            serde_json::json!({
+                "layout": {
+                    "type": "split",
+                    "direction": "horizontal",
+                    "children": [
+                        {"type": "leaf", "paneId": "plugin-pane", "kind": "plugin"},
+                        {"type": "leaf", "paneId": "web-pane", "kind": "web"}
+                    ]
+                },
+                "active_pane_id": "plugin-pane"
+            }),
+            Some("plugin-pane".to_string()),
+        );
+        let (_client_id, mut rx) = manager.add_sync_client();
+
+        assert!(manager.close_pane("plugin-pane"));
+        let updated: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("layout_updated must be broadcast"))
+                .unwrap();
+        assert_eq!(updated["type"], "layout_updated");
+        assert_eq!(updated["pane_id"], tab_id);
+        assert_eq!(updated["active_pane_id"], "web-pane");
+        assert_eq!(
+            manager
+                .active_pane_id
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref(),
+            None
+        );
+
+        assert!(manager.close_pane("web-pane"));
+        let closed: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_closed must be broadcast")).unwrap();
+        assert_eq!(closed["type"], "tab_closed");
+        assert_eq!(closed["pane_id"], tab_id);
+        assert!(!manager.tab_layouts.contains_key(tab_id));
+    }
+
+    #[test]
+    fn stale_generation_cannot_replace_or_close_current_session() {
+        let manager = Arc::new(SessionManager::new());
+        let pane_id = "generation-pane";
+        let current = stub_session();
+        let stale = stub_session();
+        let reservation = manager.reserve_session(pane_id).unwrap();
+        assert!(manager.reserve_session(pane_id).is_err());
+        assert!(!manager.insert_session(pane_id.to_string(), Arc::clone(&stale)));
+        assert!(reservation.publish(Arc::clone(&current)));
+        assert!(!manager.insert_session(pane_id.to_string(), Arc::clone(&stale)));
+
+        assert!(!manager.close_session_for_session(
+            pane_id,
+            &stale,
+            CloseReason::NaturalExit,
+            false,
+            Some(0)
+        ));
+        assert!(manager
+            .sessions
+            .get(pane_id)
+            .is_some_and(|session| Arc::ptr_eq(session.value(), &current)));
     }
 
     #[test]

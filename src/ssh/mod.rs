@@ -316,6 +316,7 @@ pub async fn create_ssh_session(
     params: SshSessionParams,
     tauri_on_exit: Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>,
 ) -> Result<(Arc<Session>, String), String> {
+    let reservation = manager.reserve_session(pane_id)?;
     let timeouts = SshTimeouts::default();
 
     // 1. 建立 SSH 连接
@@ -516,6 +517,7 @@ pub async fn create_ssh_session(
         tauri_client_id: std::sync::Mutex::new(None),
         input_tx: std::sync::Mutex::new(None),
         status: std::sync::Mutex::new(SessionStatus::Connected),
+        is_connected: std::sync::atomic::AtomicBool::new(true),
         size: std::sync::Mutex::new((80, 24)),
         exited: std::sync::Mutex::new(false),
         shell_type: "ssh".to_string(),
@@ -539,7 +541,9 @@ pub async fn create_ssh_session(
     *session_arc.ssh_handle.lock().await = Some(Box::new(session));
 
     // 10. 插入 SessionManager
-    manager.insert_session(pane_id.to_string(), Arc::clone(&session_arc));
+    if !reservation.publish(Arc::clone(&session_arc)) {
+        return Err(format!("session already exists for pane {pane_id}"));
+    }
 
     // 11. 启动 SSH reader/writer task（拥有 channel，通过 select! 处理读写）
     let read_session = Arc::clone(&session_arc);
@@ -718,7 +722,7 @@ async fn ssh_reader_task(
     // 清理：清除 ssh_cmd_tx 以防止后续发送
     *session.ssh_cmd_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 
-    manager.close_session(&pane_id, CloseReason::NaturalExit, false, None);
+    manager.close_session_for_session(&pane_id, &session, CloseReason::NaturalExit, false, None);
 
     info!("SSH reader task exited, pane={}", pane_id);
 }

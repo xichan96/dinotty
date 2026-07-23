@@ -55,6 +55,7 @@ fn local_session_for_write_input() -> Arc<Session> {
         tauri_client_id: Mutex::new(None),
         input_tx: Mutex::new(None),
         status: Mutex::new(SessionStatus::Connected),
+        is_connected: AtomicBool::new(true),
         size: Mutex::new((80, 24)),
         exited: Mutex::new(false),
         shell_type: "test".to_string(),

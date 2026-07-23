@@ -291,7 +291,7 @@ async fn handle_sync_socket(
                                 .unwrap_or_default();
                             // Each session close prunes its leaf and emits the close protocol.
                             for leaf_id in &leaf_ids {
-                                manager.kill_and_remove(leaf_id);
+                                manager.close_pane(leaf_id);
                             }
                             // Non-terminal-only tabs have no session close to remove the layout.
                             if manager.remove_tab(&pane_id) {
@@ -302,7 +302,7 @@ async fn handle_sync_socket(
                             }
                         }
                         SyncClientMsg::ClosePane { pane_id } => {
-                            manager.kill_and_remove(&pane_id);
+                            manager.close_pane(&pane_id);
                         }
                         SyncClientMsg::UpdateLayout { pane_id, layout, active_pane_id } => {
                             manager.update_layout(

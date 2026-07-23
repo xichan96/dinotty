@@ -873,8 +873,8 @@ pub async fn close_pane(
             .into_response();
     }
 
-    // Unified close also prunes the pane from its parent layout and broadcasts it.
-    manager.kill_and_remove(&pane_id);
+    // Unified pane close also handles non-terminal leaves that own no session.
+    manager.close_pane(&pane_id);
     Json(serde_json::json!({ "ok": true, "tab_closed": leaf_ids.len() <= 1 })).into_response()
 }
 

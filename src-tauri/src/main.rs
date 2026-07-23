@@ -212,8 +212,10 @@ fn pty_spawn(
         });
 
     if let Some(session) = manager.session_for_attach(&pane_id) {
-        *session.status.lock().unwrap_or_else(|e| e.into_inner()) = SessionStatus::Connected;
+        // Publish the reap veto before lifecycle membership revalidation.
+        session.set_status(SessionStatus::Connected);
         if !manager.is_current_session(&pane_id, &session) {
+            session.mark_failed_attach();
             return Err("session closed during reconnect".to_string());
         }
         manager.register_singleton_tab(&pane_id, &session, &session.shell_type);
@@ -338,8 +340,7 @@ fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<
     if let Some(entry) = state.sessions.get(&pane_id) {
         let session = Arc::clone(entry.value());
         if !session.has_clients() {
-            *session.status.lock().unwrap_or_else(|e| e.into_inner()) =
-                SessionStatus::Detached { since: std::time::Instant::now() };
+            session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
         }
     }
     Ok(())

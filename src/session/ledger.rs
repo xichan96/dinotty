@@ -187,7 +187,7 @@ mod platform {
     ) -> Result<(), String> {
         let _lock = LedgerLock::acquire(path)?;
         let mut ledger = read_ledger(path);
-        ledger.entries.retain(|entry| entry.pane_id != pane_id);
+        ledger.entries.retain(|entry| entry.pane_id != pane_id || entry.owner != owner);
         ledger.entries.push(LedgerEntry {
             pane_id: pane_id.to_string(),
             pid,
@@ -204,21 +204,61 @@ mod platform {
     /// # Errors
     /// Returns an error when the ledger lock or atomic write is unavailable.
     pub fn remove_entry(pane_id: &str) -> Result<(), String> {
-        remove_entry_at(&ledger_path(), pane_id)
+        let path = ledger_path();
+        if !path.exists() {
+            return Ok(());
+        }
+        let owner = current_owner()?;
+        remove_entry_at(&path, pane_id, &owner)
     }
 
-    fn remove_entry_at(path: &Path, pane_id: &str) -> Result<(), String> {
+    fn remove_entry_at(path: &Path, pane_id: &str, owner: &ProcessIdentity) -> Result<(), String> {
         if !path.exists() {
             return Ok(());
         }
         let _lock = LedgerLock::acquire(path)?;
         let mut ledger = read_ledger(path);
         let old_len = ledger.entries.len();
-        ledger.entries.retain(|entry| entry.pane_id != pane_id);
+        ledger.entries.retain(|entry| entry.pane_id != pane_id || &entry.owner != owner);
         if ledger.entries.len() == old_len {
             return Ok(());
         }
         write_ledger(path, &ledger)
+    }
+
+    /// Conservatively confirms that this owner's recorded process group is gone.
+    /// A live identity, live group, or any probe uncertainty keeps the ledger entry.
+    #[must_use]
+    pub fn termination_confirmed(pane_id: &str) -> bool {
+        let path = ledger_path();
+        if !path.exists() {
+            return true;
+        }
+        let owner = match current_owner() {
+            Ok(owner) => owner,
+            Err(error) => {
+                warn!(pane_id, %error, "Cannot identify PID ledger owner while confirming natural exit");
+                return false;
+            }
+        };
+        let _lock = match LedgerLock::acquire(&path) {
+            Ok(lock) => lock,
+            Err(error) => {
+                warn!(pane_id, %error, "Cannot lock PID ledger while confirming natural exit");
+                return false;
+            }
+        };
+        let ledger = read_ledger(&path);
+        let Some(entry) =
+            ledger.entries.iter().find(|entry| entry.pane_id == pane_id && entry.owner == owner)
+        else {
+            return true;
+        };
+
+        match identity_probe(entry.pid, entry.proc_start_time) {
+            Probe::Alive | Probe::Unknown(_) => false,
+            Probe::Dead => matches!(group_probe(entry.pgid), Probe::Dead),
+        }
     }
 
     pub fn boot_sweep() {
@@ -536,13 +576,35 @@ mod platform {
             assert_eq!(ledger.entries[0].owner, identity);
             assert_eq!(ledger.entries[1].owner, second_owner);
 
-            remove_entry_at(&path, "pane-a").unwrap();
+            remove_entry_at(&path, "pane-a", &identity).unwrap();
             let ledger = read_ledger(&path);
             assert_eq!(ledger.entries.len(), 1);
             assert_eq!(ledger.entries[0].pane_id, "pane-b");
 
             std::fs::write(&path, b"{not-json").unwrap();
             assert!(read_ledger(&path).entries.is_empty());
+        }
+
+        #[test]
+        fn owner_scoped_rmw_preserves_same_pane_for_sibling_owner() {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("session-ledger.json");
+            let identity = owner();
+            let sibling = ProcessIdentity {
+                pid: identity.pid,
+                start_time: identity.start_time.wrapping_add(1),
+            };
+
+            add_entry_at(&path, "shared-pane", 101, 101, 1001, identity.clone()).unwrap();
+            add_entry_at(&path, "shared-pane", 202, 202, 2002, sibling.clone()).unwrap();
+            let ledger = read_ledger(&path);
+            assert_eq!(ledger.entries.len(), 2);
+
+            remove_entry_at(&path, "shared-pane", &identity).unwrap();
+            let ledger = read_ledger(&path);
+            assert_eq!(ledger.entries.len(), 1);
+            assert_eq!(ledger.entries[0].owner, sibling);
+            assert_eq!(ledger.entries[0].pid, 202);
         }
 
         #[test]
@@ -579,7 +641,10 @@ mod platform {
 }
 
 #[cfg(unix)]
-pub use platform::{add_entry, boot_sweep, process_group_id, process_start_time, remove_entry};
+pub use platform::{
+    add_entry, boot_sweep, process_group_id, process_start_time, remove_entry,
+    termination_confirmed,
+};
 
 #[cfg(windows)]
 mod platform {
@@ -606,8 +671,16 @@ mod platform {
         Ok(())
     }
 
+    #[must_use]
+    pub fn termination_confirmed(_pane_id: &str) -> bool {
+        true
+    }
+
     pub fn boot_sweep() {}
 }
 
 #[cfg(windows)]
-pub use platform::{add_entry, boot_sweep, process_group_id, process_start_time, remove_entry};
+pub use platform::{
+    add_entry, boot_sweep, process_group_id, process_start_time, remove_entry,
+    termination_confirmed,
+};

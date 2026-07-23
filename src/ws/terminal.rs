@@ -100,9 +100,11 @@ async fn handle_socket(
     if let Some(session) = existing_session {
         info!("Joining existing session: pane={}", pane_id);
 
-        *session.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            SessionStatus::Connected;
+        // Connected is mirrored before lifecycle membership revalidation. A
+        // concurrent reap therefore vetoes removal before waiting on lifecycle.
+        session.set_status(SessionStatus::Connected);
         if !manager.is_current_session(&pane_id, &session) {
+            session.mark_failed_attach();
             info!("Session closed during reconnect: pane={}", pane_id);
             let msg = serde_json::to_string(&ServerMsg::SessionExit)
                 .expect("serialization is infallible");
@@ -269,8 +271,7 @@ async fn handle_socket(
         session.remove_client(client_id);
 
         if !session.has_clients() {
-            *session.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-                SessionStatus::Detached { since: std::time::Instant::now() };
+            session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
             info!("Session detached (all clients gone): pane={}", pane_id);
         }
         return;
@@ -432,8 +433,7 @@ async fn handle_socket(
     session.remove_client(client_id);
 
     if !session.has_clients() {
-        *session.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            SessionStatus::Detached { since: std::time::Instant::now() };
+        session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
         info!("Session detached (all clients gone): pane={}", pane_id);
     }
 }

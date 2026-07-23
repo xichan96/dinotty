@@ -195,12 +195,12 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
 }
 
 fn cleanup_exited_pty_session(
-    _session: &Arc<Session>,
+    session: &Arc<Session>,
     pane_id: &str,
     manager: &Arc<SessionManager>,
     exit_code: Option<i32>,
 ) {
-    manager.close_session(pane_id, CloseReason::NaturalExit, false, exit_code);
+    manager.close_session_for_session(pane_id, session, CloseReason::NaturalExit, false, exit_code);
 }
 
 fn notify_url_for(port: u16) -> Option<String> {
@@ -226,6 +226,7 @@ pub fn create_session(
     if argv.as_ref().is_some_and(Vec::is_empty) {
         return Err("argv must be non-empty when provided".to_string());
     }
+    let reservation = manager.reserve_session(pane_id)?;
 
     let pty_system = NativePtySystem::default();
     let pair = pty_system
@@ -337,6 +338,7 @@ pub fn create_session(
         tauri_client_id: std::sync::Mutex::new(None),
         input_tx: std::sync::Mutex::new(None),
         status: std::sync::Mutex::new(SessionStatus::Connected),
+        is_connected: std::sync::atomic::AtomicBool::new(true),
         size: std::sync::Mutex::new((80, 24)),
         exited: std::sync::Mutex::new(false),
         shell_type: shell_type.clone(),
@@ -358,7 +360,9 @@ pub fn create_session(
         output_rx: std::sync::Mutex::new(Some(output_rx)),
         pending_results: std::sync::Mutex::new(Vec::new()),
     });
-    manager.insert_session(pane_id.to_string(), Arc::clone(&session));
+    if !reservation.publish(Arc::clone(&session)) {
+        return Err(format!("session already exists for pane {pane_id}"));
+    }
     pending_spawn.disarm();
 
     // Spawn resize debounce task: waits 25ms after last change, then applies.

@@ -3,8 +3,41 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use zeroize::Zeroize;
 
-pub const CURRENT_SETTINGS_VERSION: u32 = 6;
+pub const CURRENT_SETTINGS_VERSION: u32 = 7;
 pub(crate) const LEGACY_UPLOAD_DIR: &str = "~/.dinotty/uploads";
+
+#[derive(Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyboardGuardMode {
+    #[default]
+    Off,
+    CollapseOnly,
+    OpenOnly,
+    Both,
+}
+
+impl<'de> Deserialize<'de> for KeyboardGuardMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            Some("collapse_only") => Self::CollapseOnly,
+            Some("open_only") => Self::OpenOnly,
+            Some("both") => Self::Both,
+            _ => Self::Off,
+        })
+    }
+}
+
+fn tolerant_legacy_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_bool().unwrap_or(false))
+}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -68,6 +101,11 @@ pub struct Settings {
     pub quick_send_threshold: u32,
     #[serde(default)]
     pub show_virtual_keyboard: bool,
+    #[serde(default)]
+    pub keyboard_guard_mode: KeyboardGuardMode,
+    // Legacy v6 input retained only so v7 migration can deserialize it.
+    #[serde(default, deserialize_with = "tolerant_legacy_bool", skip_serializing)]
+    pub keyboard_keep_on_scroll: bool,
     // Legacy v4 input retained only so v5 migration can deserialize it.
     #[serde(default, skip_serializing)]
     pub show_workspace_badge_on_tab: Option<bool>,
@@ -768,6 +806,8 @@ impl Default for Settings {
             keyboard_sound: false,
             quick_send_threshold: default_quick_send_threshold(),
             show_virtual_keyboard: false,
+            keyboard_guard_mode: KeyboardGuardMode::default(),
+            keyboard_keep_on_scroll: false,
             show_workspace_badge_on_tab: None,
             workspace_badge_mode: None,
             windows_alt_as_cmd: false,

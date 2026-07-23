@@ -5,7 +5,8 @@ use super::normalize::{
     clamp_quick_send_threshold, clamp_text_config, clamp_text_on_load, normalize_action_keyboards,
 };
 use super::types::{
-    default_upload_dir, Settings, WorkspaceBadgeMode, CURRENT_SETTINGS_VERSION, LEGACY_UPLOAD_DIR,
+    default_upload_dir, KeyboardGuardMode, Settings, WorkspaceBadgeMode, CURRENT_SETTINGS_VERSION,
+    LEGACY_UPLOAD_DIR,
 };
 use super::{config_dir, SettingsState};
 
@@ -126,6 +127,14 @@ pub(crate) fn migrate_settings(settings: &mut Settings) -> bool {
     // v6: drop `status_bar` field (StatusBarSettings struct removed); plugin series
     // visibility moved to `monitor.plugin_series`. serde silently ignores the legacy
     // `status_bar` key on old configs. No data to migrate - plugin series start fresh.
+    // v7: replace the keep-on-scroll boolean with the keyboard guard mode.
+    if settings.settings_version < 7 {
+        settings.keyboard_guard_mode = if settings.keyboard_keep_on_scroll {
+            KeyboardGuardMode::CollapseOnly
+        } else {
+            KeyboardGuardMode::Off
+        };
+    }
     settings.settings_version = CURRENT_SETTINGS_VERSION;
     true
 }

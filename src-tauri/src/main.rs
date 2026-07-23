@@ -216,6 +216,7 @@ fn pty_spawn(
         if !manager.is_current_session(&pane_id, &session) {
             return Err("session closed during reconnect".to_string());
         }
+        manager.register_singleton_tab(&pane_id, &session, &session.shell_type);
         {
             let mut g = session.tauri_on_exit.lock().unwrap_or_else(|e| e.into_inner());
             if g.is_none() {
@@ -242,6 +243,7 @@ fn pty_spawn(
 
     let (session, shell_type) =
         pty::create_session(&manager, &pane_id, None, Some(Arc::clone(&exit_cb)), None, None)?;
+    manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     spawn_tauri_output_forwarder(app.clone(), pane_id.clone(), Arc::clone(&session));
     spawn_tauri_write_task(Arc::clone(&session), pane_id.clone());

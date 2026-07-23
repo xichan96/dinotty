@@ -781,6 +781,72 @@ mod session_stub_tests {
     }
 
     #[test]
+    fn layoutless_session_registration_adds_terminal_leaf_and_broadcasts() {
+        let manager = SessionManager::new();
+        let pane_id = "fallback-pane";
+        let session = stub_session();
+        manager.insert_session(pane_id.to_string(), Arc::clone(&session));
+        let (_client_id, mut rx) = manager.add_sync_client();
+
+        assert!(manager.register_singleton_tab(pane_id, &session, &session.shell_type));
+
+        let tab = manager.tab_layouts.get(pane_id).expect("singleton tab must be registered");
+        let layout = tab.get("layout").expect("singleton tab must contain a layout");
+        assert_eq!(collect_terminal_leaf_pane_ids(layout), vec![pane_id]);
+        assert_eq!(first_leaf_id(layout).as_deref(), Some(pane_id));
+        drop(tab);
+
+        let created: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_created must be broadcast")).unwrap();
+        assert_eq!(created["type"], "tab_created");
+        assert_eq!(created["tab_id"], pane_id);
+        assert_eq!(created["pane_id"], pane_id);
+
+        assert!(
+            !manager.register_singleton_tab(pane_id, &session, &session.shell_type),
+            "an existing terminal-leaf reference must not be duplicated"
+        );
+        assert!(rx.try_recv().is_err(), "no duplicate tab_created should be broadcast");
+
+        assert!(manager.remove_tab(pane_id));
+        assert!(
+            manager.register_singleton_tab(pane_id, &session, &session.shell_type),
+            "a live session missing its terminal-leaf reference must be repaired"
+        );
+        let repaired: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("repair must broadcast tab_created"))
+                .unwrap();
+        assert_eq!(repaired["type"], "tab_created");
+    }
+
+    #[test]
+    fn close_session_removes_singleton_tab_without_ghost() {
+        let manager = SessionManager::new();
+        let pane_id = "fallback-pane";
+        let session = stub_session();
+        manager.insert_session(pane_id.to_string(), Arc::clone(&session));
+        let (_client_id, mut rx) = manager.add_sync_client();
+        assert!(manager.register_singleton_tab(pane_id, &session, &session.shell_type));
+        let _created = rx.try_recv().expect("tab_created must be broadcast");
+
+        assert!(manager.close_session(pane_id, CloseReason::NaturalExit, false, Some(0)));
+        assert!(!manager.sessions.contains_key(pane_id));
+        assert!(!manager.tab_layouts.contains_key(pane_id));
+        assert!(!manager
+            .tab_order
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|tab_id| tab_id == pane_id));
+
+        let closed: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_closed must be broadcast")).unwrap();
+        assert_eq!(closed["type"], "tab_closed");
+        assert_eq!(closed["pane_id"], pane_id);
+        assert!(rx.try_recv().is_err(), "no ghost-tab layout update should follow closure");
+    }
+
+    #[test]
     fn flush_sync_buffer_preserves_multibyte_across_chunk_boundary() {
         let session = stub_session();
         let mut rx = add_ready_client(&session);

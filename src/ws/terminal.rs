@@ -299,6 +299,7 @@ async fn handle_socket(
                 return;
             }
         };
+    manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     let (client_id, mut rx) = session.add_client();
 

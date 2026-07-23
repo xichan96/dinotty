@@ -321,6 +321,59 @@ impl SessionManager {
         self.insert_tab_locked(tab_id, value);
     }
 
+    /// Register the implicit singleton tab used by layoutless session creation paths.
+    /// Returns `true` only when a missing terminal-leaf reference was inserted.
+    pub fn register_singleton_tab(
+        &self,
+        pane_id: &str,
+        session: &Arc<Session>,
+        shell_type: &str,
+    ) -> bool {
+        if !self.is_current_session(pane_id, session)
+            || self.is_pane_referenced_by_terminal_leaf(pane_id)
+        {
+            return false;
+        }
+
+        let layout = serde_json::json!({
+            "type": "leaf",
+            "paneId": pane_id,
+            "title": "Terminal",
+            "shell_type": shell_type,
+            "ratio": 1,
+            "zoomed": false,
+        });
+
+        // Implicit tabs conventionally reuse the pane ID as their tab ID.
+        self.insert_tab(
+            pane_id.to_string(),
+            serde_json::json!({
+                "layout": layout.clone(),
+                "active_pane_id": pane_id,
+            }),
+        );
+
+        if !self.is_current_session(pane_id, session) {
+            self.remove_tab(pane_id);
+            return false;
+        }
+
+        self.broadcast_sync(&SyncMsg::TabCreated {
+            tab_id: pane_id.to_string(),
+            pane_id: pane_id.to_string(),
+            layout: Some(layout),
+            cwd: None,
+            connection_id: None,
+        });
+        if self.is_current_session(pane_id, session) {
+            true
+        } else {
+            // Match normal CreateTab's correction if close wins after publication.
+            self.broadcast_sync(&SyncMsg::TabClosed { pane_id: pane_id.to_string() });
+            false
+        }
+    }
+
     fn remove_tab_locked(&self, tab_id: &str) -> bool {
         let removed = self.tab_layouts.remove(tab_id).is_some();
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -414,6 +467,15 @@ impl SessionManager {
             }
         }
         false
+    }
+
+    fn is_pane_referenced_by_terminal_leaf(&self, pane_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.tab_layouts.iter().any(|entry| {
+            entry.value().get("layout").is_some_and(|layout| {
+                collect_terminal_leaf_pane_ids(layout).iter().any(|id| id == pane_id)
+            })
+        })
     }
 
     /// # Panics
@@ -650,8 +712,8 @@ impl SessionManager {
 
             let mut layout_changes = self.on_pty_exited_locked(pane_id);
             if layout_changes.closed_tabs.is_empty() && layout_changes.updates.is_empty() {
-                // Layoutless creation paths are registered in Task 4. Until then,
-                // preserve the close protocol's TabClosed fallback for them.
+                // Preserve the close protocol's fallback for legacy layoutless sessions
+                // and creation races that close before singleton publication.
                 layout_changes.closed_tabs.push(pane_id.to_string());
             }
             let mut active =

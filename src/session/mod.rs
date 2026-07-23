@@ -1,6 +1,7 @@
 mod backend;
 mod cwd;
 mod layout;
+pub mod ledger;
 mod manager;
 
 pub use backend::{PendingSshAuth, SessionBackend, SshAuthPrompt, SshCmd, SshSessionParams};
@@ -10,19 +11,17 @@ pub use layout::{
     extract_leaf_from_layout, first_leaf_id, insert_pane_into_layout,
     insert_pane_into_layout_with_info, insert_subtree_into_layout, remove_pane_from_layout,
 };
-pub use manager::{SessionManager, SessionStatus, SyncClient, SyncMsg, TabInfo};
+pub use manager::{CloseReason, SessionManager, SessionStatus, SyncClient, SyncMsg, TabInfo};
 
 #[cfg(test)]
 pub(crate) use cwd::{find_subslice, parse_title_cwd, sniff_cwd_from_title_osc, OSC_SNIFF_CAP};
-#[cfg(test)]
-pub(crate) use manager::parse_reap_secs;
 
 use crate::vt_screen::VirtualScreen;
 use std::{
     io::Write,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -58,6 +57,7 @@ pub enum SessionClientEvent {
     },
     SessionExit {
         pane_id: String,
+        exit_code: Option<i32>,
     },
     /// DEC mode 2026 transaction boundary. `SyncBegin` is enqueued BEFORE any
     /// subsequent Output (which is buffered while synchronized output is
@@ -91,6 +91,9 @@ pub struct ClientEndpoint {
     pub snapshot_pending: std::sync::atomic::AtomicBool,
 }
 
+/// Callback invoked by `close_session` when a Tauri-owned session exits.
+pub type TauriOnExit = Arc<dyn Fn(String, Option<i32>) + Send + Sync>;
+
 pub struct Session {
     /// 传输后端（本地 PTY 或 SSH）
     pub backend: tokio::sync::Mutex<SessionBackend>,
@@ -102,12 +105,13 @@ pub struct Session {
     pub tauri_client_id: Mutex<Option<u64>>,
     pub input_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
     pub status: Mutex<SessionStatus>,
+    /// Conservative lock-free mirror used only by lifecycle-locked reap claims.
+    pub(crate) is_connected: AtomicBool,
     pub size: Mutex<(u16, u16)>,
     pub exited: Mutex<bool>,
     #[allow(dead_code)]
     pub shell_type: String,
-    #[allow(clippy::type_complexity)]
-    pub tauri_on_exit: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
+    pub tauri_on_exit: Mutex<Option<TauriOnExit>>,
     pub cwd_state: Mutex<CwdState>,
     /// DEC mode 2026 state. Always acquire this before `clients` when both are needed.
     pub sync: Mutex<SyncState>,
@@ -144,11 +148,105 @@ pub struct Session {
 }
 
 impl Session {
+    /// Publish status without ever co-holding the manager lifecycle lock.
+    /// Connected is mirrored before the status value becomes visible; Detached
+    /// clears the mirror only after the status value is committed.
+    pub fn set_status(&self, status: SessionStatus) {
+        let mut current = self.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match status {
+            SessionStatus::Connected => {
+                self.is_connected.store(true, Ordering::Release);
+                *current = SessionStatus::Connected;
+            }
+            SessionStatus::Detached { since } => {
+                *current = SessionStatus::Detached { since };
+                self.is_connected.store(false, Ordering::Release);
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::Acquire)
+    }
+
+    /// Revert a failed attach publication after lifecycle membership validation.
+    pub fn mark_failed_attach(&self) {
+        self.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
+        self.mark_exited();
+    }
+
     /// Explicitly kill the child process. Safe to call multiple times (idempotent).
     /// After this, the PTY reader task's `reader.read()` will return Err/Ok(0),
     /// causing it to exit and drop its `Arc<Session>`, which triggers `Drop`.
     pub fn kill_child(&self) {
         self.kill_backend_sync();
+    }
+
+    /// Kill the backend and confirm that it terminated without waiting indefinitely.
+    ///
+    /// Returns `false` when the backend lock is held or termination cannot be
+    /// confirmed within the bounded polling window.
+    pub fn kill_child_and_confirm(&self) -> bool {
+        let Ok(mut backend) = self.backend.try_lock() else {
+            return false;
+        };
+
+        let confirmed = match &mut *backend {
+            SessionBackend::Local { child, .. } => {
+                #[cfg(unix)]
+                if let Some(pid) = child.process_id() {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let process_group = pid as i32;
+                    unsafe {
+                        libc::killpg(process_group, libc::SIGTERM);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    unsafe {
+                        libc::killpg(process_group, libc::SIGKILL);
+                    }
+                }
+                let _ = child.kill();
+
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break true,
+                        Ok(None) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Ok(None) | Err(_) => break false,
+                    }
+                }
+            }
+            SessionBackend::Ssh => self
+                .ssh_cmd_tx
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|tx| tx.send(SshCmd::Close).is_ok()),
+            SessionBackend::Exited => true,
+        };
+
+        if confirmed {
+            *backend = SessionBackend::Exited;
+        }
+        confirmed
+    }
+
+    /// Confirm a naturally-ended backend before its crash-recovery entry is removed.
+    /// Uncertainty is deliberately reported as false so boot recovery retains it.
+    pub fn natural_exit_confirmed(&self, pane_id: &str) -> bool {
+        let Ok(mut backend) = self.backend.try_lock() else {
+            return false;
+        };
+        match &mut *backend {
+            SessionBackend::Local { child, .. } => match child.try_wait() {
+                Ok(Some(_)) => ledger::termination_confirmed(pane_id),
+                Ok(None) | Err(_) => false,
+            },
+            SessionBackend::Ssh | SessionBackend::Exited => ledger::termination_confirmed(pane_id),
+        }
     }
 
     /// 同步清理后端（用于 `kill_child` 和 Drop）
@@ -158,8 +256,11 @@ impl Session {
             // SSH reader task 会在连接关闭时自行清理
             return;
         };
-        match &mut *backend {
-            SessionBackend::Local { child, .. } => {
+        // Move all backend resources out before waiting for the child. In particular,
+        // dropping the PTY master wakes a ConPTY reader that can remain blocked after exit.
+        let previous = std::mem::replace(&mut *backend, SessionBackend::Exited);
+        match previous {
+            SessionBackend::Local { writer, master, mut child } => {
                 let pid = child.process_id();
                 #[cfg(unix)]
                 if let Some(pid) = pid {
@@ -174,6 +275,8 @@ impl Session {
                     }
                 }
                 let _ = child.kill();
+                drop(writer);
+                drop(master);
                 let _ = child.wait();
                 self.mark_exited();
                 info!("Session child killed: pid={:?}", pid);
@@ -624,28 +727,32 @@ impl Session {
         }
     }
 
-    /// Notify all connected clients that the session is exiting, then mark as exited.
-    /// Returns false when another cleanup path already handled the exit.
-    pub fn notify_exit_and_mark_exited(&self, pane_id: &str) -> bool {
-        {
+    /// Mark the session exited and notify all connected clients.
+    ///
+    /// The exited transition is notification/backend state only. It is not a
+    /// cleanup winner claim; `SessionManager::close_session` owns that claim.
+    pub fn notify_exit_and_mark_exited(&self, pane_id: &str, exit_code: Option<i32>) -> bool {
+        let newly_exited = {
             let mut exited = self.exited.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if *exited {
-                return false;
-            }
+            let newly_exited = !*exited;
             *exited = true;
-        }
+            newly_exited
+        };
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clients.retain(|client| !client.tx.is_closed());
         for client in clients.iter() {
             if client
                 .tx
-                .try_send(SessionClientEvent::SessionExit { pane_id: pane_id.to_string() })
+                .try_send(SessionClientEvent::SessionExit {
+                    pane_id: pane_id.to_string(),
+                    exit_code,
+                })
                 .is_err()
             {
                 tracing::debug!("broadcast: client channel full, dropping session_exit");
             }
         }
-        true
+        newly_exited
     }
 
     pub fn has_clients(&self) -> bool {
@@ -686,6 +793,7 @@ mod session_stub_tests {
             tauri_client_id: Mutex::new(None),
             input_tx: Mutex::new(None),
             status: Mutex::new(SessionStatus::Connected),
+            is_connected: AtomicBool::new(true),
             size: Mutex::new((80, 24)),
             exited: Mutex::new(false),
             shell_type: "test".to_string(),
@@ -722,6 +830,162 @@ mod session_stub_tests {
             SessionClientEvent::Output(output) => assert_eq!(output, expected),
             _ => panic!("expected Output event"),
         }
+    }
+
+    #[test]
+    fn layoutless_session_registration_adds_terminal_leaf_and_broadcasts() {
+        let manager = SessionManager::new();
+        let pane_id = "fallback-pane";
+        let session = stub_session();
+        manager.insert_session(pane_id, Arc::clone(&session));
+        let (_client_id, mut rx) = manager.add_sync_client();
+
+        assert!(manager.register_singleton_tab(pane_id, &session, &session.shell_type));
+
+        let tab = manager.tab_layouts.get(pane_id).expect("singleton tab must be registered");
+        let layout = tab.get("layout").expect("singleton tab must contain a layout");
+        assert_eq!(collect_terminal_leaf_pane_ids(layout), vec![pane_id]);
+        assert_eq!(first_leaf_id(layout).as_deref(), Some(pane_id));
+        drop(tab);
+
+        let created: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_created must be broadcast")).unwrap();
+        assert_eq!(created["type"], "tab_created");
+        assert_eq!(created["tab_id"], pane_id);
+        assert_eq!(created["pane_id"], pane_id);
+
+        assert!(
+            !manager.register_singleton_tab(pane_id, &session, &session.shell_type),
+            "an existing terminal-leaf reference must not be duplicated"
+        );
+        assert!(rx.try_recv().is_err(), "no duplicate tab_created should be broadcast");
+
+        assert!(manager.remove_tab(pane_id));
+        assert!(
+            manager.register_singleton_tab(pane_id, &session, &session.shell_type),
+            "a live session missing its terminal-leaf reference must be repaired"
+        );
+        let repaired: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("repair must broadcast tab_created"))
+                .unwrap();
+        assert_eq!(repaired["type"], "tab_created");
+    }
+
+    #[test]
+    fn close_session_removes_singleton_tab_without_ghost() {
+        let manager = SessionManager::new();
+        let pane_id = "fallback-pane";
+        let session = stub_session();
+        manager.insert_session(pane_id, Arc::clone(&session));
+        let (_client_id, mut rx) = manager.add_sync_client();
+        assert!(manager.register_singleton_tab(pane_id, &session, &session.shell_type));
+        let _created = rx.try_recv().expect("tab_created must be broadcast");
+
+        assert!(manager.close_session(pane_id, CloseReason::NaturalExit, false, Some(0)));
+        assert!(!manager.sessions.contains_key(pane_id));
+        assert!(!manager.tab_layouts.contains_key(pane_id));
+        assert!(!manager
+            .tab_order
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|tab_id| tab_id == pane_id));
+
+        let closed: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_closed must be broadcast")).unwrap();
+        assert_eq!(closed["type"], "tab_closed");
+        assert_eq!(closed["pane_id"], pane_id);
+        assert!(rx.try_recv().is_err(), "no ghost-tab layout update should follow closure");
+    }
+
+    #[test]
+    fn reap_claim_removes_exact_detached_generation_under_lifecycle() {
+        let manager = SessionManager::new();
+        let pane_id = "reap-pane";
+        let session = stub_session();
+        assert!(manager.insert_session(pane_id, Arc::clone(&session)));
+        session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
+        let since = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(61))
+            .expect("Instant can subtract 61s within monotonic range");
+        manager.age_unowned_for_test(pane_id, since);
+
+        assert!(manager.try_reap_session_for_test(
+            pane_id,
+            &session,
+            since + Duration::from_secs(61)
+        ));
+        assert!(!manager.sessions.contains_key(pane_id));
+    }
+
+    #[test]
+    fn layout_only_close_prunes_non_terminal_leaves_and_broadcasts() {
+        let manager = SessionManager::new();
+        let tab_id = "tools-tab";
+        manager.update_layout(
+            tab_id.to_string(),
+            serde_json::json!({
+                "layout": {
+                    "type": "split",
+                    "direction": "horizontal",
+                    "children": [
+                        {"type": "leaf", "paneId": "plugin-pane", "kind": "plugin"},
+                        {"type": "leaf", "paneId": "web-pane", "kind": "web"}
+                    ]
+                },
+                "active_pane_id": "plugin-pane"
+            }),
+            Some("plugin-pane".to_string()),
+        );
+        let (_client_id, mut rx) = manager.add_sync_client();
+
+        assert!(manager.close_pane("plugin-pane"));
+        let updated: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("layout_updated must be broadcast"))
+                .unwrap();
+        assert_eq!(updated["type"], "layout_updated");
+        assert_eq!(updated["pane_id"], tab_id);
+        assert_eq!(updated["active_pane_id"], "web-pane");
+        assert_eq!(
+            manager
+                .active_pane_id
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref(),
+            None
+        );
+
+        assert!(manager.close_pane("web-pane"));
+        let closed: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_closed must be broadcast")).unwrap();
+        assert_eq!(closed["type"], "tab_closed");
+        assert_eq!(closed["pane_id"], tab_id);
+        assert!(!manager.tab_layouts.contains_key(tab_id));
+    }
+
+    #[test]
+    fn stale_generation_cannot_replace_or_close_current_session() {
+        let manager = Arc::new(SessionManager::new());
+        let pane_id = "generation-pane";
+        let current = stub_session();
+        let stale = stub_session();
+        let reservation = manager.reserve_session(pane_id).unwrap();
+        assert!(manager.reserve_session(pane_id).is_err());
+        assert!(!manager.insert_session(pane_id, Arc::clone(&stale)));
+        assert!(reservation.publish(Arc::clone(&current)));
+        assert!(!manager.insert_session(pane_id, Arc::clone(&stale)));
+
+        assert!(!manager.close_session_for_session(
+            pane_id,
+            &stale,
+            CloseReason::NaturalExit,
+            false,
+            Some(0)
+        ));
+        assert!(manager
+            .sessions
+            .get(pane_id)
+            .is_some_and(|session| Arc::ptr_eq(session.value(), &current)));
     }
 
     #[test]
@@ -842,7 +1106,7 @@ mod session_stub_tests {
         manager.register_notifier(Arc::clone(&notifier));
 
         let pane_id = "stub-pane";
-        manager.sessions.insert(pane_id.to_string(), stub_session());
+        manager.insert_session(pane_id, stub_session());
         // Seed the ledger with an event for the pane so pane_closed produces a removal delta.
         notifier.send_bell(pane_id);
 
@@ -866,7 +1130,11 @@ mod session_stub_tests {
             panes.iter().any(|p| p["paneId"] == pane_id && p["removed"] == true),
             "expected a removal delta for {pane_id}, got {panes:?}"
         );
-        // Single broadcast: nothing further queued.
+        // Unified close also emits the layoutless TabClosed fallback, but the
+        // attention ledger still emits exactly one removal delta.
+        let tab_closed: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_closed must follow")).unwrap();
+        assert_eq!(tab_closed["type"], "tab_closed");
         assert!(rx.try_recv().is_err(), "no further messages expected after the removal delta");
     }
 }

@@ -235,6 +235,7 @@ cargo run
 
 - [Comparison](docs/comparison.en.md) — differences vs ttyd/gotty/Wetty and other AI coding remote solutions
 - [Deployment Guide](docs/deployment.en.md) — systemd, Docker, Windows native run, cross-platform build, configuration
+- [Release Guide](docs/releasing.en.md) — unified version management, version PRs, `dev` to `main` promotion, tags, and GitHub Releases
 - [File Editor](docs/file-editor.en.md) — split panes, multi-cursor editing, Cursor Group cross-file sync
 - [Notification System](docs/notifications.en.md) — HTTP API, Claude Code integration, Open API
 - [Plugin System](docs/plugins.en.md) — installation, manifest, API, built-in plugins

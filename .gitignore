@@ -1,4 +1,5 @@
 /target
+/dinotty/
 dist/
 node_modules/
 .claude/

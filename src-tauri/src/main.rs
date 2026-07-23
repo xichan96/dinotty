@@ -2,7 +2,9 @@
 
 use base64::Engine;
 use dinotty_server::pty;
-use dinotty_server::session::{SessionClientEvent, SessionManager, SessionStatus, SyncMsg};
+use dinotty_server::session::{
+    CloseReason, SessionClientEvent, SessionManager, SessionStatus, TauriOnExit,
+};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::sync::{
@@ -42,6 +44,8 @@ struct PtyResize {
 #[derive(Clone, Serialize)]
 struct PtyExit {
     pane_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
 }
 
 /// DEC mode 2026 transaction boundary marker. `active: true` = SyncBegin,
@@ -101,8 +105,8 @@ fn spawn_tauri_output_forwarder(
                         break;
                     }
                 }
-                SessionClientEvent::SessionExit { pane_id: exit_pane_id } => {
-                    let _ = app.emit("pty-exit", PtyExit { pane_id: exit_pane_id });
+                SessionClientEvent::SessionExit { pane_id: exit_pane_id, exit_code } => {
+                    let _ = app.emit("pty-exit", PtyExit { pane_id: exit_pane_id, exit_code });
                     break;
                 }
                 SessionClientEvent::SyncBegin => {
@@ -204,13 +208,18 @@ fn pty_spawn(
 ) -> Result<String, String> {
     let manager = state.inner().clone();
     let app_cb = app.clone();
-    let exit_cb: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |pid: String| {
-        let _ = app_cb.emit("pty-exit", PtyExit { pane_id: pid });
+    let exit_cb: TauriOnExit = Arc::new(move |pid: String, exit_code: Option<i32>| {
+        let _ = app_cb.emit("pty-exit", PtyExit { pane_id: pid, exit_code });
     });
 
-    if let Some(entry) = manager.sessions.get(&pane_id) {
-        let session = Arc::clone(entry.value());
-        *session.status.lock().unwrap_or_else(|e| e.into_inner()) = SessionStatus::Connected;
+    if let Some(session) = manager.session_for_attach(&pane_id) {
+        // Publish the reap veto before lifecycle membership revalidation.
+        session.set_status(SessionStatus::Connected);
+        if !manager.is_current_session(&pane_id, &session) {
+            session.mark_failed_attach();
+            return Err("session closed during reconnect".to_string());
+        }
+        manager.register_singleton_tab(&pane_id, &session, &session.shell_type);
         {
             let mut g = session.tauri_on_exit.lock().unwrap_or_else(|e| e.into_inner());
             if g.is_none() {
@@ -237,6 +246,7 @@ fn pty_spawn(
 
     let (session, shell_type) =
         pty::create_session(&manager, &pane_id, None, Some(Arc::clone(&exit_cb)), None, None)?;
+    manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     spawn_tauri_output_forwarder(app.clone(), pane_id.clone(), Arc::clone(&session));
     spawn_tauri_write_task(Arc::clone(&session), pane_id.clone());
@@ -322,32 +332,7 @@ async fn pty_snapshot_request(
 
 #[tauri::command]
 fn pty_kill(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<(), String> {
-    state.kill_and_remove(&pane_id);
-    state.broadcast_sync(&SyncMsg::TabClosed { pane_id: pane_id.clone() });
-    // Collect affected layouts before purging
-    let before_layouts: Vec<(String, serde_json::Value)> =
-        state.tab_layouts.iter().map(|e| (e.key().clone(), e.value().clone())).collect();
-    state.purge_pane_from_layouts(&pane_id);
-    // Broadcast layout changes to all clients
-    for (tab_id, old_val) in &before_layouts {
-        if let Some(new_val) = state.tab_layouts.get(tab_id) {
-            if *new_val.value() != *old_val {
-                let layout =
-                    new_val.value().get("layout").cloned().unwrap_or(serde_json::Value::Null);
-                let active = new_val
-                    .value()
-                    .get("active_pane_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                state.broadcast_sync(&SyncMsg::LayoutUpdated {
-                    pane_id: tab_id.clone(),
-                    layout,
-                    active_pane_id: active,
-                });
-            }
-        }
-    }
+    state.close_session(&pane_id, CloseReason::Explicit, true, None);
     Ok(())
 }
 
@@ -356,8 +341,7 @@ fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<
     if let Some(entry) = state.sessions.get(&pane_id) {
         let session = Arc::clone(entry.value());
         if !session.has_clients() {
-            *session.status.lock().unwrap_or_else(|e| e.into_inner()) =
-                SessionStatus::Detached { since: std::time::Instant::now() };
+            session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
         }
     }
     Ok(())
@@ -575,7 +559,7 @@ fn terminate_sessions_once(manager: &SessionManager) {
     let pane_ids: Vec<String> = manager.sessions.iter().map(|entry| entry.key().clone()).collect();
     tracing::info!("Desktop shutdown: terminating {} session(s)", pane_ids.len());
     for pane_id in pane_ids {
-        manager.kill_and_remove(&pane_id);
+        manager.close_session(&pane_id, CloseReason::Shutdown, true, None);
     }
 }
 
@@ -654,6 +638,7 @@ fn main() {
     let _ = EMBEDDED_HTTP_PORT.set(port);
 
     let manager = Arc::new(SessionManager::new());
+    dinotty_server::session::ledger::boot_sweep();
 
     if args.contains(&"--server".to_string()) {
         let rt = tokio::runtime::Runtime::new().unwrap();

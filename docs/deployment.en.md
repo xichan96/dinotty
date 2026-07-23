@@ -1,5 +1,7 @@
 # Deployment Guide
 
+This guide explains how to install and deploy build artifacts. Repository maintainers preparing a version, creating a tag, or monitoring an official release should see the [Release Guide](releasing.en.md).
+
 ## Recommended Release Flow (CI/CD)
 
 Use the repository `Package` workflow (`.github/workflows/package.yml`) for release and deployment artifacts. Do not treat local script output as the official release source.

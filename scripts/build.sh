@@ -45,29 +45,21 @@ EOF
 
 need() { command -v "$1" &>/dev/null || die "Required tool not found: $1 — install it first"; }
 
-git_version() {
-    local tag
-    tag="$(git tag --sort=-v:refname | head -1)"
-    if [[ -z "$tag" ]]; then
-        die "No git tag found. Tag a release first (e.g. git tag v0.7.6)"
-    fi
-    echo "${tag#v}"
+workspace_version() {
+    need cargo
+    need node
+    cargo metadata --locked --no-deps --format-version 1 | node -e '
+const metadata = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const memberIds = new Set(metadata.workspace_members);
+const names = ["dinotty-server", "dinotty-desktop"];
+const packages = metadata.packages.filter(pkg => memberIds.has(pkg.id) && names.includes(pkg.name));
+const validNames = names.every(name => packages.filter(pkg => pkg.name === name).length === 1);
+const versions = [...new Set(packages.map(pkg => pkg.version))];
+if (!validNames || versions.length !== 1 || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(versions[0])) {
+    console.error("Could not resolve one stable server/desktop workspace version");
+    process.exit(1);
 }
-
-sync_version() {
-    local ver="$1"
-    info "Syncing version to $ver ..."
-
-    # root Cargo.toml
-    sed -i '' "s/^version = \".*\"/version = \"$ver\"/" Cargo.toml
-
-    # src-tauri/Cargo.toml
-    sed -i '' "s/^version = \".*\"/version = \"$ver\"/" src-tauri/Cargo.toml
-
-    # src-tauri/tauri.conf.json
-    sed -i '' "s/\"version\": \".*\"/\"version\": \"$ver\"/" src-tauri/tauri.conf.json
-
-    ok "Version synced: $ver"
+process.stdout.write(versions[0]);'
 }
 
 is_windows() { [[ "$1" == *"windows"* ]]; }
@@ -101,8 +93,7 @@ build_frontend() {
 
 build_native() {
     local ver
-    ver="$(git_version)"
-    sync_version "$ver"
+    ver="$(workspace_version)"
 
     build_frontend
 
@@ -154,8 +145,7 @@ build_one_target() {
 
 build_cross() {
     local ver
-    ver="$(git_version)"
-    sync_version "$ver"
+    ver="$(workspace_version)"
 
     build_frontend
 
@@ -179,8 +169,7 @@ build_cross() {
 
 build_desktop() {
     local ver
-    ver="$(git_version)"
-    sync_version "$ver"
+    ver="$(workspace_version)"
 
     build_frontend
 

@@ -245,7 +245,7 @@ fn generate_random_token() -> String {
 }
 
 fn read_git_info() -> GitInfo {
-    let version = option_env!("DINOTTY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")).to_string();
+    let version = env!("CARGO_PKG_VERSION").to_string();
 
     let mut command = std::process::Command::new("git");
     let repo_url = command

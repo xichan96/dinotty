@@ -36,6 +36,7 @@ jobs:
       release_tag: ${{ steps.meta.outputs.release_tag }}
       should_build: ${{ steps.meta.outputs.should_build }}
       should_release: ${{ steps.meta.outputs.should_release }}
+      workspace_version: ${{ steps.version.outputs.workspace_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,6 +86,34 @@ jobs:
             echo "should_build=${should_build}"
             echo "should_release=${should_release}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Check out package ref
+        if: steps.meta.outputs.should_build == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.checkout_ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.meta.outputs.should_build == 'true'
+
+      - name: Validate workspace version
+        if: steps.meta.outputs.should_build == 'true'
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          workspace_version="$(python3 scripts/check-workspace-version.py)"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/* ]]; then
+            expected_tag="v${workspace_version}"
+            if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+              echo "::error::Release tag ${GITHUB_REF_NAME} does not match workspace version ${workspace_version}; expected ${expected_tag}."
+              exit 1
+            fi
+          fi
+
+          echo "workspace_version=${workspace_version}" >> "${GITHUB_OUTPUT}"
+          echo "Packaging Dinotty ${workspace_version}"
 
   package:
     name: Package ${{ matrix.platform }}
@@ -184,7 +213,27 @@ jobs:
             throw 'dinotty-desktop.exe not found'
           }
 
-          $version = (Get-Content -Raw 'src-tauri/tauri.conf.json' | ConvertFrom-Json).version
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw 'cargo metadata --locked failed'
+          }
+          $memberIds = @($metadata.workspace_members)
+          $workspacePackages = @(
+            $metadata.packages |
+              Where-Object {
+                $memberIds -contains $_.id -and
+                $_.name -in @('dinotty-server', 'dinotty-desktop')
+              }
+          )
+          $versions = @($workspacePackages | Select-Object -ExpandProperty version -Unique)
+          $hasExpectedPackages =
+            $workspacePackages.Count -eq 2 -and
+            @($workspacePackages | Where-Object { $_.name -eq 'dinotty-server' }).Count -eq 1 -and
+            @($workspacePackages | Where-Object { $_.name -eq 'dinotty-desktop' }).Count -eq 1
+          if (-not $hasExpectedPackages -or $versions.Count -ne 1 -or $versions[0] -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw 'Could not resolve one server/desktop workspace version'
+          }
+          $version = $versions[0]
           $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
             'AMD64' { 'x64' }
             'ARM64' { 'arm64' }

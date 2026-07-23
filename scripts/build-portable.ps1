@@ -61,7 +61,6 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $frontendDir = Join-Path $repoRoot "frontend"
 $tauriDir = Join-Path $repoRoot "src-tauri"
 $distDir = Join-Path $repoRoot "dist"
-$configPath = Join-Path $tauriDir "tauri.conf.json"
 $previousLocation = Get-Location
 
 try {
@@ -99,11 +98,31 @@ try {
         throw "未找到 release 可执行文件 dinotty-desktop.exe。"
     }
 
-    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    $version = $config.version
-    if (-not $version) {
-        throw "未能从 $configPath 读取版本号。"
+    $metadataJson = & cargo metadata --locked --no-deps --format-version 1
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo metadata --locked 执行失败。"
     }
+    $metadata = $metadataJson | ConvertFrom-Json
+    $memberIds = @($metadata.workspace_members)
+    $workspacePackages = @(
+        $metadata.packages |
+            Where-Object {
+                $memberIds -contains $_.id -and
+                $_.name -in @("dinotty-server", "dinotty-desktop")
+            }
+    )
+    $versions = @(
+        $workspacePackages |
+            Select-Object -ExpandProperty version -Unique
+    )
+    $hasExpectedPackages =
+        $workspacePackages.Count -eq 2 -and
+        @($workspacePackages | Where-Object { $_.name -eq "dinotty-server" }).Count -eq 1 -and
+        @($workspacePackages | Where-Object { $_.name -eq "dinotty-desktop" }).Count -eq 1
+    if (-not $hasExpectedPackages -or $versions.Count -ne 1 -or $versions[0] -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+        throw "未能从 Cargo workspace 解析唯一的 server/desktop 版本号。"
+    }
+    $version = $versions[0]
 
     $processorArch = if ($env:PROCESSOR_ARCHITECTURE) {
         $env:PROCESSOR_ARCHITECTURE

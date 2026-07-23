@@ -4,18 +4,54 @@ use super::layout::{
 };
 use super::Session;
 use crate::attention::{MarkReadResult, Severity, Snapshot, StateDelta};
-use crate::event_bus::EventBus;
+use crate::event_bus::{BusEvent, EventBus};
 use crate::workspace_mgmt::Workspace;
 use dashmap::DashMap;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     atomic::{AtomicU16, Ordering},
     Arc, Mutex,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 
+const SESSION_REAP_TICK: Duration = Duration::from_secs(30);
+const SESSION_UNOWNED_GRACE: Duration = Duration::from_mins(1);
+
+#[derive(Clone, Copy, Debug)]
+pub enum CloseReason {
+    Explicit,
+    NaturalExit,
+    Reaped,
+    Shutdown,
+}
+
+struct LayoutUpdate {
+    tab_id: String,
+    layout: serde_json::Value,
+    active_pane_id: String,
+}
+
+#[derive(Default)]
+struct LayoutChanges {
+    closed_tabs: Vec<String>,
+    updates: Vec<LayoutUpdate>,
+}
+
+struct ClosePlan {
+    session: Arc<Session>,
+    closed_tabs: Vec<String>,
+    layout_updates: Vec<LayoutUpdate>,
+}
+
+enum PaneClosePlan {
+    Session(ClosePlan),
+    Layout(LayoutChanges),
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum SessionStatus {
     Connected,
     Detached { since: Instant },
@@ -172,8 +208,44 @@ pub struct TabInfo {
     pub connection_id: Option<String>,
 }
 
-pub(crate) fn parse_reap_secs(raw: Option<String>) -> u64 {
-    raw.and_then(|v| v.parse::<u64>().ok()).unwrap_or(5_400)
+#[derive(Default)]
+struct ReapTickStats {
+    total: usize,
+    referenced: usize,
+    unowned_grace: usize,
+}
+
+fn reconcile_unowned_since(
+    session_ids: &[String],
+    referenced_pane_ids: &HashSet<String>,
+    unowned_since: &mut HashMap<String, Instant>,
+    now: Instant,
+) -> (ReapTickStats, Vec<(String, Instant)>) {
+    let current_sessions: HashSet<&str> = session_ids.iter().map(String::as_str).collect();
+    unowned_since.retain(|pane_id, _| current_sessions.contains(pane_id.as_str()));
+
+    let mut stats = ReapTickStats { total: session_ids.len(), ..ReapTickStats::default() };
+    let mut unowned = Vec::new();
+    for pane_id in session_ids {
+        if referenced_pane_ids.contains(pane_id) {
+            stats.referenced += 1;
+            unowned_since.remove(pane_id);
+            continue;
+        }
+
+        let since = *unowned_since.entry(pane_id.clone()).or_insert(now);
+        if now.saturating_duration_since(since) < SESSION_UNOWNED_GRACE {
+            stats.unowned_grace += 1;
+        }
+        unowned.push((pane_id.clone(), since));
+    }
+    (stats, unowned)
+}
+
+#[cfg(test)]
+fn session_is_reap_eligible(since: Instant, now: Instant, status: &SessionStatus) -> bool {
+    now.saturating_duration_since(since) >= SESSION_UNOWNED_GRACE
+        && !matches!(status, SessionStatus::Connected)
 }
 
 pub struct SessionManager {
@@ -184,11 +256,72 @@ pub struct SessionManager {
     pub pending_ssh_auth: DashMap<String, crate::session::backend::PendingSshAuth>,
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
+    /// Guards membership and all composite mutations of `sessions`,
+    /// `tab_layouts`, `tab_order`, `active_pane_id`, spawn reservations, and
+    /// `unowned_since`.
+    ///
+    /// Lock order rule: this lock and per-session locks (`exited`, `status`,
+    /// and `backend`) are never held together in either order. Signals,
+    /// broadcasts, disk I/O, and async work must also happen after release.
+    lifecycle: Mutex<()>,
+    session_reservations: Mutex<HashSet<String>>,
+    unowned_since: Mutex<HashMap<String, Instant>>,
     notify_port: AtomicU16,
     /// Set once (via `register_notifier`) so any authoritative pane-removal site - including
     /// natural PTY/SSH exit, which never goes through `kill_and_remove` - can notify the
     /// attention ledger without threading a notifier handle through every call site.
     notifier: std::sync::OnceLock<Arc<crate::notification::NotificationBroadcast>>,
+}
+
+pub(crate) struct SessionReservation {
+    manager: Arc<SessionManager>,
+    pane_id: String,
+    active: bool,
+}
+
+impl SessionReservation {
+    pub(crate) fn publish(mut self, session: Arc<Session>) -> bool {
+        let published = {
+            let _lifecycle =
+                self.manager.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match self.manager.sessions.entry(self.pane_id.clone()) {
+                dashmap::mapref::entry::Entry::Vacant(entry) => {
+                    entry.insert(session);
+                    self.manager
+                        .unowned_since
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&self.pane_id);
+                    self.manager
+                        .session_reservations
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&self.pane_id);
+                    true
+                }
+                dashmap::mapref::entry::Entry::Occupied(_) => false,
+            }
+        };
+        if published {
+            self.active = false;
+        }
+        published
+    }
+}
+
+impl Drop for SessionReservation {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let _lifecycle =
+            self.manager.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.manager
+            .session_reservations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.pane_id);
+    }
 }
 
 impl Default for SessionManager {
@@ -208,6 +341,9 @@ impl SessionManager {
             tab_order: Mutex::new(Vec::new()),
             pending_ssh_auth: DashMap::new(),
             event_bus: EventBus::new(),
+            lifecycle: Mutex::new(()),
+            session_reservations: Mutex::new(HashSet::new()),
+            unowned_since: Mutex::new(HashMap::new()),
             notify_port: AtomicU16::new(0),
             notifier: std::sync::OnceLock::new(),
         }
@@ -231,8 +367,7 @@ impl SessionManager {
         self.notify_port.store(port, Ordering::Relaxed);
     }
 
-    /// Insert a tab layout and record its order position.
-    pub fn insert_tab(&self, tab_id: String, value: serde_json::Value) {
+    fn insert_tab_locked(&self, tab_id: String, value: serde_json::Value) {
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !order.contains(&tab_id) {
             order.push(tab_id.clone());
@@ -241,16 +376,198 @@ impl SessionManager {
         self.tab_layouts.insert(tab_id, value);
     }
 
-    /// Remove a tab layout and its order entry.
-    pub fn remove_tab(&self, tab_id: &str) {
-        self.tab_layouts.remove(tab_id);
+    /// Insert a tab layout and record its order position.
+    pub fn insert_tab(&self, tab_id: String, value: serde_json::Value) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.insert_tab_locked(tab_id, value);
+    }
+
+    /// Register the implicit singleton tab used by layoutless session creation paths.
+    /// Returns `true` only when a missing terminal-leaf reference was inserted.
+    pub fn register_singleton_tab(
+        &self,
+        pane_id: &str,
+        session: &Arc<Session>,
+        shell_type: &str,
+    ) -> bool {
+        if !self.is_current_session(pane_id, session)
+            || self.is_pane_referenced_by_terminal_leaf(pane_id)
+        {
+            return false;
+        }
+
+        let layout = serde_json::json!({
+            "type": "leaf",
+            "paneId": pane_id,
+            "title": "Terminal",
+            "shell_type": shell_type,
+            "ratio": 1,
+            "zoomed": false,
+        });
+
+        // Implicit tabs conventionally reuse the pane ID as their tab ID.
+        self.insert_tab(
+            pane_id.to_string(),
+            serde_json::json!({
+                "layout": layout.clone(),
+                "active_pane_id": pane_id,
+            }),
+        );
+
+        if !self.is_current_session(pane_id, session) {
+            self.remove_tab(pane_id);
+            return false;
+        }
+
+        self.broadcast_sync(&SyncMsg::TabCreated {
+            tab_id: pane_id.to_string(),
+            pane_id: pane_id.to_string(),
+            layout: Some(layout),
+            cwd: None,
+            connection_id: None,
+        });
+        if self.is_current_session(pane_id, session) {
+            true
+        } else {
+            // Match normal CreateTab's correction if close wins after publication.
+            self.broadcast_sync(&SyncMsg::TabClosed { pane_id: pane_id.to_string() });
+            false
+        }
+    }
+
+    fn remove_tab_locked(&self, tab_id: &str) -> bool {
+        let removed = self.tab_layouts.remove(tab_id).is_some();
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         order.retain(|id| id != tab_id);
+        removed
+    }
+
+    /// Remove a tab layout and its order entry.
+    pub fn remove_tab(&self, tab_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.remove_tab_locked(tab_id)
+    }
+
+    fn update_layout_locked(
+        &self,
+        tab_id: String,
+        value: serde_json::Value,
+        active_pane_id: Option<String>,
+    ) {
+        self.insert_tab_locked(tab_id, value);
+        if let Some(active_pane_id) = active_pane_id {
+            *self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(active_pane_id);
+        }
+    }
+
+    /// Atomically update a layout and, when supplied, the global active pane.
+    pub fn update_layout(
+        &self,
+        tab_id: String,
+        value: serde_json::Value,
+        active_pane_id: Option<String>,
+    ) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.update_layout_locked(tab_id, value, active_pane_id);
+    }
+
+    /// Publish a newly-created tab only if the exact session is still a member.
+    pub fn insert_tab_for_session(
+        &self,
+        pane_id: &str,
+        session: &Arc<Session>,
+        tab_id: String,
+        value: serde_json::Value,
+        active_pane_id: String,
+    ) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let is_current =
+            self.sessions.get(pane_id).is_some_and(|current| Arc::ptr_eq(current.value(), session));
+        if is_current {
+            self.update_layout_locked(tab_id, value, Some(active_pane_id));
+        }
+        is_current
+    }
+
+    pub fn set_active_pane_id(&self, pane_id: Option<String>) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = pane_id;
+    }
+
+    /// Insert a session only when the pane generation is vacant.
+    ///
+    /// Returns false when another creator already published the pane.
+    pub fn insert_session(&self, pane_id: &str, session: Arc<Session>) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self
+            .session_reservations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(pane_id)
+        {
+            return false;
+        }
+        let dashmap::mapref::entry::Entry::Vacant(entry) = self.sessions.entry(pane_id.to_string())
+        else {
+            return false;
+        };
+        self.unowned_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(pane_id);
+        entry.insert(session);
+        true
+    }
+
+    /// Reserve a vacant pane generation before any backend or ledger side effects.
+    pub(crate) fn reserve_session(
+        self: &Arc<Self>,
+        pane_id: &str,
+    ) -> Result<SessionReservation, String> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut reservations =
+            self.session_reservations.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self.sessions.contains_key(pane_id) || !reservations.insert(pane_id.to_string()) {
+            return Err(format!("session already exists for pane {pane_id}"));
+        }
+        Ok(SessionReservation {
+            manager: Arc::clone(self),
+            pane_id: pane_id.to_string(),
+            active: true,
+        })
+    }
+
+    /// Clone a session only after synchronizing with lifecycle removal.
+    pub fn session_for_attach(&self, pane_id: &str) -> Option<Arc<Session>> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.sessions.get(pane_id).map(|session| Arc::clone(session.value()))
+    }
+
+    /// Revalidate that a cloned session is still the current member.
+    pub fn is_current_session(&self, pane_id: &str, session: &Arc<Session>) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.sessions.get(pane_id).is_some_and(|current| Arc::ptr_eq(current.value(), session))
+    }
+
+    /// Correct a just-published layout if its session exited during the broadcast race.
+    pub fn recheck_publish_or_correct(&self, pane_id: &str, session: &Arc<Session>) {
+        if self.is_current_session(pane_id, session) {
+            return;
+        }
+
+        let changes = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.purge_pane_from_layouts_locked(pane_id, true)
+        };
+        self.broadcast_layout_changes(changes);
     }
 
     /// Check if a `pane_id` belongs to any registered tab layout.
     /// Used to prevent creating fallback PTY sessions for SSH panes.
     pub fn is_pane_in_any_tab(&self, pane_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for entry in &self.tab_layouts {
             if let Some(layout) = entry.value().get("layout") {
                 if layout_has_pane(layout, pane_id) {
@@ -259,6 +576,15 @@ impl SessionManager {
             }
         }
         false
+    }
+
+    fn is_pane_referenced_by_terminal_leaf(&self, pane_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.tab_layouts.iter().any(|entry| {
+            entry.value().get("layout").is_some_and(|layout| {
+                collect_terminal_leaf_pane_ids(layout).iter().any(|id| id == pane_id)
+            })
+        })
     }
 
     /// # Panics
@@ -322,24 +648,9 @@ impl SessionManager {
         self.broadcast_sync(&SyncMsg::PluginChanged { plugin_id, change });
     }
 
-    /// Remove a session from the `DashMap` and explicitly kill its child process.
-    /// Returns true if the session existed.
-    ///
-    /// This is necessary because the PTY reader task holds an `Arc<Session>`,
-    /// preventing `Drop` from firing when we only remove from the `DashMap`.
-    /// By killing the child first, the reader's `read()` returns Err/Ok(0),
-    /// causing it to exit and release its `Arc`.
+    /// Compatibility shim for explicit close callers.
     pub fn kill_and_remove(&self, pane_id: &str) -> bool {
-        if let Some((_, session)) = self.sessions.remove(pane_id) {
-            session.kill_child();
-            // Drop the input channel sender so the writer task's recv() returns
-            // None and the task exits, releasing its Arc<Session>.
-            session.input_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-            self.pane_closed_notify(pane_id);
-            true
-        } else {
-            false
-        }
+        self.close_session(pane_id, CloseReason::Explicit, true, None)
     }
 
     /// Remove a `pane_id` from all parent tab layouts. If removing it causes
@@ -347,12 +658,21 @@ impl SessionManager {
     /// Returns the list of tab IDs whose layouts became empty (i.e. the pane
     /// was the last leaf) so the caller can broadcast `TabClosed` for them.
     pub fn purge_pane_from_layouts(&self, pane_id: &str) -> Vec<String> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.purge_pane_from_layouts_locked(pane_id, true).closed_tabs
+    }
+
+    fn purge_pane_from_layouts_locked(
+        &self,
+        pane_id: &str,
+        skip_matching_tab: bool,
+    ) -> LayoutChanges {
         let mut updates: Vec<(String, serde_json::Value)> = Vec::new();
         let mut emptied_tabs: Vec<String> = Vec::new();
 
         for entry in &self.tab_layouts {
             let tab_pane_id = entry.key();
-            if tab_pane_id == pane_id {
+            if skip_matching_tab && tab_pane_id == pane_id {
                 continue;
             }
             let val = entry.value();
@@ -365,8 +685,9 @@ impl SessionManager {
                 Some(new_layout) if new_layout != *layout => {
                     let active = val.get("active_pane_id").and_then(|v| v.as_str());
                     let new_leaf_ids = collect_leaf_pane_ids(&new_layout);
-                    let active_pane_id =
-                        active.filter(|id| new_leaf_ids.iter().any(|lid| lid == *id));
+                    let active_pane_id = active
+                        .filter(|id| new_leaf_ids.iter().any(|lid| lid == *id))
+                        .or_else(|| new_leaf_ids.first().map(String::as_str));
                     let mut new_val = serde_json::json!({ "layout": new_layout });
                     if let Some(a) = active_pane_id {
                         new_val["active_pane_id"] = serde_json::Value::String(a.to_string());
@@ -377,21 +698,29 @@ impl SessionManager {
             }
         }
 
+        let mut layout_updates = Vec::new();
         for (key, val) in updates {
-            self.insert_tab(key, val);
+            let layout = val.get("layout").cloned().unwrap_or(serde_json::Value::Null);
+            let active_pane_id =
+                val.get("active_pane_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            self.insert_tab_locked(key.clone(), val);
+            layout_updates.push(LayoutUpdate { tab_id: key, layout, active_pane_id });
         }
         for tab_id in &emptied_tabs {
-            self.remove_tab(tab_id);
+            self.remove_tab_locked(tab_id);
         }
-        emptied_tabs
+        LayoutChanges { closed_tabs: emptied_tabs, updates: layout_updates }
     }
 
     pub fn tab_list(&self) -> (Vec<TabInfo>, Option<String>) {
         // Prune stale tab layouts whose terminal leaves no longer have PTY sessions.
         // Leaves with kind=plugin|files|web have no PTY and are exempt - a tab with
         // only non-terminal leaves is NOT stale.
-        let stale: Vec<String> = {
-            self.tab_layouts
+        {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let stale = self
+                .tab_layouts
                 .iter()
                 .filter_map(|e| {
                     let v = e.value();
@@ -407,15 +736,10 @@ impl SessionManager {
                     }
                     None
                 })
-                .collect()
-        };
-        for key in &stale {
-            self.tab_layouts.remove(key);
-        }
-        if !stale.is_empty() {
-            let mut order =
-                self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            order.retain(|id| !stale.contains(id));
+                .collect::<Vec<_>>();
+            for key in &stale {
+                self.remove_tab_locked(key);
+            }
         }
 
         let order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -453,61 +777,192 @@ impl SessionManager {
         (tabs, active)
     }
 
-    /// When a PTY exits, find the parent tab and either remove it (single-pane)
-    /// or update the layout (multi-pane). Returns the tab-level `pane_id` for
-    /// single-pane tabs so the caller can broadcast `TabClosed`.
+    fn on_pty_exited_locked(&self, leaf_pane_id: &str) -> LayoutChanges {
+        self.purge_pane_from_layouts_locked(leaf_pane_id, false)
+    }
+
+    fn collect_layout_close_locked(&self, pane_id: &str, fallback_tab: bool) -> LayoutChanges {
+        let mut layout_changes = self.on_pty_exited_locked(pane_id);
+        if fallback_tab
+            && layout_changes.closed_tabs.is_empty()
+            && layout_changes.updates.is_empty()
+        {
+            // Preserve the close protocol's fallback for legacy layoutless sessions
+            // and creation races that close before singleton publication.
+            layout_changes.closed_tabs.push(pane_id.to_string());
+        }
+        let mut active =
+            self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if active.as_deref() == Some(pane_id) {
+            *active = None;
+        }
+        layout_changes
+    }
+
+    fn remove_session_locked(
+        &self,
+        pane_id: &str,
+        expected: Option<&Arc<Session>>,
+    ) -> Option<ClosePlan> {
+        let current = self.sessions.get(pane_id)?;
+        if expected.is_some_and(|expected| !Arc::ptr_eq(current.value(), expected)) {
+            return None;
+        }
+        drop(current);
+        let (_, session) = self.sessions.remove(pane_id)?;
+        self.unowned_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(pane_id);
+        let layout_changes = self.collect_layout_close_locked(pane_id, true);
+        Some(ClosePlan {
+            session,
+            closed_tabs: layout_changes.closed_tabs,
+            layout_updates: layout_changes.updates,
+        })
+    }
+
+    fn claim_session_close(
+        &self,
+        pane_id: &str,
+        expected: Option<&Arc<Session>>,
+    ) -> Option<ClosePlan> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.remove_session_locked(pane_id, expected)
+    }
+
+    /// Legacy layout-only wrapper. Natural backend exits use `close_session`;
+    /// this remains for callers that only need the guarded layout mutation.
     pub fn on_pty_exited(&self, leaf_pane_id: &str) -> Option<String> {
-        // Find the tab layout that contains this leaf
-        let mut found_tab_id: Option<String> = None;
-        for entry in &self.tab_layouts {
-            let tab_id = entry.key();
-            let val = entry.value();
-            if let Some(layout) = val.get("layout") {
-                let leaf_ids = collect_leaf_pane_ids(layout);
-                if leaf_ids.iter().any(|id| id == leaf_pane_id) {
-                    found_tab_id = Some(tab_id.clone());
-                    break;
+        let changes = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.on_pty_exited_locked(leaf_pane_id)
+        };
+        for update in changes.updates {
+            self.broadcast_sync(&SyncMsg::LayoutUpdated {
+                pane_id: update.tab_id,
+                layout: update.layout,
+                active_pane_id: update.active_pane_id,
+            });
+        }
+        changes.closed_tabs.into_iter().next()
+    }
+
+    /// The single authoritative close chokepoint. Returns true only for the
+    /// caller that removed the session membership under `lifecycle`.
+    pub fn close_session(
+        &self,
+        pane_id: &str,
+        reason: CloseReason,
+        kill: bool,
+        exit_code: Option<i32>,
+    ) -> bool {
+        let Some(plan) = self.claim_session_close(pane_id, None) else {
+            return false;
+        };
+        self.execute_close_plan(pane_id, reason, kill, exit_code, plan)
+    }
+
+    /// Close only when `session` is still the current pane generation.
+    pub(crate) fn close_session_for_session(
+        &self,
+        pane_id: &str,
+        session: &Arc<Session>,
+        reason: CloseReason,
+        kill: bool,
+        exit_code: Option<i32>,
+    ) -> bool {
+        let Some(plan) = self.claim_session_close(pane_id, Some(session)) else {
+            return false;
+        };
+        self.execute_close_plan(pane_id, reason, kill, exit_code, plan)
+    }
+
+    /// Close a pane even when it is a non-terminal layout leaf with no session.
+    pub fn close_pane(&self, pane_id: &str) -> bool {
+        let plan = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(plan) = self.remove_session_locked(pane_id, None) {
+                PaneClosePlan::Session(plan)
+            } else {
+                let changes = self.collect_layout_close_locked(pane_id, false);
+                if changes.closed_tabs.is_empty() && changes.updates.is_empty() {
+                    return false;
                 }
+                PaneClosePlan::Layout(changes)
+            }
+        };
+
+        match plan {
+            PaneClosePlan::Session(plan) => {
+                self.execute_close_plan(pane_id, CloseReason::Explicit, true, None, plan)
+            }
+            PaneClosePlan::Layout(changes) => {
+                self.broadcast_layout_changes(changes);
+                true
             }
         }
+    }
 
-        let tab_id = found_tab_id?;
-
-        // Get the current layout for this tab
-        let tab_val = self.tab_layouts.get(&tab_id)?;
-        let layout = tab_val.value().get("layout")?.clone();
-        let leaf_ids = collect_leaf_pane_ids(&layout);
-
-        if leaf_ids.len() <= 1 {
-            // Single-pane tab - remove the whole tab
-            drop(tab_val);
-            self.remove_tab(&tab_id);
-            Some(tab_id)
+    fn execute_close_plan(
+        &self,
+        pane_id: &str,
+        reason: CloseReason,
+        kill: bool,
+        exit_code: Option<i32>,
+        plan: ClosePlan,
+    ) -> bool {
+        info!("Closing session: pane={pane_id}, reason={reason:?}, kill={kill}");
+        let termination_confirmed = if kill {
+            plan.session.kill_child_and_confirm()
+        } else if matches!(reason, CloseReason::NaturalExit) {
+            plan.session.natural_exit_confirmed(pane_id)
         } else {
-            // Multi-pane tab - update the layout by removing the exited pane
-            let new_layout = remove_pane_from_layout(&layout, leaf_pane_id)?;
-            let new_leaf_ids = collect_leaf_pane_ids(&new_layout);
-            let active = tab_val.value().get("active_pane_id").and_then(|v| v.as_str());
-            let active_pane_id = active
-                .filter(|id| new_leaf_ids.iter().any(|lid| lid == *id))
-                .or_else(|| new_leaf_ids.first().map(std::string::String::as_str))
-                .unwrap_or("")
-                .to_string();
-            drop(tab_val);
-
-            self.insert_tab(
-                tab_id.clone(),
-                serde_json::json!({
-                    "layout": new_layout.clone(),
-                    "active_pane_id": active_pane_id,
-                }),
+            false
+        };
+        if termination_confirmed {
+            if let Err(error) = super::ledger::remove_entry(pane_id) {
+                warn!(%error, "Failed to remove confirmed-terminated session from PID ledger: pane={pane_id}");
+            }
+        } else {
+            warn!(
+                "Session backend termination unconfirmed; retaining PID ledger entry: pane={pane_id}, reason={reason:?}"
             );
+        }
+
+        plan.session.input_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let _ = plan.session.output_tx.send(Vec::new());
+        let _ = plan.session.notify_exit_and_mark_exited(pane_id, exit_code);
+        self.pane_closed_notify(pane_id);
+        self.event_bus.publish(BusEvent::SessionClosed { pane_id: pane_id.to_string(), exit_code });
+        self.broadcast_layout_changes(LayoutChanges {
+            closed_tabs: plan.closed_tabs,
+            updates: plan.layout_updates,
+        });
+        let callback = plan
+            .session
+            .tauri_on_exit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(callback) = callback {
+            callback(pane_id.to_string(), exit_code);
+        }
+        true
+    }
+
+    fn broadcast_layout_changes(&self, changes: LayoutChanges) {
+        for tab_id in changes.closed_tabs {
+            self.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
+        }
+        for update in changes.updates {
             self.broadcast_sync(&SyncMsg::LayoutUpdated {
-                pane_id: tab_id,
-                layout: new_layout,
-                active_pane_id,
+                pane_id: update.tab_id,
+                layout: update.layout,
+                active_pane_id: update.active_pane_id,
             });
-            None
         }
     }
 
@@ -515,7 +970,7 @@ impl SessionManager {
     /// notify the attention ledger directly via `pane_closed_notify` without threading a
     /// notifier handle through every call site. Safe to call before `start_cleanup_task` (the
     /// two are independent - a bind failure or startup ordering issue must never suppress the
-    /// detached-session reaper).
+    /// unowned-session reaper).
     pub fn register_notifier(&self, notifier: Arc<crate::notification::NotificationBroadcast>) {
         let _ = self.notifier.set(notifier);
     }
@@ -523,45 +978,192 @@ impl SessionManager {
     pub fn start_cleanup_task(self: &Arc<Self>) {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            let reap_secs = parse_reap_secs(std::env::var("DINOTTY_DETACH_REAP_SECS").ok());
-            let timeout = std::time::Duration::from_secs(reap_secs);
+            let mut interval = tokio::time::interval(SESSION_REAP_TICK);
             loop {
                 interval.tick().await;
-                // Two-pass: collect stale IDs first, then kill_and_remove.
-                // Can't use retain() because we need to kill child processes.
-                let stale: Vec<String> = manager
-                    .sessions
-                    .iter()
-                    .filter_map(|entry| {
-                        let status = entry
-                            .value()
-                            .status
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        match *status {
-                            SessionStatus::Detached { since } if since.elapsed() >= timeout => {
-                                Some(entry.key().clone())
-                            }
-                            _ => None,
-                        }
+                let now = Instant::now();
+                let (stats, unowned) = manager.scan_unowned_sessions(now);
+                let candidates = unowned
+                    .into_iter()
+                    .filter_map(|(pane_id, session, since)| {
+                        (now.saturating_duration_since(since) >= SESSION_UNOWNED_GRACE
+                            && !session.is_connected())
+                        .then_some((pane_id, session))
                     })
-                    .collect();
-                for pane_id in stale {
-                    // Re-check status before killing - the session may have been
-                    // reconnected between the collect pass and now.
-                    let should_kill = manager.sessions.get(&pane_id).is_some_and(|entry| {
-                        let status = entry.value().status.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        matches!(*status, SessionStatus::Detached { since } if since.elapsed() >= timeout)
-                    });
+                    .collect::<Vec<_>>();
 
-                    if should_kill {
-                        info!("Cleanup: removing detached session: pane={}", pane_id);
-                        // kill_and_remove now notifies the attention ledger internally.
-                        manager.kill_and_remove(&pane_id);
+                let mut reaped = 0;
+                for (pane_id, session) in candidates {
+                    if manager.try_reap_session(&pane_id, &session, Instant::now()) {
+                        reaped += 1;
                     }
+                }
+
+                if stats.referenced != stats.total || reaped > 0 {
+                    info!(
+                        total = stats.total,
+                        referenced = stats.referenced,
+                        unowned_grace = stats.unowned_grace,
+                        reaped,
+                        "Session cleanup sweep"
+                    );
                 }
             }
         });
+    }
+
+    fn referenced_pane_ids_locked(&self) -> HashSet<String> {
+        self.tab_layouts
+            .iter()
+            .filter_map(|entry| entry.value().get("layout").cloned())
+            .flat_map(|layout| collect_terminal_leaf_pane_ids(&layout))
+            .collect()
+    }
+
+    fn pane_is_referenced_locked(&self, pane_id: &str) -> bool {
+        self.tab_layouts.iter().any(|entry| {
+            entry.value().get("layout").is_some_and(|layout| {
+                collect_terminal_leaf_pane_ids(layout).iter().any(|id| id == pane_id)
+            })
+        })
+    }
+
+    fn scan_unowned_sessions(
+        &self,
+        now: Instant,
+    ) -> (ReapTickStats, Vec<(String, Arc<Session>, Instant)>) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let referenced_pane_ids = self.referenced_pane_ids_locked();
+        let session_ids = self.sessions.iter().map(|entry| entry.key().clone()).collect::<Vec<_>>();
+        let (stats, unowned) = reconcile_unowned_since(
+            &session_ids,
+            &referenced_pane_ids,
+            &mut self.unowned_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            now,
+        );
+        let unowned = unowned
+            .into_iter()
+            .filter_map(|(pane_id, since)| {
+                self.sessions
+                    .get(&pane_id)
+                    .map(|session| (pane_id, Arc::clone(session.value()), since))
+            })
+            .collect();
+        (stats, unowned)
+    }
+
+    fn try_reap_session(&self, pane_id: &str, session: &Arc<Session>, now: Instant) -> bool {
+        let plan = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.pane_is_referenced_locked(pane_id) {
+                self.unowned_since
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(pane_id);
+                return false;
+            }
+            let since = *self
+                .unowned_since
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(pane_id.to_string())
+                .or_insert(now);
+            if now.saturating_duration_since(since) < SESSION_UNOWNED_GRACE
+                || session.is_connected()
+            {
+                return false;
+            }
+
+            // Connection publication sets the atomic mirror before waiting for
+            // lifecycle revalidation. Therefore this mirror check, terminal-leaf
+            // check, identity check, and membership removal form one reap claim.
+            self.remove_session_locked(pane_id, Some(session))
+        };
+        let Some(plan) = plan else {
+            return false;
+        };
+        self.execute_close_plan(pane_id, CloseReason::Reaped, true, None, plan)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn age_unowned_for_test(&self, pane_id: &str, since: Instant) {
+        self.unowned_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(pane_id.to_string(), since);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn try_reap_session_for_test(
+        &self,
+        pane_id: &str,
+        session: &Arc<Session>,
+        now: Instant,
+    ) -> bool {
+        self.try_reap_session(pane_id, session, now)
+    }
+}
+
+#[cfg(test)]
+mod reap_tests {
+    use super::*;
+
+    #[test]
+    fn referenced_session_is_never_reap_eligible() {
+        let started = Instant::now();
+        let later = started + SESSION_UNOWNED_GRACE + Duration::from_secs(1);
+        let session_ids = vec!["pane-1".to_string()];
+        let referenced = HashSet::from(["pane-1".to_string()]);
+        let mut unowned_since = HashMap::from([("pane-1".to_string(), started)]);
+
+        let (stats, unowned) =
+            reconcile_unowned_since(&session_ids, &referenced, &mut unowned_since, later);
+
+        assert_eq!(stats.referenced, 1);
+        assert!(unowned.is_empty());
+        assert!(unowned_since.is_empty());
+    }
+
+    #[test]
+    fn unowned_session_remains_in_grace_before_sixty_seconds() {
+        let started = Instant::now();
+        let session_ids = vec!["pane-1".to_string()];
+        let mut unowned_since_map = HashMap::new();
+        let (stats, unowned) =
+            reconcile_unowned_since(&session_ids, &HashSet::new(), &mut unowned_since_map, started);
+        let unowned_since_instant = unowned[0].1;
+        let session_status = SessionStatus::Detached { since: started };
+
+        assert_eq!(stats.unowned_grace, 1);
+        assert!(!session_is_reap_eligible(
+            unowned_since_instant,
+            started + Duration::from_secs(59),
+            &session_status,
+        ));
+    }
+
+    #[test]
+    fn unowned_detached_session_is_eligible_at_sixty_seconds() {
+        let started = Instant::now();
+
+        assert!(session_is_reap_eligible(
+            started,
+            started + SESSION_UNOWNED_GRACE,
+            &SessionStatus::Detached { since: started }
+        ));
+    }
+
+    #[test]
+    fn connected_session_is_exempt_after_unowned_grace() {
+        let started = Instant::now();
+        let after_grace = started + SESSION_UNOWNED_GRACE;
+
+        assert!(!session_is_reap_eligible(started, after_grace, &SessionStatus::Connected));
+        assert!(session_is_reap_eligible(
+            started,
+            after_grace,
+            &SessionStatus::Detached { since: after_grace }
+        ));
     }
 }

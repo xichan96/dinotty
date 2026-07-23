@@ -96,12 +96,24 @@ async fn handle_socket(
     });
 
     // Check if session already exists (reconnection / multi-client case)
-    let existing_session = manager.sessions.get(&pane_id).map(|r| Arc::clone(r.value()));
+    let existing_session = manager.session_for_attach(&pane_id);
     if let Some(session) = existing_session {
         info!("Joining existing session: pane={}", pane_id);
 
-        *session.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            SessionStatus::Connected;
+        // Connected is mirrored before lifecycle membership revalidation. A
+        // concurrent reap therefore vetoes removal before waiting on lifecycle.
+        session.set_status(SessionStatus::Connected);
+        if !manager.is_current_session(&pane_id, &session) {
+            session.mark_failed_attach();
+            info!("Session closed during reconnect: pane={}", pane_id);
+            let msg = serde_json::to_string(&ServerMsg::SessionExit)
+                .expect("serialization is infallible");
+            let _ = ws_out_tx.send(Message::Text(msg));
+            ping_task.abort();
+            drop(ws_out_tx);
+            let _ = writer_task.await;
+            return;
+        }
 
         // Fit-then-snapshot handshake (proposal 3): send Reconnected with the
         // current session.size as info only - do NOT push scrollback/snapshot
@@ -144,7 +156,7 @@ async fn handle_socket(
                     SessionClientEvent::Resize { cols, rows } => {
                         serde_json::to_string(&ServerMsg::Resize { cols, rows })
                     }
-                    SessionClientEvent::SessionExit { pane_id: _ } => {
+                    SessionClientEvent::SessionExit { .. } => {
                         serde_json::to_string(&ServerMsg::SessionExit)
                     }
                     SessionClientEvent::SyncBegin => serde_json::to_string(&ServerMsg::SyncBegin),
@@ -259,8 +271,7 @@ async fn handle_socket(
         session.remove_client(client_id);
 
         if !session.has_clients() {
-            *session.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-                SessionStatus::Detached { since: std::time::Instant::now() };
+            session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
             info!("Session detached (all clients gone): pane={}", pane_id);
         }
         return;
@@ -289,6 +300,7 @@ async fn handle_socket(
                 return;
             }
         };
+    manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     let (client_id, mut rx) = session.add_client();
 
@@ -309,7 +321,7 @@ async fn handle_socket(
                 SessionClientEvent::Resize { cols, rows } => {
                     serde_json::to_string(&ServerMsg::Resize { cols, rows })
                 }
-                SessionClientEvent::SessionExit { pane_id: _ } => {
+                SessionClientEvent::SessionExit { .. } => {
                     serde_json::to_string(&ServerMsg::SessionExit)
                 }
                 SessionClientEvent::SyncBegin => serde_json::to_string(&ServerMsg::SyncBegin),
@@ -421,8 +433,7 @@ async fn handle_socket(
     session.remove_client(client_id);
 
     if !session.has_clients() {
-        *session.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            SessionStatus::Detached { since: std::time::Instant::now() };
+        session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
         info!("Session detached (all clients gone): pane={}", pane_id);
     }
 }

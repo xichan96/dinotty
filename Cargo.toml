@@ -1,13 +1,19 @@
 [workspace]
 members = ["src-tauri"]
 
-[package]
-name = "dinotty-server"
+[workspace.package]
 version = "0.19.0"
 edition = "2021"
 license = "MIT"
-build = "build.rs"
 repository = "https://github.com/xichan96/dinotty"
+
+[package]
+name = "dinotty-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+repository.workspace = true
 
 [dependencies]
 axum = { version = "0.7", features = ["ws", "macros"] }

@@ -103,7 +103,7 @@ pub struct GitInfo {
 
 fn read_git_info() -> GitInfo {
     GitInfo {
-        version: env!("DINOTTY_VERSION").to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
         repo_url: env!("CARGO_PKG_REPOSITORY").to_string(),
     }
 }
@@ -656,6 +656,7 @@ async fn main() {
     let port = listener.local_addr().expect("bound listener").port();
     auth::set_session_cookie_port(port);
     let manager = Arc::new(SessionManager::new());
+    session::ledger::boot_sweep();
 
     let monitor_state = MonitorState::new(Arc::clone(&manager.sync_clients));
     monitor_state.clone().start_collector();

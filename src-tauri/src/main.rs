@@ -2,7 +2,9 @@
 
 use base64::Engine;
 use dinotty_server::pty;
-use dinotty_server::session::{CloseReason, SessionClientEvent, SessionManager, SessionStatus};
+use dinotty_server::session::{
+    CloseReason, SessionClientEvent, SessionManager, SessionStatus, TauriOnExit,
+};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::sync::{
@@ -206,10 +208,9 @@ fn pty_spawn(
 ) -> Result<String, String> {
     let manager = state.inner().clone();
     let app_cb = app.clone();
-    let exit_cb: Arc<dyn Fn(String, Option<i32>) + Send + Sync> =
-        Arc::new(move |pid: String, exit_code: Option<i32>| {
-            let _ = app_cb.emit("pty-exit", PtyExit { pane_id: pid, exit_code });
-        });
+    let exit_cb: TauriOnExit = Arc::new(move |pid: String, exit_code: Option<i32>| {
+        let _ = app_cb.emit("pty-exit", PtyExit { pane_id: pid, exit_code });
+    });
 
     if let Some(session) = manager.session_for_attach(&pane_id) {
         // Publish the reap veto before lifecycle membership revalidation.

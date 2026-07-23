@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 const SESSION_REAP_TICK: Duration = Duration::from_secs(30);
-const SESSION_UNOWNED_GRACE: Duration = Duration::from_secs(60);
+const SESSION_UNOWNED_GRACE: Duration = Duration::from_mins(1);
 
 #[derive(Clone, Copy, Debug)]
 pub enum CloseReason {
@@ -51,6 +51,7 @@ enum PaneClosePlan {
     Layout(LayoutChanges),
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum SessionStatus {
     Connected,
     Detached { since: Instant },
@@ -497,24 +498,24 @@ impl SessionManager {
     /// Insert a session only when the pane generation is vacant.
     ///
     /// Returns false when another creator already published the pane.
-    pub fn insert_session(&self, pane_id: String, session: Arc<Session>) -> bool {
+    pub fn insert_session(&self, pane_id: &str, session: Arc<Session>) -> bool {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if self
             .session_reservations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(&pane_id)
+            .contains(pane_id)
         {
             return false;
         }
-        let dashmap::mapref::entry::Entry::Vacant(entry) = self.sessions.entry(pane_id.clone())
+        let dashmap::mapref::entry::Entry::Vacant(entry) = self.sessions.entry(pane_id.to_string())
         else {
             return false;
         };
         self.unowned_since
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&pane_id);
+            .remove(pane_id);
         entry.insert(session);
         true
     }
@@ -1128,14 +1129,18 @@ mod reap_tests {
     fn unowned_session_remains_in_grace_before_sixty_seconds() {
         let started = Instant::now();
         let session_ids = vec!["pane-1".to_string()];
-        let mut unowned_since = HashMap::new();
+        let mut unowned_since_map = HashMap::new();
         let (stats, unowned) =
-            reconcile_unowned_since(&session_ids, &HashSet::new(), &mut unowned_since, started);
-        let since = unowned[0].1;
-        let status = SessionStatus::Detached { since: started };
+            reconcile_unowned_since(&session_ids, &HashSet::new(), &mut unowned_since_map, started);
+        let unowned_since_instant = unowned[0].1;
+        let session_status = SessionStatus::Detached { since: started };
 
         assert_eq!(stats.unowned_grace, 1);
-        assert!(!session_is_reap_eligible(since, started + Duration::from_secs(59), &status));
+        assert!(!session_is_reap_eligible(
+            unowned_since_instant,
+            started + Duration::from_secs(59),
+            &session_status,
+        ));
     }
 
     #[test]

@@ -314,7 +314,7 @@ pub async fn create_ssh_session(
     manager: &Arc<SessionManager>,
     pane_id: &str,
     params: SshSessionParams,
-    tauri_on_exit: Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>,
+    tauri_on_exit: Option<crate::session::TauriOnExit>,
 ) -> Result<(Arc<Session>, String), String> {
     let reservation = manager.reserve_session(pane_id)?;
     let timeouts = SshTimeouts::default();

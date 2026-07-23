@@ -219,7 +219,7 @@ pub fn create_session(
     manager: &Arc<SessionManager>,
     pane_id: &str,
     tab_id: Option<&str>,
-    tauri_on_exit: Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>,
+    tauri_on_exit: Option<crate::session::TauriOnExit>,
     cwd: Option<PathBuf>,
     argv: Option<Vec<String>>,
 ) -> Result<(Arc<Session>, String), String> {

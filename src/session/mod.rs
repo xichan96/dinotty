@@ -91,6 +91,9 @@ pub struct ClientEndpoint {
     pub snapshot_pending: std::sync::atomic::AtomicBool,
 }
 
+/// Callback invoked by `close_session` when a Tauri-owned session exits.
+pub type TauriOnExit = Arc<dyn Fn(String, Option<i32>) + Send + Sync>;
+
 pub struct Session {
     /// 传输后端（本地 PTY 或 SSH）
     pub backend: tokio::sync::Mutex<SessionBackend>,
@@ -108,8 +111,7 @@ pub struct Session {
     pub exited: Mutex<bool>,
     #[allow(dead_code)]
     pub shell_type: String,
-    #[allow(clippy::type_complexity)]
-    pub tauri_on_exit: Mutex<Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>>,
+    pub tauri_on_exit: Mutex<Option<TauriOnExit>>,
     pub cwd_state: Mutex<CwdState>,
     /// DEC mode 2026 state. Always acquire this before `clients` when both are needed.
     pub sync: Mutex<SyncState>,
@@ -244,8 +246,7 @@ impl Session {
                 Ok(Some(_)) => ledger::termination_confirmed(pane_id),
                 Ok(None) | Err(_) => false,
             },
-            SessionBackend::Ssh => ledger::termination_confirmed(pane_id),
-            SessionBackend::Exited => ledger::termination_confirmed(pane_id),
+            SessionBackend::Ssh | SessionBackend::Exited => ledger::termination_confirmed(pane_id),
         }
     }
 
@@ -832,7 +833,7 @@ mod session_stub_tests {
         let manager = SessionManager::new();
         let pane_id = "fallback-pane";
         let session = stub_session();
-        manager.insert_session(pane_id.to_string(), Arc::clone(&session));
+        manager.insert_session(pane_id, Arc::clone(&session));
         let (_client_id, mut rx) = manager.add_sync_client();
 
         assert!(manager.register_singleton_tab(pane_id, &session, &session.shell_type));
@@ -871,7 +872,7 @@ mod session_stub_tests {
         let manager = SessionManager::new();
         let pane_id = "fallback-pane";
         let session = stub_session();
-        manager.insert_session(pane_id.to_string(), Arc::clone(&session));
+        manager.insert_session(pane_id, Arc::clone(&session));
         let (_client_id, mut rx) = manager.add_sync_client();
         assert!(manager.register_singleton_tab(pane_id, &session, &session.shell_type));
         let _created = rx.try_recv().expect("tab_created must be broadcast");
@@ -898,9 +899,11 @@ mod session_stub_tests {
         let manager = SessionManager::new();
         let pane_id = "reap-pane";
         let session = stub_session();
-        assert!(manager.insert_session(pane_id.to_string(), Arc::clone(&session)));
+        assert!(manager.insert_session(pane_id, Arc::clone(&session)));
         session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
-        let since = std::time::Instant::now() - Duration::from_secs(61);
+        let since = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(61))
+            .expect("Instant can subtract 61s within monotonic range");
         manager.age_unowned_for_test(pane_id, since);
 
         assert!(manager.try_reap_session_for_test(
@@ -964,9 +967,9 @@ mod session_stub_tests {
         let stale = stub_session();
         let reservation = manager.reserve_session(pane_id).unwrap();
         assert!(manager.reserve_session(pane_id).is_err());
-        assert!(!manager.insert_session(pane_id.to_string(), Arc::clone(&stale)));
+        assert!(!manager.insert_session(pane_id, Arc::clone(&stale)));
         assert!(reservation.publish(Arc::clone(&current)));
-        assert!(!manager.insert_session(pane_id.to_string(), Arc::clone(&stale)));
+        assert!(!manager.insert_session(pane_id, Arc::clone(&stale)));
 
         assert!(!manager.close_session_for_session(
             pane_id,
@@ -1099,7 +1102,7 @@ mod session_stub_tests {
         manager.register_notifier(Arc::clone(&notifier));
 
         let pane_id = "stub-pane";
-        manager.insert_session(pane_id.to_string(), stub_session());
+        manager.insert_session(pane_id, stub_session());
         // Seed the ledger with an event for the pane so pane_closed produces a removal delta.
         notifier.send_bell(pane_id);
 

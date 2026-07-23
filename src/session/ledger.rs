@@ -658,6 +658,10 @@ mod platform {
         Some(pid)
     }
 
+    /// Windows no-op stub. Always succeeds.
+    ///
+    /// # Errors
+    /// Never returns an error on Windows.
     pub fn add_entry(
         _pane_id: &str,
         _pid: u32,
@@ -667,6 +671,10 @@ mod platform {
         Ok(())
     }
 
+    /// Windows no-op stub. Always succeeds.
+    ///
+    /// # Errors
+    /// Never returns an error on Windows.
     pub fn remove_entry(_pane_id: &str) -> Result<(), String> {
         Ok(())
     }

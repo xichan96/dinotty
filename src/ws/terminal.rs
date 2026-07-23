@@ -156,7 +156,7 @@ async fn handle_socket(
                     SessionClientEvent::Resize { cols, rows } => {
                         serde_json::to_string(&ServerMsg::Resize { cols, rows })
                     }
-                    SessionClientEvent::SessionExit { pane_id: _, .. } => {
+                    SessionClientEvent::SessionExit { .. } => {
                         serde_json::to_string(&ServerMsg::SessionExit)
                     }
                     SessionClientEvent::SyncBegin => serde_json::to_string(&ServerMsg::SyncBegin),
@@ -321,7 +321,7 @@ async fn handle_socket(
                 SessionClientEvent::Resize { cols, rows } => {
                     serde_json::to_string(&ServerMsg::Resize { cols, rows })
                 }
-                SessionClientEvent::SessionExit { pane_id: _, .. } => {
+                SessionClientEvent::SessionExit { .. } => {
                     serde_json::to_string(&ServerMsg::SessionExit)
                 }
                 SessionClientEvent::SyncBegin => serde_json::to_string(&ServerMsg::SyncBegin),

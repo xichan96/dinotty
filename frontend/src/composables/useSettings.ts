@@ -6,6 +6,7 @@ import ClaudeLogo from '../components/icons/ClaudeLogo.vue'
 import CodexLogo from '../components/icons/CodexLogo.vue'
 import OpencodeLogo from '../components/icons/OpencodeLogo.vue'
 import { isWindowsClient } from '../utils/clientPlatform'
+import type { KeyboardGuardMode } from '../utils/keyboardGuardMode'
 import type { KeyBinding } from './useKeybindings'
 import type { SavedTheme } from './useDeviceThemeSelection'
 export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
@@ -50,7 +51,7 @@ export interface SettingsData {
   keyboard_sound: boolean
   quick_send_threshold: number
   show_virtual_keyboard: boolean
-  keyboard_keep_on_scroll: boolean
+  keyboard_guard_mode: KeyboardGuardMode
   workspace_badge_mode: WorkspaceBadgeMode | null
   confirm_before_close_tab: boolean
   reload_after_supervise_tabs: boolean
@@ -394,7 +395,7 @@ export const settings = reactive<SettingsData>({
   keyboard_sound: false,
   quick_send_threshold: 63,
   show_virtual_keyboard: false,
-  keyboard_keep_on_scroll: false,
+  keyboard_guard_mode: 'off',
   workspace_badge_mode: null,
   confirm_before_close_tab: true,
   reload_after_supervise_tabs: false,

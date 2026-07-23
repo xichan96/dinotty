@@ -237,7 +237,7 @@
     />
 
     <KbToggleButton
-      v-show="appSettings.show_virtual_keyboard && !kbVisible"
+      v-show="(appSettings.show_virtual_keyboard || hasOpenGuard(appSettings.keyboard_guard_mode)) && !kbVisible"
       :visible="kbVisible"
       @toggle="kbVisible = !kbVisible"
     />
@@ -401,6 +401,7 @@ import {
 } from './utils/appActionCatalog'
 import { createHostClipboardPasteController } from './utils/hostClipboardPaste'
 import { readHostClipboard } from './utils/clipboard'
+import { hasCollapseGuard, hasOpenGuard } from './utils/keyboardGuardMode'
 import type { AppActionOptions } from './components/keyboard/mkbTypes'
 
 // ── Stores ──────────────────────────────────────────────────────
@@ -1028,7 +1029,7 @@ function onTerminalTouch(e: TouchEvent) {
     // Don't show keyboard when a scroll gesture was just detected
     if (scrollGestureDetected) {
       scrollGestureDetected = false
-      if (kbVisible.value && !appSettings.keyboard_keep_on_scroll) kbVisible.value = false
+      if (kbVisible.value && !hasCollapseGuard(appSettings.keyboard_guard_mode)) kbVisible.value = false
       return
     }
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
@@ -1036,10 +1037,10 @@ function onTerminalTouch(e: TouchEvent) {
     const term = paneId ? termRefs[paneId]?.getTerminal() : null
     if (term && term.touchMoved) {
       term.touchMoved = false
-      if (kbVisible.value && !appSettings.keyboard_keep_on_scroll) kbVisible.value = false
+      if (kbVisible.value && !hasCollapseGuard(appSettings.keyboard_guard_mode)) kbVisible.value = false
       return
     }
-    kbVisible.value = true
+    if (!hasOpenGuard(appSettings.keyboard_guard_mode)) kbVisible.value = true
   }
 }
 
@@ -1047,9 +1048,9 @@ function onTerminalScroll() {
   scrollGestureDetected = true
   clearTimeout(scrollGestureTimer)
   scrollGestureTimer = window.setTimeout(() => { scrollGestureDetected = false }, 300)
-  // With keep-on-scroll enabled, scrolling back through history must not
+  // With the collapse guard enabled, scrolling back through history must not
   // dismiss the keyboard the user is typing on.
-  if (appSettings.keyboard_keep_on_scroll) return
+  if (hasCollapseGuard(appSettings.keyboard_guard_mode)) return
   if (kbVisible.value) kbVisible.value = false
 }
 

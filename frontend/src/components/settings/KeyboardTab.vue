@@ -541,18 +541,18 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
-      <div class="settings-row">
-        <label>{{ t('settings.keyboard.keepOnScroll') }}</label>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            v-model="settings.keyboard_keep_on_scroll"
-            @change="saveSettings()"
-          />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        </label>
+      <div class="settings-row keyboard-guard-row">
+        <label>{{ t('settings.keyboard.guardMode.label') }}</label>
+        <SegmentedControl
+          class="keyboard-guard-control"
+          data-setting="keyboard-guard-mode"
+          :model-value="settings.keyboard_guard_mode"
+          :options="keyboardGuardModeOptions"
+          :aria-label="t('settings.keyboard.guardMode.label')"
+          @update:model-value="onKeyboardGuardModeChange"
+        />
       </div>
-      <p class="settings-hint">{{ t('settings.keyboard.keepOnScrollHint') }}</p>
+      <p class="settings-hint">{{ t('settings.keyboard.guardMode.hint') }}</p>
     </div>
 
     <CollapsibleSection :title="t('settings.keyboard.openApi')" level="group" default-open>
@@ -659,6 +659,8 @@ import { APP_ACTIONS, APP_ACTION_IDS } from '../../utils/appActionCatalog'
 import { isWindowsClient } from '../../utils/clientPlatform'
 import { useDeviceSuperviseReload } from '../../composables/useDeviceSuperviseReload'
 import { RotateCcw } from 'lucide-vue-next'
+import SegmentedControl from '../ui/SegmentedControl.vue'
+import type { KeyboardGuardMode } from '../../utils/keyboardGuardMode'
 import { useOpenApiTest } from '../../composables/useOpenApiTest'
 import { useKbRecording } from '../../composables/useKbRecording'
 import { useActionKeyboardGesture } from '../../composables/useActionKeyboardGesture'
@@ -672,6 +674,18 @@ import {
 const { settings, saveSettings } = useSettings()
 const { hasOverride, reloadAfterSuperviseTabs, resetOverride } = useDeviceSuperviseReload()
 const { t } = useI18n()
+
+const keyboardGuardModeOptions = computed(() => [
+  { value: 'off', label: t('settings.keyboard.guardMode.off') },
+  { value: 'collapse_only', label: t('settings.keyboard.guardMode.collapseOnly') },
+  { value: 'open_only', label: t('settings.keyboard.guardMode.openOnly') },
+  { value: 'both', label: t('settings.keyboard.guardMode.both') },
+])
+
+function onKeyboardGuardModeChange(value: string) {
+  settings.keyboard_guard_mode = value as KeyboardGuardMode
+  void saveSettings()
+}
 
 function onQuickSendThresholdChange() {
   settings.quick_send_threshold = normalizeQuickSendThreshold(settings.quick_send_threshold)
@@ -1210,6 +1224,13 @@ onBeforeUnmount(() => {
 }
 .send-btn:hover {
   opacity: 0.85;
+}
+.keyboard-guard-row {
+  align-items: stretch;
+  flex-direction: column;
+}
+.keyboard-guard-control {
+  width: 100%;
 }
 .send-btn:disabled {
   opacity: 0.4;

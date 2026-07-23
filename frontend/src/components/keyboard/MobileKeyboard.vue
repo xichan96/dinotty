@@ -342,6 +342,7 @@ import { useTextareaMetrics } from '../../composables/useTextareaMetrics'
 import { useSwipePanel } from '../../composables/useSwipePanel'
 import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
 import type { SendDataFn } from '../../utils/frozenSend'
+import { hasCollapseGuard } from '../../utils/keyboardGuardMode'
 
 const props = defineProps<{
   visible: boolean
@@ -812,16 +813,12 @@ watch(
 )
 
 watch(globalSelectedPath, () => {
-  if (globalSelectedPath.value && props.visible) {
+  if (globalSelectedPath.value && props.visible && !hasCollapseGuard(settings.keyboard_guard_mode)) {
     emit('update:visible', false)
   }
 })
 
 function onWheelCollapse() {
-  if (props.visible) emit('update:visible', false)
-}
-
-function onTerminalScrollCollapse() {
   if (props.visible) emit('update:visible', false)
 }
 
@@ -836,9 +833,6 @@ onMounted(() => {
     window.visualViewport.addEventListener('scroll', onViewportChange)
     window.addEventListener('orientationchange', onOrientationChange)
   }
-
-  // Collapse keyboard on scroll (wheel for trackpad/mouse, terminal-scroll for touch)
-  document.addEventListener('terminal-scroll', onTerminalScrollCollapse)
 
   if (barRef.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -871,7 +865,6 @@ onBeforeUnmount(() => {
     window.visualViewport.removeEventListener('scroll', onViewportChange)
   }
   window.removeEventListener('orientationchange', onOrientationChange)
-  document.removeEventListener('terminal-scroll', onTerminalScrollCollapse)
   resizeObserver?.disconnect()
   unsubThemeMetrics()
   unsubTextMetrics()

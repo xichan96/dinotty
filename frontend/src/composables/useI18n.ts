@@ -342,9 +342,13 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.keyboard.quickSendThresholdHint':
       'Single-line input at or below this length sends immediately. Longer input waits for a separate Enter; 0 always waits.',
     'settings.keyboard.sound': 'Click sound on key press',
-    'settings.keyboard.keepOnScroll': 'Keep keyboard open while scrolling',
-    'settings.keyboard.keepOnScrollHint':
-      'Scroll back through history without dismissing the keyboard',
+    'settings.keyboard.guardMode.label': 'Keyboard guard',
+    'settings.keyboard.guardMode.off': 'Off',
+    'settings.keyboard.guardMode.collapseOnly': 'Keep on scroll',
+    'settings.keyboard.guardMode.openOnly': 'Manual open',
+    'settings.keyboard.guardMode.both': 'Both',
+    'settings.keyboard.guardMode.hint':
+      'Control whether scrolling can dismiss the keyboard and terminal taps can open it.',
     'settings.keyboard.openApi': 'Open API',
     'settings.keyboard.openApiHint':
       'Allow external devices to send input to the terminal via HTTP API.',
@@ -1081,8 +1085,12 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.keyboard.quickSendThresholdHint':
       '单行输入不超过此长度时直接发送；更长的输入需再按一次回车。设为 0 时始终等待回车。',
     'settings.keyboard.sound': '按键音效',
-    'settings.keyboard.keepOnScroll': '滚动时保持键盘',
-    'settings.keyboard.keepOnScrollHint': '上翻查看历史输出时不再收起键盘',
+    'settings.keyboard.guardMode.label': '键盘防护',
+    'settings.keyboard.guardMode.off': '关闭',
+    'settings.keyboard.guardMode.collapseOnly': '滚动不收起',
+    'settings.keyboard.guardMode.openOnly': '仅手动唤起',
+    'settings.keyboard.guardMode.both': '两者都开',
+    'settings.keyboard.guardMode.hint': '控制滚动是否收起键盘，以及点击终端是否自动唤起键盘。',
     'settings.keyboard.openApi': '开放接口',
     'settings.keyboard.openApiHint': '允许外部设备通过 HTTP API 向终端发送输入。',
     'settings.keyboard.openApiEnabled': '启用开放接口',

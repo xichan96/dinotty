@@ -234,6 +234,7 @@
       @update:visible="(v: boolean) => (kbVisible = v)"
       @bookmarks="bookmarksRef?.open()"
       @app-action="dispatchAppAction"
+      @dismiss="onKeyboardDismiss"
     />
 
     <KbToggleButton
@@ -963,6 +964,15 @@ function getSendFn(): SendDataFn | null {
     ),
     broadcastMode && recipientIds.length > 1 ? () => tab.broadcastActivity++ : undefined,
   )
+}
+
+function onKeyboardDismiss() {
+  const tab = activeTab.value
+  if (tab?.type === 'terminal') {
+    termRefs[tab.activePaneId]?.blur()
+  }
+  const activeElement = document.activeElement
+  if (activeElement instanceof HTMLElement) activeElement.blur()
 }
 
 async function onLoginSuccess() {

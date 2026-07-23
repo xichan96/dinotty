@@ -100,6 +100,16 @@ vi.mock('../composables/apiBase', () => ({
   checkTokenConfigured: async () => false,
 }))
 vi.mock('../composables/useTransport', () => ({ isTauri: () => false, tauriInvoke: vi.fn() }))
+vi.mock('../composables/useHistory', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  return {
+    useHistory: () => ({
+      suggestions: ref([]),
+      fetchSuggestions: vi.fn(),
+      fetchDebounced: vi.fn(),
+    }),
+  }
+})
 vi.mock('../composables/useTerminal', () => ({
   isTouchDevice: () => false,
   setActivePaneId: () => {},
@@ -358,7 +368,7 @@ const ConfirmCloseDialogStub = defineComponent({
 
 const MobileKeyboardStub = defineComponent({
   name: 'MobileKeyboard',
-  emits: ['app-action'],
+  emits: ['app-action', 'dismiss'],
   setup() {
     return () => h('div', { class: 'mobile-keyboard-stub' })
   },
@@ -366,7 +376,7 @@ const MobileKeyboardStub = defineComponent({
 
 let mountedWrapper: VueWrapper | undefined
 
-async function mountWithTabs() {
+async function mountWithTabs(options: { realKeyboard?: boolean } = {}) {
   vi.useFakeTimers()
   const wrapper = shallowMount(App, {
     global: {
@@ -376,7 +386,7 @@ async function mountWithTabs() {
         TabBar: TabBarStub,
         ConfirmCloseDialog: ConfirmCloseDialogStub,
         ConfirmModal: ConfirmModalStub,
-        MobileKeyboard: MobileKeyboardStub,
+        MobileKeyboard: options.realKeyboard ? false : MobileKeyboardStub,
       },
     },
   })
@@ -447,6 +457,80 @@ describe('App.vue - terminal-sequence app actions', () => {
 
     await keyboard.vm.$emit('app-action', 'unknown-action', { autoEnter: true })
     expect(activeTerminal.sendData).toHaveBeenCalledTimes(cases.length)
+  })
+})
+
+describe('App.vue - system keyboard dismissal', () => {
+  it('runs the real dismiss button chain in textarea, active-terminal, active-element order', async () => {
+    const wrapper = await mountWithTabs({ realKeyboard: true })
+    const order: string[] = []
+    const fallbackInput = document.createElement('input')
+    document.body.appendChild(fallbackInput)
+    const nativeFallbackBlur = fallbackInput.blur.bind(fallbackInput)
+    vi.spyOn(fallbackInput, 'blur').mockImplementation(() => {
+      order.push('activeElement')
+      nativeFallbackBlur()
+    })
+
+    const activeTerminal = {
+      sendData: vi.fn(),
+      setOutputListener: vi.fn(),
+      blur: vi.fn(() => {
+        order.push('terminalRef')
+        fallbackInput.focus()
+      }),
+    }
+    await wrapper.findComponent(SplitContainerStub).vm.$emit('register', 'pane-1', activeTerminal)
+
+    const textarea = wrapper.find<HTMLTextAreaElement>('.mkb-text-input').element
+    textarea.focus()
+    await nextTick()
+    const nativeTextareaBlur = textarea.blur.bind(textarea)
+    vi.spyOn(textarea, 'blur').mockImplementation(() => {
+      order.push('textarea')
+      nativeTextareaBlur()
+    })
+
+    const dismissButton = wrapper.find('.mkb-dismiss-btn')
+    expect(dismissButton.attributes('title')).toBe('mobileKb.dismissKeyboard')
+    expect(dismissButton.attributes('aria-label')).toBe('mobileKb.dismissKeyboard')
+    await dismissButton.trigger('mousedown')
+
+    expect(order).toEqual(['textarea', 'terminalRef', 'activeElement'])
+    expect(activeTerminal.blur).toHaveBeenCalledOnce()
+    fallbackInput.remove()
+  })
+
+  it('blurs the active element when the MobileKeyboard stub emits dismiss', async () => {
+    const wrapper = await mountWithTabs()
+    const input = document.createElement('input')
+    document.body.appendChild(input)
+    input.focus()
+    const blur = vi.spyOn(input, 'blur')
+
+    await wrapper.findComponent(MobileKeyboardStub).vm.$emit('dismiss')
+
+    expect(blur).toHaveBeenCalledOnce()
+    input.remove()
+  })
+
+  it('does not throw for a non-terminal active tab and blurs from the real dismiss button', async () => {
+    const wrapper = await mountWithTabs({ realKeyboard: true })
+    const session = useSessionStore()
+    session.setTabs([
+      { type: 'plugin', paneId: 'plugin:memory', title: 'Memory', pluginId: 'memory' },
+    ])
+    session.setActivePane('plugin:memory')
+    await nextTick()
+
+    const textarea = wrapper.find<HTMLTextAreaElement>('.mkb-text-input').element
+    textarea.focus()
+    await nextTick()
+    const blur = vi.spyOn(textarea, 'blur')
+
+    await expect(wrapper.find('.mkb-dismiss-btn').trigger('mousedown')).resolves.toBeUndefined()
+    expect(blur).toHaveBeenCalledOnce()
+    expect(document.activeElement).not.toBe(textarea)
   })
 })
 

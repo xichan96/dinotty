@@ -516,6 +516,11 @@
   cursor: default;
 }
 
+.mkb-dismiss-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .mkb-spin {
   animation: mkb-spin 0.8s linear infinite;
 }

@@ -114,21 +114,15 @@
         <Trash2 :size="18" />
         <span class="mkb-btn-label">{{ t('mobileKb.deleteLine') }}</span>
       </button>
-      <span
-        class="mkb-target-hint"
-        style="
-          margin-left: auto;
-          color: var(--fg-muted);
-          font-size: 11px;
-          line-height: 1.2;
-          text-align: right;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        "
+      <button
+        type="button"
+        class="mkb-tool-btn mkb-dismiss-btn"
+        :title="t('mobileKb.dismissKeyboard')"
+        :aria-label="t('mobileKb.dismissKeyboard')"
+        @mousedown.prevent.stop="dismissSystemKeyboard"
       >
-        {{ t('mobileKb.targetHint') }}
-      </span>
+        <KeyboardOff :size="18" />
+      </button>
     </div>
 
     <div v-if="toolbarQuickKeyDefs.length" v-show="textInputFocused" class="mkb-toolbar mkb-toolbar-quick-row">
@@ -331,6 +325,7 @@ import {
   CornerDownLeft,
   ClipboardPaste,
   Trash2,
+  KeyboardOff,
 } from 'lucide-vue-next'
 import { useSelectedPath } from '../../composables/useFileNavigation'
 import { shellEscapePath, trailingPathDeleteLen } from '../../utils/shell'
@@ -354,6 +349,7 @@ const emit = defineEmits<{
   'update:visible': [val: boolean]
   bookmarks: []
   'app-action': [id: string, options: AppActionOptions]
+  dismiss: []
 }>()
 
 const { settings } = useSettings()
@@ -467,6 +463,11 @@ function onTextInputBlur() {
     nextTick(updateHeight)
     blurTimer = null
   }, 100)
+}
+
+function dismissSystemKeyboard() {
+  textInputRef.value?.blur()
+  emit('dismiss')
 }
 
 function onCompositionStart() {

@@ -1,7 +1,9 @@
 #![allow(clippy::too_many_lines)]
 use crate::event_bus::BusEvent;
 use crate::platform::shell;
-use crate::session::{Session, SessionBackend, SessionManager, SessionStatus, SyncMsg, SyncState};
+use crate::session::{
+    CloseReason, Session, SessionBackend, SessionManager, SessionStatus, SyncMsg, SyncState,
+};
 use crate::vt_screen::VirtualScreen;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
@@ -142,33 +144,12 @@ pub async fn broadcast_task(session: Arc<Session>, pane_id: String, manager: Arc
 }
 
 fn cleanup_exited_pty_session(
-    session: &Arc<Session>,
+    _session: &Arc<Session>,
     pane_id: &str,
     manager: &Arc<SessionManager>,
     exit_code: Option<i32>,
 ) {
-    if !session.notify_exit_and_mark_exited(pane_id) {
-        return;
-    }
-
-    session.input_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-    let _ = session.output_tx.send(Vec::new());
-
-    if manager.sessions.remove(pane_id).is_some() {
-        manager.pane_closed_notify(pane_id);
-        manager
-            .event_bus
-            .publish(BusEvent::SessionClosed { pane_id: pane_id.to_string(), exit_code });
-        if let Some(tab_pane_id) = manager.on_pty_exited(pane_id) {
-            manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_pane_id });
-        }
-    }
-
-    if let Some(f) =
-        session.tauri_on_exit.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
-    {
-        f(pane_id.to_string());
-    }
+    manager.close_session(pane_id, CloseReason::NaturalExit, false, exit_code);
 }
 
 fn notify_url_for(port: u16) -> Option<String> {
@@ -187,7 +168,7 @@ pub fn create_session(
     manager: &Arc<SessionManager>,
     pane_id: &str,
     tab_id: Option<&str>,
-    tauri_on_exit: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    tauri_on_exit: Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>,
     cwd: Option<PathBuf>,
     argv: Option<Vec<String>>,
 ) -> Result<(Arc<Session>, String), String> {
@@ -310,7 +291,7 @@ pub fn create_session(
         output_rx: std::sync::Mutex::new(Some(output_rx)),
         pending_results: std::sync::Mutex::new(Vec::new()),
     });
-    manager.sessions.insert(pane_id.to_string(), Arc::clone(&session));
+    manager.insert_session(pane_id.to_string(), Arc::clone(&session));
 
     // Spawn resize debounce task: waits 25ms after last change, then applies.
     // The actual resize runs in spawn_blocking to avoid blocking the tokio worker

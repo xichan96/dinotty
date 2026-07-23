@@ -10,7 +10,7 @@ pub use layout::{
     extract_leaf_from_layout, first_leaf_id, insert_pane_into_layout,
     insert_pane_into_layout_with_info, insert_subtree_into_layout, remove_pane_from_layout,
 };
-pub use manager::{SessionManager, SessionStatus, SyncClient, SyncMsg, TabInfo};
+pub use manager::{CloseReason, SessionManager, SessionStatus, SyncClient, SyncMsg, TabInfo};
 
 #[cfg(test)]
 pub(crate) use cwd::{find_subslice, parse_title_cwd, sniff_cwd_from_title_osc, OSC_SNIFF_CAP};
@@ -58,6 +58,7 @@ pub enum SessionClientEvent {
     },
     SessionExit {
         pane_id: String,
+        exit_code: Option<i32>,
     },
     /// DEC mode 2026 transaction boundary. `SyncBegin` is enqueued BEFORE any
     /// subsequent Output (which is buffered while synchronized output is
@@ -107,7 +108,7 @@ pub struct Session {
     #[allow(dead_code)]
     pub shell_type: String,
     #[allow(clippy::type_complexity)]
-    pub tauri_on_exit: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
+    pub tauri_on_exit: Mutex<Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>>,
     pub cwd_state: Mutex<CwdState>,
     /// DEC mode 2026 state. Always acquire this before `clients` when both are needed.
     pub sync: Mutex<SyncState>,
@@ -149,6 +150,58 @@ impl Session {
     /// causing it to exit and drop its `Arc<Session>`, which triggers `Drop`.
     pub fn kill_child(&self) {
         self.kill_backend_sync();
+    }
+
+    /// Kill the backend and confirm that it terminated without waiting indefinitely.
+    ///
+    /// Returns `false` when the backend lock is held or termination cannot be
+    /// confirmed within the bounded polling window.
+    pub fn kill_child_and_confirm(&self) -> bool {
+        let Ok(mut backend) = self.backend.try_lock() else {
+            return false;
+        };
+
+        let confirmed = match &mut *backend {
+            SessionBackend::Local { child, .. } => {
+                let pid = child.process_id();
+                #[cfg(unix)]
+                if let Some(pid) = pid {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let process_group = pid as i32;
+                    unsafe {
+                        libc::killpg(process_group, libc::SIGTERM);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    unsafe {
+                        libc::killpg(process_group, libc::SIGKILL);
+                    }
+                }
+                let _ = child.kill();
+
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break true,
+                        Ok(None) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Ok(None) | Err(_) => break false,
+                    }
+                }
+            }
+            SessionBackend::Ssh => self
+                .ssh_cmd_tx
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|tx| tx.send(SshCmd::Close).is_ok()),
+            SessionBackend::Exited => true,
+        };
+
+        if confirmed {
+            *backend = SessionBackend::Exited;
+        }
+        confirmed
     }
 
     /// 同步清理后端（用于 `kill_child` 和 Drop）
@@ -624,28 +677,32 @@ impl Session {
         }
     }
 
-    /// Notify all connected clients that the session is exiting, then mark as exited.
-    /// Returns false when another cleanup path already handled the exit.
-    pub fn notify_exit_and_mark_exited(&self, pane_id: &str) -> bool {
-        {
+    /// Mark the session exited and notify all connected clients.
+    ///
+    /// The exited transition is notification/backend state only. It is not a
+    /// cleanup winner claim; `SessionManager::close_session` owns that claim.
+    pub fn notify_exit_and_mark_exited(&self, pane_id: &str, exit_code: Option<i32>) -> bool {
+        let newly_exited = {
             let mut exited = self.exited.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if *exited {
-                return false;
-            }
+            let newly_exited = !*exited;
             *exited = true;
-        }
+            newly_exited
+        };
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clients.retain(|client| !client.tx.is_closed());
         for client in clients.iter() {
             if client
                 .tx
-                .try_send(SessionClientEvent::SessionExit { pane_id: pane_id.to_string() })
+                .try_send(SessionClientEvent::SessionExit {
+                    pane_id: pane_id.to_string(),
+                    exit_code,
+                })
                 .is_err()
             {
                 tracing::debug!("broadcast: client channel full, dropping session_exit");
             }
         }
-        true
+        newly_exited
     }
 
     pub fn has_clients(&self) -> bool {
@@ -842,7 +899,7 @@ mod session_stub_tests {
         manager.register_notifier(Arc::clone(&notifier));
 
         let pane_id = "stub-pane";
-        manager.sessions.insert(pane_id.to_string(), stub_session());
+        manager.insert_session(pane_id.to_string(), stub_session());
         // Seed the ledger with an event for the pane so pane_closed produces a removal delta.
         notifier.send_bell(pane_id);
 
@@ -866,7 +923,11 @@ mod session_stub_tests {
             panes.iter().any(|p| p["paneId"] == pane_id && p["removed"] == true),
             "expected a removal delta for {pane_id}, got {panes:?}"
         );
-        // Single broadcast: nothing further queued.
+        // Unified close also emits the layoutless TabClosed fallback, but the
+        // attention ledger still emits exactly one removal delta.
+        let tab_closed: serde_json::Value =
+            serde_json::from_str(&rx.try_recv().expect("tab_closed must follow")).unwrap();
+        assert_eq!(tab_closed["type"], "tab_closed");
         assert!(rx.try_recv().is_err(), "no further messages expected after the removal delta");
     }
 }

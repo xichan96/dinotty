@@ -78,16 +78,18 @@ pub async fn create_tab(
     });
 
     let publish_tab = || {
-        manager.insert_tab(
+        if !manager.insert_tab_for_session(
+            &pane_id,
+            &session,
             tab_id.clone(),
             serde_json::json!({
-                "layout": layout,
-                "active_pane_id": pane_id,
+                "layout": layout.clone(),
+                "active_pane_id": pane_id.clone(),
             }),
-        );
-
-        *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(pane_id.clone());
+            pane_id.clone(),
+        ) {
+            return false;
+        }
 
         manager.broadcast_sync(&SyncMsg::TabCreated {
             tab_id: tab_id.clone(),
@@ -96,26 +98,24 @@ pub async fn create_tab(
             cwd: req.cwd.clone(),
             connection_id: None,
         });
+        if manager.is_current_session(&pane_id, &session) {
+            true
+        } else {
+            // If close won after guarded publication but before TabCreated was
+            // sent, order a final corrective close after that late creation.
+            manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id.clone() });
+            false
+        }
     };
 
-    if is_argv_command {
-        // Fast commands can exit as soon as their PTY starts. Synchronize with
-        // exit cleanup so it either wins before we publish, or observes the
-        // registered tab and removes it after publication.
-        let exited = session.exited.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *exited {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    serde_json::json!({ "error": "command exited before tab creation completed" }),
-                ),
-            )
-                .into_response();
-        }
-        publish_tab();
-        drop(exited);
-    } else {
-        publish_tab();
+    if !publish_tab() {
+        let message = if is_argv_command {
+            "command exited before tab creation completed"
+        } else {
+            "session closed before tab creation completed"
+        };
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": message })))
+            .into_response();
     }
 
     Json(serde_json::json!({
@@ -142,17 +142,15 @@ pub async fn close_tab(
         .map(|layout| session::collect_leaf_pane_ids(&layout))
         .unwrap_or_default();
 
-    // Kill and remove all PTY sessions (kill_and_remove notifies the attention ledger
-    // internally).
+    // Each session close prunes its own leaf and emits the unified close protocol.
     for leaf_id in &leaf_ids {
         manager.kill_and_remove(leaf_id);
     }
 
-    // Remove tab
-    manager.remove_tab(&tab_id);
-
-    // Broadcast to all sync clients
-    manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
+    // Non-terminal-only tabs have no session close to remove the layout.
+    if manager.remove_tab(&tab_id) {
+        manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
+    }
 
     Json(serde_json::json!({ "ok": true })).into_response()
 }
@@ -430,16 +428,14 @@ pub async fn create_plugin_tab(
         "pluginId": req.plugin_id,
     });
 
-    manager.insert_tab(
+    manager.update_layout(
         tab_id.clone(),
         serde_json::json!({
             "layout": layout.clone(),
-            "active_pane_id": pane_id,
+            "active_pane_id": pane_id.clone(),
         }),
+        Some(pane_id.clone()),
     );
-
-    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(pane_id.clone());
 
     manager.broadcast_sync(&SyncMsg::TabCreated {
         tab_id: tab_id.clone(),
@@ -877,51 +873,9 @@ pub async fn close_pane(
             .into_response();
     }
 
-    // Kill and remove PTY session (kill_and_remove notifies the attention ledger internally).
+    // Unified close also prunes the pane from its parent layout and broadcasts it.
     manager.kill_and_remove(&pane_id);
-
-    // Update layout
-    if leaf_ids.len() <= 1 {
-        // Last pane - remove entire tab
-        manager.remove_tab(&tab_id);
-
-        // Broadcast tab closed
-        manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
-
-        Json(serde_json::json!({ "ok": true, "tab_closed": true }))
-    } else {
-        // Remove pane from layout
-        let new_layout = session::remove_pane_from_layout(&layout, &pane_id)
-            .unwrap_or(serde_json::Value::Null);
-
-        let new_leaf_ids = session::collect_leaf_pane_ids(&new_layout);
-        let active = tab_val
-            .get("active_pane_id")
-            .and_then(|v| v.as_str());
-        let active_pane_id = active
-            .filter(|id| new_leaf_ids.iter().any(|lid| lid == *id))
-            .or_else(|| new_leaf_ids.first().map(std::string::String::as_str))
-            .unwrap_or("")
-            .to_string();
-
-        manager.insert_tab(
-            tab_id.clone(),
-            serde_json::json!({
-                "layout": new_layout.clone(),
-                "active_pane_id": active_pane_id.clone(),
-            }),
-        );
-
-        // Broadcast layout updated
-        manager.broadcast_sync(&SyncMsg::LayoutUpdated {
-            pane_id: tab_id,
-            layout: new_layout.clone(),
-            active_pane_id: active_pane_id.clone(),
-        });
-
-        Json(serde_json::json!({ "ok": true, "tab_closed": false, "layout": new_layout, "active_pane_id": active_pane_id }))
-    }
-    .into_response()
+    Json(serde_json::json!({ "ok": true, "tab_closed": leaf_ids.len() <= 1 })).into_response()
 }
 
 // ─── PUT /api/tabs/{tab_id}/pane/{pane_id}/activate ────────────────
@@ -952,17 +906,14 @@ pub async fn activate_pane(
     }
 
     // Update active pane
-    manager.insert_tab(
+    manager.update_layout(
         tab_id.clone(),
         serde_json::json!({
             "layout": layout,
-            "active_pane_id": pane_id,
+            "active_pane_id": pane_id.clone(),
         }),
+        Some(pane_id.clone()),
     );
-
-    // Update global active pane
-    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(pane_id.clone());
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::TabActivated { pane_id });
@@ -985,18 +936,14 @@ pub async fn update_layout(
     }
 
     // Store updated layout
-    manager.insert_tab(
+    manager.update_layout(
         tab_id.clone(),
         serde_json::json!({
             "layout": req.layout.clone(),
             "active_pane_id": req.active_pane_id.clone(),
         }),
+        Some(req.active_pane_id.clone()),
     );
-
-    // Sync global active pane: frontend only syncs layout for the active tab,
-    // so the leaf active_pane_id here reflects the user's current focus.
-    *manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(req.active_pane_id.clone());
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::LayoutUpdated {

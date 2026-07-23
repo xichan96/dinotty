@@ -239,10 +239,7 @@ async fn handle_sync_socket(
                                         .map(String::from)
                                 })
                                 .unwrap_or(pane_id.clone());
-                            *manager
-                                .active_pane_id
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(leaf_id);
+                            manager.set_active_pane_id(Some(leaf_id));
                             manager.broadcast_sync_others(
                                 &SyncMsg::TabActivated { pane_id },
                                 &client_id,
@@ -253,17 +250,13 @@ async fn handle_sync_socket(
                             let leaf_id = pane_id
                                 .or_else(|| crate::session::first_leaf_id(&layout))
                                 .unwrap_or_else(|| tab_id.clone());
-                            *manager
-                                .active_pane_id
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                                Some(leaf_id.clone());
-                            manager.insert_tab(
+                            manager.update_layout(
                                 tab_id.clone(),
                                 serde_json::json!({
                                     "layout": layout,
-                                    "active_pane_id": leaf_id,
+                                    "active_pane_id": leaf_id.clone(),
                                 }),
+                                Some(leaf_id.clone()),
                             );
                             // Reply to the sender with server-generated IDs
                             let _ = msg_tx.send(
@@ -296,75 +289,30 @@ async fn handle_sync_socket(
                                 .and_then(|v| v.get("layout").cloned())
                                 .map(|layout| crate::session::collect_leaf_pane_ids(&layout))
                                 .unwrap_or_default();
-                            // Kill and remove PTY sessions for all leaves in this tab
-                            // (kill_and_remove notifies the attention ledger internally).
+                            // Each session close prunes its leaf and emits the close protocol.
                             for leaf_id in &leaf_ids {
                                 manager.kill_and_remove(leaf_id);
                             }
-                            manager.remove_tab(&pane_id);
-                            // Remove stale pane_id from any parent tab layouts
-                            manager.purge_pane_from_layouts(&pane_id);
-                            manager
-                                .broadcast_sync_others(&SyncMsg::TabClosed { pane_id }, &client_id);
-                        }
-                        SyncClientMsg::ClosePane { pane_id } => {
-                            // kill_and_remove notifies the attention ledger internally.
-                            manager.kill_and_remove(&pane_id);
-                            // Collect affected layouts before purging
-                            let before_layouts: Vec<(String, serde_json::Value)> = manager
-                                .tab_layouts
-                                .iter()
-                                .map(|e| (e.key().clone(), e.value().clone()))
-                                .collect();
-                            let emptied_tabs = manager.purge_pane_from_layouts(&pane_id);
-                            // Broadcast layout changes to other clients
-                            for (tab_id, old_val) in &before_layouts {
-                                if let Some(new_val) = manager.tab_layouts.get(tab_id) {
-                                    if *new_val.value() != *old_val {
-                                        let layout = new_val
-                                            .value()
-                                            .get("layout")
-                                            .cloned()
-                                            .unwrap_or(serde_json::Value::Null);
-                                        let active = new_val
-                                            .value()
-                                            .get("active_pane_id")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        manager.broadcast_sync_others(
-                                            &SyncMsg::LayoutUpdated {
-                                                pane_id: tab_id.clone(),
-                                                layout,
-                                                active_pane_id: active,
-                                            },
-                                            &client_id,
-                                        );
-                                    }
-                                }
-                            }
-                            // Broadcast TabClosed for tabs that became empty
-                            for tab_id in emptied_tabs {
+                            // Non-terminal-only tabs have no session close to remove the layout.
+                            if manager.remove_tab(&pane_id) {
                                 manager.broadcast_sync_others(
-                                    &SyncMsg::TabClosed { pane_id: tab_id },
+                                    &SyncMsg::TabClosed { pane_id },
                                     &client_id,
                                 );
                             }
                         }
+                        SyncClientMsg::ClosePane { pane_id } => {
+                            manager.kill_and_remove(&pane_id);
+                        }
                         SyncClientMsg::UpdateLayout { pane_id, layout, active_pane_id } => {
-                            manager.insert_tab(
+                            manager.update_layout(
                                 pane_id.clone(),
                                 serde_json::json!({
                                     "layout": layout,
-                                    "active_pane_id": active_pane_id,
+                                    "active_pane_id": active_pane_id.clone(),
                                 }),
+                                Some(active_pane_id.clone()),
                             );
-                            // Sync global active pane (same rationale as REST update_layout)
-                            *manager
-                                .active_pane_id
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                                Some(active_pane_id.clone());
                             manager.broadcast_sync_others(
                                 &SyncMsg::LayoutUpdated { pane_id, layout, active_pane_id },
                                 &client_id,

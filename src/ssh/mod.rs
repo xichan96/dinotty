@@ -3,8 +3,8 @@ pub mod sftp;
 
 use crate::event_bus::BusEvent;
 use crate::session::{
-    CwdState, PendingSshAuth, Session, SessionBackend, SessionManager, SessionStatus,
-    SshAuthPrompt, SshCmd, SshSessionParams, SyncMsg,
+    CloseReason, CwdState, PendingSshAuth, Session, SessionBackend, SessionManager, SessionStatus,
+    SshAuthPrompt, SshCmd, SshSessionParams,
 };
 use crate::settings::SshAuthMethod;
 use crate::vt_screen::VirtualScreen;
@@ -314,7 +314,7 @@ pub async fn create_ssh_session(
     manager: &Arc<SessionManager>,
     pane_id: &str,
     params: SshSessionParams,
-    tauri_on_exit: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    tauri_on_exit: Option<Arc<dyn Fn(String, Option<i32>) + Send + Sync>>,
 ) -> Result<(Arc<Session>, String), String> {
     let timeouts = SshTimeouts::default();
 
@@ -539,7 +539,7 @@ pub async fn create_ssh_session(
     *session_arc.ssh_handle.lock().await = Some(Box::new(session));
 
     // 10. 插入 SessionManager
-    manager.sessions.insert(pane_id.to_string(), Arc::clone(&session_arc));
+    manager.insert_session(pane_id.to_string(), Arc::clone(&session_arc));
 
     // 11. 启动 SSH reader/writer task（拥有 channel，通过 select! 处理读写）
     let read_session = Arc::clone(&session_arc);
@@ -718,21 +718,7 @@ async fn ssh_reader_task(
     // 清理：清除 ssh_cmd_tx 以防止后续发送
     *session.ssh_cmd_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 
-    if session.notify_exit_and_mark_exited(&pane_id) {
-        manager.sessions.remove(&pane_id);
-        manager.pane_closed_notify(&pane_id);
-        manager
-            .event_bus
-            .publish(BusEvent::SessionClosed { pane_id: pane_id.clone(), exit_code: None });
-        if let Some(tab_pane_id) = manager.on_pty_exited(&pane_id) {
-            manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_pane_id });
-        }
-    }
-    if let Some(cb) =
-        session.tauri_on_exit.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
-    {
-        cb(pane_id.clone());
-    }
+    manager.close_session(&pane_id, CloseReason::NaturalExit, false, None);
 
     info!("SSH reader task exited, pane={}", pane_id);
 }

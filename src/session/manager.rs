@@ -4,7 +4,7 @@ use super::layout::{
 };
 use super::Session;
 use crate::attention::{MarkReadResult, Severity, Snapshot, StateDelta};
-use crate::event_bus::EventBus;
+use crate::event_bus::{BusEvent, EventBus};
 use crate::workspace_mgmt::Workspace;
 use dashmap::DashMap;
 use serde::Serialize;
@@ -14,7 +14,33 @@ use std::sync::{
 };
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
+
+#[derive(Clone, Copy, Debug)]
+pub enum CloseReason {
+    Explicit,
+    NaturalExit,
+    Reaped,
+    Shutdown,
+}
+
+struct LayoutUpdate {
+    tab_id: String,
+    layout: serde_json::Value,
+    active_pane_id: String,
+}
+
+#[derive(Default)]
+struct LayoutChanges {
+    closed_tabs: Vec<String>,
+    updates: Vec<LayoutUpdate>,
+}
+
+struct ClosePlan {
+    session: Arc<Session>,
+    closed_tabs: Vec<String>,
+    layout_updates: Vec<LayoutUpdate>,
+}
 
 pub enum SessionStatus {
     Connected,
@@ -184,6 +210,13 @@ pub struct SessionManager {
     pub pending_ssh_auth: DashMap<String, crate::session::backend::PendingSshAuth>,
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
+    /// Guards membership and all composite mutations of `sessions`,
+    /// `tab_layouts`, `tab_order`, and `active_pane_id`.
+    ///
+    /// Lock order rule: this lock and per-session locks (`exited`, `status`,
+    /// and `backend`) are never held together in either order. Signals,
+    /// broadcasts, disk I/O, and async work must also happen after release.
+    lifecycle: Mutex<()>,
     notify_port: AtomicU16,
     /// Set once (via `register_notifier`) so any authoritative pane-removal site - including
     /// natural PTY/SSH exit, which never goes through `kill_and_remove` - can notify the
@@ -208,6 +241,7 @@ impl SessionManager {
             tab_order: Mutex::new(Vec::new()),
             pending_ssh_auth: DashMap::new(),
             event_bus: EventBus::new(),
+            lifecycle: Mutex::new(()),
             notify_port: AtomicU16::new(0),
             notifier: std::sync::OnceLock::new(),
         }
@@ -231,8 +265,7 @@ impl SessionManager {
         self.notify_port.store(port, Ordering::Relaxed);
     }
 
-    /// Insert a tab layout and record its order position.
-    pub fn insert_tab(&self, tab_id: String, value: serde_json::Value) {
+    fn insert_tab_locked(&self, tab_id: String, value: serde_json::Value) {
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !order.contains(&tab_id) {
             order.push(tab_id.clone());
@@ -241,16 +274,93 @@ impl SessionManager {
         self.tab_layouts.insert(tab_id, value);
     }
 
-    /// Remove a tab layout and its order entry.
-    pub fn remove_tab(&self, tab_id: &str) {
-        self.tab_layouts.remove(tab_id);
+    /// Insert a tab layout and record its order position.
+    pub fn insert_tab(&self, tab_id: String, value: serde_json::Value) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.insert_tab_locked(tab_id, value);
+    }
+
+    fn remove_tab_locked(&self, tab_id: &str) -> bool {
+        let removed = self.tab_layouts.remove(tab_id).is_some();
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         order.retain(|id| id != tab_id);
+        removed
+    }
+
+    /// Remove a tab layout and its order entry.
+    pub fn remove_tab(&self, tab_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.remove_tab_locked(tab_id)
+    }
+
+    fn update_layout_locked(
+        &self,
+        tab_id: String,
+        value: serde_json::Value,
+        active_pane_id: Option<String>,
+    ) {
+        self.insert_tab_locked(tab_id, value);
+        if let Some(active_pane_id) = active_pane_id {
+            *self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(active_pane_id);
+        }
+    }
+
+    /// Atomically update a layout and, when supplied, the global active pane.
+    pub fn update_layout(
+        &self,
+        tab_id: String,
+        value: serde_json::Value,
+        active_pane_id: Option<String>,
+    ) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.update_layout_locked(tab_id, value, active_pane_id);
+    }
+
+    /// Publish a newly-created tab only if the exact session is still a member.
+    pub fn insert_tab_for_session(
+        &self,
+        pane_id: &str,
+        session: &Arc<Session>,
+        tab_id: String,
+        value: serde_json::Value,
+        active_pane_id: String,
+    ) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let is_current =
+            self.sessions.get(pane_id).is_some_and(|current| Arc::ptr_eq(current.value(), session));
+        if is_current {
+            self.update_layout_locked(tab_id, value, Some(active_pane_id));
+        }
+        is_current
+    }
+
+    pub fn set_active_pane_id(&self, pane_id: Option<String>) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = pane_id;
+    }
+
+    pub fn insert_session(&self, pane_id: String, session: Arc<Session>) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.sessions.insert(pane_id, session);
+    }
+
+    /// Clone a session only after synchronizing with lifecycle removal.
+    pub fn session_for_attach(&self, pane_id: &str) -> Option<Arc<Session>> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.sessions.get(pane_id).map(|session| Arc::clone(session.value()))
+    }
+
+    /// Revalidate that a cloned session is still the current member.
+    pub fn is_current_session(&self, pane_id: &str, session: &Arc<Session>) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.sessions.get(pane_id).is_some_and(|current| Arc::ptr_eq(current.value(), session))
     }
 
     /// Check if a `pane_id` belongs to any registered tab layout.
     /// Used to prevent creating fallback PTY sessions for SSH panes.
     pub fn is_pane_in_any_tab(&self, pane_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for entry in &self.tab_layouts {
             if let Some(layout) = entry.value().get("layout") {
                 if layout_has_pane(layout, pane_id) {
@@ -322,24 +432,9 @@ impl SessionManager {
         self.broadcast_sync(&SyncMsg::PluginChanged { plugin_id, change });
     }
 
-    /// Remove a session from the `DashMap` and explicitly kill its child process.
-    /// Returns true if the session existed.
-    ///
-    /// This is necessary because the PTY reader task holds an `Arc<Session>`,
-    /// preventing `Drop` from firing when we only remove from the `DashMap`.
-    /// By killing the child first, the reader's `read()` returns Err/Ok(0),
-    /// causing it to exit and release its `Arc`.
+    /// Compatibility shim for explicit close callers.
     pub fn kill_and_remove(&self, pane_id: &str) -> bool {
-        if let Some((_, session)) = self.sessions.remove(pane_id) {
-            session.kill_child();
-            // Drop the input channel sender so the writer task's recv() returns
-            // None and the task exits, releasing its Arc<Session>.
-            session.input_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-            self.pane_closed_notify(pane_id);
-            true
-        } else {
-            false
-        }
+        self.close_session(pane_id, CloseReason::Explicit, true, None)
     }
 
     /// Remove a `pane_id` from all parent tab layouts. If removing it causes
@@ -347,12 +442,21 @@ impl SessionManager {
     /// Returns the list of tab IDs whose layouts became empty (i.e. the pane
     /// was the last leaf) so the caller can broadcast `TabClosed` for them.
     pub fn purge_pane_from_layouts(&self, pane_id: &str) -> Vec<String> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.purge_pane_from_layouts_locked(pane_id, true).closed_tabs
+    }
+
+    fn purge_pane_from_layouts_locked(
+        &self,
+        pane_id: &str,
+        skip_matching_tab: bool,
+    ) -> LayoutChanges {
         let mut updates: Vec<(String, serde_json::Value)> = Vec::new();
         let mut emptied_tabs: Vec<String> = Vec::new();
 
         for entry in &self.tab_layouts {
             let tab_pane_id = entry.key();
-            if tab_pane_id == pane_id {
+            if skip_matching_tab && tab_pane_id == pane_id {
                 continue;
             }
             let val = entry.value();
@@ -365,8 +469,9 @@ impl SessionManager {
                 Some(new_layout) if new_layout != *layout => {
                     let active = val.get("active_pane_id").and_then(|v| v.as_str());
                     let new_leaf_ids = collect_leaf_pane_ids(&new_layout);
-                    let active_pane_id =
-                        active.filter(|id| new_leaf_ids.iter().any(|lid| lid == *id));
+                    let active_pane_id = active
+                        .filter(|id| new_leaf_ids.iter().any(|lid| lid == *id))
+                        .or_else(|| new_leaf_ids.first().map(String::as_str));
                     let mut new_val = serde_json::json!({ "layout": new_layout });
                     if let Some(a) = active_pane_id {
                         new_val["active_pane_id"] = serde_json::Value::String(a.to_string());
@@ -377,21 +482,29 @@ impl SessionManager {
             }
         }
 
+        let mut layout_updates = Vec::new();
         for (key, val) in updates {
-            self.insert_tab(key, val);
+            let layout = val.get("layout").cloned().unwrap_or(serde_json::Value::Null);
+            let active_pane_id =
+                val.get("active_pane_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            self.insert_tab_locked(key.clone(), val);
+            layout_updates.push(LayoutUpdate { tab_id: key, layout, active_pane_id });
         }
         for tab_id in &emptied_tabs {
-            self.remove_tab(tab_id);
+            self.remove_tab_locked(tab_id);
         }
-        emptied_tabs
+        LayoutChanges { closed_tabs: emptied_tabs, updates: layout_updates }
     }
 
     pub fn tab_list(&self) -> (Vec<TabInfo>, Option<String>) {
         // Prune stale tab layouts whose terminal leaves no longer have PTY sessions.
         // Leaves with kind=plugin|files|web have no PTY and are exempt - a tab with
         // only non-terminal leaves is NOT stale.
-        let stale: Vec<String> = {
-            self.tab_layouts
+        {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let stale = self
+                .tab_layouts
                 .iter()
                 .filter_map(|e| {
                     let v = e.value();
@@ -407,15 +520,10 @@ impl SessionManager {
                     }
                     None
                 })
-                .collect()
-        };
-        for key in &stale {
-            self.tab_layouts.remove(key);
-        }
-        if !stale.is_empty() {
-            let mut order =
-                self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            order.retain(|id| !stale.contains(id));
+                .collect::<Vec<_>>();
+            for key in &stale {
+                self.remove_tab_locked(key);
+            }
         }
 
         let order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -453,62 +561,98 @@ impl SessionManager {
         (tabs, active)
     }
 
-    /// When a PTY exits, find the parent tab and either remove it (single-pane)
-    /// or update the layout (multi-pane). Returns the tab-level `pane_id` for
-    /// single-pane tabs so the caller can broadcast `TabClosed`.
+    fn on_pty_exited_locked(&self, leaf_pane_id: &str) -> LayoutChanges {
+        self.purge_pane_from_layouts_locked(leaf_pane_id, false)
+    }
+
+    /// Legacy layout-only wrapper. Natural backend exits use `close_session`;
+    /// this remains for callers that only need the guarded layout mutation.
     pub fn on_pty_exited(&self, leaf_pane_id: &str) -> Option<String> {
-        // Find the tab layout that contains this leaf
-        let mut found_tab_id: Option<String> = None;
-        for entry in &self.tab_layouts {
-            let tab_id = entry.key();
-            let val = entry.value();
-            if let Some(layout) = val.get("layout") {
-                let leaf_ids = collect_leaf_pane_ids(layout);
-                if leaf_ids.iter().any(|id| id == leaf_pane_id) {
-                    found_tab_id = Some(tab_id.clone());
-                    break;
-                }
-            }
-        }
-
-        let tab_id = found_tab_id?;
-
-        // Get the current layout for this tab
-        let tab_val = self.tab_layouts.get(&tab_id)?;
-        let layout = tab_val.value().get("layout")?.clone();
-        let leaf_ids = collect_leaf_pane_ids(&layout);
-
-        if leaf_ids.len() <= 1 {
-            // Single-pane tab - remove the whole tab
-            drop(tab_val);
-            self.remove_tab(&tab_id);
-            Some(tab_id)
-        } else {
-            // Multi-pane tab - update the layout by removing the exited pane
-            let new_layout = remove_pane_from_layout(&layout, leaf_pane_id)?;
-            let new_leaf_ids = collect_leaf_pane_ids(&new_layout);
-            let active = tab_val.value().get("active_pane_id").and_then(|v| v.as_str());
-            let active_pane_id = active
-                .filter(|id| new_leaf_ids.iter().any(|lid| lid == *id))
-                .or_else(|| new_leaf_ids.first().map(std::string::String::as_str))
-                .unwrap_or("")
-                .to_string();
-            drop(tab_val);
-
-            self.insert_tab(
-                tab_id.clone(),
-                serde_json::json!({
-                    "layout": new_layout.clone(),
-                    "active_pane_id": active_pane_id,
-                }),
-            );
+        let changes = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.on_pty_exited_locked(leaf_pane_id)
+        };
+        for update in changes.updates {
             self.broadcast_sync(&SyncMsg::LayoutUpdated {
-                pane_id: tab_id,
-                layout: new_layout,
-                active_pane_id,
+                pane_id: update.tab_id,
+                layout: update.layout,
+                active_pane_id: update.active_pane_id,
             });
-            None
         }
+        changes.closed_tabs.into_iter().next()
+    }
+
+    /// The single authoritative close chokepoint. Returns true only for the
+    /// caller that removed the session membership under `lifecycle`.
+    pub fn close_session(
+        &self,
+        pane_id: &str,
+        reason: CloseReason,
+        kill: bool,
+        exit_code: Option<i32>,
+    ) -> bool {
+        let plan = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some((_, session)) = self.sessions.remove(pane_id) else {
+                return false;
+            };
+
+            let mut layout_changes = self.on_pty_exited_locked(pane_id);
+            if layout_changes.closed_tabs.is_empty() && layout_changes.updates.is_empty() {
+                // Layoutless creation paths are registered in Task 4. Until then,
+                // preserve the close protocol's TabClosed fallback for them.
+                layout_changes.closed_tabs.push(pane_id.to_string());
+            }
+            let mut active =
+                self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if active.as_deref() == Some(pane_id) {
+                *active = None;
+            }
+
+            ClosePlan {
+                session,
+                closed_tabs: layout_changes.closed_tabs,
+                layout_updates: layout_changes.updates,
+            }
+        };
+
+        info!("Closing session: pane={pane_id}, reason={reason:?}, kill={kill}");
+        let termination_confirmed = !kill || plan.session.kill_child_and_confirm();
+        if termination_confirmed {
+            // Task 3: ledger.remove only on confirmed termination
+        } else {
+            warn!(
+                "Session backend termination unconfirmed; retaining future ledger entry: pane={pane_id}, reason={reason:?}"
+            );
+        }
+
+        plan.session.input_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let _ = plan.session.output_tx.send(Vec::new());
+        let _ = plan.session.notify_exit_and_mark_exited(pane_id, exit_code);
+        self.pane_closed_notify(pane_id);
+        self.event_bus.publish(BusEvent::SessionClosed { pane_id: pane_id.to_string(), exit_code });
+        for tab_id in plan.closed_tabs {
+            self.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
+        }
+        for update in plan.layout_updates {
+            self.broadcast_sync(&SyncMsg::LayoutUpdated {
+                pane_id: update.tab_id,
+                layout: update.layout,
+                active_pane_id: update.active_pane_id,
+            });
+        }
+        let callback = plan
+            .session
+            .tauri_on_exit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(callback) = callback {
+            callback(pane_id.to_string(), exit_code);
+        }
+        true
     }
 
     /// Registers the notifier once, so `kill_and_remove` and natural PTY/SSH exit paths can
@@ -557,8 +701,7 @@ impl SessionManager {
 
                     if should_kill {
                         info!("Cleanup: removing detached session: pane={}", pane_id);
-                        // kill_and_remove now notifies the attention ledger internally.
-                        manager.kill_and_remove(&pane_id);
+                        manager.close_session(&pane_id, CloseReason::Reaped, true, None);
                     }
                 }
             }

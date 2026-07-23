@@ -23,6 +23,7 @@ import { apiCreatePluginTab } from './useTabApi'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
 import { pickSuccessorTab } from '../utils/tabSuccessor'
 import { currentRevealNavGen, nextRevealNavGen } from '../utils/navGen'
+import { workspaceIdFromPaneId } from '../utils/pluginPaneId'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 
 type SyncEventHandler = (e: SyncEvent) => void
@@ -113,8 +114,16 @@ export function useSyncWebSocket(opts: {
   } = useWorkspaces()
 
   function workspaceIdOfTab(tab: Tab): string | null {
-    if (tab.type === 'plugin') return tab.workspaceId ?? null
-    return matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)?.id ?? null
+    if (tab.type === 'plugin') {
+      return tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId) ?? null
+    }
+    return (
+      matchWorkspace(
+        tab.cwd ?? '',
+        tab.connectionId,
+        tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId)
+      )?.id ?? null
+    )
   }
 
   let syncWs: WebSocket | null = null
@@ -273,7 +282,7 @@ export function useSyncWebSocket(opts: {
               customTitle: migrated?.customTitle,
               cwd: tab.cwd,
               connectionId: tab.connection_id,
-              workspaceId: migrated?.workspaceId,
+              workspaceId: migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
             })
           }
         }
@@ -372,6 +381,11 @@ export function useSyncWebSocket(opts: {
           if (msg.connection_id && existing.type === 'terminal' && !existing.connectionId) {
             existing.connectionId = msg.connection_id
           }
+          const decodedWorkspaceId = workspaceIdFromPaneId(msg.tab_id)
+          if (existing.type === 'terminal' && !existing.workspaceId && decodedWorkspaceId) {
+            existing.workspaceId = decodedWorkspaceId
+            persist()
+          }
         }
         if (!existing) {
           const layout = msg.layout
@@ -397,6 +411,7 @@ export function useSyncWebSocket(opts: {
             previewKind: 'web',
             cwd: msg.cwd,
             connectionId: msg.connection_id,
+            workspaceId: workspaceIdFromPaneId(msg.tab_id),
           })
           markRecentlyCreated(msg.tab_id)
           activePaneId.value = msg.tab_id
@@ -445,9 +460,18 @@ export function useSyncWebSocket(opts: {
                 // Keep the current workspace and select one of its remaining tabs below.
               }
               if (!workspaceCommitted || gen !== currentRevealNavGen()) {
-                successor = tabs.value.find(
-                  (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
-                )
+                successor =
+                  tabs.value.find(
+                    (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
+                  ) ?? tabs.value[Math.min(tabIdx, tabs.value.length - 1)]
+                const fallbackWorkspaceId = successor ? workspaceIdOfTab(successor) : null
+                if (successor && fallbackWorkspaceId !== activeWorkspaceId.value) {
+                  try {
+                    await activateWorkspace(fallbackWorkspaceId)
+                  } catch {
+                    // Keep the positional fallback selected if its workspace hop also fails.
+                  }
+                }
               }
             } else {
               cancelPendingWorkspaceActivation()

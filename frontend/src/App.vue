@@ -332,6 +332,7 @@ import { isWebPreviewInput } from './utils/previewRouting'
 import { isWindowsClient } from './utils/clientPlatform'
 import { nextRevealNavGen, currentRevealNavGen } from './utils/navGen'
 import { pickSuccessorTab } from './utils/tabSuccessor'
+import { workspaceIdFromPaneId } from './utils/pluginPaneId'
 import { initMonitorHistory } from './composables/useMonitor'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
 import { useToast } from 'vue-toastification'
@@ -446,8 +447,16 @@ const { isMobile } = useIsMobile()
 const { workspaces, activeWorkspaceId, activeWorkspace, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace, cancelPendingWorkspaceActivation } = useWorkspaces()
 
 function workspaceIdOfTab(tab: Tab): string | null {
-  if (tab.type === 'plugin') return tab.workspaceId ?? null
-  return matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)?.id ?? null
+  if (tab.type === 'plugin') {
+    return tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId) ?? null
+  }
+  return (
+    matchWorkspace(
+      tab.cwd ?? '',
+      tab.connectionId,
+      tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId)
+    )?.id ?? null
+  )
 }
 const activeWorkspaceAbbr = computed(() =>
   activeWorkspace.value ? resolveAbbr(activeWorkspace.value) : ''

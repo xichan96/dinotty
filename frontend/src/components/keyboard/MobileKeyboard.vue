@@ -120,6 +120,7 @@
         :title="t('mobileKb.dismissKeyboard')"
         :aria-label="t('mobileKb.dismissKeyboard')"
         @mousedown.prevent.stop="dismissSystemKeyboard"
+        @click.prevent.stop="dismissSystemKeyboard"
       >
         <KeyboardOff :size="18" />
       </button>

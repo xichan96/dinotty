@@ -1,6 +1,7 @@
 mod backend;
 mod cwd;
 mod layout;
+pub mod ledger;
 mod manager;
 
 pub use backend::{PendingSshAuth, SessionBackend, SshAuthPrompt, SshCmd, SshSessionParams};

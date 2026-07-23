@@ -670,10 +670,12 @@ impl SessionManager {
         info!("Closing session: pane={pane_id}, reason={reason:?}, kill={kill}");
         let termination_confirmed = !kill || plan.session.kill_child_and_confirm();
         if termination_confirmed {
-            // Task 3: ledger.remove only on confirmed termination
+            if let Err(error) = super::ledger::remove_entry(pane_id) {
+                warn!(%error, "Failed to remove confirmed-terminated session from PID ledger: pane={pane_id}");
+            }
         } else {
             warn!(
-                "Session backend termination unconfirmed; retaining future ledger entry: pane={pane_id}, reason={reason:?}"
+                "Session backend termination unconfirmed; retaining PID ledger entry: pane={pane_id}, reason={reason:?}"
             );
         }
 

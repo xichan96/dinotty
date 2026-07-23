@@ -644,6 +644,7 @@ async fn main() {
     let port = listener.local_addr().expect("bound listener").port();
     auth::set_session_cookie_port(port);
     let manager = Arc::new(SessionManager::new());
+    session::ledger::boot_sweep();
 
     let monitor_state = MonitorState::new(Arc::clone(&manager.sync_clients));
     monitor_state.clone().start_collector();

@@ -5,11 +5,62 @@ use crate::session::{
     CloseReason, Session, SessionBackend, SessionManager, SessionStatus, SyncMsg, SyncState,
 };
 use crate::vt_screen::VirtualScreen;
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+
+struct PendingSpawn<'a> {
+    child: Option<Box<dyn Child + Send + Sync>>,
+    pane_id: &'a str,
+    pid: Option<u32>,
+    pgid: Option<u32>,
+    armed: bool,
+}
+
+impl<'a> PendingSpawn<'a> {
+    fn new(child: Box<dyn Child + Send + Sync>, pane_id: &'a str) -> Self {
+        let process_id = child.process_id();
+        let process_group = process_id.and_then(crate::session::ledger::process_group_id);
+        Self { child: Some(child), pane_id, pid: process_id, pgid: process_group, armed: true }
+    }
+
+    fn take_child(&mut self) -> Result<Box<dyn Child + Send + Sync>, String> {
+        self.child.take().ok_or_else(|| "pending spawn child is missing".to_string())
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingSpawn<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        warn!(pane_id = self.pane_id, pid = ?self.pid, "Rolling back unregistered PTY spawn");
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid.and_then(|pgid| i32::try_from(pgid).ok()) {
+            unsafe {
+                libc::killpg(pgid, libc::SIGTERM);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
+        }
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        if let Err(error) = crate::session::ledger::remove_entry(self.pane_id) {
+            warn!(pane_id = self.pane_id, %error, "Failed to remove rolled-back spawn from PID ledger");
+        }
+    }
+}
 
 /// Broadcast task: 转发 PTY/SSH 输出到所有客户端
 /// 与传输无关，可被 Local 和 SSH 后端共用
@@ -200,6 +251,10 @@ pub fn create_session(
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("DINOTTY_PANE_ID", pane_id);
+    cmd.env(
+        "DINOTTY_INSTANCE",
+        option_env!("DINOTTY_CONFIG_SUFFIX").filter(|suffix| !suffix.is_empty()).unwrap_or("prod"),
+    );
     cmd.env_remove("DINOTTY_URL");
     if let Some(url) = notify_url_for(manager.notify_port()) {
         cmd.env("DINOTTY_URL", url);
@@ -242,7 +297,18 @@ pub fn create_session(
     let home_for_cwd = effective_cwd;
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| format!("spawn shell: {e}"))?;
+    let mut pending_spawn = PendingSpawn::new(child, pane_id);
     drop(pair.slave);
+
+    if let Some((pid, pgid, proc_start_time)) = pending_spawn.pid.and_then(|pid| {
+        Some((pid, pending_spawn.pgid?, crate::session::ledger::process_start_time(pid)?))
+    }) {
+        if let Err(error) = crate::session::ledger::add_entry(pane_id, pid, pgid, proc_start_time) {
+            warn!(pane_id, pid, pgid, %error, "Failed to add spawned PTY to PID ledger; continuing without crash recovery");
+        }
+    } else {
+        warn!(pane_id, pid = ?pending_spawn.pid, "Failed to identify spawned PTY; continuing without crash recovery");
+    }
 
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: Box<dyn Write + Send> = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -256,12 +322,13 @@ pub fn create_session(
             .to_path_buf();
     let (resize_tx, resize_rx) = tokio::sync::watch::channel(None);
     let (output_tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
+    let registered_child = pending_spawn.take_child()?;
 
     let session = Arc::new(Session {
         backend: tokio::sync::Mutex::new(SessionBackend::Local {
             writer,
             master: pair.master,
-            child,
+            child: registered_child,
         }),
         ssh_params: None,
         screen: std::sync::Mutex::new(VirtualScreen::new(80, 24)),
@@ -292,6 +359,7 @@ pub fn create_session(
         pending_results: std::sync::Mutex::new(Vec::new()),
     });
     manager.insert_session(pane_id.to_string(), Arc::clone(&session));
+    pending_spawn.disarm();
 
     // Spawn resize debounce task: waits 25ms after last change, then applies.
     // The actual resize runs in spawn_blocking to avoid blocking the tokio worker

@@ -7,7 +7,7 @@
         :k="k"
         :state="state"
         @key-press="(ch: string) => $emit('key-press', ch)"
-        @app-action="(id: string) => $emit('app-action', id)"
+        @app-action="(id: string, options: AppActionOptions) => $emit('app-action', id, options)"
         @special="(sp: string) => $emit('special', sp)"
       />
     </div>
@@ -16,7 +16,7 @@
 
 <script setup lang="ts">
 import MkbKey from './MkbKey.vue'
-import type { KeyDef, ModState } from './mkbTypes'
+import type { AppActionOptions, KeyDef, ModState } from './mkbTypes'
 
 defineProps<{
   keys: KeyDef[]
@@ -27,7 +27,7 @@ defineProps<{
 
 defineEmits<{
   'key-press': [ch: string]
-  'app-action': [id: string]
+  'app-action': [id: string, options: AppActionOptions]
   special: [sp: string]
 }>()
 </script>

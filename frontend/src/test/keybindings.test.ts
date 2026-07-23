@@ -64,10 +64,10 @@ function keyEvent(key: string, init: KeyboardEventInit = {}) {
   })
 }
 
-function dispatchWindowsAppBinding(event: KeyboardEvent, id: string, action: () => void) {
+function dispatchAppBinding(event: KeyboardEvent, id: string, action: () => void) {
   const binding = useKeybindings().getBinding(id)
   const appCommand =
-    (event.ctrlKey || (settings.windowsAltAsCmd && event.altKey)) &&
+    (event.metaKey || event.ctrlKey || (settings.windowsAltAsCmd && event.altKey)) &&
     !(event.ctrlKey && event.altKey)
   if (appCommand && keyEventMatchesBinding(event, binding)) action()
 }
@@ -107,6 +107,107 @@ describe('unified keybindings', () => {
     expect(appDefs.every((def) => Object.keys(def.defaultBinding).join(',') === 'key,shift')).toBe(
       true
     )
+  })
+
+  it('keeps pasteTerminal out of the keybinding registry', () => {
+    expect(useKeybindings().defs.some((def) => def.id === 'pasteTerminal')).toBe(false)
+  })
+
+  it('ignores a persisted pasteTerminal keybinding override', () => {
+    settings.keybindings.pasteTerminal = { key: 'v', shift: false }
+
+    const binding = useKeybindings().getBinding('pasteTerminal')
+    expect(binding).toEqual({ key: '', shift: false })
+    expect(keyEventMatchesBinding(keyEvent('v', { metaKey: true }), binding)).toBe(false)
+    expect(keyEventMatchesBinding(keyEvent('v', { ctrlKey: true }), binding)).toBe(false)
+  })
+
+  it.each([
+    ['Cmd', { metaKey: true }],
+    ['Ctrl', { ctrlKey: true }],
+  ])('does not dispatch pasteTerminal for %s+V', (_modifier, init) => {
+    settings.keybindings.pasteTerminal = { key: 'v', shift: false }
+    const dispatch = vi.fn()
+    const event = keyEvent('v', init)
+
+    dispatchAppBinding(event, 'pasteTerminal', dispatch)
+
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('offers pasteTerminal in the action-key selector with its own default-on auto_enter', async () => {
+    const previous = settings.action_keyboard
+    try {
+      settings.action_keyboard = { rows: [[{ label: 'new', send: '', auto_enter: true }]] }
+      const wrapper = trackWrapper(mount(KeyboardTab))
+
+      expect(wrapper.find('[data-kb-id="pasteTerminal"]').exists()).toBe(false)
+      await wrapper.get('.ak-wyg-label').trigger('click')
+      const kindSelect = wrapper
+        .findAll('.ak-modal select')
+        .find((select) => select.find('option[value="action"]').exists())!
+      await kindSelect.setValue('action')
+      await nextTick()
+
+      const actionSelect = wrapper
+        .findAll('.ak-modal select')
+        .find((select) => select.find('option[value="pasteTerminal"]').exists())!
+      const pasteOption = actionSelect.find('option[value="pasteTerminal"]')
+      expect(pasteOption.text()).toBe('Paste')
+
+      await actionSelect.setValue('pasteTerminal')
+      await nextTick()
+      const autoEnter = wrapper.get<HTMLInputElement>(
+        '.ak-modal .shortcut-check input[type="checkbox"]',
+      )
+      expect(autoEnter.element.checked).toBe(true)
+      await autoEnter.setValue(false)
+      await wrapper.get('.ak-modal .settings-save').trigger('click')
+
+      expect(settings.action_keyboard.rows[0][0]).toMatchObject({
+        kind: 'action',
+        action: 'pasteTerminal',
+        auto_enter: false,
+      })
+    } finally {
+      settings.action_keyboard = previous
+    }
+  })
+
+  it.each([
+    ['term.newline', 'Newline (do not send)'],
+    ['term.lineStart', 'Jump to Line Start'],
+    ['term.lineEnd', 'Jump to Line End'],
+    ['term.deleteToLineStart', 'Delete path or to Line Start'],
+  ])('offers %s in the action-key selector without auto_enter', async (id, label) => {
+    const previous = settings.action_keyboard
+    try {
+      settings.action_keyboard = { rows: [[{ label: 'new', send: '', auto_enter: true }]] }
+      const wrapper = trackWrapper(mount(KeyboardTab))
+
+      await wrapper.get('.ak-wyg-label').trigger('click')
+      const kindSelect = wrapper
+        .findAll('.ak-modal select')
+        .find((select) => select.find('option[value="action"]').exists())!
+      await kindSelect.setValue('action')
+      await nextTick()
+
+      const actionSelect = wrapper
+        .findAll('.ak-modal select')
+        .find((select) => select.find(`option[value="${id}"]`).exists())!
+      expect(actionSelect.find(`option[value="${id}"]`).text()).toBe(label)
+
+      await actionSelect.setValue(id)
+      await nextTick()
+      expect(wrapper.find('.ak-modal .shortcut-check input[type="checkbox"]').exists()).toBe(false)
+
+      await wrapper.get('.ak-modal .settings-save').trigger('click')
+      expect(settings.action_keyboard.rows[0][0]).toMatchObject({ kind: 'action', action: id })
+      expect(settings.action_keyboard.rows[0][0]).not.toHaveProperty('auto_enter')
+    } finally {
+      settings.action_keyboard = previous
+    }
   })
 
   it('formats app bindings exactly as before and terminal bindings with literal modifiers', () => {
@@ -216,17 +317,17 @@ describe('unified keybindings', () => {
     settings.windowsAltAsCmd = true
     const dispatch = vi.fn()
 
-    dispatchWindowsAppBinding(
+    dispatchAppBinding(
       keyEvent('`', { code: 'Backquote', altKey: true }),
       'superviseTabs',
       dispatch
     )
-    dispatchWindowsAppBinding(
+    dispatchAppBinding(
       keyEvent('`', { code: 'Backquote', ctrlKey: true }),
       'superviseTabs',
       dispatch
     )
-    dispatchWindowsAppBinding(keyEvent('`', { code: 'Backquote' }), 'superviseTabs', dispatch)
+    dispatchAppBinding(keyEvent('`', { code: 'Backquote' }), 'superviseTabs', dispatch)
 
     expect(dispatch).toHaveBeenCalledTimes(2)
   })
@@ -235,13 +336,13 @@ describe('unified keybindings', () => {
     settings.windowsAltAsCmd = false
     const dispatch = vi.fn()
 
-    dispatchWindowsAppBinding(
+    dispatchAppBinding(
       keyEvent('t', { ctrlKey: true, altKey: true }),
       'newTab',
       dispatch
     )
-    dispatchWindowsAppBinding(keyEvent('t', { ctrlKey: true }), 'newTab', dispatch)
-    dispatchWindowsAppBinding(keyEvent('t', { altKey: true }), 'newTab', dispatch)
+    dispatchAppBinding(keyEvent('t', { ctrlKey: true }), 'newTab', dispatch)
+    dispatchAppBinding(keyEvent('t', { altKey: true }), 'newTab', dispatch)
 
     expect(dispatch).toHaveBeenCalledOnce()
   })

@@ -27,6 +27,8 @@
       @open-plugin="openPlugin"
       @rename="onRenameTab"
       @open-overview="openOverview"
+      @save-as-template="openSaveTemplateDialog"
+      @apply-template="templatePickerVisible = true"
     >
       <template #left>
         <button
@@ -261,6 +263,21 @@
       @confirm="onCursorPickerConfirm"
       @cancel="cursorPickerVisible = false"
     />
+
+    <SaveTemplateDialog
+      :visible="saveTemplateVisible"
+      :source-tab-id="saveTemplateSourceTabId"
+      :source-layout="saveTemplateSourceLayout"
+      @close="saveTemplateVisible = false"
+      @saved="onTemplateSaved"
+    />
+
+    <TemplatePicker
+      :visible="templatePickerVisible"
+      :workspace-id="activeWorkspaceId"
+      @close="templatePickerVisible = false"
+      @apply="onTemplateApplied"
+    />
   </div>
 </template>
 
@@ -291,6 +308,8 @@ import ConfirmModal from './components/ui/ConfirmModal.vue'
 import { confirmState, uiConfirm, confirmResolve, confirmCancel } from './composables/useConfirm'
 import PromptModal from './components/ui/PromptModal.vue'
 import MultiSelectPicker from './components/ui/MultiSelectPicker.vue'
+import SaveTemplateDialog from './components/ui/SaveTemplateDialog.vue'
+import TemplatePicker from './components/ui/TemplatePicker.vue'
 import { promptState, promptResolve, promptCancel } from './composables/usePrompt'
 import PreviewPanel from './components/preview/PreviewPanel.vue'
 import CommandBookmarks from './components/command/CommandBookmarks.vue'
@@ -332,9 +351,10 @@ import { isWebPreviewInput } from './utils/previewRouting'
 import { isWindowsClient } from './utils/clientPlatform'
 import { nextRevealNavGen, currentRevealNavGen } from './utils/navGen'
 import { pickSuccessorTab } from './utils/tabSuccessor'
+import { workspaceIdFromPaneId } from './utils/pluginPaneId'
 import { initMonitorHistory } from './composables/useMonitor'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
-import { useToast } from 'vue-toastification'
+import { POSITION, useToast } from 'vue-toastification'
 import {
   useNotification,
   pushNotification,
@@ -375,7 +395,12 @@ import { useSettingsStore } from './stores/settingsStore'
 import { shellEscapePath } from './utils/shell'
 import { buildRunCodeCommand } from './utils/runCodeCommand'
 import { resolveAbbr, resolveColor } from './utils/workspaceIcon'
-import { APP_ACTION_IDS } from './utils/appActionCatalog'
+import {
+  getTerminalSequenceAppAction,
+  isDispatchableAppAction,
+} from './utils/appActionCatalog'
+import { createHostClipboardPasteController } from './utils/hostClipboardPaste'
+import type { AppActionOptions } from './components/keyboard/mkbTypes'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
@@ -413,6 +438,29 @@ const notif = useNotification()
 const presentationSettings = useNotificationPresentation().settings
 const { supervise } = useSuperviseTabs()
 const toast = useToast()
+const hostClipboardPaste = createHostClipboardPasteController({
+  fetchText: async () => {
+    const response = await authFetch(apiUrl('/api/clipboard'))
+    if (!response.ok) throw new Error('clipboard request failed')
+    const body = (await response.json()) as { text?: unknown }
+    if (typeof body.text !== 'string') throw new Error('invalid clipboard response')
+    return body.text
+  },
+  paste: (text, autoEnter) => {
+    if (!activePaneId.value) return
+    const tab = tabs.value.find((candidate) => candidate.paneId === activePaneId.value)
+    if (!tab || tab.type !== 'terminal') return
+    termRefs[tab.activePaneId]?.pasteFromClipboard(text, autoEnter)
+  },
+  clipboardEmpty: () =>
+    toast.info(t('mobileKb.clipboardEmpty'), { position: POSITION.BOTTOM_CENTER }),
+  pasteFailed: () =>
+    toast.error(t('mobileKb.pasteFailed'), { position: POSITION.BOTTOM_CENTER }),
+  confirmMultiline: (lines) =>
+    toast.info(t('mobileKb.confirmMultiline', { n: lines }), {
+      position: POSITION.BOTTOM_CENTER,
+    }),
+})
 const cursorPicker = useCursorPicker({
   tabs,
   activePaneId,
@@ -446,8 +494,16 @@ const { isMobile } = useIsMobile()
 const { workspaces, activeWorkspaceId, activeWorkspace, activeWorkspacePath, activeWorkspaceName, matchWorkspace, activateWorkspace, cancelPendingWorkspaceActivation } = useWorkspaces()
 
 function workspaceIdOfTab(tab: Tab): string | null {
-  if (tab.type === 'plugin') return tab.workspaceId ?? null
-  return matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)?.id ?? null
+  if (tab.type === 'plugin') {
+    return tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId) ?? null
+  }
+  return (
+    matchWorkspace(
+      tab.cwd ?? '',
+      tab.connectionId,
+      tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId)
+    )?.id ?? null
+  )
 }
 const activeWorkspaceAbbr = computed(() =>
   activeWorkspace.value ? resolveAbbr(activeWorkspace.value) : ''
@@ -527,6 +583,7 @@ const onSshConnectRef = shallowRef<(result: { tab_id: string; pane_id: string; l
 
 const {
   newTab,
+  applyTemplate,
   resolveTab,
   resolveTabWorkspace,
   clearResolvedTabNotifications,
@@ -1048,6 +1105,48 @@ function onNewMenuAction(
   }
 }
 
+// ─── Save as Template dialog ───────────────────────────────────────
+const saveTemplateVisible = ref(false)
+const saveTemplateSourceTabId = ref('')
+const saveTemplateSourceLayout = computed<PaneLayout | null>(() => {
+  const tab = tabs.value.find((t) => t.paneId === saveTemplateSourceTabId.value)
+  if (!tab || tab.type !== 'terminal') return null
+  return tab.layout
+})
+
+function openSaveTemplateDialog(tabId: string) {
+  const tab = tabs.value.find((t) => t.paneId === tabId)
+  if (!tab || tab.type !== 'terminal') return
+  saveTemplateSourceTabId.value = tabId
+  saveTemplateVisible.value = true
+}
+
+function onTemplateSaved(_templateId: string) {
+  toast?.success(t('template.savedToast'))
+}
+
+// ─── Apply Template dialog ───────────────────────────────────────────
+const templatePickerVisible = ref(false)
+
+async function onTemplateApplied(
+  templateId: string,
+  scope: 'workspace' | 'global',
+  workspaceId?: string,
+) {
+  try {
+    const result = await applyTemplate(templateId, workspaceId)
+    if (!result) return
+    if (result.warnings.length > 0) {
+      toast?.warning(t('template.applyWarningsToast').replace('{n}', String(result.warnings.length)))
+    } else {
+      toast?.success(t('template.applyToast'))
+    }
+  } catch (e: any) {
+    toast?.error(e?.message || 'Apply failed')
+  }
+  void scope
+}
+
 async function onClosePane(tabId: string, paneId: string) {
   const tab = tabs.value.find((t) => t.paneId === tabId)
   if (!tab) return
@@ -1225,6 +1324,19 @@ const paletteCommands = computed<Command[]>(() => {
       subtitle: t('palette.newLocalTerminalDesc'),
       action: () => splitPane.splitPane('horizontal', true, activeWorkspacePath.value),
     }] : []),
+    // Only show "Save as Template" when active tab is a terminal tab with a layout
+    ...(activeTab.value?.type === 'terminal' ? [{
+      icon: '⎘',
+      title: t('palette.saveAsTemplate'),
+      subtitle: t('palette.saveAsTemplateDesc'),
+      action: () => openSaveTemplateDialog(activeTab.value!.paneId),
+    }] : []),
+    {
+      icon: '⊷',
+      title: t('palette.applyTemplate'),
+      subtitle: t('palette.applyTemplateDesc'),
+      action: () => { templatePickerVisible.value = true },
+    },
   ]
 
   // Plugin-registered commands
@@ -1259,7 +1371,7 @@ const paletteCommands = computed<Command[]>(() => {
   return base
 })
 
-const keyActions: Record<string, () => void> = {
+const keyActions: Record<string, (options?: AppActionOptions) => void> = {
   togglePalette: () => paletteRef.value?.toggle(),
   openBookmarks: () => bookmarksRef.value?.open(),
   newTab: () => newTab(),
@@ -1286,6 +1398,7 @@ const keyActions: Record<string, () => void> = {
     if (!tab || tab.type !== 'terminal') return
     termRefs[tab.activePaneId]?.toggleSearch()
   },
+  pasteTerminal: (options) => void hostClipboardPaste.trigger(options?.autoEnter ?? true),
   missionControl: () => openOverview(),
   superviseTabs: () =>
     void supervise((id) => activateTab(id, { defer: true }))
@@ -1301,10 +1414,15 @@ const keyActions: Record<string, () => void> = {
   addCursorsInFiles: () => triggerAddCursors(),
 }
 
-function dispatchAppAction(id: string) {
-  if (!APP_ACTION_IDS.has(id)) return
+function dispatchAppAction(id: string, options?: AppActionOptions) {
+  if (!isDispatchableAppAction(id)) return
+  const terminalAction = getTerminalSequenceAppAction(id)
+  if (terminalAction) {
+    getSendFn()?.(terminalAction.sequence)
+    return
+  }
   if (id === 'closeTab') lastTabCloseShortcutAt = Date.now()
-  keyActions[id]?.()
+  keyActions[id]?.(options)
 }
 
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -1521,6 +1639,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  hostClipboardPaste.dispose()
   stopForegroundGainSubscription()
   pluginNotifyBridge.dispose()
   disposeNotificationPresentationScheduler()

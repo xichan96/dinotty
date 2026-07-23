@@ -127,7 +127,40 @@ const BINDING_KEYS: Record<string, string> = {
   fontSizeReset: '0',
 }
 vi.mock('../composables/useKeybindings', () => ({
-  defs: [],
+  defs: [
+    {
+      id: 'term.newline',
+      kind: 'terminal',
+      sequence: '\x1b\r',
+      titleKey: 'keybinding.term.newline',
+      icon: {},
+      defaultBinding: { key: 'enter', shift: true, meta: false },
+    },
+    {
+      id: 'term.lineStart',
+      kind: 'terminal',
+      sequence: '\x01',
+      titleKey: 'keybinding.term.lineStart',
+      icon: {},
+      defaultBinding: { key: 'arrowleft', shift: false, meta: true },
+    },
+    {
+      id: 'term.lineEnd',
+      kind: 'terminal',
+      sequence: '\x05',
+      titleKey: 'keybinding.term.lineEnd',
+      icon: {},
+      defaultBinding: { key: 'arrowright', shift: false, meta: true },
+    },
+    {
+      id: 'term.deleteToLineStart',
+      kind: 'terminal',
+      sequence: '\x15',
+      titleKey: 'keybinding.term.deleteToLineStart',
+      icon: {},
+      defaultBinding: { key: 'backspace', shift: false, meta: true },
+    },
+  ],
   useKeybindings: () => ({
     getBinding: (id: string) => ({ key: BINDING_KEYS[id] ?? 'x', shift: false }),
     formatBinding: (b: any) => b.key,
@@ -323,6 +356,14 @@ const ConfirmCloseDialogStub = defineComponent({
   },
 })
 
+const MobileKeyboardStub = defineComponent({
+  name: 'MobileKeyboard',
+  emits: ['app-action'],
+  setup() {
+    return () => h('div', { class: 'mobile-keyboard-stub' })
+  },
+})
+
 let mountedWrapper: VueWrapper | undefined
 
 async function mountWithTabs() {
@@ -335,6 +376,7 @@ async function mountWithTabs() {
         TabBar: TabBarStub,
         ConfirmCloseDialog: ConfirmCloseDialogStub,
         ConfirmModal: ConfirmModalStub,
+        MobileKeyboard: MobileKeyboardStub,
       },
     },
   })
@@ -380,6 +422,32 @@ afterEach(() => {
   mocks.apiDeactivateWorkspace.mockResolvedValue(undefined)
   mocks.mintNotificationRequestId.mockClear()
   mocks.resetNotificationRequestIds()
+})
+
+describe('App.vue - terminal-sequence app actions', () => {
+  it('sends each exact sequence through the active terminal input path and no-ops unknown ids', async () => {
+    const wrapper = await mountWithTabs()
+    const activeTerminal = { sendData: vi.fn(), setOutputListener: vi.fn() }
+    const splitContainer = wrapper.findComponent(SplitContainerStub)
+    await splitContainer.vm.$emit('register', 'pane-1', activeTerminal)
+
+    const keyboard = wrapper.findComponent(MobileKeyboardStub)
+    const cases = [
+      ['term.newline', '\x1b\r'],
+      ['term.lineStart', '\x01'],
+      ['term.lineEnd', '\x05'],
+      ['term.deleteToLineStart', '\x15'],
+    ] as const
+
+    for (const [id, sequence] of cases) {
+      await keyboard.vm.$emit('app-action', id, {})
+      expect(activeTerminal.sendData).toHaveBeenLastCalledWith(sequence)
+    }
+    expect(activeTerminal.sendData).toHaveBeenCalledTimes(cases.length)
+
+    await keyboard.vm.$emit('app-action', 'unknown-action', { autoEnter: true })
+    expect(activeTerminal.sendData).toHaveBeenCalledTimes(cases.length)
+  })
 })
 
 describe('App.vue - activateTab cross-workspace', () => {

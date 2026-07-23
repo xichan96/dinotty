@@ -16,6 +16,7 @@
 )]
 
 pub mod agent;
+pub mod api;
 pub mod attention;
 pub mod audit;
 pub mod auth;
@@ -35,6 +36,7 @@ pub mod session;
 pub mod settings;
 pub mod ssh;
 pub mod tabs;
+pub mod templates;
 pub mod token;
 pub mod util;
 pub mod vt_screen;

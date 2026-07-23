@@ -502,7 +502,7 @@
               <option value="danger">{{ t('settings.style.danger') }}</option>
             </select>
           </label>
-          <label v-if="akEdit.kind === 'send' && !akIsEnterEdit" class="shortcut-check">
+          <label v-if="akSupportsAutoEnter" class="shortcut-check">
             <input type="checkbox" v-model="akEdit.auto_enter" /> {{ t('settings.appendEnter') }}
           </label>
           <label v-if="akEdit.kind === 'send' && !akIsEnterEdit" class="shortcut-check">
@@ -891,6 +891,12 @@ const akEdit = ref<{
 const akRecording = ref(false)
 const recordFocusSinkRef = ref<HTMLElement | null>(null)
 const akIsEnterEdit = computed(() => akEdit.value?.scope === 'bottom-enter')
+const akSupportsAutoEnter = computed(() =>
+  !!akEdit.value &&
+  !akIsEnterEdit.value &&
+  (akEdit.value.kind === 'send' ||
+    (akEdit.value.kind === 'action' && akEdit.value.action === 'pasteTerminal'))
+)
 
 const akCanSave = computed(() => {
   if (!akEdit.value) return false
@@ -981,6 +987,7 @@ function saveActionKey() {
         action: edit.action,
         display: edit.display,
         style: edit.style || undefined,
+        ...(edit.action === 'pasteTerminal' ? { auto_enter: edit.auto_enter } : {}),
         grow: edit.grow,
       }
     : {

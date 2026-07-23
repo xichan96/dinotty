@@ -11,6 +11,11 @@ export interface KeyDef {
   icon?: object // lucide icon component
   aria?: string // accessible name
   disabled?: boolean // render as inert (unsupported action, etc.)
+  autoEnter?: boolean // per-key option for app actions that support it
+}
+
+export interface AppActionOptions {
+  autoEnter?: boolean
 }
 
 export interface ModState {

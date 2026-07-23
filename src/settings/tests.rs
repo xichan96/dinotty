@@ -537,9 +537,32 @@ fn action_keyboard_plain_send_omits_absent_optional_fields() {
     assert!(key.get("action").is_none());
     assert!(key.get("style").is_none());
     assert!(key.get("grow").is_none());
+    assert!(key.get("auto_enter").is_none());
 
     let round_trip: ActionKeyboardConfig = serde_json::from_value(serialized).unwrap();
     assert_eq!(round_trip, config);
+}
+
+#[test]
+fn action_keyboard_normalize_defaults_only_missing_paste_auto_enter() {
+    let mut config = parse_action_keyboard(
+        r#"{
+            "rows":[[
+                {"label":"paste-default","kind":"action","action":"pasteTerminal"},
+                {"label":"paste-off","kind":"action","action":"pasteTerminal","auto_enter":false},
+                {"label":"send-default","kind":"send","send":"echo ok"}
+            ]]
+        }"#,
+    );
+
+    config.normalize();
+
+    let keys = &config.rows[0];
+    assert_eq!(keys[0].auto_enter, Some(true));
+    assert_eq!(keys[1].auto_enter, Some(false));
+    assert_eq!(keys[2].auto_enter, None);
+    assert!(!keys[2].auto_enter.unwrap_or(false));
+    assert!(serde_json::to_value(&keys[2]).unwrap().get("auto_enter").is_none());
 }
 
 #[test]
@@ -670,6 +693,8 @@ fn action_keyboard_normalize_applies_kind_contract() {
                 {"label":"missing","kind":"action","send":"keep","repeat":true},
                 {"label":"blank","kind":"action","action":"  ","send":"keep","auto_enter":true},
                 {"label":"valid","kind":"action","action":"newTab","send":"remove","special":"bookmarks","repeat":true,"auto_enter":true,"grow":1.5},
+                {"label":"paste-on","kind":"action","action":"pasteTerminal","auto_enter":true},
+                {"label":"paste-off","kind":"action","action":"pasteTerminal","auto_enter":false},
                 {"label":"bookmarks","special":"bookmarks"}
             ]]
         }"#,
@@ -685,19 +710,24 @@ fn action_keyboard_normalize_applies_kind_contract() {
     assert_eq!(keys[1].send, "keep");
     assert!(keys[1].repeat);
     assert_eq!(keys[2].send, "keep");
-    assert!(keys[2].auto_enter);
+    assert_eq!(keys[2].auto_enter, Some(true));
 
     assert!(keys[3].send.is_empty());
     assert!(keys[3].special.is_none());
     assert!(!keys[3].repeat);
-    assert!(!keys[3].auto_enter);
+    assert_eq!(keys[3].auto_enter, None);
     let valid_action_json = serde_json::to_value(&keys[3]).unwrap();
     for forbidden in ["send", "special", "repeat", "auto_enter"] {
         assert!(valid_action_json.get(forbidden).is_none(), "{forbidden} survived");
     }
 
-    assert!(keys[4].send.is_empty());
-    assert_eq!(keys[4].special.as_deref(), Some("bookmarks"));
+    assert_eq!(keys[4].auto_enter, Some(true));
+    assert_eq!(keys[5].auto_enter, Some(false));
+    assert_eq!(serde_json::to_value(&keys[4]).unwrap()["auto_enter"], true);
+    assert_eq!(serde_json::to_value(&keys[5]).unwrap()["auto_enter"], false);
+
+    assert!(keys[6].send.is_empty());
+    assert_eq!(keys[6].special.as_deref(), Some("bookmarks"));
 }
 
 #[test]

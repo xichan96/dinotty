@@ -240,6 +240,7 @@ cargo run
 - [插件系统](docs/plugins.md) — 安装、清单、API、内置插件
 - [插件开发](docs/plugin-development.md) — 完整的插件开发文档
 - [Agent API](docs/agent-api.md) — HTTP/WebSocket 结构化交互，供 AI Agent 与自动化脚本调用
+- [主机剪贴板 API](docs/clipboard-api.md) — 移动端主机粘贴使用的敏感认证接口
 - [MCP Server](docs/mcp-server.md) — 内置 MCP JSON-RPC 服务器，AI 助手直接操作终端会话
 - [Token 权限系统](docs/token-system.md) — 基于 Capability 的多 Token 细粒度访问控制
 - [Event Bus](docs/event-bus.md) — 全局事件总线，模块间事件分发

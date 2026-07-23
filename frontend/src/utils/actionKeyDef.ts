@@ -26,10 +26,19 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
 
   if (ak.kind === 'action') {
     const action = ak.action ? getAppAction(ak.action) : undefined
+    const actionOptions =
+      action?.id === 'pasteTerminal' ? { autoEnter: ak.auto_enter ?? true } : {}
     const def: KeyDef = action
       ? ak.display === 'text'
-        ? { l: ak.label || '', act: action.id, cls }
-        : { l: '', act: action.id, cls, icon: action.icon, aria: t(action.labelKey) }
+        ? { l: ak.label || '', act: action.id, cls, ...actionOptions }
+        : {
+            l: '',
+            act: action.id,
+            cls,
+            icon: action.icon,
+            aria: t(action.labelKey),
+            ...actionOptions,
+          }
       : {
           l: ak.action ? `${t('actionKb.unsupported')}: ${ak.action}` : t('actionKb.unsupported'),
           cls: `${cls} mkb-disabled`,

@@ -255,6 +255,14 @@ function sendData(data: string, force?: boolean) {
   terminal?.sendData(data, force)
 }
 
+function pasteFromClipboard(text: string, autoEnter = false): boolean {
+  if (!paneAlive || !terminal || !text) return false
+  terminal.focus()
+  terminal.pasteText(text)
+  if (autoEnter && !/[\r\n]/.test(text)) terminal.sendInput('\r')
+  return true
+}
+
 function setOutputListener(cb: ((data: string) => void) | null) {
   if (terminal) terminal.onRawOutput = cb
 }
@@ -303,18 +311,24 @@ async function onMenuPaste() {
   if (!terminal) return
   let text: string | null = null
   if (isTauri()) {
-    try { text = await readClipboardText() } catch {}
+    try {
+      text = await readClipboardText()
+    } catch {}
   }
-  if (!text) {
-    try { text = await navigator.clipboard.readText() } catch {}
+  if (text === null) {
+    try {
+      text = await navigator.clipboard.readText()
+    } catch {}
   }
-  if (!text) return
-  terminal.focus()
-  if (terminal.xterm) {
-    terminal.xterm.paste(text)
-  } else {
-    terminal.pasteText(text)
+  if (text === null) {
+    toast.error(t('mobileKb.pasteFailed'), { position: POSITION.BOTTOM_CENTER })
+    return
   }
+  if (text === '') {
+    toast.info(t('mobileKb.clipboardEmpty'), { position: POSITION.BOTTOM_CENTER })
+    return
+  }
+  pasteFromClipboard(text, false)
 }
 
 function onMenuSelectAll() {
@@ -967,7 +981,7 @@ onBeforeUnmount(() => {
   terminal = null
 })
 
-defineExpose({ getTerminal, focus, blur, fit, sendData, setOutputListener, toggleSearch, adjustFontSize, resetFontSize, isComposing })
+defineExpose({ getTerminal, focus, blur, fit, sendData, pasteFromClipboard, setOutputListener, toggleSearch, adjustFontSize, resetFontSize, isComposing })
 </script>
 
 <style scoped>

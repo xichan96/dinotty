@@ -171,6 +171,15 @@
           <span class="new-menu-label">{{ t('palette.sshConnect') }}</span>
           <kbd class="new-menu-kbd">{{ kbdSshConnect }}</kbd>
         </div>
+        <div class="new-menu-sep" />
+        <div
+          class="new-menu-item"
+          @click="$emit('apply-template')"
+          @touchend.prevent="$emit('apply-template')"
+        >
+          <LayoutTemplate :size="14" class="new-menu-icon" />
+          <span class="new-menu-label">{{ t('palette.fromTemplate') }}</span>
+        </div>
       </div>
     </div>
     <div v-if="plugins.length > 0" class="tab-bar-plugin-wrap" ref="pluginWrapRef">
@@ -230,6 +239,8 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   Square,
+  Save,
+  LayoutTemplate,
 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
@@ -329,6 +340,8 @@ const emit = defineEmits<{
   rename: [paneId: string, title: string]
   'open-overview': []
   'close-tabs': [paneIds: string[]]
+  'save-as-template': [tabId: string]
+  'apply-template': []
 }>()
 
 const tabsListRef = ref<HTMLElement | null>(null)
@@ -498,6 +511,12 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
         if (targets === null) return
         void confirmCloseTabs(closeRightLabel, targets)
       },
+    },
+    {
+      label: t('palette.saveAsTemplate'),
+      icon: Save,
+      disabled: tab.type !== 'terminal',
+      action: () => emit('save-as-template', tab.paneId),
     },
     {
       label: t('overview.closeTab'),

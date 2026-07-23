@@ -62,7 +62,7 @@ export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherSt
         (t) => t.type === 'terminal' && t.paneId === result.tab_id,
       ) as TerminalTab | undefined
       if (existingTab) {
-        const wsIdVal = activeWorkspaceId.value ?? undefined
+        const wsIdVal = wsId || undefined
         if (wsIdVal && !existingTab.workspaceId) existingTab.workspaceId = wsIdVal
       } else {
         tabs.value.push({
@@ -77,7 +77,7 @@ export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherSt
           previewAddress: '',
           previewUrl: '',
           previewKind: 'web',
-          workspaceId: activeWorkspaceId.value ?? undefined,
+          workspaceId: wsId || undefined,
         })
       }
       commitLocalActivePane(result.tab_id)

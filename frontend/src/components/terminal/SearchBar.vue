@@ -6,7 +6,7 @@
         ref="inputRef"
         type="text"
         class="search-bar-input"
-        placeholder="Search…"
+        :placeholder="t('search.placeholder')"
         autocomplete="off"
         spellcheck="false"
         v-model="query"
@@ -14,13 +14,28 @@
       />
       <span v-if="resultText" class="search-bar-count">{{ resultText }}</span>
     </div>
-    <button class="search-bar-btn" title="Previous (Shift+Enter)" @click="findPrev">
+    <button
+      class="search-bar-btn"
+      :title="t('search.previous')"
+      :aria-label="t('search.previous')"
+      @click="findPrev"
+    >
       <ChevronUp :size="14" />
     </button>
-    <button class="search-bar-btn" title="Next (Enter)" @click="findNext">
+    <button
+      class="search-bar-btn"
+      :title="t('search.next')"
+      :aria-label="t('search.next')"
+      @click="findNext"
+    >
       <ChevronDown :size="14" />
     </button>
-    <button class="search-bar-btn" title="Close (Escape)" @click="emit('close')">
+    <button
+      class="search-bar-btn"
+      :title="t('search.close')"
+      :aria-label="t('search.close')"
+      @click="emit('close')"
+    >
       <X :size="14" />
     </button>
   </div>
@@ -30,6 +45,7 @@
 import { ref, watch, onMounted, nextTick, computed } from 'vue'
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import type { TerminalInstance } from '../../composables/useTerminal'
+import { useI18n } from '../../composables/useI18n'
 
 const props = defineProps<{
   terminal: TerminalInstance
@@ -38,6 +54,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
 }>()
+const { t } = useI18n()
 
 const query = ref('')
 const inputRef = ref<HTMLInputElement>()
@@ -46,8 +63,11 @@ const currentIndex = ref(0)
 
 const resultText = computed(() => {
   if (!query.value) return ''
-  if (resultCount.value === 0) return 'No results'
-  return `${currentIndex.value}/${resultCount.value}`
+  if (resultCount.value === 0) return t('search.noResults')
+  return t('search.resultCount', {
+    current: currentIndex.value,
+    total: resultCount.value,
+  })
 })
 
 function doSearch(direction: 'next' | 'prev' = 'next') {
@@ -179,5 +199,23 @@ onMounted(() => {
 .search-bar-btn:hover {
   background: var(--bg-hover);
   color: var(--fg);
+}
+
+@media (max-width: 480px) {
+  .search-bar {
+    left: 4px;
+    right: 4px;
+    min-width: 0;
+  }
+
+  .search-bar-input-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .search-bar-input {
+    width: 100%;
+    min-width: 0;
+  }
 }
 </style>

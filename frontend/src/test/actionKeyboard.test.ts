@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Bell, Columns3, Globe } from 'lucide-vue-next'
+import { Bell, ClipboardPaste, Columns3, Globe } from 'lucide-vue-next'
 import {
   cloneWithoutIcons,
   DEFAULT_ACTION_BOTTOM,
@@ -16,7 +16,11 @@ import {
   type ActionKeyboardConfig,
 } from '../composables/useSettings'
 import { actionKeyToKeyDef } from '../utils/actionKeyDef'
-import { APP_ACTIONS, getAppAction } from '../utils/appActionCatalog'
+import {
+  APP_ACTIONS,
+  getAppAction,
+  isDispatchableAppAction,
+} from '../utils/appActionCatalog'
 import { akDropGripThreshold, akResolveDropIndex } from '../components/settings/KeyboardTab.vue'
 
 function normalize(cfg: ActionKeyboardConfig): ActionKeyboardConfig {
@@ -24,7 +28,7 @@ function normalize(cfg: ActionKeyboardConfig): ActionKeyboardConfig {
 }
 
 describe('app action catalog', () => {
-  it('matches the 20 supported app keybinding registry entries in order', () => {
+  it('appends pasteTerminal and the four terminal sequences after the app registry entries', () => {
     expect(APP_ACTIONS.map(({ id }) => id)).toEqual([
       'togglePalette',
       'openBookmarks',
@@ -46,14 +50,37 @@ describe('app action catalog', () => {
       'fontSizeDown',
       'reloadApp',
       'fontSizeReset',
+      'pasteTerminal',
+      'term.newline',
+      'term.lineStart',
+      'term.lineEnd',
+      'term.deleteToLineStart',
     ])
-    expect(APP_ACTIONS).toHaveLength(20)
+    expect(APP_ACTIONS).toHaveLength(25)
   })
 
   it('uses the registry icons for actions whose old catalog icons differed', () => {
     expect(getAppAction('superviseTabs')?.icon).toBe(Bell)
     expect(getAppAction('sshConnect')?.icon).toBe(Globe)
     expect(getAppAction('equalizePanes')?.icon).toBe(Columns3)
+    expect(getAppAction('pasteTerminal')?.icon).toBe(ClipboardPaste)
+  })
+
+  it('allows selector actions through the dispatch gate and no-ops unknown ids', () => {
+    for (const id of [
+      'pasteTerminal',
+      'term.newline',
+      'term.lineStart',
+      'term.lineEnd',
+      'term.deleteToLineStart',
+    ]) {
+      expect(isDispatchableAppAction(id), id).toBe(true)
+      expect(APP_ACTIONS.some((action) => action.id === id), id).toBe(true)
+    }
+    expect(isDispatchableAppAction('searchTerminal')).toBe(true)
+    expect(isDispatchableAppAction('unknown-action')).toBe(false)
+    expect(getAppAction('pasteTerminal')?.labelKey).toBe('mobileKb.pasteTerminal')
+    expect(getAppAction('term.newline')?.labelKey).toBe('keybinding.term.newline')
   })
 })
 
@@ -80,6 +107,38 @@ describe('actionKeyToKeyDef action display', () => {
 
     expect(def.l).toBe('My New Tab')
     expect(def).not.toHaveProperty('icon')
+  })
+
+  it.each([true, false])('carries pasteTerminal auto_enter=%s into its key definition', (autoEnter) => {
+    const def = actionKeyToKeyDef({
+      label: 'Paste',
+      kind: 'action',
+      action: 'pasteTerminal',
+      display: 'icon',
+      auto_enter: autoEnter,
+    })
+
+    expect(def.act).toBe('pasteTerminal')
+    expect(def.autoEnter).toBe(autoEnter)
+  })
+
+  it.each([
+    'searchTerminal',
+    'newTab',
+    'term.newline',
+    'term.lineStart',
+    'term.lineEnd',
+    'term.deleteToLineStart',
+  ])('omits autoEnter from %s key definitions', (action) => {
+    const def = actionKeyToKeyDef({
+      label: action,
+      kind: 'action',
+      action,
+      auto_enter: true,
+    })
+
+    expect(def.act).toBe(action)
+    expect(def).not.toHaveProperty('autoEnter')
   })
 
   it('marks an unsupported action key as disabled with the action id in the label', () => {
@@ -291,6 +350,24 @@ describe('normalizeActionKeyboard', () => {
       style: 'danger',
       grow: 1.5,
     })
+  })
+
+  it('defaults and preserves per-key auto_enter only for pasteTerminal actions', () => {
+    const defaulted: ActionKey = {
+      label: 'Paste', kind: 'action', action: 'pasteTerminal',
+    }
+    const disabled: ActionKey = {
+      label: 'Paste without Enter', kind: 'action', action: 'pasteTerminal', auto_enter: false,
+    }
+    const unrelated: ActionKey = {
+      label: 'Search', kind: 'action', action: 'searchTerminal', auto_enter: true,
+    }
+
+    normalize({ rows: [[defaulted, disabled, unrelated]] })
+
+    expect(defaulted.auto_enter).toBe(true)
+    expect(disabled.auto_enter).toBe(false)
+    expect(unrelated).not.toHaveProperty('auto_enter')
   })
 
   it('keeps a send-kind key with no send, including special-only keys', () => {

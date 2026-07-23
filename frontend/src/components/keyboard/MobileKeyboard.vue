@@ -309,7 +309,7 @@ import MkbKey from './MkbKey.vue'
 import SuggestionBar from './SuggestionBar.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
-import type { ModState } from './mkbTypes'
+import type { AppActionOptions, ModState } from './mkbTypes'
 import {
   useSettings,
   onThemeChange,
@@ -345,7 +345,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:visible': [val: boolean]
   bookmarks: []
-  'app-action': [id: string]
+  'app-action': [id: string, options: AppActionOptions]
 }>()
 
 const { settings } = useSettings()
@@ -507,8 +507,8 @@ function onKeyPress(ch: string) {
   if (kbMode.value === 'default') fetchDebounced(inputBuffer.value || undefined)
 }
 
-function onAppAction(id: string) {
-  emit('app-action', id)
+function onAppAction(id: string, options: AppActionOptions) {
+  emit('app-action', id, options)
 }
 
 function onSpecial(sp: string) {

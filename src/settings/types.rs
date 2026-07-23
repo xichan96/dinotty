@@ -671,8 +671,8 @@ pub struct ActionKey {
     pub repeat: bool,
     #[serde(default)]
     pub special: Option<String>,
-    #[serde(default)]
-    pub auto_enter: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_enter: Option<bool>,
     #[serde(default)]
     pub grow: Option<f64>,
 }
@@ -684,6 +684,7 @@ impl Serialize for ActionKey {
     {
         let is_valid_action = self.kind.as_deref() == Some("action")
             && self.action.as_deref().is_some_and(|action| !action.trim().is_empty());
+        let is_paste_action = is_valid_action && self.action.as_deref() == Some("pasteTerminal");
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("label", &self.label)?;
         if let Some(kind) = &self.kind {
@@ -708,6 +709,8 @@ impl Serialize for ActionKey {
             map.serialize_entry("send", &self.send)?;
             map.serialize_entry("repeat", &self.repeat)?;
             map.serialize_entry("special", &self.special)?;
+        }
+        if (!is_valid_action || is_paste_action) && self.auto_enter.is_some() {
             map.serialize_entry("auto_enter", &self.auto_enter)?;
         }
         map.end()

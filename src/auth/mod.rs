@@ -185,6 +185,7 @@ pub async fn auth_middleware(
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(r#"{"error":"auto-token is only available from localhost"}"#))
             .unwrap();
     }
@@ -224,6 +225,7 @@ pub async fn auth_middleware(
         return Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CACHE_CONTROL, "no-store")
             .header("Retry-After", retry_after.to_string())
             .body(Body::from(r#"{"error":"too many failed attempts, please try again later"}"#))
             .unwrap();
@@ -250,6 +252,7 @@ pub async fn auth_middleware(
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(r#"{"error":"unauthorized"}"#))
         .unwrap()
 }

@@ -266,7 +266,11 @@ function normalizeActionKey(key: ActionKey): void {
   delete key.send
   delete key.special
   delete key.repeat
-  delete key.auto_enter
+  if (key.action === 'pasteTerminal') {
+    if (typeof key.auto_enter !== 'boolean') key.auto_enter = true
+  } else {
+    delete key.auto_enter
+  }
   delete key.icon
 }
 

@@ -1648,6 +1648,7 @@ dependencies = [
 name = "dinotty-server"
 version = "0.19.0"
 dependencies = [
+ "arboard",
  "axum 0.7.9",
  "axum-extra",
  "base64 0.22.1",
@@ -1687,6 +1688,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
+ "tower",
  "tower-http 0.5.2",
  "tracing",
  "tracing-appender",

@@ -240,6 +240,7 @@ cargo run
 - [Plugin System](docs/plugins.en.md) — installation, manifest, API, built-in plugins
 - [Plugin Development](docs/plugin-development.md) — full plugin development guide
 - [Agent API](docs/agent-api.md) — HTTP/WebSocket structured interaction for AI agents and automation scripts
+- [Host Clipboard API](docs/clipboard-api.md) — sensitive authenticated endpoint used by mobile host paste
 - [MCP Server](docs/mcp-server.md) — built-in MCP JSON-RPC server for AI assistants to operate terminal sessions
 - [Token Permission System](docs/token-system.md) — capability-based multi-token fine-grained access control
 - [Event Bus](docs/event-bus.md) — global event bus for inter-module event dispatch

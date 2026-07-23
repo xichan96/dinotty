@@ -18,6 +18,24 @@ const TASK3_KEYS = [
   'confirm.closeTabCancel',
 ] as const
 
+const QKB1_KEYS = [
+  'keybinding.term.newline',
+  'keybinding.term.lineStart',
+  'keybinding.term.lineEnd',
+  'keybinding.term.deleteToLineStart',
+  'mobileKb.pasteTerminal',
+  'mobileKb.findTerminal',
+  'mobileKb.clipboardEmpty',
+  'mobileKb.pasteFailed',
+  'mobileKb.confirmMultiline',
+  'search.placeholder',
+  'search.resultCount',
+  'search.noResults',
+  'search.previous',
+  'search.next',
+  'search.close',
+] as const
+
 describe('useI18n - confirm-before-close-tab strings', () => {
   describe('English locale', () => {
     beforeEach(() => {
@@ -127,5 +145,24 @@ describe('useI18n - confirm-before-close-tab strings', () => {
       const { t } = useI18n()
       expect(t(key)).toBe(expected)
     })
+  })
+})
+
+describe('useI18n - QKB1 strings', () => {
+  it.each(['en', 'zh'] as const)('defines every QKB1 key in %s', (locale) => {
+    settings.locale = locale
+    const { t } = useI18n()
+    for (const key of QKB1_KEYS) expect(t(key), `${locale} missing ${key}`).not.toBe(key)
+  })
+
+  it('uses the audited exact mobile shortcut strings', () => {
+    settings.locale = 'en'
+    expect(useI18n().t('mobileKb.confirmMultiline', { n: 4 })).toBe(
+      'Clipboard has 4 lines — tap again to paste'
+    )
+    settings.locale = 'zh'
+    expect(useI18n().t('mobileKb.confirmMultiline', { n: 4 })).toBe(
+      '剪贴板含 4 行，再点一次粘贴'
+    )
   })
 })

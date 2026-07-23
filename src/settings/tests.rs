@@ -22,6 +22,7 @@ fn settings_empty_json_is_valid() {
     let settings: Settings = serde_json::from_str(r"{}").unwrap();
     assert_eq!(settings.settings_version, 0);
     assert!(!settings.keyboard_sound);
+    assert_eq!(settings.quick_send_threshold, 63);
     assert!(!settings.show_virtual_keyboard);
     assert!(!settings.windows_alt_as_cmd);
     assert!(settings.confirm_before_close_tab);
@@ -32,6 +33,31 @@ fn settings_empty_json_is_valid() {
         assert_eq!(settings.ip_whitelist, vec!["127.0.0.1", "::1"]);
     }
     assert_eq!(settings.upload_dir, default_upload_dir());
+}
+
+#[test]
+fn quick_send_threshold_is_clamped_on_load_normalization() {
+    let mut loaded: Settings = serde_json::from_str(r#"{"quick_send_threshold":99999}"#).unwrap();
+
+    assert!(clamp_quick_send_threshold(&mut loaded));
+    assert_eq!(loaded.quick_send_threshold, 5000);
+}
+
+#[test]
+fn quick_send_threshold_is_clamped_on_put_normalization() {
+    let mut put = Settings { quick_send_threshold: 99999, ..Settings::default() };
+
+    assert!(clamp_quick_send_threshold(&mut put));
+    assert_eq!(put.quick_send_threshold, 5000);
+    assert!(!clamp_quick_send_threshold(&mut put));
+}
+
+#[test]
+fn settings_ignores_removed_global_paste_auto_enter() {
+    let settings: Settings = serde_json::from_str(r#"{"paste_auto_enter":false}"#)
+        .expect("settings with removed paste_auto_enter should still parse");
+
+    assert_eq!(settings.settings_version, 0);
 }
 
 #[test]

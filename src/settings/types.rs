@@ -64,6 +64,8 @@ pub struct Settings {
     pub toolbar_quick_keys: Vec<ActionKey>,
     #[serde(default)]
     pub keyboard_sound: bool,
+    #[serde(default = "default_quick_send_threshold")]
+    pub quick_send_threshold: u32,
     #[serde(default)]
     pub show_virtual_keyboard: bool,
     // Legacy v4 input retained only so v5 migration can deserialize it.
@@ -470,6 +472,10 @@ pub(crate) fn default_upload_cap_count() -> u32 {
     100
 }
 
+pub(crate) fn default_quick_send_threshold() -> u32 {
+    63
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelPosition {
@@ -760,6 +766,7 @@ impl Default for Settings {
             upload_cap_count: default_upload_cap_count(),
             upload_file_cap_mb: 0,
             keyboard_sound: false,
+            quick_send_threshold: default_quick_send_threshold(),
             show_virtual_keyboard: false,
             show_workspace_badge_on_tab: None,
             workspace_badge_mode: None,

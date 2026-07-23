@@ -338,6 +338,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.monitor.pluginMetrics': 'Plugin Metrics',
     'settings.tab.monitor': 'Monitor',
     'settings.keyboard.feedback': 'Key Feedback',
+    'settings.keyboard.quickSendThreshold': 'Quick send threshold',
+    'settings.keyboard.quickSendThresholdHint':
+      'Single-line input at or below this length sends immediately. Longer input waits for a separate Enter; 0 always waits.',
     'settings.keyboard.sound': 'Click sound on key press',
     'settings.keyboard.keepOnScroll': 'Keep keyboard open while scrolling',
     'settings.keyboard.keepOnScrollHint':
@@ -1074,6 +1077,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.monitor.pluginMetrics': '插件指标',
     'settings.tab.monitor': '监控',
     'settings.keyboard.feedback': '按键反馈',
+    'settings.keyboard.quickSendThreshold': '快捷发送阈值',
+    'settings.keyboard.quickSendThresholdHint':
+      '单行输入不超过此长度时直接发送；更长的输入需再按一次回车。设为 0 时始终等待回车。',
     'settings.keyboard.sound': '按键音效',
     'settings.keyboard.keepOnScroll': '滚动时保持键盘',
     'settings.keyboard.keepOnScrollHint': '上翻查看历史输出时不再收起键盘',

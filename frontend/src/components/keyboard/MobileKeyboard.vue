@@ -32,6 +32,8 @@
           @focus="onTextInputFocus"
           @blur="onTextInputBlur"
           @input="resizeTextInput"
+          @compositionstart="onCompositionStart"
+          @compositionend="onCompositionEnd"
           @keydown.enter.exact.prevent="sendTextInput"
         />
       </div>
@@ -302,6 +304,10 @@
   </div>
 </template>
 
+<script lang="ts">
+export const SPLIT_DELAY_MS = 50
+</script>
+
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import MkbRow from './MkbRow.vue'
@@ -335,11 +341,12 @@ import { POSITION, useToast } from 'vue-toastification'
 import { useTextareaMetrics } from '../../composables/useTextareaMetrics'
 import { useSwipePanel } from '../../composables/useSwipePanel'
 import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
+import type { SendDataFn } from '../../utils/frozenSend'
 
 const props = defineProps<{
   visible: boolean
   paneId: string
-  getSendFn: () => ((data: string) => void) | null
+  getSendFn: () => SendDataFn | null
 }>()
 
 const emit = defineEmits<{
@@ -372,6 +379,10 @@ const textInputFocused = ref(false)
 const kbMode = ref<'default' | 'action'>('action')
 const inputBuffer = ref('')
 let blurTimer: ReturnType<typeof setTimeout> | null = null
+let composing = false
+let sendLocked = false
+let sendGeneration = 0
+let componentMounted = false
 
 const {
   resetTextareaMetrics,
@@ -457,16 +468,56 @@ function onTextInputBlur() {
   }, 100)
 }
 
-function sendTextInput() {
-  const text = textInput.value
-  if (!text) return
-  props.getSendFn()?.(text + '\r')
+function onCompositionStart() {
+  composing = true
+}
+
+function onCompositionEnd() {
+  composing = false
+}
+
+function clearSentText() {
   textInput.value = ''
   textInputRef.value?.focus()
   nextTick(resizeTextInput)
 }
 
+async function sendTextInput() {
+  if (composing || sendLocked) return
+  const text = textInput.value
+  if (text.includes('\0') || text.includes('\x1b')) return
+  const send = props.getSendFn()
+  if (!send) return
+  if (!text) {
+    send('\r')
+    return
+  }
+
+  const direct =
+    !text.includes('\n') &&
+    settings.quick_send_threshold > 0 &&
+    text.length <= settings.quick_send_threshold
+  if (!direct) {
+    send(text)
+    clearSentText()
+    return
+  }
+
+  sendLocked = true
+  const generation = ++sendGeneration
+  try {
+    const textLeg = send(text)
+    clearSentText()
+    await textLeg
+    await new Promise<void>((resolve) => setTimeout(resolve, SPLIT_DELAY_MS))
+    if (componentMounted && generation === sendGeneration) send('\r')
+  } finally {
+    if (generation === sendGeneration) sendLocked = false
+  }
+}
+
 function onKeyPress(ch: string) {
+  if (sendLocked) return
   let data = ch
   if (data.length !== 1) {
     if (data === '\r' || data === '\n') inputBuffer.value = ''
@@ -508,6 +559,7 @@ function onKeyPress(ch: string) {
 }
 
 function onAppAction(id: string, options: AppActionOptions) {
+  if (sendLocked) return
   emit('app-action', id, options)
 }
 
@@ -772,6 +824,7 @@ function onTerminalScrollCollapse() {
 }
 
 onMounted(() => {
+  componentMounted = true
   fetchSuggestions()
   resetTextInputHeight()
 
@@ -806,6 +859,11 @@ function onOrientationChange() {
 }
 
 onBeforeUnmount(() => {
+  componentMounted = false
+  if (sendLocked) {
+    sendLocked = false
+    sendGeneration++
+  }
   if (window.visualViewport) {
     window.visualViewport.removeEventListener('resize', onViewportChange)
     window.visualViewport.removeEventListener('scroll', onViewportChange)

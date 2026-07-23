@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use tracing::error;
 
-use super::normalize::{clamp_text_config, clamp_text_on_load, normalize_action_keyboards};
+use super::normalize::{
+    clamp_quick_send_threshold, clamp_text_config, clamp_text_on_load, normalize_action_keyboards,
+};
 use super::types::{
     default_upload_dir, Settings, WorkspaceBadgeMode, CURRENT_SETTINGS_VERSION, LEGACY_UPLOAD_DIR,
 };
@@ -54,8 +56,9 @@ pub fn load_settings() -> Settings {
                         migrated = true;
                     }
                     let text_changed = clamp_text_config(&mut settings.text);
+                    let threshold_changed = clamp_quick_send_threshold(&mut settings);
                     let action_keyboard_changed = normalize_action_keyboards(&mut settings);
-                    if migrated || text_changed || action_keyboard_changed {
+                    if migrated || text_changed || threshold_changed || action_keyboard_changed {
                         if let Err(e) = save_settings(&settings) {
                             error!("persist settings on load: {}", e);
                         }
@@ -77,8 +80,9 @@ pub fn load_settings() -> Settings {
     };
     let migrated = migrate_settings(&mut settings);
     let text_changed = clamp_text_on_load(&mut settings.text);
+    let threshold_changed = clamp_quick_send_threshold(&mut settings);
     let action_keyboard_changed = normalize_action_keyboards(&mut settings);
-    if migrated || text_changed || action_keyboard_changed {
+    if migrated || text_changed || threshold_changed || action_keyboard_changed {
         if let Err(e) = save_settings(&settings) {
             error!("persist settings on load: {}", e);
         }

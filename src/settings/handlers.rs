@@ -13,7 +13,9 @@ use tracing::{error, info};
 use crate::session::SessionManager;
 
 use super::io::{bg_image_path, migrate_settings, save_settings};
-use super::normalize::{clamp_text_config, clamp_theme_on_put, normalize_action_keyboards};
+use super::normalize::{
+    clamp_quick_send_threshold, clamp_text_config, clamp_theme_on_put, normalize_action_keyboards,
+};
 use super::types::CURRENT_SETTINGS_VERSION;
 use super::{log_file_path, Settings, SettingsState};
 
@@ -34,6 +36,7 @@ pub async fn put_settings(
     let _ = migrate_settings(&mut new_settings);
     new_settings.settings_version = CURRENT_SETTINGS_VERSION;
     let _ = clamp_text_config(&mut new_settings.text);
+    let _ = clamp_quick_send_threshold(&mut new_settings);
     let _ = clamp_theme_on_put(&mut new_settings);
     let _ = normalize_action_keyboards(&mut new_settings);
     match save_settings(&new_settings) {

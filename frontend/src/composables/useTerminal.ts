@@ -640,7 +640,7 @@ export class TerminalInstance {
     // Guard: only the active pane sends input (prevents WKWebView multi-focus duplication)
     if (!force && _activePaneId !== null && _activePaneId !== this.paneId) return
     if (this._transport) {
-      this._transport.send({ type: 'input', data })
+      return this._transport.send({ type: 'input', data })
     } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'input', data } as ClientMsg))
     }

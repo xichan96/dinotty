@@ -252,7 +252,7 @@ function isComposing(): boolean {
 }
 
 function sendData(data: string, force?: boolean) {
-  terminal?.sendData(data, force)
+  return terminal?.sendData(data, force)
 }
 
 function pasteFromClipboard(text: string, autoEnter = false): boolean {

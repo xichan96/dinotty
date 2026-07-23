@@ -160,6 +160,12 @@ pub(crate) fn clamp_theme_on_put(settings: &mut Settings) -> bool {
     clamp_theme_library(&mut settings.custom_themes, &mut settings.hidden_builtins)
 }
 
+pub(crate) fn clamp_quick_send_threshold(settings: &mut Settings) -> bool {
+    let old = settings.quick_send_threshold;
+    settings.quick_send_threshold = settings.quick_send_threshold.clamp(0, 5000);
+    settings.quick_send_threshold != old
+}
+
 // Legit CSS font stacks contain only letters/digits/space/comma/quotes.
 // Anything with control chars or < > ; { } is a CSS-injection vector -> neutralise.
 fn font_family_is_unsafe(s: &str) -> bool {

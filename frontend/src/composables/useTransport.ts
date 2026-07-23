@@ -2,7 +2,7 @@ import type { ClientMsg, ServerMsg } from '../types/protocol'
 import { wsUrlWithToken } from './apiBase'
 
 export interface Transport {
-  send(msg: ClientMsg): void
+  send(msg: ClientMsg): void | Promise<void>
   onMessage(handler: (msg: ServerMsg) => void): void
   onConnect(handler: () => void): void
   onDisconnect(handler: () => void): void
@@ -206,12 +206,14 @@ export class TauriIpcTransport implements Transport {
 
   send(msg: ClientMsg) {
     if (msg.type === 'input') {
-      this._invoke('pty_write', { data: msg.data }).catch((err: unknown) => {
+      const invokePromise = this._invoke('pty_write', { data: msg.data }) as Promise<void>
+      void invokePromise.catch((err: unknown) => {
         const errStr = typeof err === 'string' ? err : String(err)
         if (errStr.includes('timeout') || errStr.includes('exited')) {
           this._disconnectHandler?.()
         }
       })
+      return invokePromise
     } else if (msg.type === 'resize') {
       this._invoke('pty_resize', { cols: msg.cols, rows: msg.rows }).catch(() => {})
     } else if (msg.type === 'snapshot_request') {

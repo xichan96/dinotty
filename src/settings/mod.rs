@@ -28,8 +28,8 @@ pub use types::{
 pub(crate) use io::migrate_settings;
 #[cfg(test)]
 pub(crate) use normalize::{
-    clamp_custom_fonts, clamp_text_config, clamp_text_on_load, clamp_theme_on_put,
-    normalize_action_keyboards,
+    clamp_custom_fonts, clamp_quick_send_threshold, clamp_text_config, clamp_text_on_load,
+    clamp_theme_on_put, normalize_action_keyboards,
 };
 #[cfg(test)]
 pub(crate) use types::default_scroll_acceleration;

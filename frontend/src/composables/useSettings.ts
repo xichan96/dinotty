@@ -48,6 +48,7 @@ export interface SettingsData {
   upload_file_cap_mb: number
   upload_cap_count: number
   keyboard_sound: boolean
+  quick_send_threshold: number
   show_virtual_keyboard: boolean
   keyboard_keep_on_scroll: boolean
   workspace_badge_mode: WorkspaceBadgeMode | null
@@ -391,6 +392,7 @@ export const settings = reactive<SettingsData>({
   upload_file_cap_mb: 0,
   upload_cap_count: 100,
   keyboard_sound: false,
+  quick_send_threshold: 63,
   show_virtual_keyboard: false,
   keyboard_keep_on_scroll: false,
   workspace_badge_mode: null,

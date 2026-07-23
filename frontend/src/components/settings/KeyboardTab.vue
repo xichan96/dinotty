@@ -521,6 +521,20 @@
     <div class="settings-group">
       <h3 class="settings-group-title">{{ t('settings.keyboard.feedback') }}</h3>
       <div class="settings-row">
+        <label>{{ t('settings.keyboard.quickSendThreshold') }}</label>
+        <input
+          v-model.number="settings.quick_send_threshold"
+          type="number"
+          min="0"
+          max="5000"
+          step="1"
+          class="settings-input-number"
+          data-setting="quick-send-threshold"
+          @change="onQuickSendThresholdChange"
+        />
+      </div>
+      <p class="settings-hint">{{ t('settings.keyboard.quickSendThresholdHint') }}</p>
+      <div class="settings-row">
         <label>{{ t('settings.keyboard.sound') }}</label>
         <label class="toggle">
           <input type="checkbox" v-model="settings.keyboard_sound" @change="saveSettings()" />
@@ -612,6 +626,12 @@
 
 <script lang="ts">
 export { akDropGripThreshold, akResolveDropIndex } from '../../composables/useActionKeyboardGesture'
+
+export function normalizeQuickSendThreshold(value: unknown): number {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 63
+  return Math.min(5000, Math.max(0, Math.trunc(numeric)))
+}
 </script>
 
 <script setup lang="ts">
@@ -652,6 +672,11 @@ import {
 const { settings, saveSettings } = useSettings()
 const { hasOverride, reloadAfterSuperviseTabs, resetOverride } = useDeviceSuperviseReload()
 const { t } = useI18n()
+
+function onQuickSendThresholdChange() {
+  settings.quick_send_threshold = normalizeQuickSendThreshold(settings.quick_send_threshold)
+  void saveSettings()
+}
 const { defs, getBinding, formatBinding, isReadOnly } = useKeybindings()
 const appDefs = computed(() => defs.filter((def) => (def.kind ?? 'app') === 'app'))
 const terminalDefs = computed(() => defs.filter((def) => def.kind === 'terminal'))

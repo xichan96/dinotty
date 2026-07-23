@@ -319,6 +319,7 @@ import SshAuthPromptDialog from './components/ssh/SshAuthPromptDialog.vue'
 import StatusBar from './components/terminal/StatusBar.vue'
 import type { Tab, TerminalTab, PluginTab, PaneLayout, LeafPane, DropPosition } from './types/pane'
 import { getAllLeaves, findLeaf, findFirstLeaf, ensureSplitRoot } from './types/pane'
+import { createFrozenSendFn, type SendDataFn } from './utils/frozenSend'
 import { initializePaneMru } from './types/paneMru'
 // useSettings replaced by useSettingsStore
 import {
@@ -943,23 +944,26 @@ function onFileClick(path: string) {
   nextTick(() => previewPanelRef.value?.openFromPath(path))
 }
 
-function getSendFn(): ((data: string) => void) | null {
+function getSendFn(): SendDataFn | null {
   if (!activePaneId.value) return null
   const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
   if (!tab || tab.type !== 'terminal') return null
   const paneId = tab.activePaneId
   if (!termRefs[paneId]) return null
-  return (data: string) => {
-    termRefs[paneId]?.sendData(data)
-    if (tab.broadcastMode && getAllLeaves(tab.layout).length > 1) {
-      for (const leaf of getAllLeaves(tab.layout)) {
-        if (leaf.paneId !== paneId) {
-          termRefs[leaf.paneId]?.sendData(data, true)
-        }
-      }
-      tab.broadcastActivity++
-    }
-  }
+  const broadcastMode = tab.broadcastMode
+  const frozenLeaves = broadcastMode ? getAllLeaves(tab.layout) : []
+  const recipientIds = [
+    paneId,
+    ...frozenLeaves.filter((leaf) => leaf.paneId !== paneId).map((leaf) => leaf.paneId),
+  ]
+  return createFrozenSendFn(
+    recipientIds.map((recipientId) =>
+      recipientId === paneId
+        ? (data: string) => termRefs[recipientId]?.sendData(data)
+        : (data: string) => termRefs[recipientId]?.sendData(data, true)
+    ),
+    broadcastMode && recipientIds.length > 1 ? () => tab.broadcastActivity++ : undefined,
+  )
 }
 
 async function onLoginSuccess() {

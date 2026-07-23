@@ -204,7 +204,7 @@ pub async fn split_pane(
         .get(&req.pane_id)
         .and_then(|s| s.cwd_state.lock().ok().map(|state| state.cwd.clone()));
 
-    let (_session, _shell_type) = if req.force_local {
+    let (session, _shell_type) = if req.force_local {
         // Force local PTY - use explicit cwd if provided, otherwise inherit from source
         let local_cwd = req.cwd.map(std::path::PathBuf::from).or(source_cwd);
         match pty::create_session(&manager, &new_pane_id, Some(&tab_id), None, local_cwd, None) {
@@ -292,6 +292,7 @@ pub async fn split_pane(
         layout: new_layout.clone(),
         active_pane_id,
     });
+    manager.recheck_publish_or_correct(&new_pane_id, &session);
 
     Json(serde_json::json!({
         "new_pane_id": new_pane_id,

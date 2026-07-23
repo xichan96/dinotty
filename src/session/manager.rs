@@ -549,6 +549,20 @@ impl SessionManager {
         self.sessions.get(pane_id).is_some_and(|current| Arc::ptr_eq(current.value(), session))
     }
 
+    /// Correct a just-published layout if its session exited during the broadcast race.
+    pub fn recheck_publish_or_correct(&self, pane_id: &str, session: &Arc<Session>) {
+        if self.is_current_session(pane_id, session) {
+            return;
+        }
+
+        let changes = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.purge_pane_from_layouts_locked(pane_id, true)
+        };
+        self.broadcast_layout_changes(changes);
+    }
+
     /// Check if a `pane_id` belongs to any registered tab layout.
     /// Used to prevent creating fallback PTY sessions for SSH panes.
     pub fn is_pane_in_any_tab(&self, pane_id: &str) -> bool {

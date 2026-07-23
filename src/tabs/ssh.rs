@@ -65,6 +65,7 @@ pub async fn create_ssh_quick_tab(
         cwd: None,
         connection_id: req.profile_id.clone(),
     });
+    manager.recheck_publish_or_correct(&pane_id, &session);
 
     Json(serde_json::json!({
         "tab_id": tab_id,
@@ -158,6 +159,7 @@ pub async fn create_ssh_tab(
         cwd: None,
         connection_id: Some(req.profile_id.clone()),
     });
+    manager.recheck_publish_or_correct(&pane_id, &session);
 
     Json(serde_json::json!({
         "tab_id": tab_id,

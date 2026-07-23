@@ -4,6 +4,9 @@ export function createFrozenSendFn(senders: SendDataFn[], onDispatch?: () => voi
   return (data: string) => {
     const results = senders.map((send) => send(data))
     onDispatch?.()
-    return Promise.all(results).then(() => undefined)
+    const aggregate = Promise.all(results).then(() => undefined)
+    // Transport layer logs failures already.
+    void aggregate.catch(() => {})
+    return aggregate
   }
 }

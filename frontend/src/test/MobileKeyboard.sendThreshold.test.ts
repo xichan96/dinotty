@@ -285,8 +285,10 @@ describe('MobileKeyboard configurable send threshold', () => {
     await mounted.find('textarea').trigger('keydown', { key: 'Enter' })
     await advance(50)
 
+    // Sync throw retains text, releases the lock, and a follow-up send works
+    // (['retry'] retried, then '\r' — no error surfaced to Vue's errorHandler).
     expect(send.mock.calls).toEqual([['retry'], ['retry'], ['\r']])
-    expect(errorHandler).toHaveBeenCalled()
+    expect(errorHandler).not.toHaveBeenCalled()
   })
 
   it('scenario 15: an asynchronous native text-leg rejection skips bare Enter', async () => {
@@ -301,8 +303,14 @@ describe('MobileKeyboard configurable send threshold', () => {
     await nextTick()
     await advance(100)
 
+    // '\r' leg skipped, no error surfaced to Vue's errorHandler.
     expect(send.mock.calls).toEqual([['reject']])
-    expect(errorHandler).toHaveBeenCalled()
+    expect(errorHandler).not.toHaveBeenCalled()
+
+    // Lock released: a follow-up send works.
+    await enterText(mounted, 'again')
+    await advance(50)
+    expect(send.mock.calls).toEqual([['reject'], ['again'], ['\r']])
   })
 
   it('scenario 16: forwards the real invoke promise through transport, terminal, App closure, and keyboard', async () => {

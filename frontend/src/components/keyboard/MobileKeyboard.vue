@@ -511,6 +511,8 @@ async function sendTextInput() {
     await textLeg
     await new Promise<void>((resolve) => setTimeout(resolve, SPLIT_DELAY_MS))
     if (componentMounted && generation === sendGeneration) send('\r')
+  } catch {
+    // Rejected text leg: degrade to two-stage (no \r). Transport already logged.
   } finally {
     if (generation === sendGeneration) sendLocked = false
   }

@@ -8,13 +8,17 @@ use crate::event_bus::{BusEvent, EventBus};
 use crate::workspace_mgmt::Workspace;
 use dashmap::DashMap;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     atomic::{AtomicU16, Ordering},
     Arc, Mutex,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
+
+const SESSION_REAP_TICK: Duration = Duration::from_secs(30);
+const SESSION_UNOWNED_GRACE: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug)]
 pub enum CloseReason {
@@ -198,8 +202,43 @@ pub struct TabInfo {
     pub connection_id: Option<String>,
 }
 
-pub(crate) fn parse_reap_secs(raw: Option<String>) -> u64 {
-    raw.and_then(|v| v.parse::<u64>().ok()).unwrap_or(5_400)
+#[derive(Default)]
+struct ReapTickStats {
+    total: usize,
+    referenced: usize,
+    unowned_grace: usize,
+}
+
+fn reconcile_unowned_since(
+    session_ids: &[String],
+    referenced_pane_ids: &HashSet<String>,
+    unowned_since: &mut HashMap<String, Instant>,
+    now: Instant,
+) -> (ReapTickStats, Vec<(String, Instant)>) {
+    let current_sessions: HashSet<&str> = session_ids.iter().map(String::as_str).collect();
+    unowned_since.retain(|pane_id, _| current_sessions.contains(pane_id.as_str()));
+
+    let mut stats = ReapTickStats { total: session_ids.len(), ..ReapTickStats::default() };
+    let mut unowned = Vec::new();
+    for pane_id in session_ids {
+        if referenced_pane_ids.contains(pane_id) {
+            stats.referenced += 1;
+            unowned_since.remove(pane_id);
+            continue;
+        }
+
+        let since = *unowned_since.entry(pane_id.clone()).or_insert(now);
+        if now.saturating_duration_since(since) < SESSION_UNOWNED_GRACE {
+            stats.unowned_grace += 1;
+        }
+        unowned.push((pane_id.clone(), since));
+    }
+    (stats, unowned)
+}
+
+fn session_is_reap_eligible(since: Instant, now: Instant, status: &SessionStatus) -> bool {
+    now.saturating_duration_since(since) >= SESSION_UNOWNED_GRACE
+        && !matches!(status, SessionStatus::Connected)
 }
 
 pub struct SessionManager {
@@ -211,12 +250,13 @@ pub struct SessionManager {
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
     /// Guards membership and all composite mutations of `sessions`,
-    /// `tab_layouts`, `tab_order`, and `active_pane_id`.
+    /// `tab_layouts`, `tab_order`, `active_pane_id`, and `unowned_since`.
     ///
     /// Lock order rule: this lock and per-session locks (`exited`, `status`,
     /// and `backend`) are never held together in either order. Signals,
     /// broadcasts, disk I/O, and async work must also happen after release.
     lifecycle: Mutex<()>,
+    unowned_since: Mutex<HashMap<String, Instant>>,
     notify_port: AtomicU16,
     /// Set once (via `register_notifier`) so any authoritative pane-removal site - including
     /// natural PTY/SSH exit, which never goes through `kill_and_remove` - can notify the
@@ -242,6 +282,7 @@ impl SessionManager {
             pending_ssh_auth: DashMap::new(),
             event_bus: EventBus::new(),
             lifecycle: Mutex::new(()),
+            unowned_since: Mutex::new(HashMap::new()),
             notify_port: AtomicU16::new(0),
             notifier: std::sync::OnceLock::new(),
         }
@@ -342,6 +383,10 @@ impl SessionManager {
 
     pub fn insert_session(&self, pane_id: String, session: Arc<Session>) {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.unowned_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&pane_id);
         self.sessions.insert(pane_id, session);
     }
 
@@ -598,6 +643,10 @@ impl SessionManager {
             let Some((_, session)) = self.sessions.remove(pane_id) else {
                 return false;
             };
+            self.unowned_since
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(pane_id);
 
             let mut layout_changes = self.on_pty_exited_locked(pane_id);
             if layout_changes.closed_tabs.is_empty() && layout_changes.updates.is_empty() {
@@ -659,7 +708,7 @@ impl SessionManager {
     /// notify the attention ledger directly via `pane_closed_notify` without threading a
     /// notifier handle through every call site. Safe to call before `start_cleanup_task` (the
     /// two are independent - a bind failure or startup ordering issue must never suppress the
-    /// detached-session reaper).
+    /// unowned-session reaper).
     pub fn register_notifier(&self, notifier: Arc<crate::notification::NotificationBroadcast>) {
         let _ = self.notifier.set(notifier);
     }
@@ -667,44 +716,179 @@ impl SessionManager {
     pub fn start_cleanup_task(self: &Arc<Self>) {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            let reap_secs = parse_reap_secs(std::env::var("DINOTTY_DETACH_REAP_SECS").ok());
-            let timeout = std::time::Duration::from_secs(reap_secs);
+            let mut interval = tokio::time::interval(SESSION_REAP_TICK);
             loop {
                 interval.tick().await;
-                // Two-pass: collect stale IDs first, then kill_and_remove.
-                // Can't use retain() because we need to kill child processes.
-                let stale: Vec<String> = manager
-                    .sessions
-                    .iter()
-                    .filter_map(|entry| {
-                        let status = entry
-                            .value()
-                            .status
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        match *status {
-                            SessionStatus::Detached { since } if since.elapsed() >= timeout => {
-                                Some(entry.key().clone())
-                            }
-                            _ => None,
-                        }
+                let now = Instant::now();
+                let (stats, unowned) = manager.scan_unowned_sessions(now);
+                let candidates = unowned
+                    .into_iter()
+                    .filter_map(|(pane_id, session, since)| {
+                        let eligible = {
+                            let status = session
+                                .status
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            session_is_reap_eligible(since, now, &status)
+                        };
+                        eligible.then_some(pane_id)
                     })
-                    .collect();
-                for pane_id in stale {
-                    // Re-check status before killing - the session may have been
-                    // reconnected between the collect pass and now.
-                    let should_kill = manager.sessions.get(&pane_id).is_some_and(|entry| {
-                        let status = entry.value().status.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        matches!(*status, SessionStatus::Detached { since } if since.elapsed() >= timeout)
-                    });
+                    .collect::<Vec<_>>();
 
-                    if should_kill {
-                        info!("Cleanup: removing detached session: pane={}", pane_id);
-                        manager.close_session(&pane_id, CloseReason::Reaped, true, None);
+                let mut reaped = 0;
+                for pane_id in candidates {
+                    if manager.final_reap_recheck(&pane_id, Instant::now())
+                        && manager.close_session(&pane_id, CloseReason::Reaped, true, None)
+                    {
+                        reaped += 1;
                     }
+                }
+
+                if stats.referenced != stats.total || reaped > 0 {
+                    info!(
+                        total = stats.total,
+                        referenced = stats.referenced,
+                        unowned_grace = stats.unowned_grace,
+                        reaped,
+                        "Session cleanup sweep"
+                    );
                 }
             }
         });
+    }
+
+    fn referenced_pane_ids_locked(&self) -> HashSet<String> {
+        self.tab_layouts
+            .iter()
+            .filter_map(|entry| entry.value().get("layout").cloned())
+            .flat_map(|layout| collect_terminal_leaf_pane_ids(&layout))
+            .collect()
+    }
+
+    fn pane_is_referenced_locked(&self, pane_id: &str) -> bool {
+        self.tab_layouts.iter().any(|entry| {
+            entry.value().get("layout").is_some_and(|layout| {
+                collect_terminal_leaf_pane_ids(layout).iter().any(|id| id == pane_id)
+            })
+        })
+    }
+
+    fn scan_unowned_sessions(
+        &self,
+        now: Instant,
+    ) -> (ReapTickStats, Vec<(String, Arc<Session>, Instant)>) {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let referenced_pane_ids = self.referenced_pane_ids_locked();
+        let session_ids = self.sessions.iter().map(|entry| entry.key().clone()).collect::<Vec<_>>();
+        let (stats, unowned) = reconcile_unowned_since(
+            &session_ids,
+            &referenced_pane_ids,
+            &mut self.unowned_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            now,
+        );
+        let unowned = unowned
+            .into_iter()
+            .filter_map(|(pane_id, since)| {
+                self.sessions
+                    .get(&pane_id)
+                    .map(|session| (pane_id, Arc::clone(session.value()), since))
+            })
+            .collect();
+        (stats, unowned)
+    }
+
+    fn final_reap_recheck(&self, pane_id: &str, now: Instant) -> bool {
+        let candidate = {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.pane_is_referenced_locked(pane_id) {
+                self.unowned_since
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(pane_id);
+                return false;
+            }
+
+            let Some(session) = self.sessions.get(pane_id).map(|entry| Arc::clone(entry.value()))
+            else {
+                self.unowned_since
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(pane_id);
+                return false;
+            };
+            let since = *self
+                .unowned_since
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(pane_id.to_string())
+                .or_insert(now);
+            if now.saturating_duration_since(since) < SESSION_UNOWNED_GRACE {
+                return false;
+            }
+            (session, since)
+        };
+
+        let status = candidate.0.status.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        session_is_reap_eligible(candidate.1, now, &status)
+    }
+}
+
+#[cfg(test)]
+mod reap_tests {
+    use super::*;
+
+    #[test]
+    fn referenced_session_is_never_reap_eligible() {
+        let started = Instant::now();
+        let later = started + SESSION_UNOWNED_GRACE + Duration::from_secs(1);
+        let session_ids = vec!["pane-1".to_string()];
+        let referenced = HashSet::from(["pane-1".to_string()]);
+        let mut unowned_since = HashMap::from([("pane-1".to_string(), started)]);
+
+        let (stats, unowned) =
+            reconcile_unowned_since(&session_ids, &referenced, &mut unowned_since, later);
+
+        assert_eq!(stats.referenced, 1);
+        assert!(unowned.is_empty());
+        assert!(unowned_since.is_empty());
+    }
+
+    #[test]
+    fn unowned_session_remains_in_grace_before_sixty_seconds() {
+        let started = Instant::now();
+        let session_ids = vec!["pane-1".to_string()];
+        let mut unowned_since = HashMap::new();
+        let (stats, unowned) =
+            reconcile_unowned_since(&session_ids, &HashSet::new(), &mut unowned_since, started);
+        let since = unowned[0].1;
+        let status = SessionStatus::Detached { since: started };
+
+        assert_eq!(stats.unowned_grace, 1);
+        assert!(!session_is_reap_eligible(since, started + Duration::from_secs(59), &status));
+    }
+
+    #[test]
+    fn unowned_detached_session_is_eligible_at_sixty_seconds() {
+        let started = Instant::now();
+
+        assert!(session_is_reap_eligible(
+            started,
+            started + SESSION_UNOWNED_GRACE,
+            &SessionStatus::Detached { since: started }
+        ));
+    }
+
+    #[test]
+    fn connected_session_is_exempt_after_unowned_grace() {
+        let started = Instant::now();
+        let after_grace = started + SESSION_UNOWNED_GRACE;
+
+        assert!(!session_is_reap_eligible(started, after_grace, &SessionStatus::Connected));
+        assert!(session_is_reap_eligible(
+            started,
+            after_grace,
+            &SessionStatus::Detached { since: after_grace }
+        ));
     }
 }

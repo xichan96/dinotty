@@ -14,8 +14,6 @@ pub use manager::{CloseReason, SessionManager, SessionStatus, SyncClient, SyncMs
 
 #[cfg(test)]
 pub(crate) use cwd::{find_subslice, parse_title_cwd, sniff_cwd_from_title_osc, OSC_SNIFF_CAP};
-#[cfg(test)]
-pub(crate) use manager::parse_reap_secs;
 
 use crate::vt_screen::VirtualScreen;
 use std::{

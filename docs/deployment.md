@@ -120,7 +120,6 @@ Windows 上可通过 Docker Desktop 使用 Linux 容器部署；`.env` 中的工
 | Token | `DINOTTY_TOKEN` 环境变量或配置文件 | 未配置 / 首次设置 | 访问认证令牌，为空时进入首次设置流程 |
 | 日志级别 | `RUST_LOG` 环境变量 | info | trace / debug / info / warn / error |
 | Shell | Unix: `SHELL`；Windows: `DINOTTY_SHELL` | 自动检测 | Windows 优先 `DINOTTY_SHELL`，再尝试 `pwsh.exe`、`powershell.exe`、`%ComSpec%` / `cmd.exe` |
-| 分离会话回收时间 | `DINOTTY_DETACH_REAP_SECS` 环境变量 | 5400（90 分钟） | seconds a detached (disconnected) session is kept before the cleanup task reaps it; default 5400 (90 minutes) |
 
 ### 配置与数据目录
 

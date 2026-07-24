@@ -339,6 +339,7 @@ import { useSwipePanel } from '../../composables/useSwipePanel'
 import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
 import type { SendDataFn } from '../../utils/frozenSend'
 import { hasCollapseGuard } from '../../utils/keyboardGuardMode'
+import { isTouchDevice } from '../../utils/terminalInput'
 
 const props = defineProps<{
   visible: boolean
@@ -351,6 +352,7 @@ const emit = defineEmits<{
   bookmarks: []
   'app-action': [id: string, options: AppActionOptions]
   dismiss: []
+  'typing-change': [focused: boolean]
 }>()
 
 const { settings } = useSettings()
@@ -449,6 +451,12 @@ function onTextInputFocus() {
     blurTimer = null
   }
   textInputFocused.value = true
+  // Arm iOS-dismiss detection now if the system keyboard is ALREADY open — e.g.
+  // the user moved focus here from the search or preview-address input without
+  // the keyboard closing, so onViewportChange sees no fresh open edge to arm on.
+  // Without this, a later iOS dismiss would not fall back to the shortcut keyboard.
+  if (sysKbOpen) sysKbArmed = true
+  emit('typing-change', true)
   nextTick(resizeTextInput)
 }
 
@@ -460,6 +468,7 @@ function onTextInputBlur() {
       return
     }
     textInputFocused.value = false
+    emit('typing-change', false)
     resetTextInputHeight()
     nextTick(updateHeight)
     blurTimer = null
@@ -467,6 +476,9 @@ function onTextInputBlur() {
 }
 
 function dismissSystemKeyboard() {
+  // Lift the sticky-typing guard BEFORE blurring so the terminal becomes
+  // focusable again the moment the user leaves typing mode.
+  emit('typing-change', false)
   textInputRef.value?.blur()
   emit('dismiss')
 }
@@ -778,13 +790,21 @@ function updateHeight() {
 // Viewport listener for system keyboard detection
 let naturalVH = 0
 let sysKbOpen = false
+// Armed only by a system-keyboard OPEN edge observed while our own text input holds
+// focus. A bare `sysKbOpen` transition is not enough to conclude "the user dismissed
+// the keyboard": iPad Stage Manager, split-view drags and window resizes shrink the
+// visual viewport past the 120px threshold too, and their restore would otherwise
+// read as a dismissal. Cleared on every close edge and on orientation change.
+let sysKbArmed = false
 
 function onViewportChange() {
   if (!window.visualViewport) return
   const vh = window.visualViewport.height
   if (vh > naturalVH) naturalVH = vh
   const off = window.innerHeight - (window.visualViewport.offsetTop + vh)
+  const wasSysKbOpen = sysKbOpen
   sysKbOpen = naturalVH - vh > 120
+  if (sysKbOpen && !wasSysKbOpen) sysKbArmed = textInputFocused.value
   // Set --kb-open: either system keyboard or custom keyboard is visible
   document.documentElement.style.setProperty('--kb-open', sysKbOpen || props.visible ? '1' : '0')
   if (barRef.value) {
@@ -803,6 +823,29 @@ function onViewportChange() {
   }
   if (textInputFocused.value) resizeTextInput()
   updateHeight()
+  // iOS owns dismiss affordances the page cannot intercept: Safari's keyboard-down
+  // button in the input accessory bar, and the Done check in the standalone-PWA
+  // accessory bar. Both hide the system keyboard while leaving our textarea
+  // focused, which strands the UI in typing mode — toolbar shown, shortcut
+  // keyboard hidden, no keyboard at all — and, with the sticky typing guard on,
+  // the terminal cannot take focus either, so there is no way back. Detect the
+  // outcome instead of the button: on an ARMED open→closed edge with our input
+  // still holding focus, run the same path our own dismiss button runs, landing
+  // on the shortcut keyboard. Guarding on activeElement keeps this from
+  // double-firing after our own button, which has already blurred by then.
+  // Touch + collapse-guard gated: this is a behaviour the guard introduces, so
+  // desktop and the off / open_only modes must never reach it.
+  const dismissedByOS = wasSysKbOpen && !sysKbOpen && sysKbArmed
+  if (!sysKbOpen) sysKbArmed = false
+  if (
+    dismissedByOS &&
+    isTouchDevice() &&
+    hasCollapseGuard(settings.keyboard_guard_mode) &&
+    textInputFocused.value &&
+    document.activeElement === textInputRef.value
+  ) {
+    dismissSystemKeyboard()
+  }
 }
 
 watch(
@@ -849,8 +892,17 @@ let roAf = 0
 let resizeObserver: ResizeObserver | null = null
 function onOrientationChange() {
   resetTextareaMetrics()
+  // Disarm SYNCHRONOUSLY: the viewport resize events that a rotation fires arrive
+  // before the 300ms baseline reset below, and against the stale naturalVH a
+  // height change can look like an iOS dismissal. Clearing the arming now means
+  // no dismiss can fire during the rotation window; the timeout re-establishes
+  // the baseline once the new orientation settles.
+  sysKbArmed = false
   setTimeout(() => {
     naturalVH = window.visualViewport!.height
+    // The baseline just moved, so any pending open-edge arming is stale.
+    sysKbOpen = false
+    sysKbArmed = false
     if (textInputFocused.value) resizeTextInput()
     updateHeight()
   }, 300)
@@ -858,6 +910,18 @@ function onOrientationChange() {
 
 onBeforeUnmount(() => {
   componentMounted = false
+  // Release typing mode explicitly. The pending blur timer would otherwise fire
+  // after this component is gone, when its emit no longer reaches the parent —
+  // leaving the parent's typing flag stuck true and, with it, the sticky guard
+  // that disables every terminal's helper textarea. That happens for real when
+  // the session drops mid-typing and the authenticated subtree unmounts: after
+  // re-login every newly attached pane would come up unfocusable.
+  if (blurTimer) {
+    clearTimeout(blurTimer)
+    blurTimer = null
+  }
+  textInputFocused.value = false
+  emit('typing-change', false)
   if (sendLocked) {
     sendLocked = false
     sendGeneration++

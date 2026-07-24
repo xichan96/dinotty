@@ -87,7 +87,11 @@
       </template>
     </TabBar>
 
-    <div id="tab-content" @touchend="onTerminalTouch">
+    <div
+      id="tab-content"
+      @mousedown.capture="onTabContentMouseDownCapture"
+      @touchend="onTerminalTouch"
+    >
       <div
         v-for="tab in tabs"
         :key="tabKey(tab)"
@@ -235,6 +239,7 @@
       @bookmarks="bookmarksRef?.open()"
       @app-action="dispatchAppAction"
       @dismiss="onKeyboardDismiss"
+      @typing-change="(v: boolean) => (kbTyping = v)"
     />
 
     <KbToggleButton
@@ -332,7 +337,12 @@ import {
   markCookieAuthenticated,
 } from './composables/apiBase'
 import { isTauri, tauriInvoke } from './composables/useTransport'
-import { isTouchDevice, setActivePaneId } from './composables/useTerminal'
+import {
+  isKbTypingLocked,
+  isTouchDevice,
+  setActivePaneId,
+  setKbTypingLock,
+} from './composables/useTerminal'
 import { useI18n } from './composables/useI18n'
 import { keyEventMatchesBinding, useKeybindings } from './composables/useKeybindings'
 import { usePluginNotifyBridge } from './composables/usePluginNotifyBridge'
@@ -423,6 +433,8 @@ const windowCloseConfirmVisible = ref(false)
 let linkJustActivated = false
 let scrollGestureDetected = false
 let scrollGestureTimer = 0
+// Sticky typing mode: true while the mobile keyboard's text input is focused.
+const kbTyping = ref(false)
 
 // ── Template refs (purely UI concerns) ─────────────────────────
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
@@ -665,6 +677,17 @@ function adjustActiveTerminalFontSize(delta: number) {
     ref.adjustFontSize(delta)
   }
 }
+
+// Sticky typing mode: the terminal must not be able to take focus while the user
+// is typing on the mobile keyboard, otherwise the iOS system keyboard closes.
+// Only under the collapse guard, so off/open_only stay upstream-equivalent.
+watch(
+  [kbTyping, () => appSettings.keyboard_guard_mode],
+  ([typing, mode]) => {
+    setKbTypingLock(isTouchDevice() && typing && hasCollapseGuard(mode))
+  },
+  { immediate: true },
+)
 
 // Capture plugin preview when active tab changes to a plugin tab (handles initial load)
 watch(
@@ -1025,6 +1048,36 @@ function onTerminalRunCode(e: Event) {
 
 function onLinkActivate() {
   linkJustActivated = true
+}
+
+// Sticky typing mode, native focus-move guard.
+//
+// While typing, disabling every xterm helper textarea already stops a tap that
+// LANDS on a terminal from stealing focus (xterm's own mousedown handler calls
+// preventDefault() and then focus() on a now-unfocusable textarea). But a tap on
+// pane chrome that xterm does not cover — a split pane's header, the reduced-
+// opacity inactive-pane surface, the gap between panes — has no such
+// preventDefault, so the browser's default mousedown action moves focus off our
+// mobile keyboard input, which is exactly what closes the iOS system keyboard.
+// This is why a single-pane tap (always on the terminal) was fine while tapping
+// the other pane in a split was not. Cancel that default action for every
+// mousedown inside the terminal area while the lock is on. Capture phase so it
+// runs before the target's default focus handling; no stopPropagation, so pane
+// activation (SplitContainer's own mousedown -> focusPane) and link clicks still
+// fire. The lock is only ever set on touch under the collapse guard, so desktop
+// and off / open_only never reach this.
+//
+// #tab-content also holds the preview panel, whose address field and other real
+// inputs the user must still be able to focus while typing — cancelling their
+// default action would make them uneditable. So skip genuine focus targets
+// (form controls / contenteditable) and only guard taps on inert terminal
+// chrome. Buttons and links are unaffected either way: preventing a mousedown's
+// default does not cancel the subsequent click.
+function onTabContentMouseDownCapture(e: MouseEvent) {
+  if (!isKbTypingLocked()) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+  e.preventDefault()
 }
 
 function onTerminalTouch(e: TouchEvent) {

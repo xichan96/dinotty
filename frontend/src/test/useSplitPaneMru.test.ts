@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import type { PaneLayout, Tab, TerminalTab } from '../types/pane'
 
 const api = vi.hoisted(() => ({
@@ -10,12 +10,17 @@ const triggers = vi.hoisted(() => ({
   foreground: true,
   markPaneReadIfUnread: vi.fn(),
 }))
+const termLock = vi.hoisted(() => ({ locked: false }))
 
 vi.mock('../composables/useTabApi', () => ({
   apiSplitPane: api.split,
   apiClosePane: api.close,
 }))
-vi.mock('../composables/useTerminal', () => ({ setActivePaneId: vi.fn() }))
+vi.mock('../composables/useTerminal', () => ({
+  setActivePaneId: vi.fn(),
+  setKbTypingLock: () => {},
+  isKbTypingLocked: () => termLock.locked,
+}))
 vi.mock('../composables/useAppForeground', () => ({
   getIsAppForeground: () => triggers.foreground,
 }))
@@ -24,6 +29,7 @@ vi.mock('../composables/useNotification', () => ({
 }))
 
 import { useSplitPane } from '../composables/useSplitPane'
+import { setActivePaneId } from '../composables/useTerminal'
 
 function leaf(paneId: string): PaneLayout {
   return { type: 'leaf', paneId, title: paneId, ratio: 1, zoomed: false }
@@ -69,13 +75,14 @@ function setup() {
     sendLayoutSync: vi.fn(),
     persist: vi.fn(),
   })
-  return { tab, subject }
+  return { tab, subject, termRefs }
 }
 
 describe('useSplitPane MRU', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     triggers.foreground = true
+    termLock.locked = false
   })
 
   it('prepends the pane created and focused by splitPane', async () => {
@@ -149,5 +156,38 @@ describe('useSplitPane MRU', () => {
     api.close.mockRejectedValue(new Error('network'))
     expect(await subject.closePane('b')).toBe(false)
     expect(JSON.stringify(tab)).toBe(before)
+  })
+})
+
+describe('focusPane sticky-typing guard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    termLock.locked = false
+  })
+
+  it('keeps the original terminal blur/focus behaviour while unlocked', async () => {
+    const { tab, subject, termRefs } = setup()
+
+    subject.focusPane('a')
+    await nextTick()
+
+    expect(tab.activePaneId).toBe('a')
+    expect(termRefs['b'].blur).toHaveBeenCalled()
+    expect(termRefs['a'].focus).toHaveBeenCalled()
+  })
+
+  it('activates the pane without moving terminal focus while locked', async () => {
+    const { tab, subject, termRefs } = setup()
+    termLock.locked = true
+
+    subject.focusPane('a')
+    await nextTick()
+
+    expect(tab.activePaneId).toBe('a')
+    expect(setActivePaneId).toHaveBeenCalledWith('a')
+    expect(termRefs['a'].focus).not.toHaveBeenCalled()
+    for (const termRef of Object.values(termRefs) as any[]) {
+      expect(termRef.blur).not.toHaveBeenCalled()
+    }
   })
 })

@@ -28,6 +28,7 @@ const paneMocks = vi.hoisted(() => {
 
 vi.mock('../composables/useTerminal', () => ({
   TerminalInstance: paneMocks.TerminalInstance,
+  setKbTypingLock: () => {},
 }))
 
 vi.mock('../composables/useUpload', () => ({

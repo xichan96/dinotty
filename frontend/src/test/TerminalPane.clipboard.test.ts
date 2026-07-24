@@ -29,7 +29,10 @@ const clipboardMocks = vi.hoisted(() => ({
   readClipboardText: vi.fn(),
 }))
 
-vi.mock('../composables/useTerminal', () => ({ TerminalInstance: paneMocks.TerminalInstance }))
+vi.mock('../composables/useTerminal', () => ({
+  TerminalInstance: paneMocks.TerminalInstance,
+  setKbTypingLock: () => {},
+}))
 vi.mock('../composables/useAppForeground', () => ({ getIsAppForeground: () => false }))
 vi.mock('../composables/useNotification', () => ({ markPaneReadIfUnread: vi.fn() }))
 vi.mock('../composables/useTransport', () => ({

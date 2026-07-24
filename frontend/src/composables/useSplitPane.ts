@@ -25,7 +25,7 @@ import {
   apiMovePane,
   apiExtractPane,
 } from './useTabApi'
-import { setActivePaneId } from './useTerminal'
+import { isKbTypingLocked, setActivePaneId } from './useTerminal'
 import { useI18n } from './useI18n'
 import { usePaneWarning } from './usePaneWarning'
 import { reconcilePaneMru, removePaneFromMru, touchPaneMru } from '../types/paneMru'
@@ -393,6 +393,13 @@ export function useSplitPane(opts: {
       syncTabLayout(tab)
       if (getIsAppForeground()) markPaneReadIfUnread(paneId, 'focus')
       nextTick(() => {
+        // Sticky typing mode: the user tapped another pane while typing on the mobile
+        // keyboard. Keep the iOS system keyboard — mobile input already routes to the
+        // new activePaneId via getSendFn(), so no terminal needs DOM focus. Moving
+        // xterm focus here would blur our textarea and collapse the keyboard. The lock
+        // is only ever set on touch under the collapse guard, so off/open_only and
+        // desktop keep the original blur/focus behaviour untouched.
+        if (isKbTypingLocked()) return
         // Blur all other panes first to prevent duplicate input in Tauri WKWebView
         for (const leaf of getAllLeaves(tab.layout)) {
           if (leaf.paneId !== paneId) {

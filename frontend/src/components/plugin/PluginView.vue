@@ -5,6 +5,10 @@
         v-if="plugin.state === 'active' && plugin.exports?.component && !hasError"
         :is="plugin.exports.component"
         :api="api"
+        :pane-id="paneId"
+        :workspace-id="workspaceId"
+        :is-visible="isVisible"
+        :is-focused="isFocused"
       />
       <div v-else-if="hasError" class="plugin-error">
         <p>Plugin runtime error: {{ errorMsg }}</p>
@@ -26,6 +30,10 @@ import type { LoadedPlugin, PluginContext } from '../../composables/usePluginLoa
 defineProps<{
   plugin: LoadedPlugin
   api: PluginContext
+  paneId: string
+  workspaceId: string | undefined
+  isVisible: boolean
+  isFocused: boolean
 }>()
 
 const hasError = ref(false)

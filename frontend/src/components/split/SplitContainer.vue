@@ -74,6 +74,8 @@
     </div>
     <PaneContent
       :leaf="leaf"
+      :is-visible="isVisible"
+      :is-focused="leaf.paneId === activePaneId"
       @register="(id: string, el: any) => emit('register', id, el)"
       @title-change="(id: string, title: string) => emit('titleChange', id, title)"
       @shell-info="(id: string, shell: string) => emit('shellInfo', id, shell)"
@@ -105,6 +107,7 @@
         :allow-close="allowClose"
         :parent-direction="split!.direction"
         :tab-id="tabId"
+        :is-visible="isChildVisible(child)"
         :style="getChildStyle(idx)"
         @register="(id: string, el: any) => emit('register', id, el)"
         @title-change="(id: string, title: string) => emit('titleChange', id, title)"
@@ -146,16 +149,22 @@ import SplitDivider from './SplitDivider.vue'
 import PaneHeader from './PaneHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 
-const props = defineProps<{
-  layout: PaneLayout
-  activePaneId: string
-  broadcastMode: boolean
-  broadcastActivity: number
-  showHeader?: boolean
-  allowClose?: boolean
-  parentDirection?: 'horizontal' | 'vertical'
-  tabId: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    layout: PaneLayout
+    activePaneId: string
+    broadcastMode: boolean
+    broadcastActivity: number
+    showHeader?: boolean
+    allowClose?: boolean
+    parentDirection?: 'horizontal' | 'vertical'
+    tabId: string
+    isVisible?: boolean
+  }>(),
+  {
+    isVisible: true,
+  }
+)
 
 const emit = defineEmits<{
   register: [paneId: string, el: any]
@@ -183,6 +192,9 @@ const containerRef = ref<HTMLElement>()
 
 const leaf = computed(() => (props.layout.type === 'leaf' ? (props.layout as LeafPane) : null))
 const split = computed(() => (props.layout.type === 'split' ? props.layout : null))
+const hasDirectZoomedLeaf = computed(
+  () => split.value?.children.some((child) => child.type === 'leaf' && child.zoomed) ?? false
+)
 
 const broadcastActive = computed(() => {
   if (!leaf.value) return false
@@ -196,6 +208,10 @@ const broadcastReceiving = computed(() => {
 
 function onLeafClick(paneId: string) {
   emit('focus', paneId)
+}
+
+function isChildVisible(child: PaneLayout) {
+  return props.isVisible && (!hasDirectZoomedLeaf.value || (child.type === 'leaf' && child.zoomed))
 }
 
 function makeRatioRef(idx: number) {

@@ -110,6 +110,7 @@
             :broadcast-activity="tab.broadcastActivity"
             :allow-close="getAllLeaves(tab.layout).length > 1"
             :tab-id="tab.paneId"
+            :is-visible="tab.paneId === activePaneId"
             @register="registerTermRef"
             @title-change="onTitleChange"
             @shell-info="onShellInfo"

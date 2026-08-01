@@ -211,14 +211,33 @@
       @cancel="promptCancel"
     />
 
-    <ConfirmModal
+    <WindowCloseDialog
       :visible="windowCloseConfirmVisible"
+      :can-hide-to-tray="desktopLifecycle.capabilities.value.canHideToTray"
       :title="t('confirm.closeWindowTitle')"
-      :message="t('confirm.closeWindowMessage')"
-      :confirm-text="t('confirm.closeWindowConfirm')"
+      :message="
+        desktopLifecycle.capabilities.value.canHideToTray
+          ? t('confirm.closeWindowMessage')
+          : t('confirm.closeWindowMessageNoTray')
+      "
+      :hide-text="t('confirm.closeWindowHide')"
+      :quit-text="t('confirm.closeWindowQuit')"
       :cancel-text="t('confirm.closeWindowCancel')"
-      @confirm="onWindowCloseConfirm"
+      @hide="onWindowCloseHide"
+      @quit="onWindowCloseQuit"
       @cancel="onWindowCloseCancel"
+    />
+
+    <TrayVisibilityDialog
+      :visible="trayVisibilityDialogVisible"
+      :title="t('traySetup.title')"
+      :message="t('traySetup.message')"
+      :open-settings-text="t('traySetup.openSettings')"
+      :confirm-text="t('traySetup.confirmAndHide')"
+      :cancel-text="t('traySetup.cancel')"
+      @open-settings="onOpenSystemTraySettings"
+      @confirm="onTrayVisibilityConfirmed"
+      @cancel="onTrayVisibilityCancel"
     />
 
     <CommandBookmarks ref="bookmarksRef" :get-send-fn="getSendFn" :create-tab="newTab" />
@@ -318,6 +337,8 @@ import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
+import WindowCloseDialog from './components/ui/WindowCloseDialog.vue'
+import TrayVisibilityDialog from './components/ui/TrayVisibilityDialog.vue'
 import { confirmState, uiConfirm, confirmResolve, confirmCancel } from './composables/useConfirm'
 import PromptModal from './components/ui/PromptModal.vue'
 import MultiSelectPicker from './components/ui/MultiSelectPicker.vue'
@@ -357,6 +378,7 @@ import { useSshAuth } from './composables/useSshAuth'
 import { useCursorPicker } from './composables/useCursorPicker'
 import { useOverviewCallbacks } from './composables/useOverviewCallbacks'
 import { useTabPersistence } from './composables/useTabPersistence'
+import { useDesktopLifecycle } from './composables/useDesktopLifecycle'
 import { useViewportResize } from './composables/useViewportResize'
 import { useDeviceKeyboardSettings } from './composables/useDeviceKeyboardSettings'
 import { useKeyboardOverlap } from './composables/useKeyboardOverlap'
@@ -438,12 +460,7 @@ const session = useSessionStore()
 const { tabs, activePaneId, tabList, activeTabType, activeTab, isBroadcastActive, canBroadcast } =
   storeToRefs(session)
 
-const {
-  persist,
-  persistNow,
-  flushOnUnload,
-  dispose: disposePersist,
-} = useTabPersistence({ tabs, activePaneId })
+const { persist, persistNow, dispose: disposePersist } = useTabPersistence({ tabs, activePaneId })
 
 const ui = useUiStore()
 const { syncConnected, kbVisible, settingsOpen, authenticated, authProbe, needsSetup } =
@@ -452,7 +469,13 @@ const { syncConnected, kbVisible, settingsOpen, authenticated, authProbe, needsS
 const settingsStore = useSettingsStore()
 const appSettings = settingsStore.settings
 
+const desktopLifecycle = useDesktopLifecycle({
+  persistNow,
+  saveSettings: () => settingsStore.save(),
+})
+
 const windowCloseConfirmVisible = ref(false)
+const trayVisibilityDialogVisible = ref(false)
 
 let linkJustActivated = false
 let scrollGestureDetected = false
@@ -1653,19 +1676,52 @@ function setupTauriWindowClose() {
     if (Date.now() - lastTabCloseShortcutAt < 500) {
       return
     }
-    if (appSettings.confirm_before_close_tab && tabs.value.some((t) => t.type === 'terminal')) {
-      windowCloseConfirmVisible.value = true
-    } else {
-      tauriInvoke('close_window')
-    }
+    windowCloseConfirmVisible.value = true
   }).then((fn: () => void) => {
     unlistenWindowClose = fn
   })
 }
-function onWindowCloseConfirm() {
+async function onWindowCloseHide() {
   windowCloseConfirmVisible.value = false
-  flushOnUnload()
-  tauriInvoke('close_window')
+  if (desktopLifecycle.needsTrayVisibilityConfirmation()) {
+    trayVisibilityDialogVisible.value = true
+    return
+  }
+  await performHideToTray()
+}
+async function performHideToTray() {
+  try {
+    await desktopLifecycle.hideToTray()
+  } catch (error) {
+    const message =
+      typeof error === 'object' && error && 'message' in error
+        ? String((error as { message: unknown }).message)
+        : String(error)
+    toast.error(message)
+  }
+}
+async function onOpenSystemTraySettings() {
+  try {
+    await desktopLifecycle.openSystemTraySettings()
+  } catch (error) {
+    const message =
+      typeof error === 'object' && error && 'message' in error
+        ? String((error as { message: unknown }).message)
+        : String(error)
+    toast.error(message)
+  }
+}
+async function onTrayVisibilityConfirmed() {
+  desktopLifecycle.confirmTrayVisibility()
+  trayVisibilityDialogVisible.value = false
+  await performHideToTray()
+}
+function onTrayVisibilityCancel() {
+  trayVisibilityDialogVisible.value = false
+}
+function onWindowCloseQuit() {
+  windowCloseConfirmVisible.value = false
+  void desktopLifecycle.requestQuit('window')
 }
 function onWindowCloseCancel() {
   windowCloseConfirmVisible.value = false
@@ -1673,6 +1729,7 @@ function onWindowCloseCancel() {
 
 onMounted(async () => {
   setupTauriWindowClose()
+  await desktopLifecycle.setup()
   document.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('terminal-scroll', onTerminalScroll)
   window.addEventListener('focus', _focusHandler)
@@ -1795,6 +1852,7 @@ onBeforeUnmount(() => {
   clearActiveReadContext()
   clearToastInstance()
   disposePersist()
+  desktopLifecycle.dispose()
   unlistenWindowClose?.()
   document.removeEventListener('keydown', onGlobalKeydown)
   document.removeEventListener('terminal-scroll', onTerminalScroll)

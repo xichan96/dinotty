@@ -64,6 +64,8 @@ chmod +x ./Dinotty*.AppImage
 ./Dinotty*.AppImage
 ```
 
+The Linux system tray integration is experimental and requires an AppIndicator host and compatible runtime libraries. GNOME commonly also needs an AppIndicator extension, while KDE Plasma usually provides a system tray host. If the host or libraries are missing, Dinotty records diagnostics and continues running normally without hiding its main window. It does not install runtime libraries or desktop extensions.
+
 ## macOS Desktop Package
 
 Download the `.dmg` from the CI `dinotty-macos` artifact or from GitHub Releases, then open it and follow the system installer prompts.
@@ -74,6 +76,14 @@ Download packages from the CI `dinotty-windows` artifact or from GitHub Releases
 
 - NSIS installer: suitable for normal install and uninstall flows.
 - Portable `.exe`: suitable for install-free testing.
+
+Dinotty registers one system tray icon for the lifetime of the process. Windows decides whether it appears next to the clock or in the `^` overflow area; Dinotty does not modify this preference:
+
+- Windows 11: open Settings → Personalization → Taskbar → Other system tray icons, then enable Dinotty.
+- Windows 10: open Taskbar settings → Select which icons appear on the taskbar, then enable Dinotty.
+- The NSIS installer and portable executable use different paths, so Windows may treat them as separate entries that must be enabled independently.
+
+Closing the main window offers hide to tray, quit, or cancel when tray hiding is available. Hiding keeps PTYs, terminal sessions, and the embedded service running. Quitting makes a best-effort frontend save before cleaning up sessions; forced termination, power loss, and crashes cannot guarantee that save completes.
 
 For auto-start on Windows, wrap the portable executable with Task Scheduler, NSSM, or WinSW.
 

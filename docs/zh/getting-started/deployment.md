@@ -64,6 +64,8 @@ chmod +x ./Dinotty*.AppImage
 ./Dinotty*.AppImage
 ```
 
+Dinotty 的 Linux 系统托盘功能为实验性功能，需要桌面环境提供 AppIndicator 宿主及相应动态库。GNOME 通常还需要启用 AppIndicator 扩展，KDE Plasma 通常可直接使用系统托盘。缺少宿主或动态库时，Dinotty 会记录诊断信息并继续正常运行，但不会隐藏主窗口；可从其他入口正常退出。应用不会自动安装动态库或桌面扩展。
+
 ## macOS 桌面包
 
 从 CI 的 `dinotty-macos` artifact 或 GitHub Release 下载 `.dmg`，打开后按系统提示安装。
@@ -74,6 +76,14 @@ chmod +x ./Dinotty*.AppImage
 
 - NSIS 安装包：适合正常安装和卸载。
 - portable `.exe`：适合免安装测试。
+
+Dinotty 运行时会持续注册一个系统托盘图标。Windows 决定该图标直接显示在时间旁还是收入 `^` 溢出区域，应用不会修改系统偏好：
+
+- Windows 11：打开“设置 → 个性化 → 任务栏 → 其他系统托盘图标”，开启 Dinotty。
+- Windows 10：打开“任务栏设置 → 选择哪些图标显示在任务栏上”，开启 Dinotty。
+- NSIS 安装版与 portable 版的可执行文件路径不同，Windows 可能将它们视为两个独立条目，需要分别设置。
+
+关闭主窗口时可以选择隐藏到系统托盘、真正退出或取消。隐藏不会终止 PTY、终端会话和嵌入式服务；真正退出会尽力保存前端状态后清理会话。系统强制终止、断电或进程崩溃时无法保证完成保存。
 
 如需开机自启，可以使用 Windows 任务计划程序、NSSM 或 WinSW 包装 portable 可执行文件。
 

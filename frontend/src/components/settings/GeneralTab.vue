@@ -474,6 +474,11 @@
       <section class="settings-section">
         <h3>{{ t('settings.behavior') }}</h3>
         <div class="settings-row">
+          <label>{{ t('settings.systemTray') }}</label>
+        </div>
+        <p class="settings-hint">{{ t('settings.systemTrayWindows') }}</p>
+        <p class="settings-hint">{{ t('settings.systemTrayLinux') }}</p>
+        <div class="settings-row">
           <label>{{ t('settings.confirmBeforeCloseTab') }}</label>
           <label class="toggle">
             <input
@@ -711,7 +716,7 @@ const loginMethodOptions = computed(() => [
 async function refreshHasSubscriber() {
   try {
     const res = await authFetch(
-      apiUrl('/api/plugins/events/has-subscriber?event=auth.verification_code'),
+      apiUrl('/api/plugins/events/has-subscriber?event=auth.verification_code')
     )
     if (!res.ok) return
     const data = await res.json()

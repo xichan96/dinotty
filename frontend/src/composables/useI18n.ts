@@ -675,9 +675,23 @@ const messages: Record<Locale, Record<string, string>> = {
     'confirm.closeTabConfirm': 'Close',
     'confirm.closeTabCancel': 'Cancel',
     'confirm.closeWindowTitle': 'Close window?',
-    'confirm.closeWindowMessage': 'Closing the window will terminate all terminal sessions.',
-    'confirm.closeWindowConfirm': 'Close',
+    'confirm.closeWindowMessage':
+      'Keep Dinotty running in the system tray, or quit and end all terminal sessions.',
+    'confirm.closeWindowMessageNoTray': 'Quitting Dinotty will end all terminal sessions.',
+    'confirm.closeWindowHide': 'Hide to system tray',
+    'confirm.closeWindowQuit': 'Quit Dinotty',
     'confirm.closeWindowCancel': 'Cancel',
+    'traySetup.title': 'Keep Dinotty accessible',
+    'traySetup.message':
+      'Windows may hide the Dinotty system tray icon and may not show a ^ overflow button. Before hiding this window, enable Dinotty under Other system tray icons.',
+    'traySetup.openSettings': 'Open system tray settings',
+    'traySetup.confirmAndHide': 'I enabled it, hide window',
+    'traySetup.cancel': 'Do not hide yet',
+    'settings.systemTray': 'System tray',
+    'settings.systemTrayWindows':
+      'Windows 11: Settings → Personalization → Taskbar → Other system tray icons. Windows 10: Taskbar settings → Select which icons appear on the taskbar. Installer and portable builds may have separate preferences.',
+    'settings.systemTrayLinux':
+      'Linux tray support is experimental and automatically falls back when no AppIndicator host or runtime library is available.',
 
     'fileBookmark.title': 'Bookmarks',
     'fileBookmark.empty': 'No bookmarks yet',
@@ -1481,9 +1495,22 @@ const messages: Record<Locale, Record<string, string>> = {
     'confirm.closeTabConfirm': '关闭',
     'confirm.closeTabCancel': '取消',
     'confirm.closeWindowTitle': '关闭窗口？',
-    'confirm.closeWindowMessage': '关闭窗口将终止所有终端会话。',
-    'confirm.closeWindowConfirm': '关闭',
+    'confirm.closeWindowMessage': '可将 Dinotty 隐藏到系统托盘继续运行，或退出并终止所有终端会话。',
+    'confirm.closeWindowMessageNoTray': '退出 Dinotty 将终止所有终端会话。',
+    'confirm.closeWindowHide': '隐藏到系统托盘',
+    'confirm.closeWindowQuit': '退出 Dinotty',
     'confirm.closeWindowCancel': '取消',
+    'traySetup.title': '让 Dinotty 保持可访问',
+    'traySetup.message':
+      'Windows 可能隐藏 Dinotty 的系统托盘图标，并且当前可能没有 ^ 隐藏图标入口。请在“其他系统托盘图标”中开启 Dinotty，然后再隐藏窗口。',
+    'traySetup.openSettings': '打开系统托盘设置',
+    'traySetup.confirmAndHide': '我已开启，隐藏窗口',
+    'traySetup.cancel': '暂不隐藏',
+    'settings.systemTray': '系统托盘',
+    'settings.systemTrayWindows':
+      'Windows 11：设置 → 个性化 → 任务栏 → 其他系统托盘图标。Windows 10：任务栏设置 → 选择哪些图标显示在任务栏上。安装版与 portable 版可能使用独立偏好。',
+    'settings.systemTrayLinux':
+      'Linux 托盘为实验性功能；没有 AppIndicator 宿主或运行库时会自动降级。',
 
     'fileBookmark.title': '书签',
     'fileBookmark.empty': '暂无书签',

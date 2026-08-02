@@ -38,7 +38,7 @@ fn try_build(app: &App) -> Result<(), String> {
         return Ok(());
     }
     let tray_menu = menu::build(app).map_err(|error| error.to_string())?;
-    let icon = tauri::image::Image::from_bytes(include_bytes!("../../icons/tray-icon.png"))
+    let icon = tauri::image::Image::from_bytes(platform::TRAY_ICON_BYTES)
         .map_err(|error| error.to_string())?;
     let builder = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .icon(icon)

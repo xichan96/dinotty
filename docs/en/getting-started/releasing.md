@@ -1,6 +1,6 @@
 # Release Guide
 
-This guide is for Dinotty repository maintainers. It explains how to prepare a version, promote `dev` to `main`, and trigger an official release with a Git tag. See the [Deployment Guide](deployment.en.md) for installing and deploying artifacts, and [Contributing](contributing.en.md) for the regular contribution workflow.
+This guide is for Dinotty repository maintainers. It explains how to prepare a version, promote `dev` to `main`, and trigger an official release with a Git tag. See the [Deployment Guide](deployment.md) for installing and deploying artifacts, and [Contributing](contributing.md) for the regular contribution workflow.
 
 ## Release Model
 
@@ -123,14 +123,28 @@ git push origin "v$Version"
 
 Before pushing, verify that the tag is exactly `v{workspace_version}` and that the current `HEAD` is the intended `main` commit. Do not use `git push --force` for an official tag.
 
-## 5. Monitor the Package Workflow
+## 5. Configure macOS Signing and Notarization
+
+A repository administrator must configure the following GitHub Actions secrets. Never commit certificates or private key files to Git:
+
+| Secret | Value |
+|--------|-------|
+| `APPLE_CERTIFICATE` | Single-line Base64 of the Developer ID Application `.p12`, for example `base64 -i certificate.p12 \| tr -d '\n'` |
+| `APPLE_CERTIFICATE_PASSWORD` | Password selected when exporting the `.p12`; use an empty value for a passwordless certificate |
+| `APPLE_API_KEY_CONTENT` | Complete contents of the App Store Connect API `AuthKey_*.p8` file |
+| `APPLE_API_KEY` | App Store Connect API Key ID |
+| `APPLE_API_ISSUER` | App Store Connect API Issuer ID |
+
+The macOS job fails immediately when the certificate or any notarization credential is missing, so it cannot publish an unsigned or unnotarized artifact. Tauri signs and notarizes the application with the Developer ID Application certificate; the workflow then submits, staples, and validates the final `.dmg` separately. Secrets can be set safely from standard input with `gh secret set SECRET_NAME`.
+
+## 6. Monitor the Package Workflow
 
 Pushing the tag triggers `.github/workflows/package.yml`:
 
 1. `prepare` confirms that the tag commit is in `origin/main` history.
 2. `scripts/check-workspace-version.py` validates the single version source, Cargo packages, and lockfile.
 3. The workflow confirms that the tag equals `v{workspace_version}`.
-4. The macOS, Linux, and Windows jobs build and upload platform artifacts.
+4. The macOS job signs and notarizes the application and `.dmg`, while all platform jobs build and upload artifacts.
 5. After every platform job succeeds, `publish-release` creates the GitHub Release, generates release notes, and attaches the artifacts.
 
 Expected artifacts:

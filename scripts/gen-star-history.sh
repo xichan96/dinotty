@@ -2,13 +2,13 @@
 # Generate a star history SVG chart from GitHub stargazers data.
 # Incremental: caches daily star counts locally, only fetches new pages on subsequent runs.
 # Requires: gh (GitHub CLI) authenticated, python3
-# Output: docs/images/star-history.svg
+# Output: docs/public/images/star-history.svg
 
 set -euo pipefail
 
 REPO="xichan96/dinotty"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OUT_DIR="$ROOT_DIR/docs/images"
+OUT_DIR="$ROOT_DIR/docs/public/images"
 OUT_FILE="$OUT_DIR/star-history.svg"
 CACHE_FILE="$ROOT_DIR/.star-cache"
 PER_PAGE=100

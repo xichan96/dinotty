@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.png" alt="Dinotty Logo" width="200" />
+  <img src="docs/public/images/logo.png" alt="Dinotty Logo" width="200" />
 </p>
 
 <h1 align="center">Dinotty</h1>
@@ -8,6 +8,7 @@
   <a href="https://github.com/xichan96/dinotty/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/language-Rust-orange" alt="Rust">
   <img src="https://img.shields.io/badge/frontend-Vue%203-brightgreen" alt="Vue 3">
+  <a href="https://xichan96.github.io/dinotty/"><img src="https://img.shields.io/badge/docs-dinotty-8a8a8a" alt="Docs"></a>
   <a href="https://github.com/xichan96/dinotty/stargazers"><img src="https://img.shields.io/github/stars/xichan96/dinotty?style=social" alt="GitHub Stars"></a>
   <a href="https://github.com/xichan96/dinotty/releases"><img src="https://img.shields.io/github/downloads/xichan96/dinotty/total" alt="GitHub Downloads"></a>
   <a href="https://github.com/xichan96/dinotty/issues"><img src="https://img.shields.io/github/issues/xichan96/dinotty" alt="GitHub Issues"></a>
@@ -24,17 +25,17 @@
 ## 截图
 
 <p align="center">
-  <img src="docs/images/1.png" alt="手机上运行 Claude Code" width="250" />
-  <img src="docs/images/2.png" alt="完整键盘布局与 htop" width="250" />
-  <img src="docs/images/3.png" alt="主题设置" width="250" />
+  <img src="docs/public/images/1.png" alt="手机上运行 Claude Code" width="250" />
+  <img src="docs/public/images/2.png" alt="完整键盘布局与 htop" width="250" />
+  <img src="docs/public/images/3.png" alt="主题设置" width="250" />
 </p>
 <p align="center">
-  <img src="docs/images/4.png" alt="快捷键盘自定义" width="250" />
-  <img src="docs/images/5.png" alt="系统监控" width="250" />
-  <img src="docs/images/6.png" alt="通知系统" width="250" />
+  <img src="docs/public/images/4.png" alt="快捷键盘自定义" width="250" />
+  <img src="docs/public/images/5.png" alt="系统监控" width="250" />
+  <img src="docs/public/images/6.png" alt="通知系统" width="250" />
 </p>
 <p align="center">
-  <img src="docs/images/7.png" alt="平板横屏桌面级布局" width="500" />
+  <img src="docs/public/images/7.png" alt="平板横屏桌面级布局" width="500" />
 </p>
 
 ## 桌面端演示
@@ -44,37 +45,37 @@
 **分屏广播** — 可拖拽的多面板分屏，一个 pane 输入，多个 pane 同步执行：
 
 <p align="center">
-  <img src="docs/images/gif/1-split-broadcast.gif" alt="分屏广播演示" width="600" />
+  <img src="docs/public/images/gif/1-split-broadcast.gif" alt="分屏广播演示" width="600" />
 </p>
 
 **命令收藏** — 右键终端文本直接收藏，分组管理，一键执行：
 
 <p align="center">
-  <img src="docs/images/gif/2-command-bookmark.gif" alt="命令收藏演示" width="600" />
+  <img src="docs/public/images/gif/2-command-bookmark.gif" alt="命令收藏演示" width="600" />
 </p>
 
 **SSH 连接与文件浏览器** — 内建 SSH 客户端，远程会话与本地体验一致，SFTP 文件管理全覆盖：
 
 <p align="center">
-  <img src="docs/images/gif/3-ssh-file-browser.gif" alt="SSH 连接与文件浏览器演示" width="600" />
+  <img src="docs/public/images/gif/3-ssh-file-browser.gif" alt="SSH 连接与文件浏览器演示" width="600" />
 </p>
 
 **工作区管理与 Mission Control** — 多工作区隔离，Mission Control 概览，快速切换：
 
 <p align="center">
-  <img src="docs/images/gif/4-workspace-mission-control.gif" alt="工作区管理演示" width="600" />
+  <img src="docs/public/images/gif/4-workspace-mission-control.gif" alt="工作区管理演示" width="600" />
 </p>
 
 **插件系统** — JS 插件热重载，内置 CC Switch、JSON Formatter 等：
 
 <p align="center">
-  <img src="docs/images/gif/5-plugin.gif" alt="插件系统演示" width="600" />
+  <img src="docs/public/images/gif/5-plugin.gif" alt="插件系统演示" width="600" />
 </p>
 
 **统一布局系统** - 终端、插件、文件浏览器、网页预览皆为 pane，可拖拽分屏、跨 Tab 移动、提取为新 Tab：
 
 <p align="center">
-  <img src="docs/images/gif/6-layout-sys.gif" alt="统一布局系统演示" width="600" />
+  <img src="docs/public/images/gif/6-layout-sys.gif" alt="统一布局系统演示" width="600" />
 </p>
 
 ## 为什么选择 Dinotty？
@@ -129,7 +130,7 @@
 - **自包含工作环境** - 内建文件浏览、网页预览、Git 变更、SSH/SFTP、插件系统
 - **免费开源** - 自托管，无订阅无中继
 
-完整方案对比见 [方案对比](docs/getting-started/comparison.md)。
+完整方案对比见 [方案对比](docs/zh/getting-started/comparison.md)。
 
 ## 安装
 
@@ -249,20 +250,20 @@ cargo run
 
 ## 更多文档
 
-- [方案对比](docs/getting-started/comparison.md) — 与 ttyd/gotty/Wetty 及其他 AI Coding 远程方案的差异
-- [部署指南](docs/getting-started/deployment.md) — systemd、Docker、Windows 原生运行、跨平台构建、配置说明
-- [发布指南](docs/getting-started/releasing.md) — 统一版本管理、版本 PR、`dev` 到 `main` 晋升、Tag 与 GitHub Release
-- [文件编辑器](docs/features/file-editor.md) — 分屏、多光标编辑、Cursor Group 跨文件同步
-- [通知系统](docs/features/notifications.md) — HTTP API、Claude Code 集成、Open API
-- [插件系统](docs/plugins/plugins.md) — 安装、清单、API、内置插件
-- [插件开发](docs/plugins/plugin-development.md) — 完整的插件开发文档
-- [Agent API](docs/api/agent-api.md) — HTTP/WebSocket 结构化交互，供 AI Agent 与自动化脚本调用
-- [主机剪贴板 API](docs/api/clipboard-api.md) — 移动端主机粘贴使用的敏感认证接口
-- [MCP Server](docs/api/mcp-server.md) — 内置 MCP JSON-RPC 服务器，AI 助手直接操作终端会话
-- [Token 权限系统](docs/internals/token-system.md) — 基于 Capability 的多 Token 细粒度访问控制
-- [Event Bus](docs/internals/event-bus.md) — 全局事件总线，模块间事件分发
-- [审计日志与 Webhook](docs/internals/audit-webhook.md) — API 使用追踪与外部通知
-- [贡献指南](docs/getting-started/contributing.md) — 分支策略、Commit 规范、代码风格
+- [方案对比](docs/zh/getting-started/comparison.md) — 与 ttyd/gotty/Wetty 及其他 AI Coding 远程方案的差异
+- [部署指南](docs/zh/getting-started/deployment.md) — systemd、Docker、Windows 原生运行、跨平台构建、配置说明
+- [发布指南](docs/zh/getting-started/releasing.md) — 统一版本管理、版本 PR、`dev` 到 `main` 晋升、Tag 与 GitHub Release
+- [文件编辑器](docs/zh/features/file-editor.md) — 分屏、多光标编辑、Cursor Group 跨文件同步
+- [通知系统](docs/zh/features/notifications.md) — HTTP API、Claude Code 集成、Open API
+- [插件系统](docs/zh/plugins/plugins.md) — 安装、清单、API、内置插件
+- [插件开发](docs/zh/plugins/plugin-development.md) — 完整的插件开发文档
+- [Agent API](docs/zh/api/agent-api.md) — HTTP/WebSocket 结构化交互，供 AI Agent 与自动化脚本调用
+- [主机剪贴板 API](docs/zh/api/clipboard-api.md) — 移动端主机粘贴使用的敏感认证接口
+- [MCP Server](docs/zh/api/mcp-server.md) — 内置 MCP JSON-RPC 服务器，AI 助手直接操作终端会话
+- [Token 权限系统](docs/zh/internals/token-system.md) — 基于 Capability 的多 Token 细粒度访问控制
+- [Event Bus](docs/zh/internals/event-bus.md) — 全局事件总线，模块间事件分发
+- [审计日志与 Webhook](docs/zh/internals/audit-webhook.md) — API 使用追踪与外部通知
+- [贡献指南](docs/zh/getting-started/contributing.md) — 分支策略、Commit 规范、代码风格
 
 ## 贡献者
 
@@ -275,12 +276,12 @@ cargo run
 ## 加入 QQ 群
 
 <p align="center">
-  <img src="docs/images/qq.png" alt="QQ 群" width="200" />
+  <img src="docs/public/images/qq.png" alt="QQ 群" width="200" />
 </p>
 
 ## Star History
 
-![Star History](docs/images/star-history.svg)
+![Star History](docs/public/images/star-history.svg)
 
 ## 许可证
 

@@ -123,14 +123,28 @@ git push origin "v$Version"
 
 推送前应确认 tag 名称是 `v{workspace_version}`，且当前 `HEAD` 正是要发布的 `main` commit。不要使用 `git push --force` 发布正式 tag。
 
-## 5. 监控 Package workflow
+## 5. 配置 macOS 签名和公证
+
+仓库管理员需要在 GitHub 仓库的 Actions secrets 中配置以下值；证书和私钥文件不得提交到 Git：
+
+| Secret | 内容 |
+|--------|------|
+| `APPLE_CERTIFICATE` | Developer ID Application `.p12` 文件的 Base64 单行文本，例如 `base64 -i certificate.p12 \| tr -d '\n'` |
+| `APPLE_CERTIFICATE_PASSWORD` | 导出 `.p12` 时设置的密码；无密码证书配置为空值 |
+| `APPLE_API_KEY_CONTENT` | App Store Connect API `AuthKey_*.p8` 文件的完整文本 |
+| `APPLE_API_KEY` | App Store Connect API Key ID |
+| `APPLE_API_ISSUER` | App Store Connect API Issuer ID |
+
+macOS job 缺少证书或任一公证凭据时会立即失败，不会生成未签名或未公证的发布产物。Tauri 使用 Developer ID Application 证书签名并公证应用；workflow 随后单独提交、装订并验证最终 `.dmg`。可用 `gh secret set SECRET_NAME` 从标准输入安全配置 secrets。
+
+## 6. 监控 Package workflow
 
 tag push 会触发 `.github/workflows/package.yml`：
 
 1. `prepare` 确认 tag commit 位于 `origin/main` 历史；
 2. `scripts/check-workspace-version.py` 校验唯一版本源、Cargo packages 和 lockfile；
 3. workflow 确认 tag 等于 `v{workspace_version}`；
-4. macOS、Linux 和 Windows jobs 构建并上传平台产物；
+4. macOS job 签名并公证应用和 `.dmg`，全部平台 jobs 构建并上传产物；
 5. 全部平台 jobs 成功后，`publish-release` 创建 GitHub Release、生成 release notes 并附加产物。
 
 预期产物如下：

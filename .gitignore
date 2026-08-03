@@ -14,3 +14,10 @@ AGENTS.md
 src-tauri/gen/schemas/*.json
 ghostty-comparison-optimization.md
 .star-cache
+
+# Local Apple signing credentials; never commit private keys or certificates.
+/apple-signing/
+
+# VitePress build output
+docs/.vitepress/dist/
+docs/.vitepress/cache/

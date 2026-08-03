@@ -73,6 +73,7 @@ function startDrag(e: MouseEvent | TouchEvent, isTouch: boolean) {
 
   const moveEvent = isTouch ? 'touchmove' : 'mousemove'
   const endEvent = isTouch ? 'touchend' : 'mouseup'
+  const cancelEvent = isTouch ? 'touchcancel' : 'pointercancel'
 
   window.addEventListener(
     moveEvent,
@@ -80,9 +81,12 @@ function startDrag(e: MouseEvent | TouchEvent, isTouch: boolean) {
     { passive: !isTouch } as AddEventListenerOptions
   )
   window.addEventListener(endEvent, onPointerEnd)
+  window.addEventListener(cancelEvent, onPointerEnd)
   if (!isTouch) {
     document.addEventListener('keydown', onKeydown, true)
     document.addEventListener('mouseleave', onMouseLeave)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
   }
 }
 
@@ -96,6 +100,18 @@ function onKeydown(e: KeyboardEvent) {
 function onMouseLeave(_e: MouseEvent) {
   // When pointer leaves the document during drag, cancel without emit
   if (dragStarted) {
+    cancelDrag()
+  }
+}
+
+function onBlur() {
+  if (dragStarted) {
+    cancelDrag()
+  }
+}
+
+function onVisibilityChange() {
+  if (dragStarted && document.visibilityState === 'hidden') {
     cancelDrag()
   }
 }
@@ -150,6 +166,11 @@ function scheduleHoverSwitch(tabId: string) {
 }
 
 function onPointerMove(e: MouseEvent | TouchEvent) {
+  // Self-heal: if the button was released but mouseup was lost, cancel on the next move.
+  if (!isTouchDrag && 'buttons' in e && (e as MouseEvent).buttons === 0) {
+    cancelDrag()
+    return
+  }
   const pos = getPointerPos(e)
   if (!dragStarted) {
     if (
@@ -303,8 +324,12 @@ function cleanup() {
   window.removeEventListener('mouseup', onPointerEnd)
   window.removeEventListener('touchmove', onPointerMove as EventListener)
   window.removeEventListener('touchend', onPointerEnd)
+  window.removeEventListener('pointercancel', onPointerEnd)
+  window.removeEventListener('touchcancel', onPointerEnd)
   document.removeEventListener('keydown', onKeydown, true)
   document.removeEventListener('mouseleave', onMouseLeave)
+  window.removeEventListener('blur', onBlur)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 }
 
 onBeforeUnmount(() => {

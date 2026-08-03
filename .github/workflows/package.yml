@@ -184,8 +184,75 @@ jobs:
           Remove-Item -LiteralPath target/debian -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath src-tauri/target/release/bundle -Recurse -Force -ErrorAction SilentlyContinue
 
+      - name: Configure Apple signing and notarization
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          set -euo pipefail
+
+          for name in \
+            APPLE_API_KEY_CONTENT \
+            APPLE_API_KEY \
+            APPLE_API_ISSUER \
+            APPLE_CERTIFICATE; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required repository secret ${name} is not configured."
+              exit 1
+            fi
+          done
+
+          api_key_path="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s' "${APPLE_API_KEY_CONTENT}" > "${api_key_path}"
+          chmod 600 "${api_key_path}"
+          echo "APPLE_API_KEY_PATH=${api_key_path}" >> "${GITHUB_ENV}"
+
       - name: Build desktop packages
+        env:
+          APPLE_API_KEY: ${{ matrix.platform == 'macos' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ matrix.platform == 'macos' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_CERTIFICATE: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.platform == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: "${{ matrix.platform == 'macos' && 'Developer ID Application: ConstChar LLC (N95822WA7A)' || '' }}"
         run: pnpm dlx "@tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}" build --bundles ${{ matrix.bundles }} --ci
+
+      - name: Notarize and verify macOS artifacts
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+
+          first_dmg="$(find target src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print -quit 2>/dev/null || true)"
+          if [[ -z "${first_dmg}" ]]; then
+            echo "::error::Expected a macOS DMG output."
+            exit 1
+          fi
+
+          # Tauri removes the intermediate .app after creating a DMG-only bundle.
+          while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=2 "${app}"
+            xcrun stapler validate "${app}"
+            spctl --assess --type execute --verbose=2 "${app}"
+          done < <(find target src-tauri/target -type d -path '*/release/bundle/macos/*.app' -print0 2>/dev/null || true)
+
+          # Tauri notarizes the app bundle; submit and staple each distributed DMG as well.
+          while IFS= read -r -d '' dmg; do
+            xcrun notarytool submit "${dmg}" \
+              --key "${APPLE_API_KEY_PATH}" \
+              --key-id "${APPLE_API_KEY}" \
+              --issuer "${APPLE_API_ISSUER}" \
+              --wait
+            xcrun stapler staple "${dmg}"
+            xcrun stapler validate "${dmg}"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "${dmg}"
+          done < <(find target src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print0 2>/dev/null || true)
 
       - name: Install cargo-deb
         if: matrix.platform == 'linux'
@@ -245,6 +312,11 @@ jobs:
           $portableDir = 'target/release/bundle/portable'
           New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
           Copy-Item -LiteralPath $exe -Destination (Join-Path $portableDir $portableName) -Force
+
+      - name: Remove temporary Apple API key
+        if: always() && matrix.platform == 'macos'
+        shell: bash
+        run: rm -f "${APPLE_API_KEY_PATH:-}"
 
       - name: Stage package artifacts
         shell: pwsh

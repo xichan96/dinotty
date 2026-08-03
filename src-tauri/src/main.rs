@@ -7,19 +7,16 @@ use dinotty_server::session::{
 };
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, OnceLock,
-};
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 mod embedded_server;
+mod shutdown;
+mod tray;
+mod window_actions;
 
 static EMBEDDED_HTTP_PORT: OnceLock<u16> = OnceLock::new();
-static DESKTOP_SHUTDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 const BUILT_IN_DEFAULT_PORT: u16 = 8999;
 
 fn default_port() -> u16 {
@@ -612,61 +609,6 @@ fn set_window_title(title: String, window: tauri::Window) -> Result<(), String> 
     window.set_title(&title).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn toggle_window(window: tauri::Window) {
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
-    } else {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
-fn reveal_webview_window(window: &tauri::WebviewWindow) {
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-}
-
-fn reveal_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        reveal_webview_window(&window);
-    }
-}
-
-fn toggle_webview_window(window: &tauri::WebviewWindow) {
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
-    } else {
-        reveal_webview_window(window);
-    }
-}
-
-fn terminate_sessions_once(manager: &SessionManager) {
-    if DESKTOP_SHUTDOWN_STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-
-    let pane_ids: Vec<String> = manager.sessions.iter().map(|entry| entry.key().clone()).collect();
-    tracing::info!("Desktop shutdown: terminating {} session(s)", pane_ids.len());
-    for pane_id in pane_ids {
-        manager.close_session(&pane_id, CloseReason::Shutdown, true, None);
-    }
-}
-
-fn quit_desktop_app(app: &AppHandle, manager: &SessionManager) {
-    terminate_sessions_once(manager);
-    if let Err(e) = app.global_shortcut().unregister_all() {
-        tracing::warn!("Failed to unregister global shortcuts during shutdown: {e}");
-    }
-    app.exit(0);
-}
-
-#[tauri::command]
-fn close_window(app: AppHandle, state: State<'_, Arc<SessionManager>>) {
-    quit_desktop_app(&app, state.inner().as_ref());
-}
-
 /// macOS-specific: GUI-launched apps inherit LaunchServices' minimal PATH, so
 /// argv tabs (e.g. `claude --resume`) fail to spawn. Import the user's
 /// login-shell PATH once at startup, before any PTY spawn or thread exists.
@@ -750,19 +692,20 @@ fn main() {
     let _runtime_enter = runtime.enter();
     manager.start_cleanup_task();
 
-    let run_manager = Arc::clone(&manager);
-
     tauri::Builder::default()
         // Keep one desktop instance so a second launch focuses the hidden/tray window instead
         // of racing the first process for the same port and global shortcut.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tracing::info!("Second Dinotty launch detected; focusing existing window");
-            reveal_main_window(app);
+            window_actions::reveal_main_window(app);
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(manager.clone())
+        .manage(tray::state::TrayCapabilityState::default())
+        .manage(tray::state::TrayMenuState::default())
+        .manage(shutdown::ShutdownCoordinator::new(manager.clone()))
         .setup(move |app| {
             let mgr = Arc::clone(&manager);
             match embedded_server::bind_listener(port) {
@@ -785,57 +728,34 @@ fn main() {
                 }
             }
 
+            // Windows and Linux must not inherit an application menu. The desktop
+            // controls remain in the Vue UI; the native menu belongs only to the tray.
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = window.remove_menu() {
+                    tracing::warn!(%error, "failed to remove native main-window menu");
+                }
+            }
+
             // Register global shortcut for Quake-mode toggle (Ctrl+Shift+`)
-            let win = app.get_webview_window("main").expect("no main window");
-            let win_clone = win.clone();
             app.global_shortcut().on_shortcut(
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Backquote),
-                move |_app, _shortcut, event| {
+                move |app, _shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        toggle_webview_window(&win_clone);
+                        if let Err(error) = window_actions::toggle_main_window_checked(app) {
+                            tracing::warn!(%error, "global shortcut window toggle failed");
+                        }
                     }
                 },
             )?;
 
-            // Build tray icon with context menu
-            let show_item = MenuItemBuilder::with_id("show", "Show/Hide").build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-            let menu = MenuBuilder::new(app).items(&[&show_item, &quit_item]).build()?;
-            let quit_manager = Arc::clone(&manager);
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            toggle_webview_window(&window);
-                        }
-                    }
-                    "quit" => {
-                        quit_desktop_app(app, quit_manager.as_ref());
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            toggle_webview_window(&window);
-                        }
-                    }
-                })
-                .build(app)?;
+            tray::install_tray(app);
 
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if DESKTOP_SHUTDOWN_STARTED.load(Ordering::SeqCst) {
+                if window.app_handle().state::<shutdown::ShutdownCoordinator>().is_finalizing() {
                     return;
                 }
                 api.prevent_close();
@@ -858,23 +778,36 @@ fn main() {
             tauri_read_drag_pboard,
             pick_upload_dir,
             pick_workspace_dir,
-            close_window,
-            toggle_window,
+            shutdown::request_desktop_quit,
+            shutdown::desktop_quit_ack,
+            window_actions::desktop_capabilities,
+            window_actions::hide_main_window,
+            window_actions::open_system_tray_settings,
             set_window_title,
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri application")
         .run(move |app_handle, event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
-                if let Some(win) = app_handle.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                window_actions::reveal_main_window(app_handle);
             }
 
-            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
-                terminate_sessions_once(run_manager.as_ref());
+            match event {
+                tauri::RunEvent::ExitRequested { code, api, .. } => {
+                    if code == Some(tauri::RESTART_EXIT_CODE) {
+                        return;
+                    }
+                    let coordinator = app_handle.state::<shutdown::ShutdownCoordinator>();
+                    if !coordinator.is_finalizing() {
+                        api.prevent_exit();
+                        coordinator.request_quit(app_handle, "system");
+                    }
+                }
+                tauri::RunEvent::Exit => {
+                    app_handle.state::<shutdown::ShutdownCoordinator>().force_cleanup();
+                }
+                _ => {}
             }
 
             #[cfg(not(target_os = "macos"))]

@@ -55,7 +55,7 @@ describe('terminal upload detection', () => {
     expect(drop.defaultPrevented).toBe(true)
   })
 
-  it('keeps the existing Tauri path typing branch unchanged', () => {
+  it('keeps the existing Tauri path typing branch unchanged', async () => {
     transportMocks.tauri = true
     const term = new TerminalInstance('p1')
     const sendData = vi.spyOn(term, 'sendData').mockImplementation(() => {})
@@ -76,6 +76,7 @@ describe('terminal upload detection', () => {
       getData: vi.fn(),
     })
     xterm.dispatchEvent(drop)
+    await flushAsync()
 
     expect(upload).not.toHaveBeenCalled()
     expect(sendData).toHaveBeenCalledWith("'/tmp/a b.txt'")

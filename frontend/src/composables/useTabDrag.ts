@@ -97,6 +97,7 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
 
     const moveEvent = isTouch ? 'touchmove' : 'mousemove'
     const endEvent = isTouch ? 'touchend' : 'mouseup'
+    const cancelEvent = isTouch ? 'touchcancel' : 'pointercancel'
 
     window.addEventListener(
       moveEvent,
@@ -104,9 +105,12 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
       { passive: !isTouch } as AddEventListenerOptions
     )
     window.addEventListener(endEvent, onPointerEnd)
+    window.addEventListener(cancelEvent, onPointerEnd)
     if (!isTouch) {
       document.addEventListener('keydown', onKeydown, true)
       document.addEventListener('mouseleave', onMouseLeave)
+      window.addEventListener('blur', onBlur)
+      document.addEventListener('visibilitychange', onVisibilityChange)
     }
   }
 
@@ -118,6 +122,18 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
 
   function onMouseLeave(_e: MouseEvent) {
     if (dragStarted) {
+      cancelDrag()
+    }
+  }
+
+  function onBlur() {
+    if (dragStarted) {
+      cancelDrag()
+    }
+  }
+
+  function onVisibilityChange() {
+    if (dragStarted && document.visibilityState === 'hidden') {
       cancelDrag()
     }
   }
@@ -153,6 +169,11 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
   }
 
   function onPointerMove(e: MouseEvent | TouchEvent) {
+    // Self-heal: if the button was released but mouseup was lost, cancel on the next move.
+    if (!isTouchDrag && 'buttons' in e && (e as MouseEvent).buttons === 0) {
+      cancelDrag()
+      return
+    }
     const pos = getPointerPos(e)
     if (!dragStarted) {
       if (
@@ -236,8 +257,12 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
     window.removeEventListener('mouseup', onPointerEnd)
     window.removeEventListener('touchmove', onPointerMove as EventListener)
     window.removeEventListener('touchend', onPointerEnd)
+    window.removeEventListener('pointercancel', onPointerEnd)
+    window.removeEventListener('touchcancel', onPointerEnd)
     document.removeEventListener('keydown', onKeydown, true)
     document.removeEventListener('mouseleave', onMouseLeave)
+    window.removeEventListener('blur', onBlur)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
 
     drag.endDrag()
   }

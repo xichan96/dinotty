@@ -1,0 +1,17 @@
+:root {
+  --vp-c-brand: #8a8a8a;
+  --vp-c-brand-light: #a5a5a5;
+  --vp-c-brand-dark: #6f6f6f;
+  --vp-c-brand-darker: #5a5a5a;
+  --vp-c-brand-soft: rgba(138, 138, 138, 0.14);
+}
+
+:root {
+  --vp-button-brand-bg: #8a8a8a;
+  --vp-button-brand-hover-bg: #a5a5a5;
+  --vp-button-brand-active-bg: #6f6f6f;
+}
+
+.VPNavBarTitle .title {
+  font-weight: 600;
+}

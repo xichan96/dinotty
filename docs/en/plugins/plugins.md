@@ -91,7 +91,7 @@ The return value of `activate(context)` may include:
 | **Command Bookmarks** | Command bookmarks with batch execution to multiple terminals |
 | **Text Diff** | Text diff comparison tool with line-by-line highlighting |
 
-For the full plugin development guide, see [plugin-development.md](plugin-development.md).
+For the full plugin development guide, see [Plugin Development Guide (中文)](/zh/plugins/plugin-development).
 
 Dinotty selects a native plugin target on the backend; it never trusts the remote browser platform. Supported keys are `windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, and `macos-aarch64`. `entries[current-target]` takes precedence over legacy `entry`. Unknown targets, missing entries, paths outside the plugin directory, escaping symlinks, and non-regular files are rejected.
 

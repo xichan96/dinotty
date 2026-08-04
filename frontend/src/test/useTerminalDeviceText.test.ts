@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const xtermMocks = vi.hoisted(() => ({ instances: [] as any[] }))
+const mocks = vi.hoisted(() => ({
+  hostTarget: vi.fn<() => string | null>(),
+  instances: [] as any[],
+  isTauri: vi.fn<() => boolean>(),
+}))
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
@@ -10,7 +14,7 @@ vi.mock('@xterm/xterm', () => ({
     buffer = { active: { getLine: () => null, cursorY: 0, cursorX: 0 } }
     constructor(options: Record<string, any>) {
       this.options = { ...options }
-      xtermMocks.instances.push(this)
+      mocks.instances.push(this)
     }
     loadAddon() {}
     open(wrapper: HTMLElement) {
@@ -34,10 +38,14 @@ vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: class {} }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { onContextLoss() {}; dispose() {} } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }))
 vi.mock('../composables/useTransport', () => ({
-  isTauri: () => true,
+  isTauri: mocks.isTauri,
   createTransport: () => ({
     onConnect() {}, onMessage() {}, onDisconnect() {}, connect() {}, disconnect() {}, send() {},
   }),
+}))
+vi.mock('../utils/clientPlatform', () => ({
+  hostTarget: mocks.hostTarget,
+  isWindowsClient: false,
 }))
 vi.mock('../composables/useTerminalWheel', () => ({
   createTerminalWheel: () => ({
@@ -53,6 +61,7 @@ import { settings, notifyTextChange } from '../composables/useSettings'
 import {
   getEffectiveText,
   resetAllOverrides,
+  resetOverride,
   setOverride,
 } from '../composables/useDeviceTextSettings'
 
@@ -76,7 +85,9 @@ function attach(id: string) {
 
 describe('useTerminal device text integration', () => {
   beforeEach(() => {
-    xtermMocks.instances.length = 0
+    mocks.instances.length = 0
+    mocks.hostTarget.mockReturnValue('linux-x86_64')
+    mocks.isTauri.mockReturnValue(true)
     const storage = new MemoryStorage()
     Object.defineProperty(window, 'localStorage', { value: storage, configurable: true })
     vi.stubGlobal('localStorage', storage)
@@ -88,7 +99,14 @@ describe('useTerminal device text integration', () => {
     settings.text.letter_spacing = 1
     settings.text.cursor_blink = true
     settings.text.scrollback = 10000
+    document.documentElement.style.setProperty('--font-mono', 'test-mono-stack')
     vi.stubGlobal('ResizeObserver', class { observe() {}; disconnect() {} })
+    vi.stubGlobal('WebSocket', class {
+      static OPEN = 1
+      readyState = 0
+      close() {}
+      send() {}
+    })
   })
 
   it('initializes xterm from effective text', () => {
@@ -98,6 +116,50 @@ describe('useTerminal device text integration', () => {
     expect(term.xterm?.options).toMatchObject({ fontSize: 24, fontFamily: 'local-font' })
     term.destroy()
   })
+
+  it('uses monospace for an empty font on Linux Tauri', () => {
+    settings.text.font_family = ''
+    const term = attach('p1')
+    expect(term.xterm?.options.fontFamily).toBe('monospace')
+    term.destroy()
+  })
+
+  it('keeps an explicit server font on Linux Tauri', () => {
+    settings.text.font_family = 'server-font'
+    const term = attach('p1')
+    expect(term.xterm?.options.fontFamily).toBe('server-font')
+    term.destroy()
+  })
+
+  it('resets the runtime font to monospace on Linux Tauri and refits once', () => {
+    settings.text.font_family = ''
+    setOverride('font_family', 'local-font')
+    const term = attach('p1')
+    const refit = term['_refit'] as ReturnType<typeof vi.fn>
+    resetOverride('font_family')
+    expect(term.xterm?.options.fontFamily).toBe('monospace')
+    expect(refit).toHaveBeenCalledTimes(1)
+    term.destroy()
+  })
+
+  it('keeps the CSS font stack for an empty font in a Linux browser', () => {
+    mocks.isTauri.mockReturnValue(false)
+    settings.text.font_family = ''
+    const term = attach('p1')
+    expect(term.xterm?.options.fontFamily).toBe('test-mono-stack')
+    term.destroy()
+  })
+
+  it.each(['windows-x86_64', 'macos-aarch64'])(
+    'keeps the CSS font stack for an empty font on %s Tauri',
+    (target) => {
+      mocks.hostTarget.mockReturnValue(target)
+      settings.text.font_family = ''
+      const term = attach('p1')
+      expect(term.xterm?.options.fontFamily).toBe('test-mono-stack')
+      term.destroy()
+    },
+  )
 
   it('broadcasts local changes to two panes and refits each once', () => {
     const one = attach('p1')

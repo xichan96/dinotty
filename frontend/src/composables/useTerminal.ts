@@ -16,7 +16,7 @@ import {
 } from './useDeviceTextSettings'
 import { wsUrlWithToken } from './apiBase'
 import { useKeybindings } from './useKeybindings'
-import { isWindowsClient } from '../utils/clientPlatform'
+import { hostTarget, isWindowsClient } from '../utils/clientPlatform'
 import { setupTouchScroll } from '../utils/touchScroll'
 import {
   DEDUP_WINDOW_MS,
@@ -49,6 +49,12 @@ export {
 let _activePaneId: string | null = null
 export function setActivePaneId(paneId: string | null) {
   _activePaneId = paneId
+}
+
+function resolveTerminalFontFamily(configuredFamily: string, cssFallback: string): string {
+  if (configuredFamily) return configuredFamily
+  if (isTauri() && hostTarget()?.startsWith('linux-')) return 'monospace'
+  return cssFallback
 }
 
 // Sticky typing mode (mobile web): while the user is typing in the app's own
@@ -209,7 +215,7 @@ export class TerminalInstance {
     const v = (name: string) => s.getPropertyValue(name).trim()
 
     const text = getEffectiveText()
-    const fontFamily = text.font_family || v('--font-mono')
+    const fontFamily = resolveTerminalFontFamily(text.font_family, v('--font-mono'))
 
     this.xterm = new XTerm({
       cursorBlink: text.cursor_blink,
@@ -612,9 +618,10 @@ export class TerminalInstance {
         text.letter_spacing !== lastLayout.letter_spacing ||
         text.scrollback !== lastLayout.scrollback
       this.xterm.options.fontSize = text.font_size
-      this.xterm.options.fontFamily =
-        text.font_family ||
-        getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
+      this.xterm.options.fontFamily = resolveTerminalFontFamily(
+        text.font_family,
+        getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim(),
+      )
       this.xterm.options.lineHeight = text.line_height
       this.xterm.options.letterSpacing = text.letter_spacing
       this.xterm.options.cursorBlink = text.cursor_blink

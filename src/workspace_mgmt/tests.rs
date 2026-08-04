@@ -139,6 +139,51 @@ fn test_validate_path_accepts_real_dir() {
 }
 
 #[test]
+#[cfg(windows)]
+fn test_validate_path_simplifies_windows_verbatim_prefix() {
+    let temp_dir = std::env::temp_dir();
+    let canonical = validate_workspace_path(&temp_dir.to_string_lossy()).unwrap();
+
+    assert!(!canonical.to_string_lossy().starts_with(r"\\?\"));
+}
+
+#[test]
+fn test_simplify_local_workspace_paths_preserves_remote_paths() {
+    let remote_path = r"\\?\C:\remote\project";
+    let mut workspaces = vec![Workspace {
+        id: "remote".to_string(),
+        name: "remote".to_string(),
+        path: remote_path.to_string(),
+        order: 0,
+        connection_id: Some("ssh-profile".to_string()),
+        abbr: None,
+        color: None,
+    }];
+
+    simplify_local_workspace_paths(&mut workspaces);
+
+    assert_eq!(workspaces[0].path, remote_path);
+}
+
+#[test]
+#[cfg(windows)]
+fn test_simplify_local_workspace_paths_updates_legacy_windows_paths_in_memory() {
+    let mut workspaces = vec![Workspace {
+        id: "local".to_string(),
+        name: "local".to_string(),
+        path: r"\\?\C:\repo\dinotty".to_string(),
+        order: 0,
+        connection_id: None,
+        abbr: None,
+        color: None,
+    }];
+
+    simplify_local_workspace_paths(&mut workspaces);
+
+    assert_eq!(workspaces[0].path, r"C:\repo\dinotty");
+}
+
+#[test]
 fn test_derive_name_with_special_chars() {
     assert_eq!(derive_name("/home/user/my project"), "my project");
     assert_eq!(derive_name("/home/user/项目"), "项目");

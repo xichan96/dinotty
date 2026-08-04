@@ -471,7 +471,10 @@ async fn pick_workspace_dir(base: Option<String>) -> Option<String> {
     if let Some(dir) = resolved {
         dialog = dialog.set_directory(dir);
     }
-    dialog.pick_folder().await.map(|folder| folder.path().to_string_lossy().into_owned())
+    dialog
+        .pick_folder()
+        .await
+        .map(|folder| dunce::simplified(folder.path()).to_string_lossy().into_owned())
 }
 
 #[tauri::command]

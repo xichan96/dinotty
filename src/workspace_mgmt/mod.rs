@@ -85,6 +85,15 @@ pub(crate) fn migrate_colors(ws: &mut Vec<Workspace>) -> bool {
     changed
 }
 
+fn simplify_local_workspace_paths(workspaces: &mut [Workspace]) {
+    for workspace in workspaces {
+        if workspace.connection_id.is_none() {
+            workspace.path =
+                dunce::simplified(FsPath::new(&workspace.path)).to_string_lossy().into_owned();
+        }
+    }
+}
+
 fn workspaces_path() -> PathBuf {
     settings::config_dir().join("workspaces.json")
 }
@@ -94,8 +103,9 @@ pub fn load_workspaces() -> Vec<Workspace> {
     let path = workspaces_path();
     if path.exists() {
         match std::fs::read_to_string(&path) {
-            Ok(data) => match serde_json::from_str(&data) {
+            Ok(data) => match serde_json::from_str::<Vec<Workspace>>(&data) {
                 Ok(mut ws) => {
+                    simplify_local_workspace_paths(&mut ws);
                     if migrate_colors(&mut ws) {
                         if let Err(e) = save_workspaces(&ws) {
                             error!("save workspaces: {}", e);
@@ -164,7 +174,7 @@ pub fn validate_workspace_path(path: &str) -> Result<PathBuf, String> {
     if is_sensitive_workspace_target(raw) {
         return Err(format!("cannot use sensitive system directory: {}", raw.display()));
     }
-    let canonical = std::fs::canonicalize(trimmed).map_err(|e| format!("invalid path: {e}"))?;
+    let canonical = dunce::canonicalize(trimmed).map_err(|e| format!("invalid path: {e}"))?;
     if !canonical.is_dir() {
         return Err("path is not a directory".into());
     }

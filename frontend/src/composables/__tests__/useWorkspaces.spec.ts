@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../useWorkspaces'
+import {
+  DEFAULT_WORKSPACE_ID,
+  isPathWithinWorkspace,
+  useWorkspaces,
+  workspaceBasename,
+} from '../useWorkspaces'
 import { settings } from '../useSettings'
 import type { Workspace } from '../../types/workspace'
 import type { TerminalTab } from '../../types/pane'
@@ -22,6 +27,35 @@ function makeTab(paneId: string, cwd?: string): TerminalTab {
     cwd,
   }
 }
+
+describe('workspace path helpers', () => {
+  it.each([
+    [String.raw`C:\repo\dinotty`, 'dinotty'],
+    ['C:/repo/dinotty/', 'dinotty'],
+    ['/home/user/dinotty/', 'dinotty'],
+    ['\\\\server\\share\\project\\', 'project'],
+  ])('gets the basename of %s', (path, expected) => {
+    expect(workspaceBasename(path)).toBe(expected)
+  })
+
+  it('matches Windows drive paths by segment with mixed case and separators', () => {
+    expect(isPathWithinWorkspace(String.raw`c:\REPO\dinotty\src`, 'C:/repo/Dinotty/')).toBe(true)
+    expect(isPathWithinWorkspace(String.raw`C:\repo\dinotty-old`, String.raw`C:\repo\dinotty`)).toBe(
+      false
+    )
+  })
+
+  it('matches UNC paths case-insensitively', () => {
+    expect(
+      isPathWithinWorkspace(String.raw`\\SERVER\Share\Project\src`, '//server/share/project/')
+    ).toBe(true)
+  })
+
+  it('keeps POSIX path matching case-sensitive', () => {
+    expect(isPathWithinWorkspace('/Users/me/Project/src', '/Users/me/Project///')).toBe(true)
+    expect(isPathWithinWorkspace('/Users/me/project/src', '/Users/me/Project')).toBe(false)
+  })
+})
 
 describe('useWorkspaces', () => {
   const { workspaces, activeWorkspaceId, activeWorkspace, matchWorkspace, filterTabs } = useWorkspaces()
@@ -103,6 +137,17 @@ describe('useWorkspaces', () => {
     it('matches workspace with path exactly equal to cwd', () => {
       const result = matchWorkspace('/Users/talentc/projects/my-app')
       expect(result?.id).toBe('ws2')
+    })
+
+    it('uses Windows path semantics while preserving longest-prefix matching', () => {
+      workspaces.value = [
+        { id: 'parent', name: 'repo', path: String.raw`C:\Repo`, order: 0 },
+        { id: 'child', name: 'dinotty', path: 'c:/repo/dinotty/', order: 1 },
+      ]
+
+      const result = matchWorkspace(String.raw`C:\REPO\Dinotty\src`)
+
+      expect(result?.id).toBe('child')
     })
   })
 

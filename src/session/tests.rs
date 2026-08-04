@@ -257,8 +257,8 @@ fn parse_title_cwd_windows_drive_path() {
 
 #[test]
 fn sniff_cwd_extracts_from_bel_terminated_osc() {
-    // Use a real directory and canonicalize the expected path, because
-    // parse_title_cwd calls canonicalize() which resolves symlinks
+    // Use a real directory and canonicalize the expected local path, because
+    // CWD sniffing resolves symlinks
     // (e.g. /tmp -> /private/tmp on macOS).
     let home = PathBuf::from("/home/user");
     let mut cwd = PathBuf::from("/home/user");
@@ -267,8 +267,8 @@ fn sniff_cwd_extracts_from_bel_terminated_osc() {
     let tmp = std::env::temp_dir();
     let tmp_str = tmp.to_string_lossy();
     let data = format!("\x1b]0;user@host:{}\x07", tmp_str);
-    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
-    assert_eq!(cwd, tmp.canonicalize().unwrap_or(tmp));
+    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd, true);
+    assert_eq!(cwd, dunce::canonicalize(&tmp).unwrap_or(tmp));
 }
 
 #[test]
@@ -279,8 +279,8 @@ fn sniff_cwd_extracts_from_st_terminated_osc() {
     let tmp = std::env::temp_dir();
     let tmp_str = tmp.to_string_lossy();
     let data = format!("\x1b]0;user@host:{}\x1b\\", tmp_str);
-    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
-    assert_eq!(cwd, tmp.canonicalize().unwrap_or(tmp));
+    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd, true);
+    assert_eq!(cwd, dunce::canonicalize(&tmp).unwrap_or(tmp));
 }
 
 #[test]
@@ -290,11 +290,11 @@ fn sniff_cwd_handles_chunked_input() {
     let mut buf = Vec::new();
     let target = std::env::temp_dir();
     let target_str = target.to_string_lossy();
-    sniff_cwd_from_title_osc(&mut buf, b"\x1b]0;user", &home, &mut cwd);
+    sniff_cwd_from_title_osc(&mut buf, b"\x1b]0;user", &home, &mut cwd, true);
     assert_eq!(cwd, PathBuf::from("/home/user")); // not yet
     let chunk = format!("@host:{target_str}\x07");
-    sniff_cwd_from_title_osc(&mut buf, chunk.as_bytes(), &home, &mut cwd);
-    assert_eq!(cwd, target.canonicalize().unwrap_or(target));
+    sniff_cwd_from_title_osc(&mut buf, chunk.as_bytes(), &home, &mut cwd, true);
+    assert_eq!(cwd, dunce::canonicalize(&target).unwrap_or(target));
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn sniff_cwd_buffers_beyond_cap() {
     let mut buf = Vec::new();
     // Fill buffer with garbage beyond the cap
     let big_data = vec![b'x'; OSC_SNIFF_CAP + 1000];
-    sniff_cwd_from_title_osc(&mut buf, &big_data, &home, &mut cwd);
+    sniff_cwd_from_title_osc(&mut buf, &big_data, &home, &mut cwd, true);
     assert!(buf.len() <= OSC_SNIFF_CAP);
 }
 
@@ -319,9 +319,9 @@ fn sniff_cwd_accepts_powershell_title_with_windows_path() {
     let mut buf = Vec::new();
     let data = format!("\x1b]0;user@host:{}\x07", target.display());
 
-    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
+    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd, true);
 
-    assert_eq!(cwd, target.canonicalize().unwrap());
+    assert_eq!(cwd, dunce::canonicalize(target).unwrap());
 }
 
 #[cfg(windows)]
@@ -334,16 +334,17 @@ fn sniff_cwd_buffers_chunked_powershell_title_with_windows_path() {
     let mut cwd = home.clone();
     let mut buf = Vec::new();
 
-    sniff_cwd_from_title_osc(&mut buf, b"\x1b]0;user@host:", &home, &mut cwd);
+    sniff_cwd_from_title_osc(&mut buf, b"\x1b]0;user@host:", &home, &mut cwd, true);
     assert_eq!(cwd, home);
     sniff_cwd_from_title_osc(
         &mut buf,
         format!("{}\x07", target.display()).as_bytes(),
         &home,
         &mut cwd,
+        true,
     );
 
-    assert_eq!(cwd, target.canonicalize().unwrap());
+    assert_eq!(cwd, dunce::canonicalize(target).unwrap());
 }
 
 #[cfg(windows)]
@@ -358,7 +359,7 @@ fn sniff_cwd_falls_back_to_raw_windows_path_when_missing() {
     let mut buf = Vec::new();
     let data = format!("\x1b]0;user@host:{}\x07", missing.display());
 
-    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
+    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd, true);
 
     assert_eq!(cwd, missing);
 }
@@ -994,8 +995,8 @@ fn sniff_cwd_updates_cwd_state() {
     let target_str = target.to_string_lossy();
     // OSC 0: \x1b]0;user@host:path\x07
     let data = format!("\x1b]0;user@host:{target_str}\x07");
-    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
-    assert_eq!(cwd, target.canonicalize().unwrap_or(target));
+    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd, true);
+    assert_eq!(cwd, dunce::canonicalize(&target).unwrap_or(target));
 }
 
 #[test]
@@ -1003,12 +1004,29 @@ fn sniff_cwd_falls_back_to_raw_path_when_canonicalize_fails() {
     let home = PathBuf::from("/");
     let mut cwd = home.clone();
     let mut buf = Vec::new();
-    // Path does not exist — canonicalize() fails; the raw path is used as fallback so SSH remote cwd tracking still works (a89eb0a4)
+    // Path does not exist, so local canonicalization falls back to the parsed path.
     sniff_cwd_from_title_osc(
         &mut buf,
         b"\x1b]0;user@host:/nonexistent_path_12345\x07",
         &home,
         &mut cwd,
+        true,
     );
     assert_eq!(cwd, PathBuf::from("/nonexistent_path_12345"));
+}
+
+#[test]
+fn sniff_remote_cwd_does_not_canonicalize_against_host_filesystem() {
+    let temp = tempfile::tempdir().unwrap();
+    let nested = temp.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    let remote_path = nested.join("..");
+    let home = PathBuf::from("/remote/home");
+    let mut cwd = home.clone();
+    let mut buf = Vec::new();
+    let data = format!("\x1b]0;user@host:{}\x07", remote_path.display());
+
+    sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd, false);
+
+    assert_eq!(cwd, remote_path);
 }

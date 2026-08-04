@@ -86,12 +86,6 @@ pub async fn create_tab(
         let shell_spec = crate::platform::shell::shell_with_preference(&s.shell, &s.shell_path);
         (cwd, shell_spec)
     };
-    // String form of the resolved cwd, used for the TabCreated broadcast and
-    // the HTTP response. We must return the *resolved* cwd (not `req.cwd`)
-    // so the frontend can match the tab to the correct workspace - when the
-    // caller omits cwd, `req.cwd` is None but the PTY actually runs in
-    // `resolved_default_workspace_root()`.
-    let cwd_str = cwd.as_deref().and_then(|p| p.to_str()).map(std::string::ToString::to_string);
     let is_argv_command = req.argv.is_some();
 
     // Create PTY session
@@ -111,6 +105,15 @@ pub async fn create_tab(
                 .into_response();
         }
     };
+    let cwd_str = Some(
+        session
+            .cwd_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .cwd
+            .to_string_lossy()
+            .into_owned(),
+    );
 
     // Create initial layout with single leaf
     let title = req.title.as_deref().unwrap_or("Terminal");

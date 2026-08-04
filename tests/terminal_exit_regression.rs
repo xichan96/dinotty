@@ -330,15 +330,27 @@ async fn shell_exit_notifies_ws_and_removes_tab() -> TestResult {
     let base = format!("http://127.0.0.1:{port}");
     wait_until_ready(&client, &base, port, &mut child, tmp.path()).await?;
 
+    #[cfg(windows)]
+    let requested_cwd = format!(r"\\?\{}", userprofile.display());
+    #[cfg(unix)]
+    let requested_cwd = userprofile.to_string_lossy().into_owned();
+
     let created: Value = client
         .post(format!("{base}/api/tabs"))
         .bearer_auth("regression-token")
-        .json(&serde_json::json!({ "cwd": null }))
+        .json(&serde_json::json!({ "cwd": requested_cwd }))
         .send()
         .await?
         .error_for_status()?
         .json()
         .await?;
+    let created_cwd = created
+        .get("cwd")
+        .and_then(Value::as_str)
+        .ok_or_else(|| test_error("create tab response missing cwd"))?;
+    assert_eq!(PathBuf::from(created_cwd), dunce::canonicalize(&userprofile)?);
+    #[cfg(windows)]
+    assert!(!created_cwd.starts_with(r"\\?\"));
     let tab_id = created
         .get("tab_id")
         .and_then(Value::as_str)
@@ -365,6 +377,27 @@ async fn shell_exit_notifies_ws_and_removes_tab() -> TestResult {
     .await?;
 
     wait_for_shell_prompt(&mut ws).await?;
+
+    let tabs: Value = client
+        .get(format!("{base}/api/tabs"))
+        .bearer_auth("regression-token")
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let listed_cwd = tabs
+        .get("tabs")
+        .and_then(Value::as_array)
+        .and_then(|tabs| {
+            tabs.iter().find(|tab| tab.get("tab_id").and_then(Value::as_str) == Some(&tab_id))
+        })
+        .and_then(|tab| tab.get("cwd"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| test_error("tab list missing created tab cwd"))?;
+    assert_eq!(PathBuf::from(listed_cwd), dunce::canonicalize(&userprofile)?);
+    #[cfg(windows)]
+    assert!(!listed_cwd.starts_with(r"\\?\"));
 
     ws.send(Message::Text(serde_json::json!({ "type": "input", "data": "exit\r" }).to_string()))
         .await?;

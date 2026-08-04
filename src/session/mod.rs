@@ -582,7 +582,7 @@ impl Session {
         let home = remote_home_guard.as_ref().unwrap_or(&default_home);
         let mut state = self.cwd_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let CwdState { ref mut cwd, ref mut sniff_buf } = *state;
-        cwd::sniff_cwd_from_title_osc(sniff_buf, data, home, cwd);
+        cwd::sniff_cwd_from_title_osc(sniff_buf, data, home, cwd, self.ssh_params.is_none());
     }
 
     /// Replace the input channel, closing the old one (if any) so the previous

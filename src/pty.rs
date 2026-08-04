@@ -7,7 +7,7 @@ use crate::session::{
 use crate::vt_screen::VirtualScreen;
 use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -268,7 +268,7 @@ pub fn create_session(
 
     let home_path = shell::home_dir();
 
-    let effective_cwd = cwd.filter(|p| p.is_dir()).unwrap_or_else(|| home_path.clone());
+    let effective_cwd = resolve_local_cwd(cwd, &home_path);
     cmd.cwd(&effective_cwd);
 
     // Shell-specific hooks depend on HOME-style prompt expansion.
@@ -296,8 +296,6 @@ pub fn create_session(
         }
     }
 
-    let home_for_cwd = effective_cwd;
-
     let child = pair.slave.spawn_command(cmd).map_err(|e| format!("spawn shell: {e}"))?;
     let mut pending_spawn = PendingSpawn::new(child, pane_id);
     drop(pair.slave);
@@ -315,13 +313,7 @@ pub fn create_session(
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: Box<dyn Write + Send> = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-    // Strip the \\?\ verbatim prefix that std::canonicalize adds on Windows.
-    // PowerShell renders verbatim paths as `Microsoft.PowerShell.Core\FileSystem::\\?\D:\...`
-    // which breaks tools that parse $PWD (e.g. pi agent). dunce::simplified is a
-    // no-op on non-Windows.
-    let initial_cwd =
-        dunce::simplified(&home_for_cwd.canonicalize().unwrap_or_else(|_| home_for_cwd.clone()))
-            .to_path_buf();
+    let initial_cwd = effective_cwd;
     let (resize_tx, resize_rx) = tokio::sync::watch::channel(None);
     let (output_tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
     let registered_child = pending_spawn.take_child()?;
@@ -576,6 +568,12 @@ pub fn create_session(
     Ok((session, shell_type))
 }
 
+fn resolve_local_cwd(cwd: Option<PathBuf>, home: &Path) -> PathBuf {
+    let selected = cwd.filter(|path| path.is_dir()).unwrap_or_else(|| home.to_path_buf());
+    let canonical = dunce::canonicalize(&selected).unwrap_or(selected);
+    dunce::simplified(&canonical).to_path_buf()
+}
+
 #[must_use]
 pub fn setup_zsh_title_hooks(home: &str) -> Option<std::path::PathBuf> {
     let zdotdir = std::env::temp_dir().join(format!("dinotty_zsh_{}", std::process::id()));
@@ -729,7 +727,10 @@ pub fn get_shell_args(shell: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_claude_session_env_key, locale_adjustment, notify_url_for, LocaleAdjustment};
+    use super::{
+        is_claude_session_env_key, locale_adjustment, notify_url_for, resolve_local_cwd,
+        LocaleAdjustment,
+    };
 
     #[test]
     fn builds_notify_url_for_bound_port() {
@@ -765,6 +766,18 @@ mod tests {
         ] {
             assert!(!is_claude_session_env_key(k), "should preserve {k}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn local_cwd_is_simplified_before_pty_spawn() {
+        let temp = std::env::temp_dir();
+        let verbatim = std::path::PathBuf::from(format!(r"\\?\{}", temp.display()));
+
+        let effective = resolve_local_cwd(Some(verbatim), &temp);
+
+        assert!(!effective.to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(effective, dunce::canonicalize(temp).unwrap());
     }
 
     #[test]

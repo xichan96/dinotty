@@ -10,10 +10,10 @@ describe('window title', () => {
     const target = { title: '' }
 
     updateDocumentTitle('Default', target)
-    expect(target.title).toBe('Dinotty - Default')
+    expect(target.title).toBe('Default')
 
     updateDocumentTitle('Project Atlas', target)
-    expect(target.title).toBe('Dinotty - Project Atlas')
+    expect(target.title).toBe('Project Atlas')
   })
 
   it('uses the application name when the workspace name is empty', () => {
@@ -27,12 +27,12 @@ describe('window title', () => {
     })
     const setTitle = vi.fn(async () => {})
 
-    await setTauriWindowTitle('Dinotty - Project Atlas', invoke, () => ({ setTitle }))
+    await setTauriWindowTitle('Project Atlas', invoke, () => ({ setTitle }))
 
     expect(invoke).toHaveBeenCalledWith('set_window_title', {
-      title: 'Dinotty - Project Atlas',
+      title: 'Project Atlas',
     })
-    expect(setTitle).toHaveBeenCalledWith('Dinotty - Project Atlas')
+    expect(setTitle).toHaveBeenCalledWith('Project Atlas')
   })
 
   it('absorbs synchronous fallback errors and rejected title updates', async () => {

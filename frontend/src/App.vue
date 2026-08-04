@@ -725,6 +725,7 @@ const {
   termRefs,
   session,
   activateTab,
+  activateWorkspace,
   closeTab,
   requestCloseTab,
   newTab,

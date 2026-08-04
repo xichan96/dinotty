@@ -5,8 +5,7 @@ interface TauriWindow {
 }
 
 export function formatWindowTitle(workspaceName?: string): string {
-  const name = workspaceName?.trim()
-  return name ? `Dinotty - ${name}` : 'Dinotty'
+  return workspaceName?.trim() || 'Dinotty'
 }
 
 export function updateDocumentTitle(

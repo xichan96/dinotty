@@ -162,6 +162,42 @@ describe('useSyncWebSocket plugin workspace attribution', () => {
     expect((session.tabs[0] as TerminalTab).workspaceId).toBe('workspace-b')
   })
 
+  it('uses the explicit SSH workspace from tab_created instead of the shared profile', async () => {
+    const { session, emit } = await setup()
+    emit({
+      type: 'tab_created',
+      tab_id: 'ssh-tab',
+      pane_id: 'ssh-pane',
+      connection_id: 'shared-profile',
+      workspace_id: 'workspace-b',
+    })
+
+    expect(session.tabs[0]).toMatchObject({
+      connectionId: 'shared-profile',
+      workspaceId: 'workspace-b',
+    })
+  })
+
+  it('restores an existing SSH tab workspace from tab_list', async () => {
+    const existing = terminal('ssh-tab')
+    existing.connectionId = 'shared-profile'
+    const { emit } = await setup([existing])
+    emit({
+      type: 'tab_list',
+      tabs: [
+        {
+          tab_id: existing.paneId,
+          pane_id: existing.activePaneId,
+          connection_id: 'shared-profile',
+          workspace_id: 'workspace-b',
+        },
+      ],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBe('workspace-b')
+  })
+
   it('scenario 6: close-time read fallback attributes a missing field to a live workspace', async () => {
     const pluginTab = terminal('plugin:session-browser:workspace-b')
     const successor = terminal('workspace-b-successor', { workspaceId: 'workspace-b' })

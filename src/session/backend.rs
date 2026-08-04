@@ -11,6 +11,8 @@ pub struct SshSessionParams {
     pub default_command: Option<String>,
     /// The `SshProfile.id` when created from a saved profile. `None` for quick-connect.
     pub profile_id: Option<String>,
+    /// The workspace that initiated this SSH session, when explicitly selected.
+    pub workspace_id: Option<String>,
     /// Initial remote directory to `cd` into after the shell starts.
     /// When `None` or empty, the shell starts in the remote `$HOME`.
     pub initial_cwd: Option<String>,

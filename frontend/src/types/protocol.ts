@@ -102,6 +102,7 @@ export interface SyncTabList {
     active_pane_id?: string
     cwd?: string
     connection_id?: string
+    workspace_id?: string
     title?: string
   }[]
   active_pane_id: string | null
@@ -114,6 +115,7 @@ export interface SyncTabCreated {
   layout?: any
   cwd?: string
   connection_id?: string
+  workspace_id?: string
 }
 
 export interface SyncTabClosed {

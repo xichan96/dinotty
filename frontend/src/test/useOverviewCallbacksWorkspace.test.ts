@@ -73,7 +73,7 @@ describe('useOverviewCallbacks workspace activation', () => {
   })
 
   it('activates a selected SSH workspace before creating its tab', async () => {
-    const { options, activateWorkspace } = createOptions()
+    const { options, activateWorkspace, tabs } = createOptions()
     mocks.apiCreateSshTab.mockResolvedValue({
       tab_id: 'tab-ssh',
       pane_id: 'pane-ssh',
@@ -90,10 +90,55 @@ describe('useOverviewCallbacks workspace activation', () => {
     await callbacks.onOverviewNewTabSsh('connection-1', '/srv/app', 'workspace-ssh')
 
     expect(activateWorkspace).toHaveBeenCalledWith('workspace-ssh')
-    expect(mocks.apiCreateSshTab).toHaveBeenCalledWith('connection-1', '/srv/app')
+    expect(mocks.apiCreateSshTab).toHaveBeenCalledWith(
+      'connection-1',
+      '/srv/app',
+      'workspace-ssh'
+    )
+    expect(tabs.value).toHaveLength(1)
+    expect(tabs.value[0]).toMatchObject({
+      connectionId: 'connection-1',
+      workspaceId: 'workspace-ssh',
+    })
     expect(activateWorkspace.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.apiCreateSshTab.mock.invocationCallOrder[0]
     )
+  })
+
+  it('repairs workspace attribution when the SSH tab broadcast wins the race', async () => {
+    const { options, tabs } = createOptions()
+    tabs.value.push({
+      type: 'terminal',
+      paneId: 'tab-ssh',
+      layout: {
+        type: 'leaf',
+        paneId: 'pane-ssh',
+        title: 'Terminal',
+        ratio: 1,
+        zoomed: false,
+      },
+      activePaneId: 'pane-ssh',
+      paneMru: ['pane-ssh'],
+      broadcastMode: false,
+      broadcastActivity: 0,
+      previewVisible: false,
+      previewAddress: '',
+      previewUrl: '',
+      previewKind: 'web',
+      connectionId: 'connection-1',
+    })
+    mocks.apiCreateSshTab.mockResolvedValue({
+      tab_id: 'tab-ssh',
+      pane_id: 'pane-ssh',
+      layout: tabs.value[0].type === 'terminal' ? tabs.value[0].layout : undefined,
+      workspace_id: 'workspace-ssh',
+    })
+    const callbacks = useOverviewCallbacks(options)
+
+    await callbacks.onOverviewNewTabSsh('connection-1', '/srv/app', 'workspace-ssh')
+
+    expect(tabs.value).toHaveLength(1)
+    expect(tabs.value[0]).toMatchObject({ workspaceId: 'workspace-ssh' })
   })
 
   it('does not create a tab when workspace activation is superseded', async () => {

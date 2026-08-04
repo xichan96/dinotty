@@ -119,11 +119,15 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
         && workspaceId !== activeWorkspaceId.value
         && !(await activateWorkspace(workspaceId))
       ) return
-      const result = await apiCreateSshTab(connectionId, initialCwd)
+      const result = await apiCreateSshTab(connectionId, initialCwd, workspaceId)
+      const resolvedWorkspaceId = result.workspace_id ?? workspaceId
       const existing = tabs.value.find(
         (t) => t.type === 'terminal' && t.paneId === result.tab_id,
       )
       if (existing) {
+        if (existing.type === 'terminal' && resolvedWorkspaceId) {
+          existing.workspaceId = resolvedWorkspaceId
+        }
         commitLocalActivePane(result.tab_id)
         persist()
         nextTick(() => focusActive())
@@ -143,6 +147,7 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
         previewUrl: '',
         previewKind: 'web',
         connectionId,
+        workspaceId: resolvedWorkspaceId,
       } as TerminalTab)
       commitLocalActivePane(result.tab_id)
       persist()

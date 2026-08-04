@@ -7,6 +7,7 @@ export interface SshConnectResult {
   pane_id: string
   layout: any
   connection_id?: string
+  workspace_id?: string
 }
 
 export interface SshConnectFlowOptions {
@@ -52,6 +53,7 @@ export function useSshConnectFlow(opts: SshConnectFlowOptions): SshConnectFlowSt
   async function onSshConnect(result: SshConnectResult) {
     const resolvedConnectionId = result.connection_id
       ?? workspaces.value.find((w) => w.id === activeWorkspaceId.value)?.connection_id
+    const resolvedWorkspaceId = result.workspace_id ?? activeWorkspaceId.value ?? undefined
 
     const existing = tabs.value.find((t) => t.paneId === result.tab_id)
     if (existing) {
@@ -59,8 +61,8 @@ export function useSshConnectFlow(opts: SshConnectFlowOptions): SshConnectFlowSt
         if (resolvedConnectionId && !existing.connectionId) {
           existing.connectionId = resolvedConnectionId
         }
-        if (!existing.workspaceId && activeWorkspaceId.value) {
-          existing.workspaceId = activeWorkspaceId.value
+        if (resolvedWorkspaceId) {
+          existing.workspaceId = resolvedWorkspaceId
         }
       }
       commitLocalActivePane(result.tab_id)
@@ -82,7 +84,7 @@ export function useSshConnectFlow(opts: SshConnectFlowOptions): SshConnectFlowSt
       previewUrl: '',
       previewKind: 'web',
       connectionId: resolvedConnectionId,
-      workspaceId: activeWorkspaceId.value ?? undefined,
+      workspaceId: resolvedWorkspaceId,
     })
     commitLocalActivePane(result.tab_id)
     persist()

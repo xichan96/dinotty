@@ -76,6 +76,8 @@ pub enum SyncMsg {
         cwd: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         connection_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        workspace_id: Option<String>,
     },
     TabClosed {
         pane_id: String,
@@ -241,6 +243,9 @@ pub struct TabInfo {
     /// The `SshProfile.id` if this tab is an SSH session created from a profile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<String>,
+    /// Explicit workspace assignment for tabs that cannot be identified by CWD.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 }
@@ -462,6 +467,7 @@ impl SessionManager {
             layout: Some(layout),
             cwd: None,
             connection_id: None,
+            workspace_id: None,
         });
         if self.is_current_session(pane_id, session) {
             true
@@ -843,8 +849,21 @@ impl SessionManager {
                     .sessions
                     .get(&pane_id)
                     .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.profile_id.clone()));
+                let workspace_id = self
+                    .sessions
+                    .get(&pane_id)
+                    .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()));
                 let title = v.get("title").and_then(|v| v.as_str()).map(String::from);
-                TabInfo { tab_id, pane_id, layout, active_pane_id, cwd, connection_id, title }
+                TabInfo {
+                    tab_id,
+                    pane_id,
+                    layout,
+                    active_pane_id,
+                    cwd,
+                    connection_id,
+                    workspace_id,
+                    title,
+                }
             })
             .collect();
 

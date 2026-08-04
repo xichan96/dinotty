@@ -105,7 +105,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         ? workspaces.value.find((w) => w.id === activeWorkspaceId.value)
         : null
       if (!argv && useActiveFallback && activeWs?.connection_id) {
-        const result = await apiCreateSshTab(activeWs.connection_id, activeWs.path)
+        const result = await apiCreateSshTab(activeWs.connection_id, activeWs.path, activeWs.id)
         await onSshConnectRef.value(result)
         return result.pane_id
       }

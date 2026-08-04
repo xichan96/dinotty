@@ -284,6 +284,7 @@ async fn handle_sync_socket(
                                     layout: Some(layout.clone()),
                                     cwd: None,
                                     connection_id: None,
+                                    workspace_id: None,
                                 })
                                 .unwrap(),
                             );
@@ -295,6 +296,7 @@ async fn handle_sync_socket(
                                     layout: Some(layout),
                                     cwd: None,
                                     connection_id: None,
+                                    workspace_id: None,
                                 },
                                 &client_id,
                             );

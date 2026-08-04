@@ -799,6 +799,7 @@ impl SshConnectRequest {
             auth_method: self.auth.clone(),
             default_command: self.default_command.clone(),
             profile_id: self.profile_id.clone(),
+            workspace_id: None,
             initial_cwd: self.initial_cwd.clone(),
         }
     }
@@ -808,6 +809,10 @@ impl SshConnectRequest {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct SshProfileConnectRequest {
     pub profile_id: String,
+    /// Workspace selected by the caller. This disambiguates workspaces that
+    /// share one SSH profile but use different remote roots.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     /// Optional initial remote directory. When set, the shell runs `cd` to this
     /// path after startup. Ignored if the profile has a `default_command`.
     #[serde(default)]

@@ -227,6 +227,13 @@ export function useSyncWebSocket(opts: {
         }
 
         for (const tab of msg.tabs) {
+          const existingTab = tabs.value.find((candidate) => {
+            if (candidate.type !== 'terminal') return false
+            return candidate.paneId === tab.tab_id || !!findLeaf(candidate.layout, tab.pane_id)
+          }) as TerminalTab | undefined
+          if (existingTab && tab.workspace_id) {
+            existingTab.workspaceId = tab.workspace_id
+          }
           if (
             !localLeafIds.has(tab.pane_id) &&
             !localTabIds.has(tab.pane_id) &&
@@ -278,7 +285,8 @@ export function useSyncWebSocket(opts: {
               customTitle: migrated?.customTitle,
               cwd: tab.cwd,
               connectionId: tab.connection_id,
-              workspaceId: migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
+              workspaceId:
+                tab.workspace_id ?? migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
             })
           }
         }
@@ -377,11 +385,21 @@ export function useSyncWebSocket(opts: {
           if (msg.connection_id && existing.type === 'terminal' && !existing.connectionId) {
             existing.connectionId = msg.connection_id
           }
+          let workspaceRepaired = false
+          if (
+            msg.workspace_id
+            && existing.type === 'terminal'
+            && existing.workspaceId !== msg.workspace_id
+          ) {
+            existing.workspaceId = msg.workspace_id
+            workspaceRepaired = true
+          }
           const decodedWorkspaceId = workspaceIdFromPaneId(msg.tab_id)
           if (existing.type === 'terminal' && !existing.workspaceId && decodedWorkspaceId) {
             existing.workspaceId = decodedWorkspaceId
-            persist()
+            workspaceRepaired = true
           }
+          if (workspaceRepaired) persist()
         }
         if (!existing) {
           const layout = msg.layout
@@ -407,7 +425,7 @@ export function useSyncWebSocket(opts: {
             previewKind: 'web',
             cwd: msg.cwd,
             connectionId: msg.connection_id,
-            workspaceId: workspaceIdFromPaneId(msg.tab_id),
+            workspaceId: msg.workspace_id ?? workspaceIdFromPaneId(msg.tab_id),
           })
           markRecentlyCreated(msg.tab_id)
           activePaneId.value = msg.tab_id

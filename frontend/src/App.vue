@@ -662,6 +662,7 @@ const onSshConnectRef = shallowRef<
     pane_id: string
     layout: any
     connection_id?: string
+    workspace_id?: string
   }) => Promise<void>
 >(async () => {
   throw new Error('onSshConnect not wired')

@@ -977,6 +977,31 @@ fn tab_list_returns_empty_for_no_tabs() {
     assert!(active.is_none());
 }
 
+#[test]
+fn tab_list_restores_ssh_workspace_assignment_from_session() {
+    let manager = SessionManager::new();
+    let mut session = local_session_for_write_input();
+    Arc::get_mut(&mut session).unwrap().ssh_params = Some(SshSessionParams {
+        host: "example.test".into(),
+        port: 22,
+        username: "user".into(),
+        auth_method: crate::settings::SshAuthMethod::default(),
+        default_command: None,
+        profile_id: Some("shared-profile".into()),
+        workspace_id: Some("workspace-b".into()),
+        initial_cwd: Some("/srv/b".into()),
+    });
+    manager.sessions.insert("p1".into(), session);
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+
+    let (tabs, _) = manager.tab_list();
+
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0].connection_id.as_deref(), Some("shared-profile"));
+    assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-b"));
+}
+
 // ── CWD state tracking ─────────────────────────────────────────────
 
 #[test]
@@ -1013,6 +1038,22 @@ fn sniff_cwd_falls_back_to_raw_path_when_canonicalize_fails() {
         true,
     );
     assert_eq!(cwd, PathBuf::from("/nonexistent_path_12345"));
+}
+
+#[test]
+fn tab_created_serializes_explicit_workspace_assignment() {
+    let msg = SyncMsg::TabCreated {
+        tab_id: "tab-1".into(),
+        pane_id: "pane-1".into(),
+        layout: None,
+        cwd: None,
+        connection_id: Some("shared-profile".into()),
+        workspace_id: Some("workspace-b".into()),
+    };
+
+    let value = serde_json::to_value(msg).unwrap();
+
+    assert_eq!(value["workspace_id"], "workspace-b");
 }
 
 #[test]

@@ -189,6 +189,20 @@ describe('useWorkspaces', () => {
       expect(resultWs3).toHaveLength(1)
       expect(resultWs3[0].paneId).toBe('t2')
     })
+
+    it('uses explicit workspace attribution when remote workspaces share a profile', () => {
+      workspaces.value = [
+        { id: 'remote-a', name: 'app-a', path: '/srv/a', order: 0, connection_id: 'shared' },
+        { id: 'remote-b', name: 'app-b', path: '/srv/b', order: 1, connection_id: 'shared' },
+      ]
+      const tabs = [
+        { ...makeTab('ssh-a'), connectionId: 'shared', workspaceId: 'remote-a' },
+        { ...makeTab('ssh-b'), connectionId: 'shared', workspaceId: 'remote-b' },
+      ]
+
+      expect(filterTabs(tabs, 'remote-a').map((tab) => tab.paneId)).toEqual(['ssh-a'])
+      expect(filterTabs(tabs, 'remote-b').map((tab) => tab.paneId)).toEqual(['ssh-b'])
+    })
   })
 
   describe('visibleTabList pattern (TabInfo filtering)', () => {

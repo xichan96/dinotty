@@ -64,6 +64,7 @@ pub async fn create_ssh_quick_tab(
         layout: Some(layout.clone()),
         cwd: None,
         connection_id: req.profile_id.clone(),
+        workspace_id: None,
     });
     manager.recheck_publish_or_correct(&pane_id, &session);
 
@@ -97,6 +98,7 @@ pub async fn create_ssh_tab(
                 auth_method: profile.auth_method.clone(),
                 default_command: profile.default_command.clone(),
                 profile_id: Some(profile.id.clone()),
+                workspace_id: req.workspace_id.clone(),
                 initial_cwd: req.initial_cwd.clone(),
             },
             None => {
@@ -158,6 +160,7 @@ pub async fn create_ssh_tab(
         layout: Some(layout.clone()),
         cwd: None,
         connection_id: Some(req.profile_id.clone()),
+        workspace_id: req.workspace_id.clone(),
     });
     manager.recheck_publish_or_correct(&pane_id, &session);
 
@@ -166,6 +169,7 @@ pub async fn create_ssh_tab(
         "pane_id": pane_id,
         "layout": layout,
         "connection_id": req.profile_id,
+        "workspace_id": req.workspace_id,
     }))
     .into_response()
 }

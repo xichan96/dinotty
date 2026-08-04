@@ -180,8 +180,11 @@ export function useWorkspaces() {
     const ws = workspaces.value.find((w) => w.id === workspaceId)
     if (!ws) return []
     if (ws.connection_id) {
-      // Remote workspace: match by connection_id on the tab
-      return tabs.filter((tab) => tab.connectionId === ws.connection_id)
+      // Explicit attribution disambiguates workspaces that share one SSH profile.
+      // Keep the connection fallback for tabs created by older servers/clients.
+      return tabs.filter((tab) =>
+        tab.workspaceId ? tab.workspaceId === workspaceId : tab.connectionId === ws.connection_id
+      )
     }
     // Local workspace: match by path prefix
     return tabs.filter((tab) => {

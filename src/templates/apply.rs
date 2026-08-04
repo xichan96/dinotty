@@ -286,6 +286,7 @@ pub async fn apply_template(
         collect_first_terminal_cwd(&layout)
     });
     let connection_id = workspace.as_ref().and_then(|ws| ws.connection_id.clone());
+    let workspace_id = workspace.as_ref().map(|ws| ws.id.clone());
 
     manager.insert_tab(
         new_tab_id.clone(),
@@ -303,6 +304,7 @@ pub async fn apply_template(
         layout: Some(layout.clone()),
         cwd: effective_cwd.clone(),
         connection_id: connection_id.clone(),
+        workspace_id: workspace_id.clone(),
     });
     manager.broadcast_sync(&SyncMsg::LayoutUpdated {
         pane_id: new_tab_id.clone(),
@@ -334,6 +336,7 @@ pub async fn apply_template(
         "warnings": warnings,
         "cwd": effective_cwd,
         "connection_id": connection_id,
+        "workspace_id": workspace_id,
     }))
     .into_response()
 }

@@ -146,6 +146,7 @@ pub async fn create_tab(
             layout: Some(layout.clone()),
             cwd: cwd_str.clone(),
             connection_id: None,
+            workspace_id: None,
         });
         if manager.is_current_session(&pane_id, &session) {
             true
@@ -515,6 +516,7 @@ pub async fn create_plugin_tab(
         layout: Some(layout.clone()),
         cwd: None,
         connection_id: None,
+        workspace_id: None,
     });
 
     Json(serde_json::json!({
@@ -898,6 +900,7 @@ pub async fn extract_pane(
         layout: Some(new_layout.clone()),
         cwd: None,
         connection_id: None,
+        workspace_id: None,
     });
 
     Json(serde_json::json!({

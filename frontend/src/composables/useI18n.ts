@@ -678,8 +678,10 @@ const messages: Record<Locale, Record<string, string>> = {
       'Starts in the system tray without opening the main window. Use the tray, global shortcut, or launch Dinotty again to open it.',
     'autostart.useCurrentFile': 'Use current file',
     'autostart.disable': 'Disable autostart',
-    'autostart.pathConfirm':
-      'Autostart is bound to this file location. Moving or renaming the file will prevent it from starting. Continue?',
+    'autostart.portableConfirm.windows':
+      'You are enabling autostart for the Windows portable edition. Keep the program in a fixed, trusted location.\nAfter enabling it, moving, renaming, deleting, or replacing the program file will not update the startup entry automatically. Disable autostart before replacing it, then enable it again in the new copy.\nContinue?',
+    'autostart.portableConfirm.appImage':
+      'You are enabling autostart for the AppImage portable edition. Keep the AppImage in a fixed, trusted location.\nAfter enabling it, moving, renaming, deleting, or replacing the AppImage will not update the startup entry automatically. Disable autostart before replacing it, then enable it again in the new AppImage.\nContinue?',
     'autostart.support.unsupportedPlatform': 'Autostart is not supported on this platform.',
     'autostart.support.unsupportedPackage':
       'This Dinotty package cannot create a new autostart entry.',
@@ -699,10 +701,6 @@ const messages: Record<Locale, Record<string, string>> = {
       'The operating system startup entry could not be read. Check its permissions and try again.',
     'autostart.warning.removableVolumeMayBeUnavailable':
       'The removable drive and its drive letter must be available when you sign in.',
-    'autostart.warning.desktopEnvironmentDependent':
-      'Linux autostart and tray behavior depends on the desktop environment and AppIndicator support.',
-    'autostart.warning.systemMaySuppress':
-      'Autostart is configured, but the operating system may still suppress it.',
     'autostart.operation.notAllowed': 'The current startup entry cannot be changed safely.',
     'autostart.operation.writeFailed': 'The startup entry could not be written.',
     'autostart.operation.deleteFailed': 'The startup entry could not be removed.',
@@ -1530,7 +1528,10 @@ const messages: Record<Locale, Record<string, string>> = {
       '启动后只在系统托盘运行，不会自动打开主窗口。可通过托盘、全局快捷键或再次启动 Dinotty 打开。',
     'autostart.useCurrentFile': '改用当前文件',
     'autostart.disable': '关闭自启动',
-    'autostart.pathConfirm': '自启动绑定当前文件位置，移动或改名后将无法启动。是否继续？',
+    'autostart.portableConfirm.windows':
+      '你正在为 Windows 便携版启用登录自启动。请先将程序放在固定、可信的位置。\n启用后，移动、重命名、删除或更换程序文件不会自动更新启动项。更换前请关闭自启动，并在新程序中重新启用。\n是否继续？',
+    'autostart.portableConfirm.appImage':
+      '你正在为 AppImage 便携版启用登录自启动。请先将 AppImage 放在固定、可信的位置。\n启用后，移动、重命名、删除或更换 AppImage 不会自动更新启动项。更换前请关闭自启动，并在新 AppImage 中重新启用。\n是否继续？',
     'autostart.support.unsupportedPlatform': '当前平台不支持登录自启动。',
     'autostart.support.unsupportedPackage': '当前 Dinotty 包无法创建新的自启动记录。',
     'autostart.support.unstableInstallLocation':
@@ -1544,9 +1545,6 @@ const messages: Record<Locale, Record<string, string>> = {
     'autostart.stateError.registrationUnreadable': '无法读取操作系统启动项，请检查权限后重试。',
     'autostart.warning.removableVolumeMayBeUnavailable':
       '登录时必须能访问该可移动设备，并保持相同盘符。',
-    'autostart.warning.desktopEnvironmentDependent':
-      'Linux 自启动和托盘行为取决于桌面环境与 AppIndicator 支持。',
-    'autostart.warning.systemMaySuppress': '自启动已配置，但操作系统仍可能抑制执行。',
     'autostart.operation.notAllowed': '当前启动项无法安全修改。',
     'autostart.operation.writeFailed': '无法写入启动项。',
     'autostart.operation.deleteFailed': '无法删除启动项。',

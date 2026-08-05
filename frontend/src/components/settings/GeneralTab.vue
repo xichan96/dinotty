@@ -658,16 +658,23 @@ const autostartStateErrorText = computed(() => {
 })
 const displayAutostartWarnings = computed(() =>
   (autostart.status.value?.warnings ?? []).filter(
-    (warning) => warning !== 'pathMoveBreaksRegistration'
+    (warning) =>
+      warning !== 'pathMoveBreaksRegistration' &&
+      warning !== 'desktopEnvironmentDependent' &&
+      warning !== 'systemMaySuppress'
   )
 )
 
-function confirmAutostartPathBinding() {
-  return window.confirm(t('autostart.pathConfirm'))
+function confirmPortableAutostart() {
+  const messageKey =
+    autostart.status.value?.packageKind === 'linuxAppImage'
+      ? 'autostart.portableConfirm.appImage'
+      : 'autostart.portableConfirm.windows'
+  return window.confirm(t(messageKey))
 }
 
 function enableAutostart() {
-  void autostart.setEnabled(true, confirmAutostartPathBinding)
+  void autostart.setEnabled(true, confirmPortableAutostart)
 }
 
 function disableAutostart() {
@@ -676,7 +683,7 @@ function disableAutostart() {
 
 async function onAutostartToggle(event: Event) {
   const input = event.target as HTMLInputElement
-  await autostart.setEnabled(input.checked, confirmAutostartPathBinding)
+  await autostart.setEnabled(input.checked, confirmPortableAutostart)
   input.checked = autostart.status.value?.state === 'onCurrent'
 }
 

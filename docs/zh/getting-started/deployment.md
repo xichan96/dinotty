@@ -68,7 +68,7 @@ Dinotty 的 Linux 系统托盘功能为实验性功能，需要桌面环境提�
 
 桌面 `.deb` 和 AppImage 可在“设置 → 通用 → 启动”中启用当前用户登录自启动。登录后 Dinotty 只启动后台桌面进程和系统托盘，不会预先创建主窗口、WebView 或 PTY；通过托盘、全局快捷键或再次启动 Dinotty 才会打开窗口。Linux 使用 `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/dinotty.desktop`，属于尽力支持：Dinotty 只保证生成有效的 XDG Desktop Entry，桌面环境是否执行仍取决于其自启动与 AppIndicator 支持。托盘不可用时不能启用，自启动时若托盘安装失败则进程安静退出。
 
-AppImage 自启动绑定启用时的原始镜像路径。移动、改名或更换文件后不会自动扫描或修复；从新位置启动 Dinotty 后可选择“改用当前文件”，或关闭旧记录。稳定符号链接可以作为固定入口。卸载 `.deb` 不会以 root 扫描或删除各用户的记录；应在删除应用前从设置中关闭，或在确认该文件属于 Dinotty 后手工删除 `~/.config/autostart/dinotty.desktop`（使用自定义 `XDG_CONFIG_HOME` 时删除对应目录下的文件）。
+AppImage 是不由系统包管理器维护的便携包。启用自启动前，Dinotty 会提示将镜像放在可信、固定且登录时可访问的位置；移动、改名、删除镜像或换用不同文件名的新版后，启动项仍会指向旧副本，应用不会自动扫描、迁移或清理。移除当前副本前应先关闭自启动；从新位置启动 Dinotty 后可选择“改用当前文件”，稳定符号链接也可以作为固定入口。卸载 `.deb` 不会以 root 扫描或删除各用户的记录；应在删除应用前从设置中关闭，或在确认该文件属于 Dinotty 后手工删除 `~/.config/autostart/dinotty.desktop`（使用自定义 `XDG_CONFIG_HOME` 时删除对应目录下的文件）。
 
 ## macOS 桌面包
 
@@ -91,7 +91,7 @@ Dinotty 运行时会持续注册一个系统托盘图标。Windows 决定该图�
 - Windows 10：打开“任务栏设置 → 选择哪些图标显示在任务栏上”，开启 Dinotty。
 - NSIS 安装版与 portable 版的可执行文件路径不同，Windows 可能将它们视为两个独立条目，需要分别设置。
 
-可在“设置 → 通用 → 启动”中启用当前用户登录自启动。Dinotty 将精确的当前 exe 路径和唯一的 `--background` 参数写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `Dinotty` 值；登录后不会自动打开主窗口。固定本地盘和可移动本地盘支持启用，网络映射盘、UNC、光盘、RAM disk 和未知卷不支持。portable 版仍可启用，但会先提示路径绑定风险；移动、改名或盘符变化后不会自动寻找文件，需要从新位置显式接管或关闭旧记录。
+可在“设置 → 通用 → 启动”中启用当前用户登录自启动。Dinotty 将精确的当前 exe 路径和唯一的 `--background` 参数写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `Dinotty` 值；登录后不会自动打开主窗口。固定本地盘和可移动本地盘支持启用，网络映射盘、UNC、光盘、RAM disk 和未知卷不支持。portable 版不由安装程序维护，启用前会提示将 exe 放在可信、固定且登录时可访问的位置；移动、改名、删除文件或换用不同文件名的新版后，启动项仍会指向旧副本，应用不会自动迁移或清理。移除当前副本前应先关闭自启动；换用新副本后需从新副本重新配置，以接管旧记录。
 
 NSIS 覆盖更新会保留自启动。普通卸载只在 Run 值为 `REG_SZ` 且仍精确指向本次安装目录时删除它；指向另一份 Dinotty、包含额外参数、类型异常或格式异常的值均保持不变。Windows 还可能在系统设置中抑制已配置的启动项，Dinotty 不修改 undocumented `StartupApproved` 状态。
 

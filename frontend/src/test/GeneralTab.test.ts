@@ -278,7 +278,7 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     )
   })
 
-  it('keeps autostart off when the path-binding confirmation is cancelled', async () => {
+  it('explains Windows portable risks and keeps autostart off when cancelled', async () => {
     generalMocks.isTauri = true
     generalMocks.tauriInvoke.mockResolvedValue({
       packageKind: 'windowsDesktop',
@@ -297,9 +297,55 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     await flush()
 
     expect(confirm).toHaveBeenCalledOnce()
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/Windows/i))
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/portable|便携版/i))
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/fixed|固定/i))
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/startup entry|启动项/i))
     expect(input.element.checked).toBe(false)
     expect(generalMocks.tauriInvoke).toHaveBeenCalledTimes(1)
     expect(generalMocks.tauriInvoke).toHaveBeenCalledWith('autostart_status')
+  })
+
+  it('explains AppImage portable risks before enabling autostart', async () => {
+    generalMocks.isTauri = true
+    generalMocks.tauriInvoke.mockResolvedValue({
+      packageKind: 'linuxAppImage',
+      canEnable: true,
+      canDisable: false,
+      state: 'off',
+      warnings: ['pathMoveBreaksRegistration'],
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = mount(GeneralTab)
+    await flush()
+
+    await wrapper.find<HTMLInputElement>('[data-setting="autostart"]').setValue(true)
+    await flush()
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/AppImage/i))
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/portable|便携版/i))
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/fixed|固定/i))
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/startup entry|启动项/i))
+    expect(generalMocks.tauriInvoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides backend-only autostart environment warnings', async () => {
+    generalMocks.isTauri = true
+    generalMocks.tauriInvoke.mockResolvedValue({
+      packageKind: 'linuxAppImage',
+      canEnable: true,
+      canDisable: false,
+      state: 'off',
+      warnings: ['desktopEnvironmentDependent', 'systemMaySuppress'],
+    })
+    const wrapper = mount(GeneralTab)
+    await flush()
+
+    const card = wrapper.get('[data-testid="autostart-card"]')
+    expect(card.findAll('p.settings-hint')).toHaveLength(1)
+    expect(card.text()).not.toContain('desktopEnvironmentDependent')
+    expect(card.text()).not.toContain('systemMaySuppress')
+    expect(card.text()).not.toContain('AppIndicator')
   })
 })
 

@@ -77,7 +77,7 @@ describe('useAutostart', () => {
     expect(autostart.visible.value).toBe(true)
   })
 
-  it('cancels path-bound enable without writing', async () => {
+  it('cancels portable autostart enable without writing', async () => {
     mocks.invoke.mockResolvedValue(status({ warnings: ['pathMoveBreaksRegistration'] }))
     const autostart = useAutostart()
     await autostart.refresh()

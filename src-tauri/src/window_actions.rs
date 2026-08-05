@@ -85,9 +85,9 @@ pub fn desktop_capabilities(state: State<'_, TrayCapabilityState>) -> DesktopCap
     state.get().into()
 }
 
-fn prepare_main_window(window: &WebviewWindow) {
+fn prepare_main_window(_window: &WebviewWindow) {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
-    if let Err(error) = window.remove_menu() {
+    if let Err(error) = _window.remove_menu() {
         tracing::warn!(%error, "failed to remove native main-window menu");
     }
 }

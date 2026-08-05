@@ -256,8 +256,8 @@
 
     <MobileKeyboard
       v-if="effectiveMobileInputMode === 'builtin'"
-      :visible="kbVisible"
-      :pane-id="activeTab?.type === 'terminal' ? activeTab.activePaneId : ''"
+      :visible="kbVisible && hasActiveTerminalLeaf"
+      :pane-id="activeTerminalLeaf?.paneId ?? ''"
       :get-send-fn="getSendFn"
       @update:visible="onBuiltinKeyboardVisibilityChange"
       @bookmarks="bookmarksRef?.open()"
@@ -268,8 +268,8 @@
 
     <SystemKeyboardToolbar
       v-if="effectiveMobileInputMode === 'system'"
-      :visible="kbVisible"
-      :pane-id="activeTab?.type === 'terminal' ? activeTab.activePaneId : ''"
+      :visible="kbVisible && hasActiveTerminalLeaf"
+      :pane-id="activeTerminalLeaf?.paneId ?? ''"
       :get-send-fn="getSendFn"
       :action-open="systemActionKeyboardOpen"
       @update:action-open="onSystemActionKeyboardChange"
@@ -290,6 +290,7 @@
     <KbToggleButton
       v-show="
         (appSettings.show_virtual_keyboard || hasOpenGuard(appSettings.keyboard_guard_mode)) &&
+        hasActiveTerminalLeaf &&
         !kbVisible &&
         !mobileInputGuideVisible
       "
@@ -518,6 +519,13 @@ const { imeKeyboardOverlapPx } = useDeviceKeyboardSettings()
 const effectiveMobileInputMode = computed<MobileInputMode>(
   () => appSettings.mobile_input_mode ?? 'builtin'
 )
+const activeTerminalLeaf = computed(() => {
+  const tab = activeTab.value
+  if (!tab || tab.type !== 'terminal') return null
+  const leaf = findLeaf(tab.layout, tab.activePaneId)
+  return leaf && paneKind(leaf) === 'terminal' ? leaf : null
+})
+const hasActiveTerminalLeaf = computed(() => activeTerminalLeaf.value !== null)
 
 // ── Template refs (purely UI concerns) ─────────────────────────
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
@@ -543,10 +551,7 @@ const hostClipboardPaste = createHostClipboardPasteController({
     return text
   },
   paste: (text, autoEnter) => {
-    if (!activePaneId.value) return
-    const tab = tabs.value.find((candidate) => candidate.paneId === activePaneId.value)
-    if (!tab || tab.type !== 'terminal') return
-    termRefs[tab.activePaneId]?.pasteFromClipboard(text, autoEnter)
+    getActiveTerminalRef()?.pasteFromClipboard(text, autoEnter, !systemActionKeyboardOpen.value)
   },
   clipboardEmpty: () =>
     toast.info(t('mobileKb.clipboardEmpty'), { position: POSITION.BOTTOM_CENTER }),
@@ -690,6 +695,7 @@ const { isLandscape, dispose: disposeViewport } = useViewportResize({
   activePaneId,
   tabs,
   termRefs,
+  onSystemKeyboardClose: onSystemKeyboardClosed,
 })
 
 const onSshConnectRef = shallowRef<
@@ -891,14 +897,22 @@ watch(activePaneId, syncActivePaneId, { immediate: true })
 watch(() => tabs.value.length, syncActivePaneId)
 // Fire when active terminal tab's internal focus changes (sync WS, etc.)
 watch(
-  () => {
-    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
-    return tab?.type === 'terminal' ? tab.activePaneId : null
-  },
-  (paneId, previousPaneId) => {
+  [
+    () => {
+      const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+      return tab?.type === 'terminal' ? tab.activePaneId : null
+    },
+    hasActiveTerminalLeaf,
+  ],
+  ([paneId, isTerminalLeaf], [previousPaneId]) => {
     setActivePaneId(paneId)
+    const previousTerminal = previousPaneId ? (termRefs[previousPaneId] ?? null) : null
     if (previousPaneId && previousPaneId !== paneId) {
-      termRefs[previousPaneId]?.setVirtualModifiers(false, false)
+      previousTerminal?.setVirtualModifiers(false, false)
+    }
+    if (!isTerminalLeaf) {
+      dismissTerminalKeyboard(previousTerminal)
+      return
     }
     if (
       paneId &&
@@ -1127,10 +1141,14 @@ function getSendFn(): SendDataFn | null {
   if (!activePaneId.value) return null
   const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
   if (!tab || tab.type !== 'terminal') return null
-  const paneId = tab.activePaneId
+  const activeLeaf = findLeaf(tab.layout, tab.activePaneId)
+  if (!activeLeaf || paneKind(activeLeaf) !== 'terminal') return null
+  const paneId = activeLeaf.paneId
   if (!termRefs[paneId]) return null
   const broadcastMode = tab.broadcastMode
-  const frozenLeaves = broadcastMode ? getAllLeaves(tab.layout) : []
+  const frozenLeaves = broadcastMode
+    ? getAllLeaves(tab.layout).filter((leaf) => paneKind(leaf) === 'terminal')
+    : []
   const recipientIds = [
     paneId,
     ...frozenLeaves.filter((leaf) => leaf.paneId !== paneId).map((leaf) => leaf.paneId),
@@ -1146,13 +1164,17 @@ function getSendFn(): SendDataFn | null {
 }
 
 function getActiveTerminalRef() {
-  const tab = activeTab.value
-  if (!tab || tab.type !== 'terminal') return null
-  return termRefs[tab.activePaneId] ?? null
+  const paneId = activeTerminalLeaf.value?.paneId
+  return paneId ? (termRefs[paneId] ?? null) : null
 }
 
 function focusSystemInput() {
-  if (effectiveMobileInputMode.value !== 'system' || systemActionKeyboardOpen.value) return
+  if (
+    effectiveMobileInputMode.value !== 'system' ||
+    systemActionKeyboardOpen.value ||
+    !hasActiveTerminalLeaf.value
+  )
+    return
   configureAllMobileInputTextareas('system')
   setKbTypingLock(false)
   getActiveTerminalRef()?.focus()
@@ -1160,7 +1182,7 @@ function focusSystemInput() {
 
 function pasteActiveTerminal(text: string) {
   if (!text) return
-  getActiveTerminalRef()?.pasteFromClipboard(text, false)
+  getActiveTerminalRef()?.pasteFromClipboard(text, false, !systemActionKeyboardOpen.value)
 }
 
 function onSystemModifierChange(modifiers: { ctrl: boolean; alt: boolean }) {
@@ -1175,11 +1197,11 @@ function onSystemActionKeyboardChange(open: boolean) {
   }
 }
 
-function dismissTerminalKeyboard() {
+function dismissTerminalKeyboard(terminal = getActiveTerminalRef()) {
   systemActionKeyboardOpen.value = false
   kbVisible.value = false
   terminalImeFocused.value = false
-  const terminal = getActiveTerminalRef()
+  mobileInputGuideVisible.value = false
   terminal?.blur()
 
   const activeElement = document.activeElement
@@ -1192,9 +1214,24 @@ function dismissTerminalKeyboard() {
   }
 }
 
+function onSystemKeyboardClosed() {
+  if (
+    effectiveMobileInputMode.value !== 'system' ||
+    !kbVisible.value ||
+    systemActionKeyboardOpen.value
+  )
+    return
+  const activeElement = document.activeElement
+  if (
+    activeElement instanceof HTMLElement &&
+    activeElement.classList.contains('xterm-helper-textarea')
+  ) {
+    dismissTerminalKeyboard()
+  }
+}
+
 function requestTerminalKeyboard() {
-  const tab = activeTab.value
-  if (!tab || tab.type !== 'terminal') return
+  if (!hasActiveTerminalLeaf.value) return
   if (isTouchDevice() && appSettings.mobile_input_mode == null) {
     kbVisible.value = false
     mobileInputGuideVisible.value = true
@@ -1224,6 +1261,10 @@ function onMobileInputGuideChoose(mode: MobileInputMode) {
   void settingsStore.save()
   configureAllMobileInputTextareas(mode)
   mobileInputGuideVisible.value = false
+  if (!hasActiveTerminalLeaf.value) {
+    dismissTerminalKeyboard()
+    return
+  }
   systemActionKeyboardOpen.value = false
   kbVisible.value = true
   if (mode === 'system') focusSystemInput()

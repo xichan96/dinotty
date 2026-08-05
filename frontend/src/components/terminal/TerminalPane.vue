@@ -270,9 +270,9 @@ function setVirtualModifiers(ctrl: boolean, alt: boolean) {
   terminal?.setVirtualModifiers({ ctrl, alt })
 }
 
-function pasteFromClipboard(text: string, autoEnter = false): boolean {
+function pasteFromClipboard(text: string, autoEnter = false, focusTerminal = true): boolean {
   if (!paneAlive || !terminal || !text) return false
-  terminal.focus()
+  if (focusTerminal) terminal.focus()
   terminal.pasteText(text)
   if (autoEnter && !/[\r\n]/.test(text)) terminal.sendInput('\r')
   return true

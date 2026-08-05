@@ -8,6 +8,7 @@ export interface ViewportResizeOptions {
   tabs: Ref<Tab[]>
   termRefs: Record<string, { fit: () => void }>
   terminalImeFocused?: Ref<boolean>
+  onSystemKeyboardClose?: () => void
 }
 
 export interface ViewportResizeState {
@@ -38,6 +39,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   let viewportRefitTimer = 0
   let orientationRevalidateFrame = 0
   let naturalVH = 0
+  let lastSampledKeyboardOpen = false
+  let awaitingPostOrientationBaseline = false
+  let postOrientationOccludedVH = 0
   let disposed = false
 
   function sampleViewport(allowBaselineReset = false) {
@@ -51,11 +55,30 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
 
     const vh = viewport.height
     const off = Math.max(0, window.innerHeight - (viewport.offsetTop + vh))
+    let preserveKeyboardWithoutBaseline = false
+    // Layout-resize browsers report off=0 even with the IME open. After a
+    // rotation, retain the known-open state until the viewport expands again.
+    if (awaitingPostOrientationBaseline) {
+      const expandedPastKeyboard =
+        postOrientationOccludedVH > 0 && vh - postOrientationOccludedVH > 120
+      if (off > 0 || expandedPastKeyboard) {
+        awaitingPostOrientationBaseline = false
+        postOrientationOccludedVH = 0
+      } else {
+        postOrientationOccludedVH =
+          postOrientationOccludedVH > 0 ? Math.min(postOrientationOccludedVH, vh) : vh
+        preserveKeyboardWithoutBaseline = true
+      }
+    }
     if (off === 0 && vh > 0) {
       naturalVH = allowBaselineReset ? vh : Math.max(naturalVH, vh)
+    } else if (naturalVH === 0 && off > 0) {
+      // The first sample after a rotation or restore can still be occluded. In
+      // overlay-style viewports, innerHeight remains the unoccluded baseline.
+      naturalVH = Math.max(vh, window.innerHeight)
     }
     const heightDelta = Math.max(0, naturalVH - vh)
-    const sysKbOpen = naturalVH > 0 && heightDelta > 120
+    const sysKbOpen = preserveKeyboardWithoutBaseline || (naturalVH > 0 && heightDelta > 120)
     // `off` is the part of the layout viewport actually occluded by the IME.
     // On browsers that resize the layout viewport, it stays at zero and avoids
     // subtracting the keyboard height a second time.
@@ -63,6 +86,8 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     systemKeyboardOpen.value = sysKbOpen
     systemKeyboardHeight.value = keyboardHeight
     imeOccluding.value = sysKbOpen && keyboardHeight > 0
+    const keyboardClosed = lastSampledKeyboardOpen && !sysKbOpen
+    lastSampledKeyboardOpen = sysKbOpen
     document.documentElement.style.setProperty('--sys-kb-height', `${keyboardHeight}px`)
     document.documentElement.style.setProperty(
       '--system-toolbar-bottom',
@@ -72,6 +97,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
       '--kb-open',
       sysKbOpen || kbVisible.value ? '1' : '0'
     )
+    if (keyboardClosed) opts.onSystemKeyboardClose?.()
   }
 
   function onViewportResize() {
@@ -97,9 +123,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     isLandscape.value = window.innerWidth > window.innerHeight
   }
 
-  function reset() {
+  function clearViewportState(discardBaseline = false) {
     clearTimeout(viewportRefitTimer)
-    naturalVH = 0
+    if (discardBaseline) naturalVH = 0
     imeOccluding.value = false
     systemKeyboardOpen.value = false
     systemKeyboardHeight.value = 0
@@ -108,19 +134,27 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     document.documentElement.style.setProperty('--system-toolbar-bottom', '0px')
   }
 
+  function reset() {
+    clearViewportState()
+  }
+
   function revalidate() {
     const viewport = window.visualViewport
     if (!viewport) {
       reset()
       return
     }
-    // Only re-establish the natural-height baseline from a confirmed-unoccluded
-    // sample. If the IME is still occluding (off > 0), keep the existing baseline
-    // so detection survives focus/pageshow/orientation revalidation instead of
-    // getting stuck false until the keyboard fully closes and reopens.
+    // Reset a stale baseline only from a confirmed-unoccluded sample. If this
+    // is the first sample after rotation and it is still occluded, sampleViewport
+    // derives the new orientation's baseline from the layout viewport instead.
     const off = Math.max(0, window.innerHeight - (viewport.offsetTop + viewport.height))
-    if (off === 0) naturalVH = 0
-    sampleViewport(off === 0)
+    const preservedDelta = Math.max(0, naturalVH - viewport.height)
+    const confirmedUnoccluded =
+      off === 0 &&
+      !awaitingPostOrientationBaseline &&
+      !(lastSampledKeyboardOpen && preservedDelta > 120)
+    if (confirmedUnoccluded) naturalVH = 0
+    sampleViewport(confirmedUnoccluded)
   }
 
   function onVisibilityChange() {
@@ -129,7 +163,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
 
   function onOrientationLifecycle() {
     onOrientationChange()
-    reset()
+    awaitingPostOrientationBaseline = lastSampledKeyboardOpen
+    postOrientationOccludedVH = 0
+    clearViewportState(true)
     cancelAnimationFrame(orientationRevalidateFrame)
     orientationRevalidateFrame = requestAnimationFrame(revalidate)
   }
@@ -163,6 +199,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     clearTimeout(viewportRefitTimer)
     cancelAnimationFrame(orientationRevalidateFrame)
     naturalVH = 0
+    lastSampledKeyboardOpen = false
+    awaitingPostOrientationBaseline = false
+    postOrientationOccludedVH = 0
     imeOccluding.value = false
     window.removeEventListener('resize', onOrientationChange)
     window.removeEventListener('blur', reset)

@@ -45,7 +45,6 @@ export interface TabLifecycleOptions {
     | null
     | undefined
   >
-  kbVisible: Ref<boolean>
   persist: () => void
   persistNow: () => void
   onSshConnectRef: ShallowRef<(result: SshConnectResult) => Promise<void>>

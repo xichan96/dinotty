@@ -170,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Bookmark,
   ChevronLeft,
@@ -225,7 +225,7 @@ const {
   toolbarQuickKeyDefs,
 } = useKeyboardLayout({ kbMode, settings })
 
-const systemShortcutDefs = computed<KeyDef[]>(() => [
+const systemShortcutDefs: KeyDef[] = [
   { l: 'Esc', s: '\x1b', cls: 'mkb-mod' },
   { l: 'Tab', s: '\x09', cls: 'mkb-mod' },
   { l: 'Ctrl', sp: 'ctrl', cls: 'mkb-mod', id: 'system-kb-ctrl' },
@@ -238,7 +238,7 @@ const systemShortcutDefs = computed<KeyDef[]>(() => [
   { l: '^I', s: '\x09', cls: 'mkb-mod' },
   { l: '^S', s: '\x13', cls: 'mkb-mod' },
   { l: '^Z', s: '\x1a', cls: 'mkb-mod' },
-])
+]
 
 const termiusKeyRows: KeyDef[][] = [
   [

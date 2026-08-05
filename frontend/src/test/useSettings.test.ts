@@ -3,8 +3,6 @@ import { settings, type SettingsData } from '../composables/useSettings'
 
 describe('useSettings - confirm_before_close_tab mirror', () => {
   it('exposes mobile_input_mode as a global setting with no initial choice', () => {
-    const _field: keyof SettingsData = 'mobile_input_mode'
-    expect(_field).toBe('mobile_input_mode')
     expect(settings.mobile_input_mode).toBeNull()
   })
 

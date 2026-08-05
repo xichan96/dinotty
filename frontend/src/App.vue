@@ -256,7 +256,7 @@
 
     <MobileKeyboard
       v-if="effectiveMobileInputMode === 'builtin'"
-      :visible="kbVisible && effectiveMobileInputMode === 'builtin'"
+      :visible="kbVisible"
       :pane-id="activeTab?.type === 'terminal' ? activeTab.activePaneId : ''"
       :get-send-fn="getSendFn"
       @update:visible="onBuiltinKeyboardVisibilityChange"
@@ -268,7 +268,7 @@
 
     <SystemKeyboardToolbar
       v-if="effectiveMobileInputMode === 'system'"
-      :visible="kbVisible && effectiveMobileInputMode === 'system'"
+      :visible="kbVisible"
       :pane-id="activeTab?.type === 'terminal' ? activeTab.activePaneId : ''"
       :get-send-fn="getSendFn"
       :action-open="systemActionKeyboardOpen"
@@ -738,7 +738,6 @@ const {
   termRefs,
   isMobile,
   tabBarRef,
-  kbVisible,
   persist,
   persistNow,
   onSshConnectRef,
@@ -1181,7 +1180,6 @@ function dismissTerminalKeyboard() {
   kbVisible.value = false
   terminalImeFocused.value = false
   const terminal = getActiveTerminalRef()
-  terminal?.setVirtualModifiers(false, false)
   terminal?.blur()
 
   const activeElement = document.activeElement

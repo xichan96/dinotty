@@ -46,16 +46,24 @@ describe('onData dedup helper (useTerminal)', () => {
 describe('wheel bypass skips dedup (regression)', () => {
   const mouseReport = '\x1b[<64;10;10M'
 
+  function createTerminalInstance(bypassActive: boolean) {
+    const instance = Object.create(TerminalInstance.prototype) as any
+    instance._wheel = { isBypassActive: () => bypassActive }
+    instance._lastInputData = ''
+    instance._lastInputTime = 0
+    instance._mobileModifiers = { ctrl: false, alt: false }
+    instance._emitInput = vi.fn()
+    return instance
+  }
+
   beforeEach(() => {
     transportMocks.tauri = false
   })
 
   it('emits byte-identical SGR reports sent back-to-back during bypass', () => {
-    const instance = Object.create(TerminalInstance.prototype) as any
-    instance._wheel = { isBypassActive: () => true }
+    const instance = createTerminalInstance(true)
     instance._lastInputData = mouseReport
     instance._lastInputTime = performance.now()
-    instance._emitInput = vi.fn()
 
     instance._handleXtermData(mouseReport)
     instance._handleXtermData(mouseReport)
@@ -66,11 +74,9 @@ describe('wheel bypass skips dedup (regression)', () => {
   })
 
   it('leaves the dedup state untouched during bypass', () => {
-    const instance = Object.create(TerminalInstance.prototype) as any
-    instance._wheel = { isBypassActive: () => true }
+    const instance = createTerminalInstance(true)
     instance._lastInputData = 'existing input'
     instance._lastInputTime = 1234
-    instance._emitInput = vi.fn()
 
     instance._handleXtermData(mouseReport)
 
@@ -80,11 +86,7 @@ describe('wheel bypass skips dedup (regression)', () => {
 
   it('drops the second identical input when bypass is disabled (Tauri)', () => {
     transportMocks.tauri = true
-    const instance = Object.create(TerminalInstance.prototype) as any
-    instance._wheel = { isBypassActive: () => false }
-    instance._lastInputData = ''
-    instance._lastInputTime = 0
-    instance._emitInput = vi.fn()
+    const instance = createTerminalInstance(false)
     const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(2000)
 
     try {
@@ -100,11 +102,7 @@ describe('wheel bypass skips dedup (regression)', () => {
 
   it('keeps both identical inputs on web (dedup gated to Tauri only)', () => {
     transportMocks.tauri = false
-    const instance = Object.create(TerminalInstance.prototype) as any
-    instance._wheel = { isBypassActive: () => false }
-    instance._lastInputData = ''
-    instance._lastInputTime = 0
-    instance._emitInput = vi.fn()
+    const instance = createTerminalInstance(false)
     const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(2000)
 
     try {

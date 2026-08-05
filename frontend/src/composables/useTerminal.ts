@@ -21,7 +21,6 @@ import { setupTouchScroll } from '../utils/touchScroll'
 import {
   DEDUP_WINDOW_MS,
   IME_SYM_PAIR_MS,
-  applyAfterTerminalComposition,
   applyMobileTerminalModifiers,
   handleTerminalShortcutKeydown,
   isDuplicateOnData,
@@ -767,7 +766,7 @@ export class TerminalInstance {
     }
     const modified = applyMobileTerminalModifiers(
       data,
-      this._mobileModifiers ?? { ctrl: false, alt: false }
+      this._mobileModifiers
     )
     data = modified.data
     this._mobileModifiers = modified.modifiers

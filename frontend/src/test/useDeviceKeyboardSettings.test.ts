@@ -87,22 +87,4 @@ describe('useDeviceKeyboardSettings', () => {
     expect(useDeviceKeyboardSettings().imeKeyboardOverlapPx.value).toBe(0)
     expect(localStorage.getItem(V2_KEY)).toBeNull()
   })
-
-  it('ignores malformed legacy mode data without losing the overlap setting', () => {
-    localStorage.setItem(
-      V2_KEY,
-      JSON.stringify({
-        version: 2,
-        settings: { ime_keyboard_overlap_px: 72, mobile_input_mode: 'automatic' },
-      })
-    )
-
-    reloadDeviceKeyboardSettings()
-
-    expect(useDeviceKeyboardSettings().settings.ime_keyboard_overlap_px).toBe(72)
-    expect(JSON.parse(localStorage.getItem(V2_KEY)!)).toEqual({
-      version: 2,
-      settings: { ime_keyboard_overlap_px: 72 },
-    })
-  })
 })

@@ -115,11 +115,6 @@ vi.mock('../composables/useTerminal', () => ({
     apply()
     return true
   },
-  applyMobileTerminalModifiers: (data: string, modifiers: { ctrl: boolean; alt: boolean }) => ({
-    data,
-    modifiers,
-    consumed: false,
-  }),
   configureAllMobileInputTextareas: () => {},
   isKbTypingLocked: () => false,
   isTouchDevice: () => false,

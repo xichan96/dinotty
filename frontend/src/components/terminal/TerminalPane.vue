@@ -266,6 +266,10 @@ function sendData(data: string, force?: boolean) {
   return terminal?.sendData(data, force)
 }
 
+function setVirtualModifiers(ctrl: boolean, alt: boolean) {
+  terminal?.setVirtualModifiers({ ctrl, alt })
+}
+
 function pasteFromClipboard(text: string, autoEnter = false): boolean {
   if (!paneAlive || !terminal || !text) return false
   terminal.focus()
@@ -1055,6 +1059,7 @@ defineExpose({
   blur,
   fit,
   sendData,
+  setVirtualModifiers,
   pasteFromClipboard,
   setOutputListener,
   toggleSearch,

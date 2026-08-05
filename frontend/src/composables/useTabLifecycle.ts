@@ -4,7 +4,7 @@ import { getAllLeaves, findLeaf, findFirstLeaf, ensureSplitRoot } from '../types
 import type { Workspace } from '../types/workspace'
 import { nextRevealNavGen, currentRevealNavGen } from '../utils/navGen'
 import { pickSuccessorTab } from '../utils/tabSuccessor'
-import { isTouchDevice } from './useTerminal'
+import { isKbTypingLocked } from './useTerminal'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
 import { invalidatePluginPreview } from './useTabPreview'
 import { apiActivatePane, apiCloseTab, apiCreateTab, apiCreateSshTab } from './useTabApi'
@@ -16,7 +16,10 @@ import type { SyncClientMsg } from '../types/protocol'
 export interface TabLifecycleOptions {
   tabs: Ref<Tab[]>
   activePaneId: Ref<string | null>
-  session: { reorderTab: (fromId: string, toId: string) => void; renameTab: (paneId: string, title: string) => void }
+  session: {
+    reorderTab: (fromId: string, toId: string) => void
+    renameTab: (paneId: string, title: string) => void
+  }
   ui: {
     requestCloseTab: (tabId: string) => void
     requestClosePane: (tabId: string, paneId: string) => void
@@ -25,7 +28,11 @@ export interface TabLifecycleOptions {
   appSettings: { confirm_before_close_tab?: boolean }
   activeWorkspaceId: Ref<string | null>
   workspaces: Ref<Workspace[]>
-  matchWorkspace: (cwd: string, connectionId: string | undefined, workspaceId: string | undefined) => Workspace | null
+  matchWorkspace: (
+    cwd: string,
+    connectionId: string | undefined,
+    workspaceId: string | undefined
+  ) => Workspace | null
   activateWorkspace: (id: string | null) => Promise<boolean>
   cancelPendingWorkspaceActivation: () => void
   workspaceIdOfTab: (tab: Tab) => string | null
@@ -33,7 +40,11 @@ export interface TabLifecycleOptions {
   notif: { clearForPaneIds: (paneIds: string[], reason: MarkReadReason) => void }
   termRefs: Record<string, any>
   isMobile: Ref<boolean>
-  tabBarRef: Ref<{ scrollTabIntoView: (paneId: string) => boolean; hasTab: (paneId: string) => boolean } | null | undefined>
+  tabBarRef: Ref<
+    | { scrollTabIntoView: (paneId: string) => boolean; hasTab: (paneId: string) => boolean }
+    | null
+    | undefined
+  >
   kbVisible: Ref<boolean>
   persist: () => void
   persistNow: () => void
@@ -49,7 +60,7 @@ export interface TabLifecycleState {
   }
   applyTemplate: (
     templateId: string,
-    workspaceId?: string,
+    workspaceId?: string
   ) => Promise<{ tabId: string; warnings: string[] } | null>
   resolveTab: (tabId: string) => Tab | undefined
   resolveTabWorkspace: (tab: Tab) => Workspace | null
@@ -83,7 +94,6 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     termRefs,
     isMobile,
     tabBarRef,
-    kbVisible,
     persist,
     persistNow,
     onSshConnectRef,
@@ -92,8 +102,18 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
 
   function newTab(cwd?: string): Promise<void>
   function newTab(cwd: string, argv: string[], title?: string): Promise<string>
-  function newTab(cwd?: string, argv?: string[], title?: string, workspaceId?: string | null): Promise<void>
-  async function newTab(cwd?: string, argv?: string[], title?: string, workspaceId?: string | null): Promise<string | void> {
+  function newTab(
+    cwd?: string,
+    argv?: string[],
+    title?: string,
+    workspaceId?: string | null
+  ): Promise<void>
+  async function newTab(
+    cwd?: string,
+    argv?: string[],
+    title?: string,
+    workspaceId?: string | null
+  ): Promise<string | void> {
     try {
       // When `workspaceId` is provided (e.g. from the MC overview), the
       // caller has already resolved the target workspace. Skip both the
@@ -109,9 +129,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         await onSshConnectRef.value(result)
         return result.pane_id
       }
-      const effectiveCwd = useActiveFallback
-        ? (cwd ?? activeWorkspacePath.value)
-        : cwd
+      const effectiveCwd = useActiveFallback ? (cwd ?? activeWorkspacePath.value) : cwd
       const result = await apiCreateTab(effectiveCwd, argv, title)
       const existing = tabs.value.find((t) => t.type === 'terminal' && t.paneId === result.tab_id)
       if (existing) {
@@ -157,7 +175,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
    *  surfaced by the backend (e.g. missing plugin, downgraded SSH pane). */
   async function applyTemplate(
     templateId: string,
-    workspaceId?: string,
+    workspaceId?: string
   ): Promise<{ tabId: string; warnings: string[] } | null> {
     try {
       const result = await apiApplyTemplate({ template_id: templateId, workspace_id: workspaceId })
@@ -166,7 +184,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       // workspace_id requested by the caller; fall back to matching by the
       // cwd / connection_id returned by the backend.
       const targetWorkspace = workspaceId
-        ? workspaces.value.find((w) => w.id === workspaceId) ?? null
+        ? (workspaces.value.find((w) => w.id === workspaceId) ?? null)
         : matchWorkspace(result.cwd ?? '', result.connection_id, undefined)
       const targetWorkspaceId = targetWorkspace?.id ?? null
 
@@ -176,9 +194,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         workspaceId: targetWorkspaceId ?? undefined,
       }
 
-      const existing = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === result.tab_id,
-      )
+      const existing = tabs.value.find((t) => t.type === 'terminal' && t.paneId === result.tab_id)
       if (existing) {
         Object.assign(existing, tabFields)
         commitLocalActivePane(result.tab_id)
@@ -232,13 +248,16 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
   function resolveTabWorkspace(tab: Tab) {
     return tab.type === 'terminal'
       ? matchWorkspace(tab.cwd ?? '', tab.connectionId, tab.workspaceId)
-      : tab.workspaceId ? workspaces.value.find((w) => w.id === tab.workspaceId) ?? null : null
+      : tab.workspaceId
+        ? (workspaces.value.find((w) => w.id === tab.workspaceId) ?? null)
+        : null
   }
 
   function clearResolvedTabNotifications(tab: Tab, reason: MarkReadReason = 'tab_activate') {
-    const activatedPaneIds = tab.type === 'terminal'
-      ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
-      : [tab.paneId]
+    const activatedPaneIds =
+      tab.type === 'terminal'
+        ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
+        : [tab.paneId]
     notif.clearForPaneIds(activatedPaneIds, reason)
   }
 
@@ -263,9 +282,10 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     if (!tab) return false
 
     const targetWs = resolveTabWorkspace(tab)
-    const needsSwitch = tab.type === 'terminal'
-      ? (targetWs?.id ?? null) !== activeWorkspaceId.value
-      : targetWs && targetWs.id !== activeWorkspaceId.value
+    const needsSwitch =
+      tab.type === 'terminal'
+        ? (targetWs?.id ?? null) !== activeWorkspaceId.value
+        : targetWs && targetWs.id !== activeWorkspaceId.value
     if (needsSwitch) {
       try {
         const committed = await activateWorkspace(targetWs?.id ?? null)
@@ -319,9 +339,10 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     if (!tab) return false
 
     const targetWs = resolveTabWorkspace(tab)
-    const needsSwitch = tab.type === 'terminal'
-      ? (targetWs?.id ?? null) !== activeWorkspaceId.value
-      : targetWs && targetWs.id !== activeWorkspaceId.value
+    const needsSwitch =
+      tab.type === 'terminal'
+        ? (targetWs?.id ?? null) !== activeWorkspaceId.value
+        : targetWs && targetWs.id !== activeWorkspaceId.value
     if (needsSwitch) {
       try {
         const committed = await activateWorkspace(targetWs?.id ?? null)
@@ -408,14 +429,14 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     ui.requestCloseTab(tabId)
   }
 
-
   async function closeTab(tabId: string) {
     const tab = tabs.value.find((t) => t.paneId === tabId)
     if (!tab) return
 
-    const closedPaneIds = tab.type === 'terminal'
-      ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
-      : [tab.paneId]
+    const closedPaneIds =
+      tab.type === 'terminal'
+        ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
+        : [tab.paneId]
     if (tab.type === 'plugin') {
       invalidatePluginPreview(tab.paneId)
     } else if (tab.type === 'terminal') {
@@ -462,7 +483,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         closedWorkspaceId,
         workspaceIdxBefore,
         idx,
-        workspaceIdOfTab,
+        workspaceIdOfTab
       )
       // Close-induced reselection is the newest navigation: supersede any in-flight
       // deferred/supervised hop so a late older-generation commit cannot clobber it.
@@ -476,9 +497,10 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
           // Keep the current workspace and select one of its remaining tabs below.
         }
         if (!workspaceCommitted || gen !== currentRevealNavGen()) {
-          successor = tabs.value.find(
-            (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
-          ) ?? tabs.value[Math.min(idx, tabs.value.length - 1)]
+          successor =
+            tabs.value.find(
+              (candidate) => workspaceIdOfTab(candidate) === activeWorkspaceId.value
+            ) ?? tabs.value[Math.min(idx, tabs.value.length - 1)]
           const fallbackWorkspaceId = successor ? workspaceIdOfTab(successor) : null
           if (successor && fallbackWorkspaceId !== activeWorkspaceId.value) {
             try {
@@ -509,7 +531,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       for (const leaf of getAllLeaves(tab.layout)) {
         if (termRefs[leaf.paneId]?.isComposing()) return
       }
-      if (!(isTouchDevice() && kbVisible.value)) {
+      if (!isKbTypingLocked()) {
         for (const leaf of getAllLeaves(tab.layout)) {
           if (leaf.paneId !== paneId) {
             termRefs[leaf.paneId]?.blur()

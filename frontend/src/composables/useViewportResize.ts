@@ -1,4 +1,4 @@
-import { ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import type { Tab } from '../types/pane'
 import { getAllLeaves } from '../types/pane'
 
@@ -7,11 +7,16 @@ export interface ViewportResizeOptions {
   activePaneId: Ref<string | null>
   tabs: Ref<Tab[]>
   termRefs: Record<string, { fit: () => void }>
+  terminalImeFocused?: Ref<boolean>
 }
 
 export interface ViewportResizeState {
   isLandscape: Ref<boolean>
   imeOccluding: Ref<boolean>
+  systemKeyboardOpen: Ref<boolean>
+  systemKeyboardHeight: Ref<number>
+  terminalImeFocused: Ref<boolean>
+  toolbarBottom: Ref<number>
   onViewportResize: () => void
   onOrientationChange: () => void
   reset: () => void
@@ -24,6 +29,12 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
 
   const isLandscape = ref(window.innerWidth > window.innerHeight)
   const imeOccluding = ref(false)
+  const systemKeyboardOpen = ref(false)
+  const systemKeyboardHeight = ref(0)
+  const terminalImeFocused = opts.terminalImeFocused ?? ref(false)
+  const toolbarBottom = computed(() =>
+    terminalImeFocused.value && systemKeyboardOpen.value ? systemKeyboardHeight.value : 0
+  )
   let viewportRefitTimer = 0
   let orientationRevalidateFrame = 0
   let naturalVH = 0
@@ -33,6 +44,8 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     const viewport = window.visualViewport
     if (!viewport) {
       imeOccluding.value = false
+      systemKeyboardOpen.value = false
+      systemKeyboardHeight.value = 0
       return
     }
 
@@ -41,12 +54,23 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     if (off === 0 && vh > 0) {
       naturalVH = allowBaselineReset ? vh : Math.max(naturalVH, vh)
     }
-    const sysKbOpen = naturalVH > 0 && naturalVH - vh > 120
-    imeOccluding.value = sysKbOpen && off > 0
-    document.documentElement.style.setProperty('--sys-kb-height', `${off}px`)
+    const heightDelta = Math.max(0, naturalVH - vh)
+    const sysKbOpen = naturalVH > 0 && heightDelta > 120
+    // `off` is the part of the layout viewport actually occluded by the IME.
+    // On browsers that resize the layout viewport, it stays at zero and avoids
+    // subtracting the keyboard height a second time.
+    const keyboardHeight = sysKbOpen ? off : 0
+    systemKeyboardOpen.value = sysKbOpen
+    systemKeyboardHeight.value = keyboardHeight
+    imeOccluding.value = sysKbOpen && keyboardHeight > 0
+    document.documentElement.style.setProperty('--sys-kb-height', `${keyboardHeight}px`)
+    document.documentElement.style.setProperty(
+      '--system-toolbar-bottom',
+      `${toolbarBottom.value}px`
+    )
     document.documentElement.style.setProperty(
       '--kb-open',
-      sysKbOpen || kbVisible.value ? '1' : '0',
+      sysKbOpen || kbVisible.value ? '1' : '0'
     )
   }
 
@@ -77,8 +101,11 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     clearTimeout(viewportRefitTimer)
     naturalVH = 0
     imeOccluding.value = false
+    systemKeyboardOpen.value = false
+    systemKeyboardHeight.value = 0
     document.documentElement.style.setProperty('--sys-kb-height', '0px')
     document.documentElement.style.setProperty('--kb-open', kbVisible.value ? '1' : '0')
+    document.documentElement.style.setProperty('--system-toolbar-bottom', '0px')
   }
 
   function revalidate() {
@@ -111,6 +138,10 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     document.documentElement.style.setProperty('--kb-open', v ? '1' : '0')
   })
 
+  watch(toolbarBottom, (value) => {
+    document.documentElement.style.setProperty('--system-toolbar-bottom', `${value}px`)
+  })
+
   onMounted(() => {
     window.addEventListener('resize', onOrientationChange)
     window.addEventListener('blur', reset)
@@ -121,6 +152,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     document.addEventListener('visibilitychange', onVisibilityChange)
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', onViewportResize)
+      window.visualViewport.addEventListener('scroll', onViewportResize)
     }
     revalidate()
   })
@@ -141,8 +173,10 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     document.removeEventListener('visibilitychange', onVisibilityChange)
     if (window.visualViewport) {
       window.visualViewport.removeEventListener('resize', onViewportResize)
+      window.visualViewport.removeEventListener('scroll', onViewportResize)
     }
     document.documentElement.style.removeProperty('--sys-kb-height')
+    document.documentElement.style.removeProperty('--system-toolbar-bottom')
     document.documentElement.style.setProperty('--kb-open', '0')
   }
 
@@ -151,6 +185,10 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   return {
     isLandscape,
     imeOccluding,
+    systemKeyboardOpen,
+    systemKeyboardHeight,
+    terminalImeFocused,
+    toolbarBottom,
     onViewportResize,
     onOrientationChange,
     reset,

@@ -48,6 +48,13 @@ pub enum WorkspaceBadgeMode {
     Both,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MobileInputMode {
+    Builtin,
+    System,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Settings {
@@ -101,6 +108,8 @@ pub struct Settings {
     pub quick_send_threshold: u32,
     #[serde(default)]
     pub show_virtual_keyboard: bool,
+    #[serde(default)]
+    pub mobile_input_mode: Option<MobileInputMode>,
     #[serde(default)]
     pub keyboard_guard_mode: KeyboardGuardMode,
     // Legacy v6 input retained only so v7 migration can deserialize it.
@@ -846,6 +855,7 @@ impl Default for Settings {
             keyboard_sound: false,
             quick_send_threshold: default_quick_send_threshold(),
             show_virtual_keyboard: false,
+            mobile_input_mode: None,
             keyboard_guard_mode: KeyboardGuardMode::default(),
             keyboard_keep_on_scroll: false,
             show_workspace_badge_on_tab: None,

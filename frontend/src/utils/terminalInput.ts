@@ -1,8 +1,71 @@
-import { terminalKeyBindingDefs, useKeybindings, type KeyBinding } from '../composables/useKeybindings'
+import {
+  terminalKeyBindingDefs,
+  useKeybindings,
+  type KeyBinding,
+} from '../composables/useKeybindings'
 import { trailingPathDeleteLen } from './shell'
 
 export function isTouchDevice(): boolean {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0
+}
+
+export function applyAfterTerminalComposition(apply: () => void): boolean {
+  const focused =
+    typeof document !== 'undefined' &&
+    document.activeElement instanceof HTMLTextAreaElement &&
+    document.activeElement.classList.contains('xterm-helper-textarea')
+      ? document.activeElement
+      : null
+
+  if (focused?.dataset.dinottyComposing === 'true') {
+    focused.addEventListener('compositionend', apply, { once: true })
+    return false
+  }
+
+  apply()
+  return true
+}
+
+export interface MobileTerminalModifiers {
+  ctrl: boolean
+  alt: boolean
+}
+
+export function applyMobileTerminalModifiers(
+  input: string,
+  modifiers: MobileTerminalModifiers
+): { data: string; modifiers: MobileTerminalModifiers; consumed: boolean } {
+  let data = input
+  let ctrl = modifiers.ctrl
+  let alt = modifiers.alt
+  let consumed = false
+
+  if (ctrl && data.length === 1 && data.charCodeAt(0) <= 0x7f) {
+    const upper = data.toUpperCase()
+    let code: number | null = null
+    if (upper >= 'A' && upper <= 'Z') code = upper.charCodeAt(0) - 64
+    else if (data === ' ' || data === '@') code = 0
+    else if (data === '[') code = 27
+    else if (data === '\\') code = 28
+    else if (data === ']') code = 29
+    else if (data === '^') code = 30
+    else if (data === '_') code = 31
+    else if (data === '?') code = 127
+
+    if (code !== null) {
+      data = String.fromCharCode(code)
+      ctrl = false
+      consumed = true
+    }
+  }
+
+  if (alt && data) {
+    data = `\x1b${data}`
+    alt = false
+    consumed = true
+  }
+
+  return { data, modifiers: { ctrl, alt }, consumed }
 }
 
 // Dedup window (ms) for WKWebView onData double-fire.

@@ -564,3 +564,168 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* System IME accessory toolbar. The browser cannot provide a native
+ * inputAccessoryView, so this bar follows the VisualViewport keyboard edge. */
+#system-mobile-kb {
+  position: fixed;
+  right: 0;
+  bottom: var(--system-toolbar-bottom, 0px);
+  left: 0;
+  z-index: 520;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px max(5px, env(safe-area-inset-right)) max(5px, env(safe-area-inset-bottom))
+    max(5px, env(safe-area-inset-left));
+  border-top: 1px solid color-mix(in srgb, var(--border), white 7%);
+  background: color-mix(in srgb, var(--bg-surface), black 4%);
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.22);
+  user-select: none;
+  -webkit-user-select: none;
+  --mkb-key-bg: color-mix(in srgb, var(--bg-input), white 10%);
+  --mkb-mod-bg: color-mix(in srgb, var(--bg), white 6%);
+}
+
+.system-kb-tool-row,
+.system-kb-action-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.system-kb-tool {
+  display: flex;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  background: var(--bg-input);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.system-kb-tool:active {
+  border-color: var(--accent);
+  color: var(--fg-bright);
+}
+
+.system-kb-action-toggle {
+  flex: 0 1 auto;
+  width: auto;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.system-kb-action-icon {
+  flex: 0 0 20px;
+}
+
+.system-kb-dismiss {
+  margin-left: auto;
+}
+
+.system-kb-quick-row,
+.system-kb-shortcut-strip {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.system-kb-quick-row::-webkit-scrollbar,
+.system-kb-shortcut-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.system-kb-quick-row .mkb-btn {
+  flex: 1 0 58px !important;
+  height: 34px;
+  font-size: 12px;
+}
+
+.system-kb-shortcut-strip .mkb-btn {
+  flex: 0 0 49px !important;
+  height: 36px;
+  font-size: 12px;
+}
+
+.system-kb-shortcut-strip .mkb-arrow {
+  min-height: 36px;
+  font-size: 17px;
+}
+
+.system-kb-action-header {
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 2px 3px;
+  color: var(--fg-bright);
+  font-size: 12px;
+}
+
+.system-kb-action-header button {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 34px;
+  min-height: 30px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+#system-mkb-action-panel,
+#system-termius-key-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#system-mkb-action-panel .mkb-btn,
+#system-termius-key-panel .mkb-btn {
+  min-height: 36px;
+  font-size: 13px;
+}
+
+#system-termius-key-panel {
+  max-height: min(60dvh, 440px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+}
+
+#system-termius-key-panel::-webkit-scrollbar {
+  display: none;
+}
+
+#system-termius-key-panel .mkb-btn {
+  min-width: 0;
+  min-height: 43px;
+  padding: 0 2px;
+  font-size: 12px;
+}
+
+@media (max-width: 420px) {
+  .system-kb-tool-row {
+    gap: 3px;
+  }
+  .system-kb-tool {
+    flex-basis: 32px;
+    width: 32px;
+  }
+  .system-kb-action-toggle span {
+    display: none;
+  }
+  #system-termius-key-panel .mkb-btn {
+    min-height: 40px;
+    font-size: 11px;
+  }
+}

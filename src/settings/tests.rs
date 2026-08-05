@@ -1,4 +1,4 @@
-use super::types::KeyboardGuardMode;
+use super::types::{KeyboardGuardMode, MobileInputMode};
 use super::*;
 
 #[test]
@@ -25,6 +25,7 @@ fn settings_empty_json_is_valid() {
     assert!(!settings.keyboard_sound);
     assert_eq!(settings.quick_send_threshold, 63);
     assert!(!settings.show_virtual_keyboard);
+    assert_eq!(settings.mobile_input_mode, None);
     assert!(!settings.windows_alt_as_cmd);
     assert!(settings.confirm_before_close_tab);
     assert!(settings.bookmarks.is_empty());
@@ -34,6 +35,21 @@ fn settings_empty_json_is_valid() {
         assert_eq!(settings.ip_whitelist, vec!["127.0.0.1", "::1"]);
     }
     assert_eq!(settings.upload_dir, default_upload_dir());
+}
+
+#[test]
+fn mobile_input_mode_round_trips_as_global_settings_data() {
+    for (mode, serialized_name) in
+        [(MobileInputMode::Builtin, "builtin"), (MobileInputMode::System, "system")]
+    {
+        let settings = Settings { mobile_input_mode: Some(mode), ..Settings::default() };
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let restored: Settings = serde_json::from_str(&serialized).unwrap();
+
+        assert!(serialized.contains(&format!(r#""mobile_input_mode":"{serialized_name}""#)));
+        assert_eq!(restored.mobile_input_mode, Some(mode));
+    }
 }
 
 #[test]

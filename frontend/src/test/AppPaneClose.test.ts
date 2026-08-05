@@ -111,6 +111,16 @@ vi.mock('../composables/useHistory', async () => {
   }
 })
 vi.mock('../composables/useTerminal', () => ({
+  applyAfterTerminalComposition: (apply: () => void) => {
+    apply()
+    return true
+  },
+  applyMobileTerminalModifiers: (data: string, modifiers: { ctrl: boolean; alt: boolean }) => ({
+    data,
+    modifiers,
+    consumed: false,
+  }),
+  configureAllMobileInputTextareas: () => {},
   isKbTypingLocked: () => false,
   isTouchDevice: () => false,
   setActivePaneId: () => {},
@@ -333,10 +343,15 @@ const TabBarStub = defineComponent({
       hasTab: () => true,
       scrollTabIntoView: mocks.scrollTabIntoView,
     })
-    return () => h('div', {
-      class: 'tab-bar-stub',
-      'data-indicators': JSON.stringify(props.indicators),
-    }, slots.right?.())
+    return () =>
+      h(
+        'div',
+        {
+          class: 'tab-bar-stub',
+          'data-indicators': JSON.stringify(props.indicators),
+        },
+        slots.right?.()
+      )
   },
 })
 
@@ -597,7 +612,10 @@ describe('App.vue - activateTab cross-workspace', () => {
     const { wrapper } = await seedCrossWorkspaceTabs()
     let release!: () => void
     mocks.apiActivateWorkspace.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { release = resolve })
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
     )
 
     const staleActivation = (wrapper.vm as any).activateTab('terminal-other') as Promise<boolean>
@@ -616,7 +634,10 @@ describe('App.vue - activateTab cross-workspace', () => {
     const { wrapper } = await seedCrossWorkspaceTabs()
     let releasePane!: () => void
     mocks.apiActivatePane.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { releasePane = resolve })
+      () =>
+        new Promise<void>((resolve) => {
+          releasePane = resolve
+        })
     )
 
     const staleActivation = (wrapper.vm as any).activateTab('terminal-other') as Promise<boolean>
@@ -1074,7 +1095,9 @@ describe('App.vue - plugin notification bridge', () => {
     await flushBridge()
 
     expect(mocks.authFetch).toHaveBeenCalledTimes(2)
-    const requestBodies = mocks.authFetch.mock.calls.map(([, init]) => JSON.parse(init!.body as string))
+    const requestBodies = mocks.authFetch.mock.calls.map(([, init]) =>
+      JSON.parse(init!.body as string)
+    )
     expect(requestBodies[0].requestId).toBe(requestBodies[1].requestId)
     expect(requestBodies[0]).toEqual(requestBodies[1])
     expect(mocks.pushNotification).not.toHaveBeenCalled()
@@ -1083,8 +1106,9 @@ describe('App.vue - plugin notification bridge', () => {
   it('does not insert for a suppressed response', async () => {
     await mountWithTabs()
     mocks.authFetch.mockClear()
-    mocks.authFetch.mockResolvedValueOnce(response(200, { status: 'suppressed', reason: 'disabled' }))
-
+    mocks.authFetch.mockResolvedValueOnce(
+      response(200, { status: 'suppressed', reason: 'disabled' })
+    )
     ;(window as any).__dinotty_ui_notify('suppressed', 'info')
     await flushBridge()
 
@@ -1108,14 +1132,15 @@ describe('App.vue - plugin notification bridge', () => {
       .mockResolvedValueOnce(
         response(200, { status: 'accepted', notifId: 'notif-3', eventSeq: '3' })
       )
-
     ;(window as any).__dinotty_ui_notify('busy', 'info')
     await flushBridge()
     await vi.advanceTimersByTimeAsync(3000)
     await flushBridge()
 
     expect(mocks.authFetch).toHaveBeenCalledTimes(3)
-    const requestBodies = mocks.authFetch.mock.calls.map(([, init]) => JSON.parse(init!.body as string))
+    const requestBodies = mocks.authFetch.mock.calls.map(([, init]) =>
+      JSON.parse(init!.body as string)
+    )
     expect(new Set(requestBodies.map(({ requestId }) => requestId))).toEqual(
       new Set([requestBodies[0].requestId])
     )
@@ -1136,7 +1161,6 @@ describe('App.vue - plugin notification bridge', () => {
       if (attempt === 1) throw new Error('network')
       return response(200, { status: 'accepted', notifId: request.requestId, eventSeq: '1' })
     })
-
     ;(window as any).__dinotty_ui_notify('first', 'info')
     ;(window as any).__dinotty_ui_notify('second', 'warn')
     await flushBridge()
@@ -1153,9 +1177,7 @@ describe('App.vue - plugin notification bridge', () => {
     expect([...requestIdsByBody.keys()].sort()).toEqual(['first', 'second'])
     expect(requestIdsByBody.get('first')?.size).toBe(1)
     expect(requestIdsByBody.get('second')?.size).toBe(1)
-    expect([...requestIdsByBody.get('first')!][0]).not.toBe(
-      [...requestIdsByBody.get('second')!][0]
-    )
+    expect([...requestIdsByBody.get('first')!][0]).not.toBe([...requestIdsByBody.get('second')!][0])
     expect([...attemptsByRequestId.values()]).toEqual([2, 2])
   })
 
@@ -1166,7 +1188,6 @@ describe('App.vue - plugin notification bridge', () => {
       mocks.authFetch.mockClear()
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       mocks.authFetch.mockResolvedValueOnce(response(status, { status: 'terminal' }))
-
       ;(window as any).__dinotty_ui_notify('rejected', 'info')
       await flushBridge()
 
@@ -1185,7 +1206,6 @@ describe('App.vue - plugin notification bridge', () => {
     vi.useFakeTimers()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.authFetch.mockRejectedValue(new Error('offline'))
-
     ;(window as any).__dinotty_ui_notify('offline', 'error')
     await flushBridge()
     await vi.advanceTimersByTimeAsync(7000)
@@ -1278,18 +1298,22 @@ describe('App.vue - plugin notification bridge', () => {
     expect(consoleWarn).toHaveBeenCalledWith(
       '[notification] plugin notify bridge queue full; evicted 5 oldest pending jobs'
     )
-    pending.splice(0, 3).forEach(({ resolve }) =>
-      resolve(response(200, { status: 'accepted', notifId: 'notif', eventSeq: '1' }))
-    )
+    pending
+      .splice(0, 3)
+      .forEach(({ resolve }) =>
+        resolve(response(200, { status: 'accepted', notifId: 'notif', eventSeq: '1' }))
+      )
     await flushBridge()
 
     const startedAfterSlotRelease = mocks.authFetch.mock.calls
       .slice(3, 6)
       .map(([, init]) => JSON.parse(init!.body as string).body)
     expect(startedAfterSlotRelease).toEqual(['queued-8', 'queued-9', 'queued-10'])
-    pending.splice(0).forEach(({ resolve }) =>
-      resolve(response(200, { status: 'accepted', notifId: 'notif', eventSeq: '1' }))
-    )
+    pending
+      .splice(0)
+      .forEach(({ resolve }) =>
+        resolve(response(200, { status: 'accepted', notifId: 'notif', eventSeq: '1' }))
+      )
     await flushBridge()
     consoleWarn.mockRestore()
   })
@@ -1328,8 +1352,8 @@ describe('App.vue - plugin notification bridge', () => {
     expect(abortEvents).toBe(3)
     expect(signals.every((signal) => signal.aborted)).toBe(true)
     expect(mocks.authFetch).toHaveBeenCalledTimes(3)
-    const startedBodies = mocks.authFetch.mock.calls.map(([, init]) =>
-      JSON.parse(init!.body as string).body
+    const startedBodies = mocks.authFetch.mock.calls.map(
+      ([, init]) => JSON.parse(init!.body as string).body
     )
     expect(startedBodies).toEqual(['dispose-0', 'dispose-1', 'dispose-2'])
     expect(mocks.pushNotification).not.toHaveBeenCalled()

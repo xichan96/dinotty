@@ -255,23 +255,46 @@
     />
 
     <MobileKeyboard
-      :visible="kbVisible"
+      v-if="effectiveMobileInputMode === 'builtin'"
+      :visible="kbVisible && effectiveMobileInputMode === 'builtin'"
       :pane-id="activeTab?.type === 'terminal' ? activeTab.activePaneId : ''"
       :get-send-fn="getSendFn"
-      @update:visible="(v: boolean) => (kbVisible = v)"
+      @update:visible="onBuiltinKeyboardVisibilityChange"
       @bookmarks="bookmarksRef?.open()"
       @app-action="dispatchAppAction"
       @dismiss="onKeyboardDismiss"
       @typing-change="(v: boolean) => (kbTyping = v)"
     />
 
+    <SystemKeyboardToolbar
+      v-if="effectiveMobileInputMode === 'system'"
+      :visible="kbVisible && effectiveMobileInputMode === 'system'"
+      :pane-id="activeTab?.type === 'terminal' ? activeTab.activePaneId : ''"
+      :get-send-fn="getSendFn"
+      :action-open="systemActionKeyboardOpen"
+      @update:action-open="onSystemActionKeyboardChange"
+      @modifier-change="onSystemModifierChange"
+      @bookmarks="bookmarksRef?.open()"
+      @app-action="dispatchAppAction"
+      @dismiss="dismissTerminalKeyboard"
+      @focus-xterm="focusSystemInput"
+      @paste-text="pasteActiveTerminal"
+    />
+
+    <MobileInputGuide
+      :visible="mobileInputGuideVisible"
+      @choose="onMobileInputGuideChoose"
+      @close="mobileInputGuideVisible = false"
+    />
+
     <KbToggleButton
       v-show="
         (appSettings.show_virtual_keyboard || hasOpenGuard(appSettings.keyboard_guard_mode)) &&
-        !kbVisible
+        !kbVisible &&
+        !mobileInputGuideVisible
       "
       :visible="kbVisible"
-      @toggle="kbVisible = !kbVisible"
+      @toggle="toggleTerminalKeyboard"
     />
 
     <WorkspaceOverview
@@ -334,6 +357,8 @@ import CommandPalette from './components/command/CommandPalette.vue'
 import type { Command } from './components/command/CommandPalette.vue'
 import MobileKeyboard from './components/keyboard/MobileKeyboard.vue'
 import KbToggleButton from './components/keyboard/KbToggleButton.vue'
+import MobileInputGuide from './components/keyboard/MobileInputGuide.vue'
+import SystemKeyboardToolbar from './components/keyboard/SystemKeyboardToolbar.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
@@ -369,6 +394,8 @@ import { isTauri, tauriInvoke } from './composables/useTransport'
 import {
   isKbTypingLocked,
   isTouchDevice,
+  applyAfterTerminalComposition,
+  configureAllMobileInputTextareas,
   setActivePaneId,
   setKbTypingLock,
 } from './composables/useTerminal'
@@ -382,6 +409,7 @@ import { useTabPersistence } from './composables/useTabPersistence'
 import { useDesktopLifecycle } from './composables/useDesktopLifecycle'
 import { useViewportResize } from './composables/useViewportResize'
 import { useDeviceKeyboardSettings } from './composables/useDeviceKeyboardSettings'
+import type { MobileInputMode } from './composables/useSettings'
 import { useKeyboardOverlap } from './composables/useKeyboardOverlap'
 import { usePluginLauncher } from './composables/usePluginLauncher'
 import { useSshConnectFlow } from './composables/useSshConnectFlow'
@@ -483,6 +511,13 @@ let scrollGestureDetected = false
 let scrollGestureTimer = 0
 // Sticky typing mode: true while the mobile keyboard's text input is focused.
 const kbTyping = ref(false)
+const terminalImeFocused = ref(false)
+const mobileInputGuideVisible = ref(false)
+const systemActionKeyboardOpen = ref(false)
+const { imeKeyboardOverlapPx } = useDeviceKeyboardSettings()
+const effectiveMobileInputMode = computed<MobileInputMode>(
+  () => appSettings.mobile_input_mode ?? 'builtin'
+)
 
 // ── Template refs (purely UI concerns) ─────────────────────────
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
@@ -651,6 +686,7 @@ const termRefs = shallowReactive<Record<string, InstanceType<typeof TerminalPane
 
 const { isLandscape, dispose: disposeViewport } = useViewportResize({
   kbVisible,
+  terminalImeFocused,
   activePaneId,
   tabs,
   termRefs,
@@ -770,6 +806,19 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => appSettings.mobile_input_mode,
+  (mode, previousMode) => {
+    applyAfterTerminalComposition(() => {
+      configureAllMobileInputTextareas(mode)
+      if (previousMode != null && previousMode !== mode && kbVisible.value) {
+        dismissTerminalKeyboard()
+      }
+    })
+  },
+  { immediate: true, flush: 'sync' }
+)
+
 // Capture plugin preview when active tab changes to a plugin tab (handles initial load)
 watch(activePaneId, (paneId) => {
   const tab = tabs.value.find((t) => t.paneId === paneId)
@@ -803,7 +852,6 @@ const hasVerticalPreview = computed(() => {
     (resolvedPosition.value === 'top' || resolvedPosition.value === 'bottom')
   )
 })
-const { imeKeyboardOverlapPx } = useDeviceKeyboardSettings()
 useKeyboardOverlap({
   settingPx: imeKeyboardOverlapPx,
   kbVisible,
@@ -848,7 +896,20 @@ watch(
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
     return tab?.type === 'terminal' ? tab.activePaneId : null
   },
-  (paneId) => setActivePaneId(paneId)
+  (paneId, previousPaneId) => {
+    setActivePaneId(paneId)
+    if (previousPaneId && previousPaneId !== paneId) {
+      termRefs[previousPaneId]?.setVirtualModifiers(false, false)
+    }
+    if (
+      paneId &&
+      effectiveMobileInputMode.value === 'system' &&
+      kbVisible.value &&
+      !systemActionKeyboardOpen.value
+    ) {
+      nextTick(focusSystemInput)
+    }
+  }
 )
 
 const outputListeners = new Set<(paneId: string, data: string) => void>()
@@ -1085,6 +1146,91 @@ function getSendFn(): SendDataFn | null {
   )
 }
 
+function getActiveTerminalRef() {
+  const tab = activeTab.value
+  if (!tab || tab.type !== 'terminal') return null
+  return termRefs[tab.activePaneId] ?? null
+}
+
+function focusSystemInput() {
+  if (effectiveMobileInputMode.value !== 'system' || systemActionKeyboardOpen.value) return
+  configureAllMobileInputTextareas('system')
+  setKbTypingLock(false)
+  getActiveTerminalRef()?.focus()
+}
+
+function pasteActiveTerminal(text: string) {
+  if (!text) return
+  getActiveTerminalRef()?.pasteFromClipboard(text, false)
+}
+
+function onSystemModifierChange(modifiers: { ctrl: boolean; alt: boolean }) {
+  getActiveTerminalRef()?.setVirtualModifiers(modifiers.ctrl, modifiers.alt)
+}
+
+function onSystemActionKeyboardChange(open: boolean) {
+  systemActionKeyboardOpen.value = open
+  if (open) {
+    getActiveTerminalRef()?.blur()
+    terminalImeFocused.value = false
+  }
+}
+
+function dismissTerminalKeyboard() {
+  systemActionKeyboardOpen.value = false
+  kbVisible.value = false
+  terminalImeFocused.value = false
+  const terminal = getActiveTerminalRef()
+  terminal?.setVirtualModifiers(false, false)
+  terminal?.blur()
+
+  const activeElement = document.activeElement
+  if (
+    activeElement instanceof HTMLElement &&
+    (activeElement.classList.contains('xterm-helper-textarea') ||
+      activeElement.closest('#mobile-kb, #system-mobile-kb'))
+  ) {
+    activeElement.blur()
+  }
+}
+
+function requestTerminalKeyboard() {
+  const tab = activeTab.value
+  if (!tab || tab.type !== 'terminal') return
+  if (isTouchDevice() && appSettings.mobile_input_mode == null) {
+    kbVisible.value = false
+    mobileInputGuideVisible.value = true
+    return
+  }
+
+  mobileInputGuideVisible.value = false
+  systemActionKeyboardOpen.value = false
+  kbVisible.value = true
+  if (effectiveMobileInputMode.value === 'system') focusSystemInput()
+}
+
+function toggleTerminalKeyboard() {
+  if (kbVisible.value) dismissTerminalKeyboard()
+  else requestTerminalKeyboard()
+}
+
+function onBuiltinKeyboardVisibilityChange(visible: boolean) {
+  if (visible) requestTerminalKeyboard()
+  else kbVisible.value = false
+}
+
+function onMobileInputGuideChoose(mode: MobileInputMode) {
+  // This handler is reached synchronously from the card's click event. Keeping
+  // focus in this stack is required for iOS Safari/PWA to open the software IME.
+  appSettings.mobile_input_mode = mode
+  void settingsStore.save()
+  configureAllMobileInputTextareas(mode)
+  mobileInputGuideVisible.value = false
+  systemActionKeyboardOpen.value = false
+  kbVisible.value = true
+  if (mode === 'system') focusSystemInput()
+}
+
 function onKeyboardDismiss() {
   const tab = activeTab.value
   if (tab?.type === 'terminal') {
@@ -1170,8 +1316,18 @@ function onLinkActivate() {
 // chrome. Buttons and links are unaffected either way: preventing a mousedown's
 // default does not cancel the subsequent click.
 function onTabContentMouseDownCapture(e: MouseEvent) {
-  if (!isKbTypingLocked()) return
   const target = e.target as HTMLElement | null
+  if (
+    effectiveMobileInputMode.value === 'system' &&
+    !kbVisible.value &&
+    hasOpenGuard(appSettings.keyboard_guard_mode) &&
+    target?.closest('.terminal-pane-container') &&
+    !target.closest('input, textarea, select, [contenteditable="true"]')
+  ) {
+    e.preventDefault()
+    return
+  }
+  if (!isKbTypingLocked()) return
   if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
   e.preventDefault()
 }
@@ -1201,7 +1357,7 @@ function onTerminalTouch(e: TouchEvent) {
         kbVisible.value = false
       return
     }
-    if (!hasOpenGuard(appSettings.keyboard_guard_mode)) kbVisible.value = true
+    if (!hasOpenGuard(appSettings.keyboard_guard_mode)) requestTerminalKeyboard()
   }
 }
 
@@ -1211,6 +1367,10 @@ function onTerminalScroll() {
   scrollGestureTimer = window.setTimeout(() => {
     scrollGestureDetected = false
   }, 300)
+  if (effectiveMobileInputMode.value === 'system') {
+    dismissTerminalKeyboard()
+    return
+  }
   // With the collapse guard enabled, scrolling back through history must not
   // dismiss the keyboard the user is typing on.
   if (hasCollapseGuard(appSettings.keyboard_guard_mode)) return
@@ -1661,6 +1821,26 @@ const _focusHandler = () => {
   nextTick(() => focusActive())
 }
 
+function onDocumentFocusIn(event: FocusEvent) {
+  const target = event.target as HTMLElement | null
+  if (!target) return
+  if (target.classList.contains('xterm-helper-textarea')) {
+    terminalImeFocused.value = effectiveMobileInputMode.value === 'system'
+    return
+  }
+  if (
+    effectiveMobileInputMode.value === 'system' &&
+    kbVisible.value &&
+    target.matches('input, textarea, select, [contenteditable="true"]') &&
+    !target.closest('#system-mobile-kb')
+  ) {
+    systemActionKeyboardOpen.value = false
+    kbVisible.value = false
+    terminalImeFocused.value = false
+    getActiveTerminalRef()?.setVirtualModifiers(false, false)
+  }
+}
+
 // Tauri window close confirmation
 // On macOS, Cmd+W is bound to the native "Close" menu item and fires CloseRequested
 // in addition to the JS keydown handler. Track when the tab-close shortcut fires so
@@ -1731,6 +1911,7 @@ onMounted(async () => {
   setupTauriWindowClose()
   await desktopLifecycle.setup()
   document.addEventListener('keydown', onGlobalKeydown)
+  document.addEventListener('focusin', onDocumentFocusIn)
   document.addEventListener('terminal-scroll', onTerminalScroll)
   window.addEventListener('focus', _focusHandler)
   window.addEventListener('terminal-insert-path', onTerminalInsertPath)
@@ -1855,6 +2036,7 @@ onBeforeUnmount(() => {
   desktopLifecycle.dispose()
   unlistenWindowClose?.()
   document.removeEventListener('keydown', onGlobalKeydown)
+  document.removeEventListener('focusin', onDocumentFocusIn)
   document.removeEventListener('terminal-scroll', onTerminalScroll)
   window.removeEventListener('focus', _focusHandler)
   window.removeEventListener('terminal-insert-path', onTerminalInsertPath)

@@ -10,6 +10,7 @@ import type { KeyboardGuardMode } from '../utils/keyboardGuardMode'
 import type { KeyBinding } from './useKeybindings'
 import type { SavedTheme } from './useDeviceThemeSelection'
 export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
+export type MobileInputMode = 'builtin' | 'system'
 
 export interface SettingsData {
   theme: {
@@ -52,6 +53,7 @@ export interface SettingsData {
   keyboard_sound: boolean
   quick_send_threshold: number
   show_virtual_keyboard: boolean
+  mobile_input_mode: MobileInputMode | null
   keyboard_guard_mode: KeyboardGuardMode
   workspace_badge_mode: WorkspaceBadgeMode | null
   confirm_before_close_tab: boolean
@@ -410,6 +412,7 @@ export const settings = reactive<SettingsData>({
   keyboard_sound: false,
   quick_send_threshold: 63,
   show_virtual_keyboard: false,
+  mobile_input_mode: null,
   keyboard_guard_mode: 'off',
   workspace_badge_mode: null,
   confirm_before_close_tab: true,

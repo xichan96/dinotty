@@ -672,6 +672,42 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.spaceConfirmsDialogs': 'Use Space to confirm dialogs',
     'settings.spaceConfirmsDialogsHint': 'Applies to all confirmation dialogs',
     'settings.behavior': 'Behavior',
+    'autostart.title': 'Startup',
+    'autostart.loginLaunch': 'Launch at login',
+    'autostart.hint':
+      'Starts in the system tray without opening the main window. Use the tray, global shortcut, or launch Dinotty again to open it.',
+    'autostart.useCurrentFile': 'Use current file',
+    'autostart.disable': 'Disable autostart',
+    'autostart.pathConfirm':
+      'Autostart is bound to this file location. Moving or renaming the file will prevent it from starting. Continue?',
+    'autostart.support.unsupportedPlatform': 'Autostart is not supported on this platform.',
+    'autostart.support.unsupportedPackage':
+      'This Dinotty package cannot create a new autostart entry.',
+    'autostart.support.unstableInstallLocation':
+      'Move Dinotty to a supported local installation location before enabling autostart.',
+    'autostart.support.executablePathUnavailable':
+      'The current executable path cannot be verified.',
+    'autostart.support.homeDirectoryUnavailable':
+      'The current user configuration directory is unavailable.',
+    'autostart.support.trayUnavailable':
+      'A working system tray is required before autostart can be enabled.',
+    'autostart.support.runtimeEvidenceInvalid':
+      'The AppImage runtime path information is incomplete or inconsistent.',
+    'autostart.stateError.registrationMalformed':
+      'The existing startup entry is not in Dinotty’s managed format and was left untouched. Inspect HKCU Run\\Dinotty, ~/Library/LaunchAgents/com.dinotty.terminal.autostart.plist, or ~/.config/autostart/dinotty.desktop for your platform.',
+    'autostart.stateError.registrationUnreadable':
+      'The operating system startup entry could not be read. Check its permissions and try again.',
+    'autostart.warning.removableVolumeMayBeUnavailable':
+      'The removable drive and its drive letter must be available when you sign in.',
+    'autostart.warning.desktopEnvironmentDependent':
+      'Linux autostart and tray behavior depends on the desktop environment and AppIndicator support.',
+    'autostart.warning.systemMaySuppress':
+      'Autostart is configured, but the operating system may still suppress it.',
+    'autostart.operation.notAllowed': 'The current startup entry cannot be changed safely.',
+    'autostart.operation.writeFailed': 'The startup entry could not be written.',
+    'autostart.operation.deleteFailed': 'The startup entry could not be removed.',
+    'autostart.operation.verificationFailed':
+      'The startup entry could not be verified after the change.',
     'confirm.closeTabTitle': 'Close session?',
     'confirm.closeTabMessage': 'Closing this session will terminate all running processes. Close',
     'confirm.closeTabConfirm': 'Close',
@@ -1494,6 +1530,33 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.spaceConfirmsDialogs': '使用空格键确认对话框',
     'settings.spaceConfirmsDialogsHint': '适用于所有确认对话框',
     'settings.behavior': '行为',
+    'autostart.title': '启动',
+    'autostart.loginLaunch': '登录时自动启动',
+    'autostart.hint':
+      '启动后只在系统托盘运行，不会自动打开主窗口。可通过托盘、全局快捷键或再次启动 Dinotty 打开。',
+    'autostart.useCurrentFile': '改用当前文件',
+    'autostart.disable': '关闭自启动',
+    'autostart.pathConfirm': '自启动绑定当前文件位置，移动或改名后将无法启动。是否继续？',
+    'autostart.support.unsupportedPlatform': '当前平台不支持登录自启动。',
+    'autostart.support.unsupportedPackage': '当前 Dinotty 包无法创建新的自启动记录。',
+    'autostart.support.unstableInstallLocation':
+      '请先将 Dinotty 移到受支持的本地安装位置，再启用自启动。',
+    'autostart.support.executablePathUnavailable': '无法验证当前可执行文件路径。',
+    'autostart.support.homeDirectoryUnavailable': '当前用户配置目录不可用。',
+    'autostart.support.trayUnavailable': '启用自启动前需要可用的系统托盘。',
+    'autostart.support.runtimeEvidenceInvalid': 'AppImage 运行时路径信息缺失或相互冲突。',
+    'autostart.stateError.registrationMalformed':
+      '现有启动项不符合 Dinotty 的受管格式，已保持不变。请按平台检查 HKCU Run\\Dinotty、~/Library/LaunchAgents/com.dinotty.terminal.autostart.plist 或 ~/.config/autostart/dinotty.desktop。',
+    'autostart.stateError.registrationUnreadable': '无法读取操作系统启动项，请检查权限后重试。',
+    'autostart.warning.removableVolumeMayBeUnavailable':
+      '登录时必须能访问该可移动设备，并保持相同盘符。',
+    'autostart.warning.desktopEnvironmentDependent':
+      'Linux 自启动和托盘行为取决于桌面环境与 AppIndicator 支持。',
+    'autostart.warning.systemMaySuppress': '自启动已配置，但操作系统仍可能抑制执行。',
+    'autostart.operation.notAllowed': '当前启动项无法安全修改。',
+    'autostart.operation.writeFailed': '无法写入启动项。',
+    'autostart.operation.deleteFailed': '无法删除启动项。',
+    'autostart.operation.verificationFailed': '修改后无法验证启动项状态。',
     'confirm.closeTabTitle': '关闭会话？',
     'confirm.closeTabMessage': '关闭此会话将终止所有正在运行的进程。仍要关闭',
     'confirm.closeTabConfirm': '关闭',

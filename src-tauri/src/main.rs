@@ -7,10 +7,14 @@ use dinotty_server::session::{
 };
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, OnceLock,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
+mod autostart;
 mod embedded_server;
 mod shutdown;
 mod tray;
@@ -18,6 +22,42 @@ mod window_actions;
 
 static EMBEDDED_HTTP_PORT: OnceLock<u16> = OnceLock::new();
 const BUILT_IN_DEFAULT_PORT: u16 = 8999;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LaunchIntent {
+    Interactive,
+    Background,
+    Server,
+    Invalid,
+}
+
+impl LaunchIntent {
+    fn parse(args: &[String]) -> Self {
+        let background_count =
+            args.iter().filter(|argument| argument.as_str() == "--background").count();
+        let server_count = args.iter().filter(|argument| argument.as_str() == "--server").count();
+        match (background_count, server_count) {
+            (0, 0) => Self::Interactive,
+            (1, 0) => Self::Background,
+            (0, 1) => Self::Server,
+            _ => Self::Invalid,
+        }
+    }
+}
+
+#[derive(Default)]
+struct StartupExitState(AtomicBool);
+
+impl StartupExitState {
+    fn exit(&self, app: &AppHandle, code: i32) {
+        self.0.store(true, Ordering::SeqCst);
+        app.exit(code);
+    }
+
+    fn is_exiting(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
 
 fn default_port() -> u16 {
     option_env!("DINOTTY_DEFAULT_PORT")
@@ -660,6 +700,7 @@ fn main() {
     let _log_guard = dinotty_server::settings::init_logging();
 
     let args: Vec<String> = std::env::args().collect();
+    let launch_intent = LaunchIntent::parse(&args);
     let requested_port = parse_port(&args);
     let port = if requested_port == 0 {
         let port = match default_port() {
@@ -674,9 +715,8 @@ fn main() {
     let _ = EMBEDDED_HTTP_PORT.set(port);
 
     let manager = Arc::new(SessionManager::new());
-    dinotty_server::session::ledger::boot_sweep();
-
-    if args.contains(&"--server".to_string()) {
+    if launch_intent == LaunchIntent::Server {
+        dinotty_server::session::ledger::boot_sweep();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let mgr = Arc::clone(&manager);
         rt.block_on(async move {
@@ -693,24 +733,75 @@ fn main() {
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let _runtime_enter = runtime.enter();
-    manager.start_cleanup_task();
+
+    let mut context = tauri::generate_context!();
+    if launch_intent != LaunchIntent::Interactive {
+        for window in &mut context.config_mut().app.windows {
+            if window.label == "main" {
+                window.create = false;
+            }
+        }
+    }
 
     tauri::Builder::default()
         // Keep one desktop instance so a second launch focuses the hidden/tray window instead
         // of racing the first process for the same port and global shortcut.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tracing::info!("Second Dinotty launch detected; focusing existing window");
-            window_actions::reveal_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            match LaunchIntent::parse(&args) {
+                LaunchIntent::Interactive => {
+                    tracing::info!("Second interactive Dinotty launch detected");
+                    window_actions::request_main_window(app, "second_instance");
+                }
+                LaunchIntent::Background => {
+                    tracing::info!("Secondary background launch ignored");
+                }
+                LaunchIntent::Server | LaunchIntent::Invalid => {
+                    tracing::warn!(?args, "Secondary launch has invalid desktop mode arguments");
+                }
+            }
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(manager.clone())
+        .manage(autostart::AutostartController::default())
         .manage(tray::state::TrayCapabilityState::default())
         .manage(tray::state::TrayMenuState::default())
+        .manage(window_actions::MainWindowState::default())
+        .manage(StartupExitState::default())
         .manage(shutdown::ShutdownCoordinator::new(manager.clone()))
         .setup(move |app| {
+            if launch_intent == LaunchIntent::Invalid {
+                tracing::error!(?args, "Invalid launch mode: mode flags must appear exactly once");
+                app.state::<StartupExitState>().exit(app.handle(), 2);
+                return Ok(());
+            }
+            if launch_intent == LaunchIntent::Background
+                && !autostart::background_package_supported()
+            {
+                tracing::warn!("Background launch is unsupported for this package or location");
+                app.state::<StartupExitState>().exit(app.handle(), 0);
+                return Ok(());
+            }
+
+            #[cfg(target_os = "macos")]
+            if launch_intent == LaunchIntent::Background {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
+            window_actions::initialize_existing_main_window(app.handle());
+            let tray_capability = tray::install_tray(app);
+            if launch_intent == LaunchIntent::Background && !tray_capability.is_available() {
+                tracing::warn!(
+                    "Background launch is exiting because the system tray is unavailable"
+                );
+                app.state::<StartupExitState>().exit(app.handle(), 0);
+                return Ok(());
+            }
+
+            dinotty_server::session::ledger::boot_sweep();
             let mgr = Arc::clone(&manager);
+            mgr.start_cleanup_task();
             match embedded_server::bind_listener(port) {
                 Ok(listener) => {
                     let actual = listener.local_addr().expect("bound listener").port();
@@ -731,17 +822,8 @@ fn main() {
                 }
             }
 
-            // Windows and Linux must not inherit an application menu. The desktop
-            // controls remain in the Vue UI; the native menu belongs only to the tray.
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
-            if let Some(window) = app.get_webview_window("main") {
-                if let Err(error) = window.remove_menu() {
-                    tracing::warn!(%error, "failed to remove native main-window menu");
-                }
-            }
-
             // Register global shortcut for Quake-mode toggle (Ctrl+Shift+`)
-            app.global_shortcut().on_shortcut(
+            if let Err(error) = app.global_shortcut().on_shortcut(
                 Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Backquote),
                 move |app, _shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
@@ -750,9 +832,9 @@ fn main() {
                         }
                     }
                 },
-            )?;
-
-            tray::install_tray(app);
+            ) {
+                tracing::warn!(%error, "global shortcut registration failed");
+            }
 
             Ok(())
         })
@@ -786,9 +868,11 @@ fn main() {
             window_actions::desktop_capabilities,
             window_actions::hide_main_window,
             window_actions::open_system_tray_settings,
+            autostart::autostart_status,
+            autostart::set_autostart,
             set_window_title,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error building tauri application")
         .run(move |app_handle, event| {
             #[cfg(target_os = "macos")]
@@ -799,6 +883,9 @@ fn main() {
             match event {
                 tauri::RunEvent::ExitRequested { code, api, .. } => {
                     if code == Some(tauri::RESTART_EXIT_CODE) {
+                        return;
+                    }
+                    if app_handle.state::<StartupExitState>().is_exiting() {
                         return;
                     }
                     let coordinator = app_handle.state::<shutdown::ShutdownCoordinator>();
@@ -835,4 +922,42 @@ fn parse_port(args: &[String]) -> u16 {
         i += 1;
     }
     default_port()
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn launch_intent_is_orthogonal_to_port_arguments() {
+        assert_eq!(LaunchIntent::parse(&args(&["dinotty"])), LaunchIntent::Interactive);
+        assert_eq!(
+            LaunchIntent::parse(&args(&["dinotty", "--background", "--port", "9000"])),
+            LaunchIntent::Background
+        );
+        assert_eq!(
+            LaunchIntent::parse(&args(&["dinotty", "-p", "9000", "--server"])),
+            LaunchIntent::Server
+        );
+    }
+
+    #[test]
+    fn repeated_or_conflicting_mode_flags_are_invalid() {
+        assert_eq!(
+            LaunchIntent::parse(&args(&["dinotty", "--background", "--background"])),
+            LaunchIntent::Invalid
+        );
+        assert_eq!(
+            LaunchIntent::parse(&args(&["dinotty", "--server", "--server"])),
+            LaunchIntent::Invalid
+        );
+        assert_eq!(
+            LaunchIntent::parse(&args(&["dinotty", "--background", "--server"])),
+            LaunchIntent::Invalid
+        );
+    }
 }

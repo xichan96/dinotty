@@ -21,6 +21,10 @@ impl TrayCapability {
     pub fn can_hide(&self) -> bool {
         matches!(self, Self::Installed { mode: TrayMode::Full })
     }
+
+    pub fn is_available(&self) -> bool {
+        matches!(self, Self::Installed { .. })
+    }
 }
 
 pub struct TrayCapabilityState(Mutex<TrayCapability>);
@@ -73,5 +77,7 @@ mod tests {
         assert!(!TrayCapability::Installed { mode: TrayMode::ShowOnly }.can_hide());
         assert!(!TrayCapability::NotAttempted.can_hide());
         assert!(!TrayCapability::Unavailable { reason: "missing host".into() }.can_hide());
+        assert!(TrayCapability::Installed { mode: TrayMode::ShowOnly }.is_available());
+        assert!(!TrayCapability::Unavailable { reason: "missing host".into() }.is_available());
     }
 }

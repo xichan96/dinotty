@@ -460,6 +460,58 @@
     <div class="settings-group">
       <h3 class="settings-group-title">{{ t('settings.group.behavior') }}</h3>
 
+      <section v-if="autostart.visible.value" class="settings-section" data-testid="autostart-card">
+        <h3>{{ t('autostart.title') }}</h3>
+        <template v-if="autostart.status.value?.state !== 'onDifferentPath'">
+          <div class="settings-row">
+            <label>{{ t('autostart.loginLaunch') }}</label>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                data-setting="autostart"
+                :checked="autostart.status.value?.state === 'onCurrent'"
+                :disabled="autostartToggleDisabled"
+                @change="onAutostartToggle"
+              />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+        </template>
+        <div v-else class="autostart-actions">
+          <button
+            v-if="autostart.status.value.canEnable"
+            class="icon-btn"
+            data-testid="autostart-adopt"
+            :disabled="autostart.requesting.value"
+            @click="enableAutostart"
+          >
+            {{ t('autostart.useCurrentFile') }}
+          </button>
+          <button
+            v-if="autostart.status.value.canDisable"
+            class="icon-btn danger"
+            data-testid="autostart-disable"
+            :disabled="autostart.requesting.value"
+            @click="disableAutostart"
+          >
+            {{ t('autostart.disable') }}
+          </button>
+        </div>
+        <p class="settings-hint">{{ t('autostart.hint') }}</p>
+        <p v-if="autostart.status.value?.supportReason" class="settings-hint">
+          {{ autostartSupportText }}
+        </p>
+        <p v-if="autostart.status.value?.stateError" class="settings-error">
+          {{ autostartStateErrorText }}
+        </p>
+        <p v-for="warning in displayAutostartWarnings" :key="warning" class="settings-hint">
+          {{ t(`autostart.warning.${warning}`) }}
+        </p>
+        <p v-if="autostart.operationError.value" class="settings-error">
+          {{ t(`autostart.operation.${autostart.operationError.value}`) }}
+        </p>
+      </section>
+
       <section class="settings-section">
         <h3>{{ t('settings.monitor') }}</h3>
         <div class="settings-row">
@@ -571,7 +623,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
 import { Eye, EyeOff, Copy, Check, Pencil, RefreshCw, Save, X, FolderOpen } from 'lucide-vue-next'
 import { useSettings } from '../../composables/useSettings'
 import type { WorkspaceBadgeMode } from '../../composables/useSettings'
@@ -586,12 +638,55 @@ import { authFetch, apiUrl } from '../../composables/apiBase'
 import { useUploadManagement } from '../../composables/useUploadManagement'
 import { useTokenManagement } from '../../composables/useTokenManagement'
 import { useAccessUrl } from '../../composables/useAccessUrl'
+import { useAutostart } from '../../composables/useAutostart'
+import { onAppForegroundGain } from '../../composables/useAppForeground'
 
 const emit = defineEmits<{ 'token-changed': [] }>()
 const { settings, saveSettings } = useSettings()
 const { t } = useI18n()
 const { isMobile } = useIsMobile()
 const toast = useToast()
+const autostart = useAutostart()
+
+const autostartToggleDisabled = computed(() => {
+  const status = autostart.status.value
+  if (!status || autostart.requesting.value || status.state === 'error') return true
+  return status.state === 'onCurrent' ? !status.canDisable : !status.canEnable
+})
+const autostartSupportText = computed(() => {
+  const reason = autostart.status.value?.supportReason
+  return reason ? t(`autostart.support.${reason}`) : ''
+})
+const autostartStateErrorText = computed(() => {
+  const error = autostart.status.value?.stateError
+  return error ? t(`autostart.stateError.${error}`) : ''
+})
+const displayAutostartWarnings = computed(() =>
+  (autostart.status.value?.warnings ?? []).filter(
+    (warning) => warning !== 'pathMoveBreaksRegistration'
+  )
+)
+
+function confirmAutostartPathBinding() {
+  return window.confirm(t('autostart.pathConfirm'))
+}
+
+function enableAutostart() {
+  void autostart.setEnabled(true, confirmAutostartPathBinding)
+}
+
+function disableAutostart() {
+  void autostart.setEnabled(false)
+}
+
+async function onAutostartToggle(event: Event) {
+  const input = event.target as HTMLInputElement
+  await autostart.setEnabled(input.checked, confirmAutostartPathBinding)
+  input.checked = autostart.status.value?.state === 'onCurrent'
+}
+
+const stopAutostartFocusRefresh = onAppForegroundGain(() => void autostart.refresh())
+onBeforeUnmount(stopAutostartFocusRefresh)
 
 const wsBadgeEffective = computed(() =>
   resolveWorkspaceBadgeMode(settings.workspace_badge_mode, isMobile.value)
@@ -766,6 +861,7 @@ function confirmLoginMethodChange() {
 }
 
 onMounted(async () => {
+  await autostart.refresh()
   loginMethodValue.value = settings.auth.login_method
   await refreshHasSubscriber()
 })
@@ -846,6 +942,13 @@ onMounted(async () => {
   align-items: center;
   flex-wrap: wrap;
   margin: 10px 0 6px;
+}
+
+.autostart-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .upload-dir-control {

@@ -1621,11 +1621,13 @@ dependencies = [
  "base64 0.22.1",
  "dinotty-server",
  "dunce",
+ "libc",
  "local-ip-address",
  "mime_guess",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "plist",
  "portable-pty",
  "rand 0.10.1",
  "reqwest 0.12.28",
@@ -1639,6 +1641,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
  "tower-http 0.5.2",
  "tracing",
@@ -1646,6 +1649,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "windows-sys 0.60.2",
+ "winreg 0.55.0",
 ]
 
 [[package]]

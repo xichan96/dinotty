@@ -66,9 +66,17 @@ chmod +x ./Dinotty*.AppImage
 
 The Linux system tray integration is experimental and requires an AppIndicator host and compatible runtime libraries. GNOME commonly also needs an AppIndicator extension, while KDE Plasma usually provides a system tray host. If the host or libraries are missing, Dinotty records diagnostics and continues running normally without hiding its main window. It does not install runtime libraries or desktop extensions.
 
+Desktop `.deb` and AppImage builds can enable per-user login autostart under Settings → General → Startup. At login, Dinotty starts only the background desktop process and system tray; it does not pre-create the main window, WebView, or a PTY. The tray, global shortcut, or another interactive Dinotty launch creates the window on demand. Linux writes `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/dinotty.desktop` on a best-effort basis: Dinotty guarantees a valid XDG Desktop Entry, but whether it runs still depends on the desktop environment's autostart and AppIndicator support. Autostart cannot be enabled without a tray, and an autostart launch exits quietly if tray installation fails.
+
+AppImage autostart is bound to the original image path used when it was enabled. Moving, renaming, or replacing that file does not trigger a scan or silent repair; launch Dinotty from the new location to choose Use current file, or disable the old entry. A stable symlink can be used as a fixed entry point. Uninstalling the `.deb` does not scan user homes as root. Disable autostart before removing the app, or, after confirming the file belongs to Dinotty, manually remove `~/.config/autostart/dinotty.desktop` (or the equivalent file under a custom `XDG_CONFIG_HOME`).
+
 ## macOS Desktop Package
 
 Download the `.dmg` from the CI `dinotty-macos` artifact or from GitHub Releases, then open it and follow the system installer prompts.
+
+After placing the `.app` in `/Applications` or `~/Applications`, enable per-user login autostart under Settings → General → Startup. It cannot be enabled from a DMG, App Translocation, a read-only volume, or another location. The record is stored at `~/Library/LaunchAgents/com.dinotty.terminal.autostart.plist`; login keeps only the tray and background capabilities alive, and the main window is created on the first explicit open request.
+
+Deleting an `.app` directly does not run an uninstall hook. Disable autostart in Settings first. If the app has already been removed, manually delete the plist above only after confirming that it belongs to Dinotty.
 
 ## Windows Desktop Package
 
@@ -83,9 +91,13 @@ Dinotty registers one system tray icon for the lifetime of the process. Windows 
 - Windows 10: open Taskbar settings → Select which icons appear on the taskbar, then enable Dinotty.
 - The NSIS installer and portable executable use different paths, so Windows may treat them as separate entries that must be enabled independently.
 
+Enable per-user login autostart under Settings → General → Startup. Dinotty writes the exact current exe path plus the single `--background` argument to the `Dinotty` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; login does not automatically open the main window. Fixed and removable local drives are supported, while mapped network drives, UNC paths, optical media, RAM disks, and unknown volume types are rejected. Portable builds can still enable autostart after acknowledging the path-binding warning. Moving or renaming the file, or changing a removable drive letter, does not make Dinotty search for it; explicitly adopt the new file or disable the old entry.
+
+NSIS in-place updates preserve autostart. A normal uninstall removes the Run value only when it is a `REG_SZ` that still points exactly to the executable in that installation directory. Values pointing to another Dinotty copy, containing extra arguments, using another registry type, or having malformed content are left untouched. Windows may also suppress a configured startup item in system settings; Dinotty does not modify the undocumented `StartupApproved` state.
+
 Closing the main window offers hide to tray, quit, or cancel when tray hiding is available. Hiding keeps PTYs, terminal sessions, and the embedded service running. Quitting makes a best-effort frontend save before cleaning up sessions; forced termination, power loss, and crashes cannot guarantee that save completes.
 
-For auto-start on Windows, wrap the portable executable with Task Scheduler, NSSM, or WinSW.
+This feature covers desktop startup after the current user signs in. It does not install a Windows Service or run before login.
 
 ## Docker Deploy
 

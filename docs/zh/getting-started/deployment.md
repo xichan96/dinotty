@@ -66,9 +66,17 @@ chmod +x ./Dinotty*.AppImage
 
 Dinotty 的 Linux 系统托盘功能为实验性功能，需要桌面环境提供 AppIndicator 宿主及相应动态库。GNOME 通常还需要启用 AppIndicator 扩展，KDE Plasma 通常可直接使用系统托盘。缺少宿主或动态库时，Dinotty 会记录诊断信息并继续正常运行，但不会隐藏主窗口；可从其他入口正常退出。应用不会自动安装动态库或桌面扩展。
 
+桌面 `.deb` 和 AppImage 可在“设置 → 通用 → 启动”中启用当前用户登录自启动。登录后 Dinotty 只启动后台桌面进程和系统托盘，不会预先创建主窗口、WebView 或 PTY；通过托盘、全局快捷键或再次启动 Dinotty 才会打开窗口。Linux 使用 `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/dinotty.desktop`，属于尽力支持：Dinotty 只保证生成有效的 XDG Desktop Entry，桌面环境是否执行仍取决于其自启动与 AppIndicator 支持。托盘不可用时不能启用，自启动时若托盘安装失败则进程安静退出。
+
+AppImage 自启动绑定启用时的原始镜像路径。移动、改名或更换文件后不会自动扫描或修复；从新位置启动 Dinotty 后可选择“改用当前文件”，或关闭旧记录。稳定符号链接可以作为固定入口。卸载 `.deb` 不会以 root 扫描或删除各用户的记录；应在删除应用前从设置中关闭，或在确认该文件属于 Dinotty 后手工删除 `~/.config/autostart/dinotty.desktop`（使用自定义 `XDG_CONFIG_HOME` 时删除对应目录下的文件）。
+
 ## macOS 桌面包
 
 从 CI 的 `dinotty-macos` artifact 或 GitHub Release 下载 `.dmg`，打开后按系统提示安装。
+
+将 `.app` 放入 `/Applications` 或 `~/Applications` 后，可在“设置 → 通用 → 启动”中启用当前用户登录自启动。DMG、App Translocation、只读卷和其他位置不允许启用。记录保存在 `~/Library/LaunchAgents/com.dinotty.terminal.autostart.plist`；登录后仅保留托盘和后台能力，首次显式打开时才创建主窗口。
+
+直接删除 `.app` 不会触发卸载钩子。删除前应先在设置中关闭自启动；如果应用已删除，可在确认内容属于 Dinotty 后手工删除上述 plist。
 
 ## Windows 桌面包
 
@@ -83,9 +91,13 @@ Dinotty 运行时会持续注册一个系统托盘图标。Windows 决定该图�
 - Windows 10：打开“任务栏设置 → 选择哪些图标显示在任务栏上”，开启 Dinotty。
 - NSIS 安装版与 portable 版的可执行文件路径不同，Windows 可能将它们视为两个独立条目，需要分别设置。
 
+可在“设置 → 通用 → 启动”中启用当前用户登录自启动。Dinotty 将精确的当前 exe 路径和唯一的 `--background` 参数写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `Dinotty` 值；登录后不会自动打开主窗口。固定本地盘和可移动本地盘支持启用，网络映射盘、UNC、光盘、RAM disk 和未知卷不支持。portable 版仍可启用，但会先提示路径绑定风险；移动、改名或盘符变化后不会自动寻找文件，需要从新位置显式接管或关闭旧记录。
+
+NSIS 覆盖更新会保留自启动。普通卸载只在 Run 值为 `REG_SZ` 且仍精确指向本次安装目录时删除它；指向另一份 Dinotty、包含额外参数、类型异常或格式异常的值均保持不变。Windows 还可能在系统设置中抑制已配置的启动项，Dinotty 不修改 undocumented `StartupApproved` 状态。
+
 关闭主窗口时可以选择隐藏到系统托盘、真正退出或取消。隐藏不会终止 PTY、终端会话和嵌入式服务；真正退出会尽力保存前端状态后清理会话。系统强制终止、断电或进程崩溃时无法保证完成保存。
 
-如需开机自启，可以使用 Windows 任务计划程序、NSSM 或 WinSW 包装 portable 可执行文件。
+该功能只处理用户登录后的桌面自启动，不创建 Windows Service，也不在登录前运行。
 
 ## Docker 部署
 

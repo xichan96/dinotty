@@ -99,7 +99,9 @@ impl ShutdownCoordinator {
                 tracing::warn!(request_id, %error, "desktop quit frontend emit failed");
             }
         } else {
-            tracing::warn!(request_id, "desktop quit frontend unavailable");
+            tracing::info!(request_id, "desktop quit has no frontend; finalizing immediately");
+            self.finalize_if_current(app, &request_id, "no_frontend");
+            return;
         }
 
         let app = app.clone();

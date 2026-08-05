@@ -725,12 +725,6 @@ const messages: Record<Locale, Record<string, string>> = {
     'traySetup.openSettings': 'Open system tray settings',
     'traySetup.confirmAndHide': 'I enabled it, hide window',
     'traySetup.cancel': 'Do not hide yet',
-    'settings.systemTray': 'System tray',
-    'settings.systemTrayWindows':
-      'Windows 11: Settings → Personalization → Taskbar → Other system tray icons. Windows 10: Taskbar settings → Select which icons appear on the taskbar. Installer and portable builds may have separate preferences.',
-    'settings.systemTrayLinux':
-      'Linux tray support is experimental and automatically falls back when no AppIndicator host or runtime library is available.',
-
     'fileBookmark.title': 'Bookmarks',
     'fileBookmark.empty': 'No bookmarks yet',
     'fileBookmark.emptyHint': 'Right-click a file to add',
@@ -1573,12 +1567,6 @@ const messages: Record<Locale, Record<string, string>> = {
     'traySetup.openSettings': '打开系统托盘设置',
     'traySetup.confirmAndHide': '我已开启，隐藏窗口',
     'traySetup.cancel': '暂不隐藏',
-    'settings.systemTray': '系统托盘',
-    'settings.systemTrayWindows':
-      'Windows 11：设置 → 个性化 → 任务栏 → 其他系统托盘图标。Windows 10：任务栏设置 → 选择哪些图标显示在任务栏上。安装版与 portable 版可能使用独立偏好。',
-    'settings.systemTrayLinux':
-      'Linux 托盘为实验性功能；没有 AppIndicator 宿主或运行库时会自动降级。',
-
     'fileBookmark.title': '书签',
     'fileBookmark.empty': '暂无书签',
     'fileBookmark.emptyHint': '右键点击文件添加',

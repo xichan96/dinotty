@@ -32,9 +32,12 @@
             class="settings-row kb-shortcut-row"
             :data-kb-id="def.id"
           >
-            <label
-              ><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label
-            >
+            <label class="kb-shortcut-label">
+              <span class="kb-icon" aria-hidden="true"
+                ><component :is="def.icon" :size="14"
+              /></span>
+              <span>{{ t(def.titleKey) }}</span>
+            </label>
             <div class="kb-shortcut-ctrl">
               <span v-if="kbRecording !== def.id" class="kb-keys">
                 <kbd
@@ -81,9 +84,12 @@
             class="settings-row kb-shortcut-row"
             :data-kb-id="def.id"
           >
-            <label
-              ><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label
-            >
+            <label class="kb-shortcut-label">
+              <span class="kb-icon" aria-hidden="true"
+                ><component :is="def.icon" :size="14"
+              /></span>
+              <span>{{ t(def.titleKey) }}</span>
+            </label>
             <div class="kb-shortcut-ctrl">
               <span v-if="kbRecording !== def.id" class="kb-keys">
                 <kbd
@@ -126,10 +132,12 @@
         <CollapsibleSection :title="t('keybinding.group.nav')" level="section" default-open>
           <template v-for="def in navDefs" :key="def.id">
             <div class="settings-row kb-shortcut-row" :data-kb-id="def.id">
-              <label
-                ><component :is="def.icon" :size="14" class="kb-icon" />
-                {{ t(def.titleKey) }}</label
-              >
+              <label class="kb-shortcut-label">
+                <span class="kb-icon" aria-hidden="true"
+                  ><component :is="def.icon" :size="14"
+                /></span>
+                <span>{{ t(def.titleKey) }}</span>
+              </label>
               <div class="kb-shortcut-ctrl">
                 <span v-if="kbRecording !== def.id" class="kb-keys">
                   <kbd
@@ -207,9 +215,12 @@
             class="settings-row kb-shortcut-row"
             :data-kb-id="def.id"
           >
-            <label
-              ><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label
-            >
+            <label class="kb-shortcut-label">
+              <span class="kb-icon" aria-hidden="true"
+                ><component :is="def.icon" :size="14"
+              /></span>
+              <span>{{ t(def.titleKey) }}</span>
+            </label>
             <div class="kb-shortcut-ctrl">
               <span v-if="kbRecording !== def.id" class="kb-keys">
                 <kbd
@@ -259,9 +270,10 @@
           class="settings-row kb-shortcut-row"
           :data-kb-id="def.id"
         >
-          <label
-            ><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label
-          >
+          <label class="kb-shortcut-label">
+            <span class="kb-icon" aria-hidden="true"><component :is="def.icon" :size="14" /></span>
+            <span>{{ t(def.titleKey) }}</span>
+          </label>
           <div class="kb-shortcut-ctrl">
             <span v-if="kbRecording !== def.id" class="kb-keys">
               <kbd
@@ -1437,6 +1449,11 @@ onBeforeUnmount(() => {
 .kb-shortcut-row {
   justify-content: space-between;
 }
+.kb-shortcut-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .kb-group + .kb-group {
   margin-top: 12px;
 }
@@ -1499,6 +1516,9 @@ onBeforeUnmount(() => {
   height: 18px;
   flex-shrink: 0;
   color: var(--fg-muted);
+}
+.kb-icon > svg {
+  display: block;
 }
 .kb-stop {
   color: #ef4444 !important;

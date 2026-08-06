@@ -14,6 +14,36 @@ const TerminalPaneStub = defineComponent({
 })
 
 describe('SplitContainer shell info', function splitContainerShellInfoSuite() {
+  it('uses a centered SVG icon for the pane close control', function rendersCloseIcon() {
+    const wrapper = mount(SplitContainer, {
+      props: {
+        layout: {
+          type: 'leaf',
+          paneId: 'pane-1',
+          title: 'Terminal',
+          ratio: 1,
+          zoomed: false,
+        },
+        activePaneId: 'pane-1',
+        broadcastMode: false,
+        broadcastActivity: 0,
+        showHeader: true,
+        allowClose: true,
+        tabId: 'tab-1',
+      },
+      global: {
+        stubs: {
+          TerminalPane: TerminalPaneStub,
+        },
+      },
+    })
+
+    const closeButton = wrapper.get('.pane-close-btn')
+    expect(closeButton.find('svg').exists()).toBe(true)
+    expect(closeButton.text()).toBe('')
+    wrapper.unmount()
+  })
+
   it('forwards the leaf shell type with its pane id', async function forwardsShellInfo() {
     // 步骤1：挂载一个最小叶子终端，并替换真实终端实现。
     const wrapper = mount(SplitContainer, {

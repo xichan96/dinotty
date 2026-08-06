@@ -27,12 +27,13 @@
     />
     <button
       v-if="allowClose"
+      type="button"
       class="pane-close-btn"
       :title="t('split.closePane')"
       @mousedown.stop
       @click.stop="emit('close', leaf!.paneId)"
     >
-      &times;
+      <X :size="14" aria-hidden="true" />
     </button>
     <template v-if="broadcastActive">
       <div class="broadcast-icon broadcast-icon--active" :title="t('split.broadcastTooltip')">
@@ -148,6 +149,7 @@ import PaneContent from './PaneContent.vue'
 import SplitDivider from './SplitDivider.vue'
 import PaneHeader from './PaneHeader.vue'
 import { useI18n } from '../../composables/useI18n'
+import { X } from 'lucide-vue-next'
 
 const props = withDefaults(
   defineProps<{
@@ -304,8 +306,6 @@ function getChildStyle(idx: number) {
   border-radius: 4px;
   background: transparent;
   color: var(--text-secondary, #888);
-  font-size: 14px;
-  line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -315,6 +315,10 @@ function getChildStyle(idx: number) {
     opacity 0.15s,
     background 0.15s,
     color 0.15s;
+}
+
+.pane-close-btn svg {
+  display: block;
 }
 
 /* Adjust close button position when vertical header with expanded padding is present */

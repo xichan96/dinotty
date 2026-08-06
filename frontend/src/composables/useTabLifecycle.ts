@@ -49,6 +49,7 @@ export interface TabLifecycleOptions {
   persistNow: () => void
   onSshConnectRef: ShallowRef<(result: SshConnectResult) => Promise<void>>
   sendSync: (msg: SyncClientMsg) => void
+  showCreateTerminalError: (error: unknown) => void
 }
 
 export interface TabLifecycleState {
@@ -97,6 +98,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     persistNow,
     onSshConnectRef,
     sendSync,
+    showCreateTerminalError,
   } = opts
 
   function newTab(cwd?: string): Promise<void>
@@ -164,6 +166,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     } catch (e) {
       console.error('Failed to create tab:', e)
       if (argv) throw e
+      showCreateTerminalError(e)
       return ''
     }
   }

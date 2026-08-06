@@ -47,6 +47,31 @@ fn shell_err_response(error: &ShellResolveError) -> axum::response::Response {
     (status, Json(json!({ "error": { "code": error.code } }))).into_response()
 }
 
+fn layout_contains_terminal(layout: &Value) -> bool {
+    match layout.get("type").and_then(Value::as_str) {
+        Some("leaf") => {
+            layout.get("kind").and_then(Value::as_str).unwrap_or("terminal") == "terminal"
+        }
+        Some("split") => layout
+            .get("children")
+            .and_then(Value::as_array)
+            .is_some_and(|children| children.iter().any(layout_contains_terminal)),
+        _ => false,
+    }
+}
+
+async fn resolve_shell_for_layout(
+    shell_probe: &ShellProbeService,
+    preference: &ShellPreference,
+    layout: &Value,
+) -> Result<Option<ShellSpec>, ShellResolveError> {
+    if layout_contains_terminal(layout) {
+        shell_probe.resolve(preference).await.map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 /// Walk the layout tree and prepare every leaf in place:
 ///
 /// - terminal: validate cwd (fallback to home), call `pty::create_session`,
@@ -69,7 +94,7 @@ fn prepare_layout_with_shell(
     startup_commands: &mut Vec<(String, String)>,
     warnings: &mut Vec<String>,
     workspace: Option<&workspace_mgmt::Workspace>,
-    shell_spec: &ShellSpec,
+    shell_spec: Option<&ShellSpec>,
 ) -> Result<(), (StatusCode, String)> {
     let Some(node_type) = layout.get("type").and_then(|v| v.as_str()).map(str::to_string) else {
         return Ok(());
@@ -81,6 +106,12 @@ fn prepare_layout_with_shell(
 
         match kind.as_str() {
             "terminal" => {
+                let Some(shell_spec) = shell_spec else {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "terminal layout is missing a resolved shell".to_string(),
+                    ));
+                };
                 // Preserve a missing CWD so the selected backend can choose its own home.
                 let workspace_path = workspace.map(|ws| PathBuf::from(&ws.path));
                 let cwd = layout.get("cwd").and_then(|v| v.as_str());
@@ -264,6 +295,7 @@ pub async fn apply_template(
         _ => None,
     };
 
+    let mut layout = template.layout.clone();
     let installed_plugin_ids: HashSet<String> =
         plugins.list().into_iter().map(|p| p.manifest.id).collect();
     let shell_preference = {
@@ -274,12 +306,12 @@ pub async fn apply_template(
             settings.wsl_distro.clone(),
         )
     };
-    let shell_spec = match shell_probe.resolve(&shell_preference).await {
+    let shell_spec = match resolve_shell_for_layout(&shell_probe, &shell_preference, &layout).await
+    {
         Ok(spec) => spec,
         Err(error) => return shell_err_response(&error),
     };
 
-    let mut layout = template.layout.clone();
     let new_tab_id = Uuid::new_v4().to_string();
     let mut created_pty_ids: Vec<String> = Vec::new();
     let mut startup_commands: Vec<(String, String)> = Vec::new();
@@ -297,7 +329,7 @@ pub async fn apply_template(
         &mut startup_commands,
         &mut warnings,
         workspace.as_ref(),
-        &shell_spec,
+        shell_spec.as_ref(),
     ) {
         for pane_id in &created_pty_ids {
             manager.kill_and_remove(pane_id);
@@ -382,6 +414,7 @@ fn prepare_layout(
     warnings: &mut Vec<String>,
     workspace: Option<&workspace_mgmt::Workspace>,
 ) -> Result<(), (StatusCode, String)> {
+    let shell_spec = shell::default_shell();
     prepare_layout_with_shell(
         layout,
         manager,
@@ -392,7 +425,7 @@ fn prepare_layout(
         startup_commands,
         warnings,
         workspace,
-        &shell::default_shell(),
+        Some(&shell_spec),
     )
 }
 
@@ -462,6 +495,48 @@ mod tests {
     fn collect_first_pane_id_empty_tree() {
         let layout = json!({"type": "split", "direction": "horizontal", "children": []});
         assert!(collect_first_pane_id(&layout).is_none());
+    }
+
+    fn missing_custom_shell_preference() -> ShellPreference {
+        let path = std::env::temp_dir()
+            .join(format!("dinotty-missing-shell-{}", Uuid::new_v4()))
+            .join("shell");
+        ShellPreference::new("custom", Some(path.to_string_lossy().into_owned()), None)
+    }
+
+    #[tokio::test]
+    async fn non_terminal_layout_skips_invalid_shell_resolution() {
+        let layout = json!({
+            "type": "split",
+            "direction": "horizontal",
+            "children": [
+                {"type": "leaf", "kind": "plugin", "paneId": "a", "pluginId": "git"},
+                {"type": "leaf", "kind": "web", "paneId": "b", "url": "http://localhost"}
+            ]
+        });
+        let result = resolve_shell_for_layout(
+            &ShellProbeService::default(),
+            &missing_custom_shell_preference(),
+            &layout,
+        )
+        .await
+        .expect("non-terminal layouts must not require a shell");
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn terminal_layout_still_validates_shell_preference() {
+        let layout = json!({"type": "leaf", "kind": "terminal", "paneId": "terminal"});
+        let error = resolve_shell_for_layout(
+            &ShellProbeService::default(),
+            &missing_custom_shell_preference(),
+            &layout,
+        )
+        .await
+        .expect_err("terminal layouts must reject an unavailable shell");
+
+        assert_eq!(error.code, "shell_unavailable");
     }
 
     fn fresh_plugin_manager() -> PluginManagerState {

@@ -52,6 +52,7 @@ impl WslProbeResult {
         }
     }
 
+    #[cfg(windows)]
     fn unknown(reason: &'static str) -> Self {
         Self {
             program: None,

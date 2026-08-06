@@ -147,6 +147,7 @@ describe('TerminalPane host clipboard input path', () => {
       sendSync: vi.fn(),
       sendLayoutSync: vi.fn(),
       persist: vi.fn(),
+      showSplitTerminalError: vi.fn(),
     })
 
     split.onTerminalInput('p1', 'echo ok')

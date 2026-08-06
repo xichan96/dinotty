@@ -1,4 +1,4 @@
-import { reactive, readonly, ref } from 'vue'
+import { reactive, readonly, ref, watch } from 'vue'
 import { applyThemeToDOM, getXtermTheme } from '../themes'
 import { getApiBase, apiUrl, authFetch, hasAuthToken } from './apiBase'
 import { resolveEffectiveTheme } from './useDeviceThemeSelection'
@@ -486,14 +486,25 @@ export const settings = reactive<SettingsData>({
 
 let loaded = false
 let loadPromise: Promise<void> | null = null
+let saveTail: Promise<void> | null = null
+let saveTailRevision: number | null = null
 let loadGeneration = 0
 let loadsInFlight = 0
+let settingsRevision = 0
 let loadedNotificationPresentationEcho: {
   channels?: unknown
   sounds?: unknown
 } | null = null
 const settingsLoadedState = ref(false)
 export const settingsLoaded = readonly(settingsLoadedState)
+
+watch(
+  settings,
+  () => {
+    settingsRevision++
+  },
+  { deep: true, flush: 'sync' }
+)
 
 export function __setSettingsLoadedForTest(value: boolean) {
   settingsLoadedState.value = value
@@ -502,8 +513,11 @@ export function __setSettingsLoadedForTest(value: boolean) {
 export function __resetSettingsLoadStateForTest() {
   loaded = false
   loadPromise = null
+  saveTail = null
+  saveTailRevision = null
   loadGeneration = 0
   loadsInFlight = 0
+  settingsRevision = 0
   loadedNotificationPresentationEcho = null
   settingsLoadedState.value = false
 }
@@ -565,12 +579,18 @@ export function restoreActionIcons() {
 
 export async function loadSettings() {
   if (!hasAuthToken()) return
+  // A refresh that overtakes an already-started save can fetch the old server
+  // value and put it back into the UI. Only wait for saves that existed when
+  // this load was requested; later local edits are handled by the revision guard.
+  const pendingSaves = saveTail
   let requestStarted = false
   try {
     loadGeneration++
     loadsInFlight++
     requestStarted = true
+    if (pendingSaves) await pendingSaves
     await getApiBase()
+    const revisionAtRequest = settingsRevision
     const res = await authFetch(apiUrl('/api/settings'))
     if (res.ok) {
       const data = await res.json()
@@ -584,8 +604,12 @@ export async function loadSettings() {
           ? { sounds: JSON.parse(JSON.stringify(notification.sounds)) }
           : {}),
       }
-      Object.assign(settings, data)
       loadGeneration++
+      // Once settings have loaded successfully, a response that started before
+      // a local edit is stale. Applying it would make the picker show the new
+      // value briefly while saving the previous server value again.
+      if (settingsLoadedState.value && settingsRevision !== revisionAtRequest) return
+      Object.assign(settings, data)
       settings.action_keyboard = normalizeActionKeyboard(settings.action_keyboard)
       settings.action_keyboard_user_default = normalizeActionKeyboard(
         settings.action_keyboard_user_default ?? null
@@ -601,7 +625,7 @@ export async function loadSettings() {
   }
 }
 
-export async function saveSettings() {
+async function persistSettings() {
   try {
     // Wait for initial load to complete before saving, to avoid overwriting server data with defaults
     if (loadPromise) await loadPromise
@@ -655,6 +679,33 @@ export async function saveSettings() {
   } catch (e) {
     console.error('[settings] save failed:', e)
   }
+}
+
+export function saveSettings(): Promise<void> {
+  // Full settings PUTs must stay ordered. Otherwise an earlier, slower request
+  // can finish after a newer Shell selection and restore the old preference.
+  if (saveTail && saveTailRevision === settingsRevision) return saveTail
+  const predecessor = saveTail
+  const operation = predecessor
+    ? predecessor.then(persistSettings, persistSettings)
+    : persistSettings()
+  saveTail = operation
+  saveTailRevision = settingsRevision
+  void operation.then(
+    () => {
+      if (saveTail === operation) {
+        saveTail = null
+        saveTailRevision = null
+      }
+    },
+    () => {
+      if (saveTail === operation) {
+        saveTail = null
+        saveTailRevision = null
+      }
+    }
+  )
+  return operation
 }
 
 const themeChangeListeners = new Set<(xtermTheme: ReturnType<typeof getXtermTheme>) => void>()

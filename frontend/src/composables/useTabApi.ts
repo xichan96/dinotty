@@ -1,4 +1,5 @@
 import { authFetch, apiUrl } from './apiBase'
+import { apiErrorFromResponse } from '../utils/apiError'
 
 export interface CreateTabResult {
   tab_id: string
@@ -50,7 +51,7 @@ export async function apiCreateTab(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cwd, argv, title }),
   })
-  if (!res.ok) throw new Error(`create tab failed: ${res.status}`)
+  if (!res.ok) throw await apiErrorFromResponse(res, 'create tab failed')
   return res.json()
 }
 
@@ -71,7 +72,7 @@ export async function apiSplitPane(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pane_id: paneId, direction, force_local: forceLocal ?? false, cwd }),
   })
-  if (!res.ok) throw new Error(`split pane failed: ${res.status}`)
+  if (!res.ok) throw await apiErrorFromResponse(res, 'split pane failed')
   return res.json()
 }
 

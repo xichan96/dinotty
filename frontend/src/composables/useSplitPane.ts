@@ -41,8 +41,18 @@ export function useSplitPane(opts: {
   sendSync: (msg: SyncClientMsg) => void
   sendLayoutSync: (tabPaneId: string, layout: any, activePaneId: string) => void
   persist: () => void
+  showSplitTerminalError: (error: unknown) => void
 }) {
-  const { tabs, activePaneId, termRefs, genPaneId, sendSync, sendLayoutSync, persist } = opts
+  const {
+    tabs,
+    activePaneId,
+    termRefs,
+    genPaneId,
+    sendSync,
+    sendLayoutSync,
+    persist,
+    showSplitTerminalError,
+  } = opts
 
   /** Sync layout to server for a given tab */
   function syncTabLayout(tab: TerminalTab) {
@@ -96,6 +106,7 @@ export function useSplitPane(opts: {
       })
     } catch (e) {
       console.error('Failed to split pane:', e)
+      showSplitTerminalError(e)
     }
   }
 

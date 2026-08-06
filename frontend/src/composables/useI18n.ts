@@ -448,6 +448,8 @@ const messages: Record<Locale, Record<string, string>> = {
       'This WSL version does not support the required launch options.',
     'terminal.sessionError.wsl_output_invalid': 'WSL returned an invalid distribution list.',
     'terminal.sessionError.pty_spawn_failed': 'The terminal process could not be started.',
+    'terminal.createFailed': 'Unable to create the terminal.',
+    'terminal.splitFailed': 'Unable to create the split terminal.',
     'settings.tab.notification': 'Notification',
     'notification.title': 'NOTIFICATIONS',
     'notification.pin': 'Pin panel',
@@ -722,8 +724,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.behavior': 'Behavior',
     'autostart.title': 'Startup',
     'autostart.loginLaunch': 'Launch at login',
-    'autostart.hint':
-      'Starts in the system tray without opening the main window. Use the tray, global shortcut, or launch Dinotty again to open it.',
+    'autostart.hint': 'Starts in the system tray.',
     'autostart.useCurrentFile': 'Use current file',
     'autostart.disable': 'Disable autostart',
     'autostart.portableConfirm.windows':
@@ -895,6 +896,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'template.deleteConfirm': 'Delete',
     'template.applyToast': 'Template applied',
     'template.applyWarningsToast': 'Template applied with {n} warning(s)',
+    'template.applyFailed': 'Unable to apply the template.',
     'keybinding.addCursorsInFiles': 'Add Cursors in Files',
     'multiSelect.confirm': 'Confirm',
     'multiSelect.cancel': 'Cancel',
@@ -1342,6 +1344,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'terminal.sessionError.wsl_capability_unsupported': '当前 WSL 不支持所需的启动参数。',
     'terminal.sessionError.wsl_output_invalid': 'WSL 返回了无效的发行版列表。',
     'terminal.sessionError.pty_spawn_failed': '无法启动终端进程。',
+    'terminal.createFailed': '无法创建终端。',
+    'terminal.splitFailed': '无法创建分屏终端。',
     'settings.tab.notification': '通知',
     'notification.title': '通知',
     'notification.pin': '固定面板',
@@ -1613,8 +1617,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.behavior': '行为',
     'autostart.title': '启动',
     'autostart.loginLaunch': '登录时自动启动',
-    'autostart.hint':
-      '启动后只在系统托盘运行，不会自动打开主窗口。可通过托盘、全局快捷键或再次启动 Dinotty 打开。',
+    'autostart.hint': '启动后只在系统托盘运行。',
     'autostart.useCurrentFile': '改用当前文件',
     'autostart.disable': '关闭自启动',
     'autostart.portableConfirm.windows':
@@ -1778,6 +1781,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'template.deleteConfirm': '删除',
     'template.applyToast': '模板已应用',
     'template.applyWarningsToast': '模板已应用，有 {n} 个警告',
+    'template.applyFailed': '无法应用模板。',
     'keybinding.addCursorsInFiles': '跨文件添加光标',
     'multiSelect.confirm': '确认',
     'multiSelect.cancel': '取消',

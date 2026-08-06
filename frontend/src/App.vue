@@ -348,6 +348,7 @@ import {
   onMounted,
   onBeforeUnmount,
   nextTick,
+  h,
 } from 'vue'
 import TabBar from './components/terminal/TabBar.vue'
 import type { TabInfo } from './components/terminal/TabBar.vue'
@@ -484,6 +485,7 @@ import { createHostClipboardPasteController } from './utils/hostClipboardPaste'
 import { readHostClipboard } from './utils/clipboard'
 import { hasCollapseGuard, hasOpenGuard } from './utils/keyboardGuardMode'
 import type { AppActionOptions } from './components/keyboard/mkbTypes'
+import { canFixShellErrorInSettings, shellErrorMessage } from './utils/shellError'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
@@ -544,6 +546,32 @@ const notif = useNotification()
 const presentationSettings = useNotificationPresentation().settings
 const { supervise } = useSuperviseTabs()
 const toast = useToast()
+
+function showShellApiError(error: unknown, fallbackKey: string) {
+  const message = shellErrorMessage(error, t, fallbackKey)
+  if (!canFixShellErrorInSettings(error)) {
+    toast.error(message)
+    return
+  }
+
+  toast.error(
+    h('div', { class: 'notif-toast-content' }, [
+      h('span', { class: 'notif-toast-body' }, message),
+      h(
+        'button',
+        {
+          class: 'notif-toast-btn',
+          onClick: () => {
+            settingsOpen.value = true
+          },
+        },
+        t('settings.title')
+      ),
+    ]),
+    { timeout: 8000 }
+  )
+}
+
 const hostClipboardPaste = createHostClipboardPasteController({
   fetchText: async () => {
     const text = await readHostClipboard()
@@ -748,6 +776,7 @@ const {
   persistNow,
   onSshConnectRef,
   sendSync: (msg) => sendSyncFn(msg),
+  showCreateTerminalError: (error) => showShellApiError(error, 'terminal.createFailed'),
 })
 
 const {
@@ -968,6 +997,7 @@ const splitPane = useSplitPane({
   sendSync: (msg) => sendSyncFn(msg),
   sendLayoutSync: syncWs.sendLayoutSync,
   persist,
+  showSplitTerminalError: (error) => showShellApiError(error, 'terminal.splitFailed'),
 })
 
 function registerTermRef(paneId: string, el: InstanceType<typeof TerminalPane> | null) {
@@ -1511,8 +1541,8 @@ async function onTemplateApplied(
     } else {
       toast?.success(t('template.applyToast'))
     }
-  } catch (e: any) {
-    toast?.error(e?.message || 'Apply failed')
+  } catch (e: unknown) {
+    showShellApiError(e, 'template.applyFailed')
   }
   void scope
 }

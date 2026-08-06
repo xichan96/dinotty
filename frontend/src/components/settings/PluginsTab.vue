@@ -844,16 +844,19 @@ async function onRefresh() {
   align-items: center;
   padding: 5px 12px;
   border-radius: 5px;
-  background: none;
+  background: var(--bg-input);
   color: var(--fg-bright, #d0d0d0);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  border: none;
-  transition: background 0.15s;
+  border: 1px solid var(--border, #444);
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 .plugin-install-btn:hover {
   background: var(--bg-hover);
+  border-color: var(--fg-muted, #858585);
 }
 .plugin-action-btn {
   display: inline-flex;

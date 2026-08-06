@@ -48,8 +48,9 @@
           type="button"
           class="tab-bar-icon-btn"
           :title="t('app.preview')"
-          @click="openPreview"
-          @touchend.prevent="openPreview"
+          :aria-pressed="activeTab?.type === 'terminal' && activeTab.previewVisible"
+          @click="togglePreview"
+          @touchend.prevent="togglePreview"
         >
           <Monitor :size="16" />
         </button>
@@ -1154,6 +1155,16 @@ function openPreview() {
       previewPanelRef.value?.openFromPath(raw)
     }
   })
+}
+
+function togglePreview() {
+  const tab = activeTab.value
+  if (!tab || tab.type !== 'terminal') return
+  if (tab.previewVisible) {
+    closePreview(tab.paneId)
+    return
+  }
+  openPreview()
 }
 
 function onFileClick(path: string) {

@@ -494,6 +494,27 @@ afterEach(() => {
   settings.mobile_input_mode = null
 })
 
+describe('App.vue - preview toolbar toggle', () => {
+  it('opens and closes the active terminal preview on consecutive clicks', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const previewButton = wrapper.find('button[title="app.preview"]')
+    const tab = session.tabs[0]
+    if (tab.type !== 'terminal') throw new Error('expected terminal tab')
+
+    expect(tab.previewVisible).toBe(false)
+    expect(previewButton.attributes('aria-pressed')).toBe('false')
+
+    await previewButton.trigger('click')
+    expect(tab.previewVisible).toBe(true)
+    expect(previewButton.attributes('aria-pressed')).toBe('true')
+
+    await previewButton.trigger('click')
+    expect(tab.previewVisible).toBe(false)
+    expect(previewButton.attributes('aria-pressed')).toBe('false')
+  })
+})
+
 describe('App.vue - terminal-sequence app actions', () => {
   it('sends each exact sequence through the active terminal input path and no-ops unknown ids', async () => {
     const wrapper = await mountWithTabs()

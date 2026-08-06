@@ -13,6 +13,21 @@ fn old_config_missing_confirm_before_close_tab_defaults_to_true() {
 }
 
 #[test]
+fn auto_check_updates_defaults_to_true_and_preserves_explicit_false() {
+    let old_settings: Settings = serde_json::from_str(r"{}")
+        .expect("settings written before auto_check_updates should still parse");
+    assert!(old_settings.auto_check_updates);
+    assert!(Settings::default().auto_check_updates);
+
+    let disabled: Settings = serde_json::from_str(r#"{"auto_check_updates":false}"#).unwrap();
+    assert!(!disabled.auto_check_updates);
+
+    let serialized = serde_json::to_string(&disabled).unwrap();
+    let restored: Settings = serde_json::from_str(&serialized).unwrap();
+    assert!(!restored.auto_check_updates);
+}
+
+#[test]
 fn settings_defaults_locale_to_zh() {
     let settings: Settings = serde_json::from_str(r"{}").unwrap();
     assert_eq!(settings.locale, "zh");

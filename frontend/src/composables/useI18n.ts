@@ -666,6 +666,14 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.about.repository': 'Repository',
     'settings.about.documentation': 'Documentation',
     'settings.about.feedback': 'Feedback',
+    'settings.about.updateAvailable': 'New version {version} available',
+    'settings.about.viewRelease': 'View Release',
+    'settings.about.openReleaseFailed': 'Could not open the Release page. Please try again.',
+    'settings.about.autoCheckUpdates': 'Automatically check for updates',
+    'settings.about.autoCheckUpdatesHint':
+      'Check at startup or page reload, and immediately when re-enabled. Dinotty does not poll while running.',
+    'settings.about.updateToast':
+      'Version {version} is available. View details in Settings > About.',
     'settings.group.interface': 'Interface',
     'settings.group.security': 'Security & Access',
     'settings.group.behavior': 'Behavior',
@@ -1552,6 +1560,13 @@ const messages: Record<Locale, Record<string, string>> = {
     'settings.about.repository': '仓库',
     'settings.about.documentation': '文档',
     'settings.about.feedback': '反馈',
+    'settings.about.updateAvailable': '发现新版本 {version}',
+    'settings.about.viewRelease': '查看 Release',
+    'settings.about.openReleaseFailed': '无法打开 Release 页面，请重试。',
+    'settings.about.autoCheckUpdates': '自动检查更新',
+    'settings.about.autoCheckUpdatesHint':
+      '启动程序、重新加载页面或重新开启此选项时立即检查，运行期间不会定时检查。',
+    'settings.about.updateToast': '发现新版本 {version}，可前往“设置 > 关于”查看。',
     'settings.confirmBeforeCloseTab': '关闭终端 tab 前显示确认',
     'settings.confirmBeforeCloseTabHint': '关闭终端 tab 前弹出确认对话框',
     'settings.spaceConfirmsDialogs': '使用空格键确认对话框',

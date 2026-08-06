@@ -40,6 +40,7 @@ pub mod ssh;
 pub mod tabs;
 pub mod templates;
 pub mod token;
+pub mod update_check;
 pub mod util;
 pub mod vt_screen;
 pub mod webhook;

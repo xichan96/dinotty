@@ -111,6 +111,8 @@ Download the new version and install over the old one. Config and workspace data
 | Windows | `%APPDATA%\dinotty\` |
 | Linux server (deb) | `/var/lib/dinotty/` |
 
+Dinotty checks the official GitHub Release once by default after login on each desktop launch or browser/PWA page reload. It does not poll while the app remains open. You can disable **Automatically check for updates** at the bottom of **Settings > About**; enabling it again runs one check immediately. The update card appears only when a newer stable version has been published for more than 24 hours. Dinotty also shows one startup toast while the window is visible and in the foreground, or when the window next returns to the foreground if the result arrived in the background. **View Release** opens the release page in a new browser tab on the web/PWA or in the system browser on desktop; Dinotty does not download or install updates automatically. Offline starts, GitHub rate limits, and check failures remain silent and do not block startup.
+
 Server deb upgrade:
 
 ```bash

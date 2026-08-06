@@ -33,6 +33,7 @@ use dinotty_server::session::SessionManager;
 use dinotty_server::settings;
 use dinotty_server::tabs;
 use dinotty_server::templates;
+use dinotty_server::update_check;
 use dinotty_server::workspace;
 use dinotty_server::workspace_mgmt;
 use dinotty_server::ws;
@@ -64,6 +65,7 @@ pub struct AppState {
     pub mc: mission_control::MissionControlState,
     pub subscriptions: plugin::SubscriptionRegistry,
     pub code_store: Arc<CodeStore>,
+    pub update_checker: update_check::UpdateCheckState,
 }
 
 impl axum::extract::FromRef<AppState> for Arc<SessionManager> {
@@ -163,6 +165,12 @@ impl axum::extract::FromRef<AppState> for Arc<SessionStore> {
 impl axum::extract::FromRef<AppState> for Arc<tokio::sync::RwLock<String>> {
     fn from_ref(state: &AppState) -> Self {
         state.auth_token.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for update_check::UpdateCheckState {
+    fn from_ref(state: &AppState) -> Self {
+        state.update_checker.clone()
     }
 }
 
@@ -833,6 +841,7 @@ pub fn run_server(
             mc: mc_state,
             subscriptions: plugin::SubscriptionRegistry::new(),
             code_store,
+            update_checker: update_check::UpdateChecker::new(),
         };
 
         state.plugins.watch_changes(manager);
@@ -918,6 +927,7 @@ pub fn run_server(
             .route("/api/events/emit", post(events::emit_event))
             .route("/api/history", get(history::get_history).delete(history::delete_history))
             .route("/api/info", get(server_info))
+            .route("/api/update-check", get(update_check::get_update_status))
             .route("/api/auth", post(check_auth))
             .route("/api/auth/request-code", post(request_code))
             .route("/api/auth/check", get(check_auth_session))

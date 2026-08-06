@@ -3,7 +3,7 @@
 use dinotty_server::{
     agent, api::clipboard, audit, auth, event_bus, events, file_watcher, history, mcp,
     mission_control, monitor, notification, openapi, plugin, proxy, session, settings, tabs,
-    templates, token, webhook, workspace, workspace_mgmt, ws,
+    templates, token, update_check, webhook, workspace, workspace_mgmt, ws,
 };
 
 use axum::{
@@ -133,6 +133,7 @@ pub struct AppState {
     pub sessions: Arc<SessionStore>,
     pub code_store: Arc<CodeStore>,
     pub subscriptions: plugin::SubscriptionRegistry,
+    pub update_checker: update_check::UpdateCheckState,
 }
 
 // Allow extracting Arc<SessionManager> from AppState for ws handlers
@@ -265,6 +266,12 @@ impl axum::extract::FromRef<AppState> for Arc<SessionStore> {
 impl axum::extract::FromRef<AppState> for Arc<tokio::sync::RwLock<String>> {
     fn from_ref(state: &AppState) -> Self {
         state.auth_token.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for update_check::UpdateCheckState {
+    fn from_ref(state: &AppState) -> Self {
+        state.update_checker.clone()
     }
 }
 
@@ -1073,6 +1080,7 @@ async fn main() {
         sessions,
         code_store,
         subscriptions: plugin::SubscriptionRegistry::new(),
+        update_checker: update_check::UpdateChecker::new(),
     };
 
     state.plugins.watch_changes(state.manager.clone());
@@ -1184,6 +1192,7 @@ async fn main() {
             .route("/api/history", get(history::get_history).delete(history::delete_history))
             .route("/api/proxy", any(proxy::external_proxy_handler))
             .route("/api/info", get(server_info))
+            .route("/api/update-check", get(update_check::get_update_status))
             .route("/api/token", get(get_token).put(update_token))
             // Plugin management
             .route("/api/plugins", get(plugin::list_plugins))

@@ -61,6 +61,7 @@ export interface SettingsData {
   space_confirms_dialogs: boolean
   windowsAltAsCmd: boolean
   locale: string
+  auto_check_updates: boolean
   panel_position: 'auto' | 'right' | 'left' | 'top' | 'bottom'
   shell: string
   shell_path: string | null
@@ -420,6 +421,7 @@ export const settings = reactive<SettingsData>({
   space_confirms_dialogs: false,
   windowsAltAsCmd: isWindowsClient,
   locale: 'zh',
+  auto_check_updates: true,
   panel_position: 'auto',
   shell: 'auto',
   shell_path: null,

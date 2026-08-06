@@ -130,6 +130,8 @@ pub struct Settings {
     pub space_confirms_dialogs: bool,
     #[serde(default = "default_locale")]
     pub locale: String,
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
     #[serde(default)]
     pub panel_position: PanelPosition,
     #[serde(default)]
@@ -865,6 +867,7 @@ impl Default for Settings {
             reload_after_supervise_tabs: false,
             space_confirms_dialogs: false,
             locale: default_locale(),
+            auto_check_updates: true,
             panel_position: PanelPosition::default(),
             monitor: MonitorConfig::default(),
             notification: NotificationConfig::default(),

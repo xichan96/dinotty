@@ -120,13 +120,28 @@ export class TauriIpcTransport implements Transport {
   private _connectHandler: (() => void) | null = null
   private _disconnectHandler: (() => void) | null = null
   private _unlistenFns: Array<() => void> = []
+  private _destroyed = false
 
   constructor(private paneId: string) {
-    this._init()
+    void this._init()
   }
 
   private _invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
     return tauriInvoke(cmd, { paneId: this.paneId, ...args })
+  }
+
+  private async _registerListener(
+    listen: (event: string, handler: (event: any) => void) => Promise<() => void>,
+    event: string,
+    handler: (event: any) => void
+  ): Promise<boolean> {
+    const unlisten = await listen(event, handler)
+    if (this._destroyed) {
+      unlisten()
+      return false
+    }
+    this._unlistenFns.push(unlisten)
+    return true
   }
 
   private async _init() {
@@ -138,67 +153,79 @@ export class TauriIpcTransport implements Transport {
       return
     }
 
-    this._unlistenFns.push(
-      await listen('pty-output', (e: any) => {
-        if (e.payload.pane_id === this.paneId) {
-          this._messageHandler?.({ type: 'output', data: e.payload.data })
-        }
-      })
-    )
-    this._unlistenFns.push(
-      await listen('pty-reconnected', (e: any) => {
-        const p = e.payload
-        if (p.pane_id === this.paneId) {
-          this._messageHandler?.({ type: 'reconnected', cols: p.cols, rows: p.rows })
-        }
-      })
-    )
-    this._unlistenFns.push(
-      await listen('pty-resize', (e: any) => {
-        const p = e.payload
-        if (p.pane_id === this.paneId) {
-          this._messageHandler?.({ type: 'resize', cols: p.cols, rows: p.rows })
-        }
-      })
-    )
-    this._unlistenFns.push(
-      await listen('pty-exit', (e: any) => {
-        if (e.payload.pane_id === this.paneId) {
-          this._disconnectHandler?.()
-        }
-      })
-    )
-    this._unlistenFns.push(
-      await listen('pty-sync', (e: any) => {
-        if (e.payload.pane_id === this.paneId) {
-          this._messageHandler?.({ type: e.payload.active ? 'sync_begin' : 'sync_end' })
-        }
-      })
-    )
-    this._unlistenFns.push(
-      await listen('pty-replay-begin', (e: any) => {
-        if (e.payload.pane_id === this.paneId) {
-          this._messageHandler?.({
-            type: 'replay_begin',
-            cols: e.payload.cols,
-            rows: e.payload.rows,
-          })
-        }
-      })
-    )
-    this._unlistenFns.push(
-      await listen('pty-replay-end', (e: any) => {
-        if (e.payload.pane_id === this.paneId) {
-          this._messageHandler?.({ type: 'replay_end' })
-        }
-      })
-    )
-
     try {
+      if (
+        !(await this._registerListener(listen, 'pty-output', (e: any) => {
+          if (e.payload.pane_id === this.paneId) {
+            this._messageHandler?.({ type: 'output', data: e.payload.data })
+          }
+        }))
+      )
+        return
+      if (
+        !(await this._registerListener(listen, 'pty-reconnected', (e: any) => {
+          const p = e.payload
+          if (p.pane_id === this.paneId) {
+            this._messageHandler?.({ type: 'reconnected', cols: p.cols, rows: p.rows })
+          }
+        }))
+      )
+        return
+      if (
+        !(await this._registerListener(listen, 'pty-resize', (e: any) => {
+          const p = e.payload
+          if (p.pane_id === this.paneId) {
+            this._messageHandler?.({ type: 'resize', cols: p.cols, rows: p.rows })
+          }
+        }))
+      )
+        return
+      if (
+        !(await this._registerListener(listen, 'pty-exit', (e: any) => {
+          if (e.payload.pane_id === this.paneId) {
+            this._disconnectHandler?.()
+          }
+        }))
+      )
+        return
+      if (
+        !(await this._registerListener(listen, 'pty-sync', (e: any) => {
+          if (e.payload.pane_id === this.paneId) {
+            this._messageHandler?.({ type: e.payload.active ? 'sync_begin' : 'sync_end' })
+          }
+        }))
+      )
+        return
+      if (
+        !(await this._registerListener(listen, 'pty-replay-begin', (e: any) => {
+          if (e.payload.pane_id === this.paneId) {
+            this._messageHandler?.({
+              type: 'replay_begin',
+              cols: e.payload.cols,
+              rows: e.payload.rows,
+            })
+          }
+        }))
+      )
+        return
+      if (
+        !(await this._registerListener(listen, 'pty-replay-end', (e: any) => {
+          if (e.payload.pane_id === this.paneId) {
+            this._messageHandler?.({ type: 'replay_end' })
+          }
+        }))
+      )
+        return
+
       const shellType: string = (await this._invoke('pty_spawn')) as string
+      if (this._destroyed) {
+        void this._invoke('pty_detach').catch(() => {})
+        return
+      }
       this._connectHandler?.()
       this._messageHandler?.({ type: 'shell_info', shell_type: shellType })
     } catch (e) {
+      if (this._destroyed) return
       console.error('pty_spawn failed:', e)
       const code =
         typeof e === 'object' && e !== null && 'code' in e
@@ -210,6 +237,7 @@ export class TauriIpcTransport implements Transport {
   }
 
   send(msg: ClientMsg) {
+    if (this._destroyed) return
     if (msg.type === 'input') {
       const invokePromise = this._invoke('pty_write', { data: msg.data }) as Promise<void>
       void invokePromise.catch((err: unknown) => {
@@ -243,11 +271,12 @@ export class TauriIpcTransport implements Transport {
   }
 
   disconnect() {
-    this._invoke('pty_detach')
-    for (const u of this._unlistenFns) {
+    if (this._destroyed) return
+    this._destroyed = true
+    void this._invoke('pty_detach').catch(() => {})
+    for (const u of this._unlistenFns.splice(0)) {
       u()
     }
-    this._unlistenFns = []
   }
 }
 

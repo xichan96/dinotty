@@ -439,25 +439,22 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       tab.type === 'terminal'
         ? [tab.paneId, ...getAllLeaves(tab.layout).map((l) => l.paneId)]
         : [tab.paneId]
-    if (tab.type === 'plugin') {
-      invalidatePluginPreview(tab.paneId)
-    } else if (tab.type === 'terminal') {
-      for (const leaf of getAllLeaves(tab.layout)) {
-        if (leaf.kind === 'plugin') invalidatePluginPreview(leaf.paneId)
-      }
-    }
-
     if (tab.type === 'terminal') {
-      for (const leaf of getAllLeaves(tab.layout)) {
-        delete termRefs[leaf.paneId]
-        clearFileWorkspaceState(leaf.paneId)
-      }
-
       try {
         await apiCloseTab(tabId)
       } catch (e) {
         console.error('Failed to close tab:', e)
         return
+      }
+    }
+
+    if (tab.type === 'plugin') {
+      invalidatePluginPreview(tab.paneId)
+    } else if (tab.type === 'terminal') {
+      for (const leaf of getAllLeaves(tab.layout)) {
+        if (leaf.kind === 'plugin') invalidatePluginPreview(leaf.paneId)
+        delete termRefs[leaf.paneId]
+        clearFileWorkspaceState(leaf.paneId)
       }
     }
 

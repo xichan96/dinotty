@@ -89,6 +89,10 @@ import { useSettings } from '../../composables/useSettings'
 import { useUpdateCheck } from '../../composables/useUpdateCheck'
 import { openExternalUrl } from '../../utils/openExternalUrl'
 
+const emit = defineEmits<{
+  'open-about': []
+}>()
+
 const { t } = useI18n()
 const { settings, settingsLoaded, saveSettings } = useSettings()
 const update = useUpdateCheck()
@@ -133,6 +137,9 @@ function showUpdatePromptIfVisible() {
   if (!prompt) return
   toast.info(t('settings.about.updateToast', { version: `v${prompt.latestVersion}` }), {
     timeout: 8000,
+    closeOnClick: true,
+    toastClassName: 'update-available-toast',
+    onClick: () => emit('open-about'),
   })
 }
 

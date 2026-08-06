@@ -129,9 +129,17 @@ describe('AboutTab update card and automatic check preference', () => {
     expect(first.text()).toContain('发现新版本 v0.21.0')
     expect(aboutMocks.toastInfo).toHaveBeenCalledOnce()
     expect(aboutMocks.toastInfo).toHaveBeenCalledWith(
-      '发现新版本 v0.21.0，可前往“设置 > 关于”查看。',
-      { timeout: 8000 }
+      '发现新版本 v0.21.0，点击查看详情',
+      expect.objectContaining({
+        timeout: 8000,
+        closeOnClick: true,
+        toastClassName: 'update-available-toast',
+        onClick: expect.any(Function),
+      })
     )
+    const toastOptions = aboutMocks.toastInfo.mock.calls[0]?.[1]
+    toastOptions.onClick()
+    expect(first.emitted('open-about')).toHaveLength(1)
     aboutMocks.foregroundCallback?.()
     expect(aboutMocks.toastInfo).toHaveBeenCalledOnce()
 

@@ -186,6 +186,7 @@
       @close="settingsOpen = false"
       @token-changed="onTokenChanged"
       @open-plugin="openPlugin"
+      @open-about="settingsOpen = true"
     />
 
     <ConfirmCloseDialog @confirm="onConfirmClose" />

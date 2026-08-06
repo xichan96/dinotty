@@ -164,6 +164,10 @@ input {
   background: var(--bg-hover);
 }
 
+.update-available-toast {
+  cursor: pointer;
+}
+
 @media (max-width: 480px) and (orientation: portrait) {
   .Vue-Toastification__container {
     width: 33.33vw !important;

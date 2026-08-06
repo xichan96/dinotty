@@ -26,7 +26,7 @@
         <MonitorTab v-show="activeTab === 'monitor'" />
         <NotificationTab v-show="activeTab === 'notification'" />
         <PluginsTab v-show="activeTab === 'plugins'" @open-plugin="openPlugin" />
-        <AboutTab v-show="activeTab === 'about'" />
+        <AboutTab v-show="activeTab === 'about'" @open-about="openAbout" />
       </div>
     </div>
   </div>
@@ -60,6 +60,7 @@ const emit = defineEmits<{
   close: []
   'token-changed': []
   'open-plugin': [pluginId: string]
+  'open-about': []
 }>()
 
 const { settings, saveSettings, loadSettings, applyCurrentTheme } = useSettings()
@@ -73,6 +74,11 @@ function openPlugin(pluginId: string) {
 const activeTab = ref<
   'general' | 'appearance' | 'keyboard' | 'monitor' | 'notification' | 'plugins' | 'about'
 >('general')
+
+function openAbout() {
+  activeTab.value = 'about'
+  emit('open-about')
+}
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let suppressSave = false

@@ -170,48 +170,47 @@ impl ShellProbeService {
         Ok(wsl_shell_spec(program, distro))
     }
 
+    #[cfg(not(windows))]
+    fn probe_wsl(&self) -> std::future::Ready<WslProbeResult> {
+        let _ = self;
+        std::future::ready(WslProbeResult::unavailable("wsl_capability_unsupported"))
+    }
+
+    #[cfg(windows)]
     async fn probe_wsl(&self) -> WslProbeResult {
-        #[cfg(not(windows))]
-        {
-            return WslProbeResult::unavailable("wsl_capability_unsupported");
-        }
+        let mut receiver = {
+            let mut in_flight = self.in_flight.lock().await;
+            let active_receiver = in_flight.as_ref().and_then(|flight| {
+                flight.receiver.borrow().is_none().then(|| flight.receiver.clone())
+            });
+            if let Some(receiver) = active_receiver {
+                receiver
+            } else {
+                let id = self.next_probe_id.fetch_add(1, Ordering::Relaxed);
+                let (sender, receiver) = watch::channel(None);
+                *in_flight = Some(InFlightProbe { id, receiver: receiver.clone() });
 
-        #[cfg(windows)]
-        {
-            let mut receiver = {
-                let mut in_flight = self.in_flight.lock().await;
-                let active_receiver = in_flight.as_ref().and_then(|flight| {
-                    flight.receiver.borrow().is_none().then(|| flight.receiver.clone())
+                let service = self.clone();
+                tokio::spawn(async move {
+                    let result = run_wsl_probe().await;
+                    if sender.send(Some(result)).is_err() {
+                        tracing::warn!("WSL probe result had no receiver");
+                    }
+                    let mut current = service.in_flight.lock().await;
+                    if current.as_ref().is_some_and(|flight| flight.id == id) {
+                        *current = None;
+                    }
                 });
-                if let Some(receiver) = active_receiver {
-                    receiver
-                } else {
-                    let id = self.next_probe_id.fetch_add(1, Ordering::Relaxed);
-                    let (sender, receiver) = watch::channel(None);
-                    *in_flight = Some(InFlightProbe { id, receiver: receiver.clone() });
+                receiver
+            }
+        };
 
-                    let service = self.clone();
-                    tokio::spawn(async move {
-                        let result = run_wsl_probe().await;
-                        if sender.send(Some(result)).is_err() {
-                            tracing::warn!("WSL probe result had no receiver");
-                        }
-                        let mut current = service.in_flight.lock().await;
-                        if current.as_ref().is_some_and(|flight| flight.id == id) {
-                            *current = None;
-                        }
-                    });
-                    receiver
-                }
-            };
-
-            loop {
-                if let Some(result) = receiver.borrow().clone() {
-                    return result;
-                }
-                if receiver.changed().await.is_err() {
-                    return WslProbeResult::unknown("wsl_list_failed");
-                }
+        loop {
+            if let Some(result) = receiver.borrow().clone() {
+                return result;
+            }
+            if receiver.changed().await.is_err() {
+                return WslProbeResult::unknown("wsl_list_failed");
             }
         }
     }

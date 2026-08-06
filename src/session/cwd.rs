@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 pub struct CwdState {
     pub cwd: PathBuf,
+    pub host_cwd: Option<PathBuf>,
     pub sniff_buf: Vec<u8>,
 }
 

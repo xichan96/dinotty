@@ -7,6 +7,10 @@ use axum::{
     Json,
 };
 
+use crate::platform::{
+    shell::{ShellPreference, ShellResolveError},
+    shell_probe::ShellProbeService,
+};
 use crate::pty;
 use crate::session::{self, SessionManager, SyncMsg};
 use crate::settings::SettingsState;
@@ -16,6 +20,14 @@ use super::types::{
     CreatePluginTabRequest, CreateTabRequest, CreateWebPaneRequest, ExtractPaneRequest,
     MovePaneRequest, SplitPaneRequest, UpdateLayoutRequest,
 };
+
+fn shell_error_response(error: &ShellResolveError) -> axum::response::Response {
+    let status = match error.code {
+        "wsl_timeout" | "wsl_list_failed" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::CONFLICT,
+    };
+    (status, Json(serde_json::json!({ "error": { "code": error.code } }))).into_response()
+}
 
 // ─── GET /api/tabs ─────────────────────────────────────────────────
 
@@ -63,6 +75,7 @@ pub async fn rename_tab(
 #[allow(clippy::unused_async)]
 pub async fn create_tab(
     State((manager, settings)): State<(Arc<SessionManager>, SettingsState)>,
+    State(shell_probe): State<Arc<ShellProbeService>>,
     Json(req): Json<CreateTabRequest>,
 ) -> impl IntoResponse {
     let requested_cwd = match validate_create_tab_request(&req) {
@@ -75,18 +88,26 @@ pub async fn create_tab(
     let tab_id = uuid::Uuid::new_v4().to_string();
     let pane_id = uuid::Uuid::new_v4().to_string();
 
-    // Resolve CWD: explicit request > configured default workspace root > $HOME.
-    // Also resolve user-preferred shell from settings in the same read lock.
-    let (cwd, shell_spec) = {
+    // Copy settings under the lock, then probe outside it.
+    let (cwd, shell_preference) = {
         let s = settings.read().await;
         let cwd = match requested_cwd {
             Some(cwd) => Some(cwd),
             None => s.resolved_default_workspace_root(),
         };
-        let shell_spec = crate::platform::shell::shell_with_preference(&s.shell, &s.shell_path);
-        (cwd, shell_spec)
+        let preference =
+            ShellPreference::new(s.shell.clone(), s.shell_path.clone(), s.wsl_distro.clone());
+        (cwd, preference)
     };
     let is_argv_command = req.argv.is_some();
+    let shell_spec = if is_argv_command {
+        None
+    } else {
+        match shell_probe.resolve(&shell_preference).await {
+            Ok(spec) => Some(spec),
+            Err(error) => return shell_error_response(&error),
+        }
+    };
 
     // Create PTY session
     let (session, shell_type) = match pty::create_session(
@@ -94,9 +115,9 @@ pub async fn create_tab(
         &pane_id,
         Some(&tab_id),
         None,
-        cwd,
+        cwd.map(pty::LaunchCwd::Host),
         req.argv,
-        Some(shell_spec),
+        shell_spec,
     ) {
         Ok(x) => x,
         Err(e) => {
@@ -105,15 +126,7 @@ pub async fn create_tab(
                 .into_response();
         }
     };
-    let cwd_str = Some(
-        session
-            .cwd_state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .cwd
-            .to_string_lossy()
-            .into_owned(),
-    );
+    let cwd_str = session.cwd_for_workspace().map(|cwd| cwd.to_string_lossy().into_owned());
 
     // Create initial layout with single leaf
     let title = req.title.as_deref().unwrap_or("Terminal");
@@ -210,6 +223,7 @@ pub async fn close_tab(
 #[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn split_pane(
     State((manager, settings)): State<(Arc<SessionManager>, SettingsState)>,
+    State(shell_probe): State<Arc<ShellProbeService>>,
     Path(tab_id): Path<String>,
     Json(req): Json<SplitPaneRequest>,
 ) -> impl IntoResponse {
@@ -249,15 +263,19 @@ pub async fn split_pane(
     let ssh_params = manager.sessions.get(&req.pane_id).and_then(|s| s.ssh_params.clone());
 
     // Create session for new pane (SSH or local PTY)
-    let source_cwd = manager
-        .sessions
-        .get(&req.pane_id)
-        .and_then(|s| s.cwd_state.lock().ok().map(|state| state.cwd.clone()));
+    let source_cwd = manager.sessions.get(&req.pane_id).and_then(|session| session.host_cwd());
 
-    // Resolve user-preferred shell for local PTY splits.
-    let shell_spec = {
+    let shell_preference = {
         let s = settings.read().await;
-        crate::platform::shell::shell_with_preference(&s.shell, &s.shell_path)
+        ShellPreference::new(s.shell.clone(), s.shell_path.clone(), s.wsl_distro.clone())
+    };
+    let shell_spec = if req.force_local || ssh_params.is_none() {
+        match shell_probe.resolve(&shell_preference).await {
+            Ok(spec) => Some(spec),
+            Err(error) => return shell_error_response(&error),
+        }
+    } else {
+        None
     };
 
     let (session, _shell_type) = if req.force_local {
@@ -268,9 +286,9 @@ pub async fn split_pane(
             &new_pane_id,
             Some(&tab_id),
             None,
-            local_cwd,
+            local_cwd.map(pty::LaunchCwd::Host),
             None,
-            Some(shell_spec),
+            shell_spec.clone(),
         ) {
             Ok(x) => x,
             Err(e) => {
@@ -302,9 +320,9 @@ pub async fn split_pane(
             &new_pane_id,
             Some(&tab_id),
             None,
-            source_cwd,
+            source_cwd.map(pty::LaunchCwd::Host),
             None,
-            Some(shell_spec),
+            shell_spec,
         ) {
             Ok(x) => x,
             Err(e) => {

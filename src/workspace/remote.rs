@@ -46,10 +46,9 @@ async fn detect_remote_user(session: &Session) -> Option<String> {
         }
     }
     // Detect via whoami
-    let cwd = {
-        let state = session.cwd_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.cwd.to_string_lossy().into_owned()
-    };
+    let cwd = session
+        .cwd_for_workspace()
+        .map_or_else(|| "/".to_string(), |path| path.to_string_lossy().into_owned());
     let (code, stdout, _) = ssh_exec(session, "whoami", &cwd).await.ok()?;
     if code != 0 {
         return None;
@@ -75,10 +74,9 @@ async fn should_use_sudo(session: &Session) -> bool {
 /// List directory via SSH exec with sudo as fallback.
 /// Used when SFTP fails due to permission issues after user switch (e.g. `su root`).
 async fn list_via_ssh_exec(session: &Session, target: &str) -> Result<Vec<DirEntry>, Response> {
-    let cwd = {
-        let state = session.cwd_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.cwd.to_string_lossy().into_owned()
-    };
+    let cwd = session
+        .cwd_for_workspace()
+        .map_or_else(|| "/".to_string(), |path| path.to_string_lossy().into_owned());
     // Use `sudo ls -la` to get file types and names
     let cmd = format!("sudo ls -la {}", shell_escape_path(target));
     let (code, stdout, stderr) = ssh_exec(session, &cmd, &cwd)
@@ -135,10 +133,9 @@ fn parse_ls_la_full(line: &str) -> Option<(String, bool, u64)> {
 
 /// Read file via SSH exec with sudo. Returns the file content as bytes.
 async fn read_via_ssh_exec(session: &Session, target: &str) -> Result<Vec<u8>, Response> {
-    let cwd = {
-        let state = session.cwd_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.cwd.to_string_lossy().into_owned()
-    };
+    let cwd = session
+        .cwd_for_workspace()
+        .map_or_else(|| "/".to_string(), |path| path.to_string_lossy().into_owned());
     let cmd = format!("sudo cat {}", shell_escape_path(target));
     let (code, stdout, stderr) = ssh_exec(session, &cmd, &cwd)
         .await

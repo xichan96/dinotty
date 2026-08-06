@@ -89,6 +89,10 @@ describe('run code commands', function runCodeCommandSuite() {
       "python 'C:\\Users\\Administrator\\Desktop\\新建文件夹 (5)\\generate_sample_data.py'"
     )
   })
+
+  it('does not generate Windows workspace commands for WSL terminals', function rejectsWslPath() {
+    expect(buildRunCodeCommand('C:\\Work Files\\hello.py', 'wsl')).toBeNull()
+  })
 })
 
 describe('tree run code action', function treeRunCodeActionSuite() {

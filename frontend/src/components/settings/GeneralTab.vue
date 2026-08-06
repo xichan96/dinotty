@@ -40,23 +40,12 @@
       <section class="settings-section">
         <h3>{{ t('settings.shell') }}</h3>
         <div class="settings-row">
-          <select
-            v-model="settings.shell"
-            class="shortcut-input"
-            style="flex: 1"
-            @change="onShellKindChange"
-          >
-            <option value="auto">{{ t('settings.shellKind.auto') }}</option>
-            <option value="zsh">{{ t('settings.shellKind.zsh') }}</option>
-            <option value="bash">{{ t('settings.shellKind.bash') }}</option>
-            <option value="sh">{{ t('settings.shellKind.sh') }}</option>
-            <option value="fish">{{ t('settings.shellKind.fish') }}</option>
-            <option value="powershell">{{ t('settings.shellKind.powershell') }}</option>
-            <option value="cmd">{{ t('settings.shellKind.cmd') }}</option>
-            <option value="custom">{{ t('settings.shellKind.custom') }}</option>
-          </select>
+          <ShellPicker
+            :kind="settings.shell"
+            :distro="settings.wsl_distro"
+            @select="onShellSelection"
+          />
         </div>
-        <p class="settings-hint">{{ t('settings.shellHint') }}</p>
         <div v-if="settings.shell === 'custom'" class="settings-row">
           <input
             v-model="shellPathInput"
@@ -627,6 +616,7 @@ import { useIsMobile } from '../../composables/useIsMobile'
 import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
+import ShellPicker from './ShellPicker.vue'
 import { useToast } from 'vue-toastification'
 import { isTauri } from '../../composables/useTransport'
 import { authFetch, apiUrl } from '../../composables/apiBase'
@@ -707,8 +697,10 @@ function onWsBadgeModeChange(value: string) {
 
 const shellPathInput = ref(settings.shell_path ?? '')
 
-function onShellKindChange() {
-  if (settings.shell !== 'custom') {
+function onShellSelection(selection: { kind: string; distro: string | null }) {
+  settings.shell = selection.kind
+  settings.wsl_distro = selection.kind === 'wsl' ? selection.distro : null
+  if (selection.kind !== 'custom') {
     settings.shell_path = null
     shellPathInput.value = ''
   }

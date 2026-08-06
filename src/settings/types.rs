@@ -164,6 +164,8 @@ pub struct Settings {
     pub shell: String,
     #[serde(default)]
     pub shell_path: Option<String>,
+    #[serde(default)]
+    pub wsl_distro: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -882,6 +884,7 @@ impl Default for Settings {
             plugin_prefs: PluginPrefsConfig::default(),
             shell: default_shell_kind(),
             shell_path: None,
+            wsl_distro: None,
         }
     }
 }

@@ -16,18 +16,20 @@ use futures_util::{SinkExt, StreamExt};
 use tracing::{error, info, warn};
 
 use crate::history::HistoryState;
+use crate::platform::{shell::ShellPreference, shell_probe::ShellProbeService};
 use crate::session::{SessionClientEvent, SessionManager, SessionStatus};
 use crate::settings::SettingsState;
 
 use super::types::{ClientMsg, ServerMsg, WsQuery};
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::too_many_arguments)]
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(q): Query<WsQuery>,
     State(manager): State<Arc<SessionManager>>,
     State(history): State<HistoryState>,
     State(settings): State<SettingsState>,
+    State(shell_probe): State<Arc<ShellProbeService>>,
     ConnectInfo(_addr): ConnectInfo<SocketAddr>,
     _headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
@@ -47,8 +49,10 @@ pub async fn ws_handler(
     if !manager.is_pane_in_any_tab(&pane_id) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    ws.on_upgrade(move |socket| handle_socket(socket, pane_id, manager, history, settings))
-        .into_response()
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, pane_id, manager, history, settings, shell_probe)
+    })
+    .into_response()
 }
 
 async fn handle_socket(
@@ -57,6 +61,7 @@ async fn handle_socket(
     manager: Arc<SessionManager>,
     history: HistoryState,
     settings: SettingsState,
+    shell_probe: Arc<ShellProbeService>,
 ) {
     info!("WebSocket connected: pane={}", pane_id);
     let (ws_tx, mut ws_rx) = socket.split();
@@ -291,18 +296,29 @@ async fn handle_socket(
     }
 
     info!("No existing session found for pane={}, creating new PTY session", pane_id);
-    let (cwd, shell_spec) = {
+    let (cwd, shell_preference) = {
         let s = settings.read().await;
         let cwd = s.resolved_default_workspace_root();
-        let shell_spec = crate::platform::shell::shell_with_preference(&s.shell, &s.shell_path);
-        (cwd, shell_spec)
+        let preference =
+            ShellPreference::new(s.shell.clone(), s.shell_path.clone(), s.wsl_distro.clone());
+        (cwd, preference)
+    };
+    let shell_spec = match shell_probe.resolve(&shell_preference).await {
+        Ok(spec) => spec,
+        Err(error) => {
+            error!(code = error.code, detail = %error.detail, "Failed to resolve shell");
+            let message = serde_json::to_string(&ServerMsg::SessionError { code: error.code })
+                .expect("serialization is infallible");
+            let _ = ws_out_tx.send(Message::Text(message));
+            return;
+        }
     };
     let (session, shell_type) = match crate::pty::create_session(
         &manager,
         &pane_id,
         None,
         None,
-        cwd,
+        cwd.map(crate::pty::LaunchCwd::Host),
         None,
         Some(shell_spec),
     ) {

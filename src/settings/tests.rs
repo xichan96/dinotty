@@ -2,6 +2,22 @@ use super::types::{KeyboardGuardMode, MobileInputMode};
 use super::*;
 
 #[test]
+fn wsl_distro_defaults_and_round_trips_without_version_migration() {
+    let old: Settings = serde_json::from_str(r#"{"shell":"auto"}"#).unwrap();
+    assert_eq!(old.wsl_distro, None);
+
+    let settings = Settings {
+        shell: "wsl".to_string(),
+        wsl_distro: Some("Ubuntu-24.04".to_string()),
+        ..Settings::default()
+    };
+    let restored: Settings =
+        serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(restored.shell, "wsl");
+    assert_eq!(restored.wsl_distro.as_deref(), Some("Ubuntu-24.04"));
+}
+
+#[test]
 fn old_config_missing_confirm_before_close_tab_defaults_to_true() {
     let old_config = r"{}";
     let settings: Settings = serde_json::from_str(old_config)

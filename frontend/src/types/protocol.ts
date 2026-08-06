@@ -34,6 +34,11 @@ export interface ShellInfoMsg {
   shell_type: string
 }
 
+export interface SessionErrorMsg {
+  type: 'session_error'
+  code: string
+}
+
 export interface ReconnectedMsg {
   type: 'reconnected'
   cols: number
@@ -84,6 +89,7 @@ export interface ReplayEndMsg {
 export type ServerMsg =
   | OutputMsg
   | ShellInfoMsg
+  | SessionErrorMsg
   | ReconnectedMsg
   | ResizeServerMsg
   | SessionExitMsg
@@ -185,12 +191,28 @@ export interface SyncSshAuthPrompt {
 
 export interface SyncWorkspaceCreated {
   type: 'workspace_created'
-  workspace: { id: string; name: string; path: string; order: number; connection_id?: string; abbr?: string; color?: string }
+  workspace: {
+    id: string
+    name: string
+    path: string
+    order: number
+    connection_id?: string
+    abbr?: string
+    color?: string
+  }
 }
 
 export interface SyncWorkspaceUpdated {
   type: 'workspace_updated'
-  workspace: { id: string; name: string; path: string; order: number; connection_id?: string; abbr?: string; color?: string }
+  workspace: {
+    id: string
+    name: string
+    path: string
+    order: number
+    connection_id?: string
+    abbr?: string
+    color?: string
+  }
 }
 
 export interface SyncWorkspaceDeleted {
@@ -210,7 +232,15 @@ export interface SyncWorkspaceReordered {
 
 export interface SyncWorkspaceList {
   type: 'workspace_list'
-  workspaces: { id: string; name: string; path: string; order: number; connection_id?: string; abbr?: string; color?: string }[]
+  workspaces: {
+    id: string
+    name: string
+    path: string
+    order: number
+    connection_id?: string
+    abbr?: string
+    color?: string
+  }[]
   active_workspace_id: string | null
 }
 

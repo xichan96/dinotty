@@ -1,5 +1,8 @@
 pub trait CommandNoWindowExt {
     fn no_window(&mut self) -> &mut Self;
+
+    /// Suppress a console window without detaching the child from piped stdio.
+    fn no_window_with_stdio(&mut self) -> &mut Self;
 }
 
 #[cfg(windows)]
@@ -20,6 +23,15 @@ impl CommandNoWindowExt for std::process::Command {
         }
         self
     }
+
+    fn no_window_with_stdio(&mut self) -> &mut Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            self.creation_flags(CREATE_NO_WINDOW);
+        }
+        self
+    }
 }
 
 impl CommandNoWindowExt for tokio::process::Command {
@@ -27,6 +39,14 @@ impl CommandNoWindowExt for tokio::process::Command {
         #[cfg(windows)]
         {
             self.creation_flags(NO_CONSOLE_WINDOW_FLAGS);
+        }
+        self
+    }
+
+    fn no_window_with_stdio(&mut self) -> &mut Self {
+        #[cfg(windows)]
+        {
+            self.creation_flags(CREATE_NO_WINDOW);
         }
         self
     }

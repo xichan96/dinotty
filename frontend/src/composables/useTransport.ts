@@ -200,6 +200,11 @@ export class TauriIpcTransport implements Transport {
       this._messageHandler?.({ type: 'shell_info', shell_type: shellType })
     } catch (e) {
       console.error('pty_spawn failed:', e)
+      const code =
+        typeof e === 'object' && e !== null && 'code' in e
+          ? String((e as { code: unknown }).code)
+          : 'shell_unavailable'
+      this._messageHandler?.({ type: 'session_error', code })
       this._disconnectHandler?.()
     }
   }
@@ -217,9 +222,11 @@ export class TauriIpcTransport implements Transport {
     } else if (msg.type === 'resize') {
       this._invoke('pty_resize', { cols: msg.cols, rows: msg.rows }).catch(() => {})
     } else if (msg.type === 'snapshot_request') {
-      this._invoke('pty_snapshot_request', { cols: msg.cols, rows: msg.rows }).catch((err: unknown) => {
-        console.error('pty_snapshot_request failed:', err)
-      })
+      this._invoke('pty_snapshot_request', { cols: msg.cols, rows: msg.rows }).catch(
+        (err: unknown) => {
+          console.error('pty_snapshot_request failed:', err)
+        }
+      )
     }
   }
 

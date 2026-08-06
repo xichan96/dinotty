@@ -27,6 +27,7 @@ use dinotty_server::mission_control;
 use dinotty_server::monitor::MonitorState;
 use dinotty_server::notification::{self, NotificationBroadcast};
 use dinotty_server::platform::process::CommandNoWindowExt;
+use dinotty_server::platform::shell_probe::ShellProbeService;
 use dinotty_server::plugin::{self, PluginManager, PluginManagerState};
 use dinotty_server::proxy;
 use dinotty_server::session::SessionManager;
@@ -51,6 +52,7 @@ pub struct GitInfo {
 pub struct AppState {
     pub manager: Arc<SessionManager>,
     pub settings: settings::SettingsState,
+    pub shell_probe: Arc<ShellProbeService>,
     pub file_watcher: Arc<FileWatcherState>,
     pub monitor: MonitorState,
     pub notifier: Arc<NotificationBroadcast>,
@@ -75,6 +77,12 @@ impl axum::extract::FromRef<AppState> for Arc<SessionManager> {
 impl axum::extract::FromRef<AppState> for settings::SettingsState {
     fn from_ref(state: &AppState) -> Self {
         state.settings.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<ShellProbeService> {
+    fn from_ref(state: &AppState) -> Self {
+        state.shell_probe.clone()
     }
 }
 
@@ -731,6 +739,7 @@ impl Drop for PluginProcessGuard {
 pub fn run_server(
     listener: std::net::TcpListener,
     manager: Arc<SessionManager>,
+    shell_probe: Arc<ShellProbeService>,
 ) -> impl std::future::Future<Output = ()> {
     // Guard is created synchronously and moved into the returned future, so notify_port
     // resets to 0 on ANY termination of the future — normal exit, panic, task abort, or a
@@ -820,6 +829,7 @@ pub fn run_server(
         let state = AppState {
             manager: manager.clone(),
             settings: settings_state,
+            shell_probe,
             file_watcher: Arc::new(FileWatcherState::new(manager.event_bus.clone())),
             monitor: monitor_state,
             notifier,
@@ -859,6 +869,7 @@ pub fn run_server(
             .route("/api/tabs/:tab_id/layout", put(tabs::update_layout))
             .route("/api/input", post(ws::post_input))
             .route("/api/settings", get(settings::get_settings).put(settings::put_settings))
+            .route("/api/shells", get(dinotty_server::api::shells::get_shells))
             .route("/api/clipboard", get(clipboard::get_clipboard))
             .route(
                 "/api/settings/background",

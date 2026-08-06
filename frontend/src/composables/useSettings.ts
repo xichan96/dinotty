@@ -64,6 +64,7 @@ export interface SettingsData {
   panel_position: 'auto' | 'right' | 'left' | 'top' | 'bottom'
   shell: string
   shell_path: string | null
+  wsl_distro: string | null
   port?: number | null
   monitor: MonitorConfig
   notification: NotificationConfig
@@ -423,6 +424,7 @@ export const settings = reactive<SettingsData>({
   panel_position: 'auto',
   shell: 'auto',
   shell_path: null,
+  wsl_distro: null,
   monitor: {
     enabled: true,
     cpu: true,

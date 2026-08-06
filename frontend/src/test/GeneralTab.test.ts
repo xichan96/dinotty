@@ -42,6 +42,7 @@ vi.mock('../utils/clipboard', () => ({
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import GeneralTab from '../components/settings/GeneralTab.vue'
+import ShellPicker from '../components/settings/ShellPicker.vue'
 import { __resetSettingsLoadStateForTest, loadSettings, settings } from '../composables/useSettings'
 
 // Spec: openspec/changes/confirm-before-close-tab/spec.md
@@ -55,6 +56,9 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     settings.space_confirms_dialogs = false
     settings.workspace_badge_mode = null
     settings.upload_dir = ''
+    settings.shell = 'auto'
+    settings.shell_path = null
+    settings.wsl_distro = null
     generalMocks.uploadStatus = 200
     generalMocks.isTauri = false
     generalMocks.tauriInvoke.mockReset()
@@ -87,6 +91,23 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     expect(input.exists()).toBe(true)
     // Initial value mirrors reactive default (true).
     expect(input.element.checked).toBe(true)
+  })
+
+  it('saves exact WSL selections and clears backend-specific stale fields', async () => {
+    const wrapper = mount(GeneralTab)
+    const picker = wrapper.findComponent(ShellPicker)
+
+    picker.vm.$emit('select', { kind: 'wsl', distro: 'Ubuntu Dev' })
+    await nextTick()
+    expect(settings.shell).toBe('wsl')
+    expect(settings.wsl_distro).toBe('Ubuntu Dev')
+
+    settings.shell_path = '/old/custom/shell'
+    picker.vm.$emit('select', { kind: 'powershell', distro: null })
+    await nextTick()
+    expect(settings.shell).toBe('powershell')
+    expect(settings.wsl_distro).toBeNull()
+    expect(settings.shell_path).toBeNull()
   })
 
   it('renders the behavior section header with a settings.behavior i18n key', () => {

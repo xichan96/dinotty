@@ -114,6 +114,7 @@ fn read_git_info() -> GitInfo {
 pub struct AppState {
     pub manager: Arc<SessionManager>,
     pub settings: SettingsState,
+    pub shell_probe: Arc<dinotty_server::platform::shell_probe::ShellProbeService>,
     pub file_watcher: Arc<FileWatcherState>,
     pub monitor: MonitorState,
     pub notifier: Arc<NotificationBroadcast>,
@@ -152,6 +153,14 @@ impl axum::extract::FromRef<AppState> for (Arc<SessionManager>, SettingsState) {
 impl axum::extract::FromRef<AppState> for SettingsState {
     fn from_ref(state: &AppState) -> Self {
         state.settings.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState>
+    for Arc<dinotty_server::platform::shell_probe::ShellProbeService>
+{
+    fn from_ref(state: &AppState) -> Self {
+        state.shell_probe.clone()
     }
 }
 
@@ -1054,6 +1063,7 @@ async fn main() {
     let state = AppState {
         manager,
         settings: settings_state,
+        shell_probe: Arc::new(dinotty_server::platform::shell_probe::ShellProbeService::new()),
         file_watcher: Arc::new(FileWatcherState::new(file_watcher_event_bus)),
         monitor: monitor_state,
         notifier,
@@ -1118,6 +1128,7 @@ async fn main() {
             .route("/api/token-configured", get(token_configured))
             .route("/api/auto-token", get(auto_token))
             .route("/api/settings", get(settings::get_settings).put(put_settings_with_session_ttl))
+            .route("/api/shells", get(dinotty_server::api::shells::get_shells))
             .route("/api/clipboard", get(clipboard::get_clipboard))
             .route(
                 "/api/settings/background",

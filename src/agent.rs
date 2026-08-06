@@ -512,13 +512,7 @@ pub async fn agent_read(
                 CursorInfo { row, col }
             };
 
-            let cwd = session
-                .cwd_state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .cwd
-                .to_str()
-                .map(String::from);
+            let cwd = session.cwd_for_workspace().and_then(|path| path.to_str().map(String::from));
 
             (
                 StatusCode::OK,

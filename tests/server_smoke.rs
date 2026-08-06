@@ -54,7 +54,7 @@ mod windows_smoke {
 
         assert!(
             violations.is_empty(),
-            "Windows background process launches must call `.no_window()` near `Command::new(...)` \
+            "Windows background process launches must call a no-window helper near `Command::new(...)` \
              so GUI/portable builds do not flash transient console windows:\n{}",
             violations.join("\n")
         );
@@ -156,7 +156,8 @@ mod windows_smoke {
             if trimmed.starts_with("//") || !is_process_command_new(trimmed) {
                 continue;
             }
-            if command_window(&lines, idx).contains(".no_window()") {
+            let window = command_window(&lines, idx);
+            if window.contains(".no_window()") || window.contains(".no_window_with_stdio()") {
                 continue;
             }
 

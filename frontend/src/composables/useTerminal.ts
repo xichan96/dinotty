@@ -32,6 +32,7 @@ import {
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { createTerminalOverlay } from './useTerminalOverlay'
+import { t } from './useI18n'
 
 // Re-export pure helpers so existing callers (App.vue, useTabLifecycle,
 // useSplitPane, tests) don't need to update their import paths.
@@ -764,10 +765,7 @@ export class TerminalInstance {
     if (tauri && isShiftSymbolChar(data)) {
       if (!this._resolveSym(data, 1, now)) return
     }
-    const modified = applyMobileTerminalModifiers(
-      data,
-      this._mobileModifiers
-    )
+    const modified = applyMobileTerminalModifiers(data, this._mobileModifiers)
     data = modified.data
     this._mobileModifiers = modified.modifiers
     if (modified.consumed && typeof window !== 'undefined') {
@@ -892,6 +890,8 @@ export class TerminalInstance {
       } else if (msg.type === 'shell_info') {
         this._shellType = msg.shell_type
         this.onShellInfo?.(msg.shell_type)
+      } else if (msg.type === 'session_error') {
+        this._handleSessionError(msg.code)
       } else if (msg.type === 'reconnected') {
         this._suppressTitleChange = true
         this.xterm.reset()
@@ -1016,6 +1016,8 @@ export class TerminalInstance {
       } else if (msg.type === 'shell_info') {
         this._shellType = msg.shell_type
         this.onShellInfo?.(msg.shell_type)
+      } else if (msg.type === 'session_error') {
+        this._handleSessionError(msg.code)
       } else if (msg.type === 'resize') {
         // Server breaks sync mode before broadcasting Resize (see
         // apply_and_broadcast_resize), so SyncEnd lands before Resize. Flush
@@ -1333,6 +1335,16 @@ export class TerminalInstance {
     this._sessionExited = true
     this._overlayCtl?.showExit()
     this.onSessionExit?.()
+  }
+
+  private _handleSessionError(code: string) {
+    this._sessionExited = true
+    const key = `terminal.sessionError.${code}`
+    const translated = t(key)
+    this._overlayCtl?.showError(translated === key ? code : translated)
+    this._transport?.disconnect()
+    this.ws?.close(1000)
+    this.onDisconnect?.()
   }
 
   _refit() {

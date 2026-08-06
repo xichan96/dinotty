@@ -91,6 +91,7 @@ export function buildRunCodeCommand(filePath: string, shellType: string): string
   // 步骤1：不支持的文件不生成任何终端命令。
   const extension = fileExtension(filePath)
   if (!isRunnableCodeFile(filePath)) return null
+  if (shellType === 'wsl') return null
 
   // 步骤2：shell 元数据尚未到达时，根据绝对路径识别 Windows 本地终端。
   const effectiveShellType = shellType || (isWindowsRunPath(filePath) ? 'powershell' : '')

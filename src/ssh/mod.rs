@@ -521,8 +521,13 @@ pub async fn create_ssh_session(
         size: std::sync::Mutex::new((80, 24)),
         exited: std::sync::Mutex::new(false),
         shell_type: "ssh".to_string(),
+        shell_launch_kind: crate::platform::shell::ShellLaunchKind::Native,
         tauri_on_exit: std::sync::Mutex::new(tauri_on_exit),
-        cwd_state: std::sync::Mutex::new(CwdState { cwd: effective_cwd, sniff_buf: Vec::new() }),
+        cwd_state: std::sync::Mutex::new(CwdState {
+            cwd: effective_cwd,
+            host_cwd: None,
+            sniff_buf: Vec::new(),
+        }),
         sync: std::sync::Mutex::new(crate::session::SyncState::default()),
         #[cfg(test)]
         sync_disable_hook: std::sync::Mutex::new(None),

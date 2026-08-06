@@ -1322,6 +1322,11 @@ function onTerminalRunCode(e: Event) {
   const send = getSendFn()
   if (!activeLeaf || !send) return
 
+  if (activeLeaf.shell_type === 'wsl') {
+    toast.warning(t('terminal.wslRunCodeUnsupported'))
+    return
+  }
+
   // 步骤2：按活动 shell 生成命令，并发送回车立即执行。
   const command = buildRunCodeCommand(path, activeLeaf.shell_type ?? '')
   if (command) send(`${command}\r`)
@@ -1329,6 +1334,10 @@ function onTerminalRunCode(e: Event) {
 
 function onLinkActivate() {
   linkJustActivated = true
+}
+
+function onOpenSettingsRequest() {
+  settingsOpen.value = true
 }
 
 // Sticky typing mode, native focus-move guard.
@@ -1956,6 +1965,7 @@ onMounted(async () => {
   window.addEventListener('terminal-insert-path', onTerminalInsertPath)
   window.addEventListener('terminal-insert-text', onTerminalInsertText)
   window.addEventListener('terminal-run-code', onTerminalRunCode)
+  window.addEventListener('dinotty:open-settings', onOpenSettingsRequest)
   window.addEventListener('pane-drag-hover-switch', onPaneDragHoverSwitch)
   try {
     if (authenticated.value) {
@@ -2081,6 +2091,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('terminal-insert-path', onTerminalInsertPath)
   window.removeEventListener('terminal-insert-text', onTerminalInsertText)
   window.removeEventListener('terminal-run-code', onTerminalRunCode)
+  window.removeEventListener('dinotty:open-settings', onOpenSettingsRequest)
   window.removeEventListener('pane-drag-hover-switch', onPaneDragHoverSwitch)
   disposeViewport()
   syncWs.closeWs()

@@ -22,10 +22,14 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::platform::shell;
+use crate::platform::{
+    shell::{self, ShellPreference, ShellResolveError, ShellSpec},
+    shell_probe::ShellProbeService,
+};
 use crate::plugin::PluginManagerState;
 use crate::pty;
 use crate::session::{SessionManager, SyncMsg};
+use crate::settings::SettingsState;
 use crate::workspace_mgmt;
 
 use super::store::{StoreError, TemplateStore};
@@ -33,6 +37,14 @@ use super::types::{ApplyTemplateBody, Template, TemplateScope};
 
 fn err_response(status: StatusCode, msg: &str) -> axum::response::Response {
     (status, Json(json!({ "error": msg }))).into_response()
+}
+
+fn shell_err_response(error: &ShellResolveError) -> axum::response::Response {
+    let status = match error.code {
+        "wsl_timeout" | "wsl_list_failed" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::CONFLICT,
+    };
+    (status, Json(json!({ "error": { "code": error.code } }))).into_response()
 }
 
 /// Walk the layout tree and prepare every leaf in place:
@@ -47,7 +59,7 @@ fn err_response(status: StatusCode, msg: &str) -> axum::response::Response {
 ///
 /// On any PTY creation failure, returns `Err` and the caller must roll back
 /// the already-created PTY sessions listed in `created_pty_ids`.
-fn prepare_layout(
+fn prepare_layout_with_shell(
     layout: &mut Value,
     manager: &Arc<SessionManager>,
     plugins: &PluginManagerState,
@@ -57,6 +69,7 @@ fn prepare_layout(
     startup_commands: &mut Vec<(String, String)>,
     warnings: &mut Vec<String>,
     workspace: Option<&workspace_mgmt::Workspace>,
+    shell_spec: &ShellSpec,
 ) -> Result<(), (StatusCode, String)> {
     let Some(node_type) = layout.get("type").and_then(|v| v.as_str()).map(str::to_string) else {
         return Ok(());
@@ -68,7 +81,7 @@ fn prepare_layout(
 
         match kind.as_str() {
             "terminal" => {
-                // Resolve cwd: template-provided > workspace root > home.
+                // Preserve a missing CWD so the selected backend can choose its own home.
                 let workspace_path = workspace.map(|ws| PathBuf::from(&ws.path));
                 let cwd = layout.get("cwd").and_then(|v| v.as_str());
                 let cwd_path = match cwd {
@@ -79,7 +92,7 @@ fn prepare_layout(
                     }
                     _ => workspace_path.clone(),
                 };
-                let cwd_path = cwd_path.filter(|p| p.is_dir()).or_else(|| Some(shell::home_dir()));
+                let cwd_path = cwd_path.filter(|p| p.is_dir());
 
                 // Check if this was originally an SSH pane (we can't restore
                 // the connection). Downgrade to a plain terminal with a warning.
@@ -112,9 +125,9 @@ fn prepare_layout(
                     &new_pane_id,
                     Some(new_tab_id),
                     None,
-                    cwd_path,
+                    cwd_path.map(pty::LaunchCwd::Host),
                     None,
-                    None,
+                    Some(shell_spec.clone()),
                 ) {
                     Ok((_session, _shell_type)) => {
                         created_pty_ids.push(new_pane_id.clone());
@@ -192,7 +205,7 @@ fn prepare_layout(
     } else if node_type == "split" {
         if let Some(children) = layout.get_mut("children").and_then(|c| c.as_array_mut()) {
             for child in children {
-                prepare_layout(
+                prepare_layout_with_shell(
                     child,
                     manager,
                     plugins,
@@ -202,6 +215,7 @@ fn prepare_layout(
                     startup_commands,
                     warnings,
                     workspace,
+                    shell_spec,
                 )?;
             }
         }
@@ -234,6 +248,8 @@ pub async fn apply_template(
         Arc<SessionManager>,
         workspace_mgmt::WorkspacesState,
     )>,
+    State(settings): State<SettingsState>,
+    State(shell_probe): State<Arc<ShellProbeService>>,
     Json(req): Json<ApplyTemplateBody>,
 ) -> impl IntoResponse {
     let template = match load_template_any_scope(&req) {
@@ -250,6 +266,18 @@ pub async fn apply_template(
 
     let installed_plugin_ids: HashSet<String> =
         plugins.list().into_iter().map(|p| p.manifest.id).collect();
+    let shell_preference = {
+        let settings = settings.read().await;
+        ShellPreference::new(
+            settings.shell.clone(),
+            settings.shell_path.clone(),
+            settings.wsl_distro.clone(),
+        )
+    };
+    let shell_spec = match shell_probe.resolve(&shell_preference).await {
+        Ok(spec) => spec,
+        Err(error) => return shell_err_response(&error),
+    };
 
     let mut layout = template.layout.clone();
     let new_tab_id = Uuid::new_v4().to_string();
@@ -259,7 +287,7 @@ pub async fn apply_template(
 
     // Phase 1: prepare all leaves. On failure, roll back any PTY sessions
     // we already created.
-    if let Err((status, msg)) = prepare_layout(
+    if let Err((status, msg)) = prepare_layout_with_shell(
         &mut layout,
         &manager,
         &plugins,
@@ -269,6 +297,7 @@ pub async fn apply_template(
         &mut startup_commands,
         &mut warnings,
         workspace.as_ref(),
+        &shell_spec,
     ) {
         for pane_id in &created_pty_ids {
             manager.kill_and_remove(pane_id);
@@ -339,6 +368,32 @@ pub async fn apply_template(
         "workspace_id": workspace_id,
     }))
     .into_response()
+}
+
+#[cfg(test)]
+fn prepare_layout(
+    layout: &mut Value,
+    manager: &Arc<SessionManager>,
+    plugins: &PluginManagerState,
+    new_tab_id: &str,
+    installed_plugin_ids: &HashSet<String>,
+    created_pty_ids: &mut Vec<String>,
+    startup_commands: &mut Vec<(String, String)>,
+    warnings: &mut Vec<String>,
+    workspace: Option<&workspace_mgmt::Workspace>,
+) -> Result<(), (StatusCode, String)> {
+    prepare_layout_with_shell(
+        layout,
+        manager,
+        plugins,
+        new_tab_id,
+        installed_plugin_ids,
+        created_pty_ids,
+        startup_commands,
+        warnings,
+        workspace,
+        &shell::default_shell(),
+    )
 }
 
 /// Return the paneId of the first leaf (pre-order traversal) in the tree.

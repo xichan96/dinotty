@@ -237,12 +237,24 @@ fn emit_reconnected(
     );
 }
 
+#[derive(Debug, serde::Serialize)]
+struct PtySpawnError {
+    code: String,
+}
+
+impl PtySpawnError {
+    fn new(code: impl Into<String>) -> Self {
+        Self { code: code.into() }
+    }
+}
+
 #[tauri::command]
-fn pty_spawn(
+async fn pty_spawn(
     pane_id: String,
     app: AppHandle,
     state: State<'_, Arc<SessionManager>>,
-) -> Result<String, String> {
+    shell_probe: State<'_, Arc<dinotty_server::platform::shell_probe::ShellProbeService>>,
+) -> Result<String, PtySpawnError> {
     let manager = state.inner().clone();
     let app_cb = app.clone();
     let exit_cb: TauriOnExit = Arc::new(move |pid: String, exit_code: Option<i32>| {
@@ -254,7 +266,7 @@ fn pty_spawn(
         session.set_status(SessionStatus::Connected);
         if !manager.is_current_session(&pane_id, &session) {
             session.mark_failed_attach();
-            return Err("session closed during reconnect".to_string());
+            return Err(PtySpawnError::new("session_unavailable"));
         }
         manager.register_singleton_tab(&pane_id, &session, &session.shell_type);
         {
@@ -282,10 +294,13 @@ fn pty_spawn(
     }
 
     let settings = dinotty_server::settings::load_settings();
-    let shell_spec = dinotty_server::platform::shell::shell_with_preference(
-        &settings.shell,
-        &settings.shell_path,
+    let preference = dinotty_server::platform::shell::ShellPreference::new(
+        settings.shell,
+        settings.shell_path,
+        settings.wsl_distro,
     );
+    let shell_spec =
+        shell_probe.resolve(&preference).await.map_err(|error| PtySpawnError::new(error.code))?;
     let (session, shell_type) = pty::create_session(
         &manager,
         &pane_id,
@@ -294,7 +309,8 @@ fn pty_spawn(
         None,
         None,
         Some(shell_spec),
-    )?;
+    )
+    .map_err(|_| PtySpawnError::new("pty_spawn_failed"))?;
     manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     spawn_tauri_output_forwarder(app.clone(), pane_id.clone(), Arc::clone(&session));
@@ -715,6 +731,7 @@ fn main() {
     let _ = EMBEDDED_HTTP_PORT.set(port);
 
     let manager = Arc::new(SessionManager::new());
+    let shell_probe = Arc::new(dinotty_server::platform::shell_probe::ShellProbeService::new());
     if launch_intent == LaunchIntent::Server {
         dinotty_server::session::ledger::boot_sweep();
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -726,7 +743,7 @@ fn main() {
             // ordering issue must never suppress it. Notification GC simply no-ops until
             // run_server registers a notifier.
             mgr.start_cleanup_task();
-            embedded_server::run_server(listener, mgr).await
+            embedded_server::run_server(listener, mgr, shell_probe).await
         });
         return;
     }
@@ -764,6 +781,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(manager.clone())
+        .manage(shell_probe.clone())
         .manage(autostart::AutostartController::default())
         .manage(tray::state::TrayCapabilityState::default())
         .manage(tray::state::TrayMenuState::default())
@@ -810,7 +828,11 @@ fn main() {
                     // before spawn — so a Tauri `pty_spawn` IPC that fires before the spawned task's
                     // first poll still reads the real port (not 0). Do NOT remove either set.
                     mgr.set_notify_port(actual);
-                    tauri::async_runtime::spawn(embedded_server::run_server(listener, mgr));
+                    tauri::async_runtime::spawn(embedded_server::run_server(
+                        listener,
+                        mgr,
+                        shell_probe.clone(),
+                    ));
                     tracing::info!("Desktop mode: embedded server on port {}", actual);
                 }
                 Err(e) => {

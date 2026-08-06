@@ -45,13 +45,7 @@ pub async fn list_sessions(
                 crate::session::SessionStatus::Connected => "connected",
                 crate::session::SessionStatus::Detached { .. } => "detached",
             };
-        let cwd = session
-            .cwd_state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .cwd
-            .display()
-            .to_string();
+        let cwd = session.cwd_for_workspace().map(|path| path.display().to_string());
 
         // Find which tab this pane belongs to
         let mut tab_id = None;

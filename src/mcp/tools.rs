@@ -295,14 +295,8 @@ impl McpTools {
                 let session = e.value();
                 let (cols, rows) =
                     *session.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                let cwd = session
-                    .cwd_state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .cwd
-                    .to_str()
-                    .unwrap_or("")
-                    .to_string();
+                let cwd =
+                    session.cwd_for_workspace().and_then(|path| path.to_str().map(String::from));
                 serde_json::json!({
                     "pane_id": pane_id,
                     "shell": session.shell_type,

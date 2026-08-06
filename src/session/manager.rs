@@ -842,8 +842,8 @@ impl SessionManager {
                     layout.as_ref().and_then(first_leaf_id).unwrap_or_else(|| tab_id.clone());
                 let active_pane_id =
                     v.get("active_pane_id").and_then(|v| v.as_str()).map(String::from);
-                let cwd = self.sessions.get(&pane_id).and_then(|s| {
-                    s.cwd_state.lock().ok().map(|state| state.cwd.to_string_lossy().to_string())
+                let cwd = self.sessions.get(&pane_id).and_then(|session| {
+                    session.cwd_for_workspace().map(|path| path.to_string_lossy().to_string())
                 });
                 let connection_id = self
                     .sessions

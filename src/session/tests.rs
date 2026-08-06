@@ -35,6 +35,12 @@ impl Child for TestChild {
 }
 
 fn local_session_for_write_input() -> Arc<Session> {
+    local_session_with_launch(crate::platform::shell::ShellLaunchKind::Native)
+}
+
+fn local_session_with_launch(
+    shell_launch_kind: crate::platform::shell::ShellLaunchKind,
+) -> Arc<Session> {
     let pair = NativePtySystem::default()
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .unwrap();
@@ -60,7 +66,12 @@ fn local_session_for_write_input() -> Arc<Session> {
         exited: Mutex::new(false),
         shell_type: "test".to_string(),
         tauri_on_exit: Mutex::new(None),
-        cwd_state: Mutex::new(CwdState { cwd: PathBuf::from("/"), sniff_buf: Vec::new() }),
+        shell_launch_kind,
+        cwd_state: Mutex::new(CwdState {
+            cwd: PathBuf::from("/"),
+            host_cwd: Some(PathBuf::from("/")),
+            sniff_buf: Vec::new(),
+        }),
         sync: Mutex::new(SyncState::default()),
         sync_disable_hook: Mutex::new(None),
         resize_tx,
@@ -1007,7 +1018,7 @@ fn tab_list_restores_ssh_workspace_assignment_from_session() {
 #[test]
 fn cwd_state_default_path() {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    let state = CwdState { cwd: home.clone(), sniff_buf: Vec::new() };
+    let state = CwdState { cwd: home.clone(), host_cwd: Some(home.clone()), sniff_buf: Vec::new() };
     assert_eq!(state.cwd, home);
 }
 
@@ -1038,6 +1049,19 @@ fn sniff_cwd_falls_back_to_raw_path_when_canonicalize_fails() {
         true,
     );
     assert_eq!(cwd, PathBuf::from("/nonexistent_path_12345"));
+}
+
+#[test]
+fn wsl_output_does_not_replace_host_cwd_with_guest_path() {
+    let session = local_session_with_launch(crate::platform::shell::ShellLaunchKind::Wsl {
+        distro: Some("Ubuntu".to_string()),
+    });
+
+    session.on_pty_output(b"\x1b]0;user@host:/home/user/project\x07");
+
+    assert_eq!(session.host_cwd(), Some(PathBuf::from("/")));
+    let state = session.cwd_state.lock().unwrap();
+    assert!(state.sniff_buf.is_empty());
 }
 
 #[test]

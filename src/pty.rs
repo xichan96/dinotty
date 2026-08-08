@@ -254,9 +254,11 @@ pub fn create_session(
 
     let (mut cmd, shell_type, shell_launch_kind, effective_cwd, host_cwd) = if let Some(argv) = argv
     {
-        let mut cmd = CommandBuilder::new(&argv[0]);
-        cmd.args(&argv[1..]);
         let effective_cwd = requested_host_cwd.clone().unwrap_or_else(|| home_path.clone());
+        let program =
+            crate::platform::process::resolve_terminal_program(argv[0].as_ref(), &effective_cwd)?;
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(&argv[1..]);
         (
             cmd,
             "command".to_string(),

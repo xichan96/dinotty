@@ -15,6 +15,11 @@ import { useI18n } from './useI18n'
 
 export const DEFAULT_WORKSPACE_ID = '__default__'
 
+/** Convert a UI workspace identity into the canonical runtime active identity. */
+export function toActiveWorkspaceId(id: string | null | undefined): string | null {
+  return !id || id === DEFAULT_WORKSPACE_ID ? null : id
+}
+
 function isWindowsPath(path: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(path) || /^(?:\\\\|\/\/)/.test(path)
 }
@@ -109,13 +114,14 @@ export function useWorkspaces() {
 
   async function activateWorkspace(id: string | null): Promise<boolean> {
     const gen = ++wsNavGen
-    if (id) {
-      await apiActivateWorkspace(id)
+    const activeId = toActiveWorkspaceId(id)
+    if (activeId) {
+      await apiActivateWorkspace(activeId)
     } else {
       await apiDeactivateWorkspace()
     }
     if (gen !== wsNavGen) return false
-    activeWorkspaceId.value = id
+    activeWorkspaceId.value = activeId
     return true
   }
 

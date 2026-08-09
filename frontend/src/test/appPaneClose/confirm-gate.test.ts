@@ -217,6 +217,94 @@ describe('App.vue - onClosePane routes through confirmation gate', () => {
     expect(session.activePaneId).toBe('workspace-a-successor')
   })
 
+  it('does not hop workspaces when closing a default-root tab selects a default successor', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      const wrapper = await mountWithTabs()
+      const session = useSessionStore()
+      const workspaceState = useWorkspaces()
+      workspaceState.activeWorkspaceId.value = null
+      const terminalTab = (paneId: string): Tab => ({
+        type: 'terminal',
+        paneId,
+        layout: {
+          type: 'leaf',
+          paneId: `${paneId}-leaf`,
+          title: paneId,
+          ratio: 1,
+          zoomed: false,
+        },
+        activePaneId: `${paneId}-leaf`,
+        paneMru: [`${paneId}-leaf`],
+        broadcastMode: false,
+        broadcastActivity: 0,
+        cwd: `/workspace/default/${paneId}`,
+      })
+      session.setTabs([terminalTab('default-closed'), terminalTab('default-successor')])
+      session.setActivePane('default-closed')
+      mocks.apiActivateWorkspace.mockClear()
+      mocks.apiDeactivateWorkspace.mockClear()
+
+      await (wrapper.vm as any).closeTab('default-closed')
+      await nextTick()
+
+      expect(session.activePaneId).toBe('default-successor')
+      expect(workspaceState.activeWorkspaceId.value).toBeNull()
+      expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiDeactivateWorkspace).not.toHaveBeenCalled()
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
+  })
+
+  it('deactivates once when closing a named workspace last tab selects a default successor', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      const wrapper = await mountWithTabs()
+      const session = useSessionStore()
+      const workspaceState = useWorkspaces()
+      workspaceState.workspaces.value = [
+        { id: 'workspace-a', name: 'Workspace A', path: '/workspace/a', order: 0 },
+      ]
+      workspaceState.activeWorkspaceId.value = 'workspace-a'
+      const terminalTab = (paneId: string, cwd: string): Tab => ({
+        type: 'terminal',
+        paneId,
+        layout: {
+          type: 'leaf',
+          paneId: `${paneId}-leaf`,
+          title: paneId,
+          ratio: 1,
+          zoomed: false,
+        },
+        activePaneId: `${paneId}-leaf`,
+        paneMru: [`${paneId}-leaf`],
+        broadcastMode: false,
+        broadcastActivity: 0,
+        cwd,
+      })
+      session.setTabs([
+        terminalTab('workspace-a-closed', '/workspace/a'),
+        terminalTab('default-successor', '/workspace/default/project'),
+      ])
+      session.setActivePane('workspace-a-closed')
+      mocks.apiActivateWorkspace.mockClear()
+      mocks.apiDeactivateWorkspace.mockClear()
+
+      await (wrapper.vm as any).closeTab('workspace-a-closed')
+      await nextTick()
+
+      expect(session.activePaneId).toBe('default-successor')
+      expect(workspaceState.activeWorkspaceId.value).toBeNull()
+      expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiDeactivateWorkspace).toHaveBeenCalledOnce()
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
+  })
+
   it('moves to the successor workspace when closing its active workspace last tab', async () => {
     const wrapper = await mountWithTabs()
     const session = useSessionStore()

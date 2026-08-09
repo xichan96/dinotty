@@ -12,6 +12,7 @@ import { apiApplyTemplate } from './useTemplateApi'
 import type { SshConnectResult } from './useSshConnectFlow'
 import type { MarkReadReason } from './useNotification'
 import type { SyncClientMsg } from '../types/protocol'
+import { toActiveWorkspaceId } from './useWorkspaces'
 
 export interface TabLifecycleOptions {
   tabs: Ref<Tab[]>
@@ -184,7 +185,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       const targetWorkspace = workspaceId
         ? (workspaces.value.find((w) => w.id === workspaceId) ?? null)
         : matchWorkspace(result.cwd ?? '', result.connection_id, undefined)
-      const targetWorkspaceId = targetWorkspace?.id ?? null
+      const targetWorkspaceId = toActiveWorkspaceId(targetWorkspace?.id)
 
       const tabFields = {
         cwd: result.cwd,
@@ -196,7 +197,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       if (existing) {
         Object.assign(existing, tabFields)
         commitLocalActivePane(result.tab_id)
-        if (targetWorkspaceId && targetWorkspaceId !== activeWorkspaceId.value) {
+        if (targetWorkspace && targetWorkspaceId !== activeWorkspaceId.value) {
           await activateWorkspace(targetWorkspaceId)
         }
         persist()
@@ -216,7 +217,7 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         ...tabFields,
       })
       commitLocalActivePane(result.tab_id)
-      if (targetWorkspaceId && targetWorkspaceId !== activeWorkspaceId.value) {
+      if (targetWorkspace && targetWorkspaceId !== activeWorkspaceId.value) {
         await activateWorkspace(targetWorkspaceId)
       }
       persist()
@@ -276,13 +277,14 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     if (!tab) return false
 
     const targetWs = resolveTabWorkspace(tab)
+    const targetWorkspaceId = toActiveWorkspaceId(targetWs?.id)
     const needsSwitch =
       tab.type === 'terminal'
-        ? (targetWs?.id ?? null) !== activeWorkspaceId.value
-        : targetWs && targetWs.id !== activeWorkspaceId.value
+        ? targetWorkspaceId !== activeWorkspaceId.value
+        : !!targetWs && targetWorkspaceId !== activeWorkspaceId.value
     if (needsSwitch) {
       try {
-        const committed = await activateWorkspace(targetWs?.id ?? null)
+        const committed = await activateWorkspace(targetWorkspaceId)
         if (!committed) return false
       } catch {
         return false
@@ -333,13 +335,14 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     if (!tab) return false
 
     const targetWs = resolveTabWorkspace(tab)
+    const targetWorkspaceId = toActiveWorkspaceId(targetWs?.id)
     const needsSwitch =
       tab.type === 'terminal'
-        ? (targetWs?.id ?? null) !== activeWorkspaceId.value
-        : targetWs && targetWs.id !== activeWorkspaceId.value
+        ? targetWorkspaceId !== activeWorkspaceId.value
+        : !!targetWs && targetWorkspaceId !== activeWorkspaceId.value
     if (needsSwitch) {
       try {
-        const committed = await activateWorkspace(targetWs?.id ?? null)
+        const committed = await activateWorkspace(targetWorkspaceId)
         if (!committed) return false
       } catch {
         return false

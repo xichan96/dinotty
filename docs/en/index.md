@@ -4,6 +4,14 @@ A terminal built for coding agents.
 
 Run Claude Code, opencode, Codex, or OpenClaw on any device -- simple, extensible, multi-device, never lose a session.
 
+**One session across phone · iPad · desktop**
+
+Stop mid-task on your computer, continue on your phone, then return to your desktop and pick up exactly where you left off. Sessions survive disconnects and restore on refresh.
+
+**Everything is a pane — build your terminal like building blocks**
+
+Terminals, plugins, files, SSH, and web previews are all panes. Drag them around to assemble your own workspace.
+
 Docs are split into two tracks: **User Docs** for end users, and **Dev Docs** for plugin authors, API integrators, and project contributors.
 
 ## User Docs

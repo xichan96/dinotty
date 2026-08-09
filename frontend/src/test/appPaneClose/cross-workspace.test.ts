@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { mountWithTabs, mocks, SplitContainerStub, localStorageMock } from './_setup'
+import {
+  mountWithTabs,
+  mocks,
+  SplitContainerStub,
+  TabBarStub,
+  localStorageMock,
+} from './_setup'
+import { settings } from '../../composables/useSettings'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useWorkspaces } from '../../composables/useWorkspaces'
 import type { Tab } from '../../types/pane'
@@ -15,6 +22,25 @@ describe('App.vue - activateTab cross-workspace', () => {
     broadcastMode: false,
     broadcastActivity: 0,
     cwd,
+  })
+
+  const modernPluginTab = (workspaceId?: string): Tab => ({
+    type: 'terminal',
+    paneId: `plugin:session-browser:${workspaceId ?? ''}`,
+    layout: {
+      type: 'leaf',
+      kind: 'plugin',
+      paneId: `plugin:session-browser:${workspaceId ?? ''}`,
+      title: 'Session Browser',
+      pluginId: 'session-browser',
+      ratio: 1,
+      zoomed: false,
+    },
+    activePaneId: `plugin:session-browser:${workspaceId ?? ''}`,
+    paneMru: [`plugin:session-browser:${workspaceId ?? ''}`],
+    broadcastMode: false,
+    broadcastActivity: 0,
+    ...(workspaceId ? { workspaceId } : {}),
   })
 
   async function seedCrossWorkspaceTabs() {
@@ -46,6 +72,171 @@ describe('App.vue - activateTab cross-workspace', () => {
     expect(result).toBe(true)
     expect(mocks.apiDeactivateWorkspace).not.toHaveBeenCalled()
     expect(workspaceState.activeWorkspaceId.value).toBe('ws-active')
+  })
+
+  it('keeps a modern plugin scoped to its owning named workspace', async () => {
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const workspaceState = useWorkspaces()
+    workspaceState.workspaces.value = [
+      { id: 'ws-active', name: 'Active', path: '/workspace/active', order: 0 },
+      { id: 'ws-other', name: 'Other', path: '/workspace/other', order: 1 },
+    ]
+    session.setTabs([
+      modernPluginTab('ws-active'),
+      terminalTab('terminal-active', '/workspace/active'),
+      terminalTab('terminal-other', '/workspace/other'),
+      { type: 'plugin', paneId: 'legacy-plugin', title: 'Legacy', pluginId: 'legacy' },
+    ])
+
+    const visibleTabs = () => wrapper.findComponent(TabBarStub).props('tabs') as any[]
+
+    workspaceState.activeWorkspaceId.value = 'ws-active'
+    await nextTick()
+    expect(visibleTabs().map((tab) => tab.paneId)).toEqual([
+      'plugin:session-browser:ws-active',
+      'terminal-active',
+      'legacy-plugin',
+    ])
+
+    workspaceState.activeWorkspaceId.value = 'ws-other'
+    await nextTick()
+    expect(visibleTabs().map((tab) => tab.paneId)).toEqual([
+      'terminal-other',
+      'legacy-plugin',
+    ])
+
+    workspaceState.activeWorkspaceId.value = null
+    await nextTick()
+    expect(visibleTabs().map((tab) => tab.paneId)).toEqual(['legacy-plugin'])
+  })
+
+  it('keeps the runtime default workspace stable when activating a default-root terminal', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      const wrapper = await mountWithTabs()
+      const session = useSessionStore()
+      const workspaceState = useWorkspaces()
+      session.setTabs([
+        modernPluginTab(),
+        terminalTab('terminal-default', '/workspace/default/project'),
+      ])
+      session.setActivePane('plugin:session-browser:')
+      await nextTick()
+
+      const visibleTabs = () => wrapper.findComponent(TabBarStub).props('tabs') as any[]
+      expect(visibleTabs().map((tab) => tab.paneId)).toEqual([
+        'plugin:session-browser:',
+        'terminal-default',
+      ])
+      mocks.apiActivateWorkspace.mockClear()
+      mocks.apiDeactivateWorkspace.mockClear()
+
+      const result = await (wrapper.vm as any).activateTab('terminal-default')
+      await nextTick()
+
+      expect(result).toBe(true)
+      expect(workspaceState.activeWorkspaceId.value).toBeNull()
+      expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiDeactivateWorkspace).not.toHaveBeenCalled()
+      expect(visibleTabs().map((tab) => tab.paneId)).toEqual([
+        'plugin:session-browser:',
+        'terminal-default',
+      ])
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
+  })
+
+  it('keeps the runtime default workspace stable when revealing a default-root pane', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      const wrapper = await mountWithTabs()
+      const session = useSessionStore()
+      const workspaceState = useWorkspaces()
+      session.setTabs([
+        modernPluginTab(),
+        terminalTab('terminal-default', '/workspace/default/project'),
+      ])
+      session.setActivePane('plugin:session-browser:')
+      await nextTick()
+      mocks.apiActivateWorkspace.mockClear()
+      mocks.apiDeactivateWorkspace.mockClear()
+
+      const result = await (wrapper.vm as any).revealPane('terminal-default-leaf')
+      await nextTick()
+
+      expect(result).toBe(true)
+      expect(workspaceState.activeWorkspaceId.value).toBeNull()
+      expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiDeactivateWorkspace).not.toHaveBeenCalled()
+      expect(session.activePaneId).toBe('terminal-default')
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
+  })
+
+  it('creates a plugin-requested terminal in the current default workspace without a hop', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      await mountWithTabs()
+      const workspaceState = useWorkspaces()
+      workspaceState.activeWorkspaceId.value = null
+      mocks.apiCreateTab.mockClear()
+      mocks.apiActivateWorkspace.mockClear()
+      mocks.apiDeactivateWorkspace.mockClear()
+
+      const result = await window.__dinotty_terminal_api!.createTerminalTab({
+        cwd: '/workspace/default/plugin-output',
+        argv: ['echo', 'ok'],
+      })
+
+      expect(result).toBe('p-new')
+      expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiDeactivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiCreateTab).toHaveBeenCalledOnce()
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
+  })
+
+  it('abandons plugin terminal creation when its workspace hop is superseded', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      const wrapper = await mountWithTabs()
+      const session = useSessionStore()
+      const workspaceState = useWorkspaces()
+      workspaceState.workspaces.value = [
+        { id: 'workspace-a', name: 'Workspace A', path: '/workspace/a', order: 0 },
+      ]
+      workspaceState.activeWorkspaceId.value = 'workspace-a'
+      session.setTabs([terminalTab('terminal-current', '/workspace/a/project')])
+      session.setActivePane('terminal-current')
+      let releaseDeactivate!: () => void
+      mocks.apiDeactivateWorkspace.mockImplementationOnce(
+        () => new Promise<void>((resolve) => (releaseDeactivate = resolve))
+      )
+      mocks.apiCreateTab.mockClear()
+
+      const createPromise = window.__dinotty_terminal_api!.createTerminalTab({
+        cwd: '/workspace/default/plugin-output',
+        argv: ['echo', 'stale'],
+      })
+      await vi.waitFor(() => expect(mocks.apiDeactivateWorkspace).toHaveBeenCalledOnce())
+      expect(await (wrapper.vm as any).activateTab('terminal-current')).toBe(true)
+      releaseDeactivate()
+
+      expect(await createPromise).toBe('')
+      expect(workspaceState.activeWorkspaceId.value).toBe('workspace-a')
+      expect(session.activePaneId).toBe('terminal-current')
+      expect(mocks.apiCreateTab).not.toHaveBeenCalled()
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
   })
 
   it('switches to the default workspace for an ungrouped terminal tab', async () => {

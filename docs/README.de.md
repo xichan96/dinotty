@@ -23,6 +23,14 @@ Ein Terminal für Coding-Agenten.
 
 Claude Code, opencode, Codex oder OpenClaw auf jedem Gerät -- schlicht, erweiterbar, geräteübergreifend, verliert nie eine Session.
 
+**Eine Session für Handy · iPad · Desktop**
+
+Am Computer angefangen, auf dem Handy weiter, zurück am Desktop — alles ist wie vorher. Die Session überlebt Trennungen und wird beim Neuladen wiederhergestellt.
+
+**Alles ist ein Pane — baue dein Terminal wie aus Bauklötzen**
+
+Terminal, Plugins, Dateien, SSH und Web-Vorschau sind alles Panes. Ziehe sie und stelle deinen eigenen Arbeitsbereich zusammen.
+
 ## Screenshots
 
 <p align="center">

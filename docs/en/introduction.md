@@ -4,13 +4,21 @@ A terminal built for coding agents.
 
 Run Claude Code, opencode, Codex, or OpenClaw on any device -- simple, extensible, multi-device, never lose a session.
 
+**One session across phone · iPad · desktop**
+
+Stop mid-task on your computer, continue on your phone, then return to your desktop and pick up exactly where you left off. Sessions survive disconnects and restore on refresh.
+
+**Everything is a pane — build your terminal like building blocks**
+
+Terminals, plugins, files, SSH, and web previews are all panes. Drag them around to assemble your own workspace.
+
 ## Philosophy
 
 Terminal coding agents - Claude Code, opencode, Codex, OpenClaw - are powerful, yet confined to a single window. Dinotty sets them free. One terminal. Every device. Every possibility.
 
 ### Sync everywhere
 
-Half-done on your laptop. Pick up your phone, keep going. Back to your laptop, exactly as you left it.
+Sessions live on the server — they survive disconnects and restore on refresh, so phone, iPad, and desktop can pick up the same session anytime. See [Multi-device Sync & Mission Control](guide/multi-device-sync).
 
 ### Endless extensibility
 
@@ -18,7 +26,7 @@ JS plugins with hot reload. CC Switch, JSON Formatter, Claude Code dialog manage
 
 ### Everything is a pane
 
-Terminal, files, web preview, Git changes, SSH remote. Drag to split, move across tabs. All in one flow.
+Terminal, plugins, files, SSH, and web previews are all panes — drag to assemble your own workspace. See [Tabs & Panes](guide/tabs-and-panes).
 
 ### Never drops
 

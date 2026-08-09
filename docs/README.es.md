@@ -23,6 +23,14 @@ Un terminal para agentes de código.
 
 Ejecuta Claude Code, opencode, Codex u OpenClaw en cualquier dispositivo -- simple, extensible, multidispositivo, nunca pierde una sesión.
 
+**Una sesión en móvil · iPad · escritorio**
+
+Empiezas en el ordenador, continúas en el móvil y vuelves al escritorio — todo sigue exactamente donde lo dejaste. La sesión sobrevive a las desconexiones y se restaura al recargar la página.
+
+**Todo es un panel — monta tu terminal como bloques de construcción**
+
+Terminal, plugins, archivos, SSH y vista previa web son todos paneles. Arrastra para armar tu propio espacio de trabajo.
+
 ## Capturas de pantalla
 
 <p align="center">

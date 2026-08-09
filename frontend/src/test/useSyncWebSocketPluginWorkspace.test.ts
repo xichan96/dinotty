@@ -59,6 +59,7 @@ vi.mock('../composables/useWorkspaceApi', () => ({
 
 import { useSyncWebSocket } from '../composables/useSyncWebSocket'
 import { useWorkspaces } from '../composables/useWorkspaces'
+import { settings } from '../composables/useSettings'
 import { useSessionStore } from '../stores/sessionStore'
 
 function leaf(paneId: string): PaneLayout {
@@ -127,6 +128,37 @@ describe('useSyncWebSocket plugin workspace attribution', () => {
     })
 
     expect((session.tabs[0] as TerminalTab).workspaceId).toBe('workspace-a')
+  })
+
+  it('normalizes the default sentinel from workspace restore and activation broadcasts', async () => {
+    const { workspaceState, emit } = await setup()
+
+    emit({ type: 'workspace_list', workspaces: [], active_workspace_id: '__default__' })
+    expect(workspaceState.activeWorkspaceId.value).toBeNull()
+
+    workspaceState.activeWorkspaceId.value = 'workspace-a'
+    emit({ type: 'workspace_activated', id: '__default__' })
+    expect(workspaceState.activeWorkspaceId.value).toBeNull()
+  })
+
+  it('does not hop when a synchronized default close selects a default-root successor', async () => {
+    const previousDefaultRoot = settings.default_workspace_root
+    settings.default_workspace_root = '/workspace/default'
+    try {
+      const closed = terminal('default-closed', { cwd: '/workspace/default/closed' })
+      const successor = terminal('default-successor', { cwd: '/workspace/default/successor' })
+      const { session, workspaceState, emit } = await setup([closed, successor], closed.paneId)
+      workspaceState.activeWorkspaceId.value = null
+
+      emit({ type: 'tab_closed', pane_id: closed.paneId })
+
+      await vi.waitFor(() => expect(session.activePaneId).toBe(successor.paneId))
+      expect(workspaceState.activeWorkspaceId.value).toBeNull()
+      expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+      expect(mocks.apiDeactivateWorkspace).not.toHaveBeenCalled()
+    } finally {
+      settings.default_workspace_root = previousDefaultRoot
+    }
   })
 
   it('scenario 11: backfills an existing tab and persists the repair', async () => {

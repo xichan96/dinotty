@@ -4,13 +4,21 @@
 
 在任意设备上运行 Claude Code、opencode、Codex 或 OpenClaw -- 简洁、可拓展、多端同步，会话永不丢失。
 
+**手机 · iPad · 桌面，一个会话**
+
+电脑上写到一半，掏出手机继续，回到桌面一切原样。断网不丢，刷新即回。
+
+**一切皆 pane，像搭积木一样**
+
+终端、插件、文件、SSH、网页预览 —— 每个面板都是一块积木，拖拽拼装出你的专属工作台。
+
 ## 理念
 
 终端 Coding Agent -- Claude Code、opencode、Codex、OpenClaw -- 功能强大，却总被束缚在单一窗口里。Dinotty 把它解放出来。一个终端，所有设备，所有可能。
 
 ### 多端同步
 
-电脑上写到一半，掏出手机继续。回到电脑，一切原样。
+会话常驻服务端，断网不丢、刷新即回。手机、iPad、桌面随时接管同一会话。详见 [多端同步与 Mission Control](guide/multi-device-sync)。
 
 ### 拓展无界
 
@@ -18,7 +26,7 @@ JS 插件热重载。CC Switch、JSON Formatter、Claude Code 对话管理开箱
 
 ### 一切皆 pane
 
-终端、文件、网页预览、Git 变更、SSH 远程。拖拽分屏，跨 Tab 移动，浑然一体。
+终端、插件、文件、SSH、网页预览都是 pane，拖拽拼装出专属工作台。详见 [Tab 与分屏管理](guide/tabs-and-panes)。
 
 ### 永不掉线
 

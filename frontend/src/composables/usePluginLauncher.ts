@@ -73,10 +73,6 @@ export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherSt
           paneMru: [result.pane_id],
           broadcastMode: false,
           broadcastActivity: 0,
-          previewVisible: false,
-          previewAddress: '',
-          previewUrl: '',
-          previewKind: 'web',
           workspaceId: wsId || undefined,
         })
       }

@@ -312,7 +312,7 @@ async function connectProfile(profile: SshProfile) {
   connecting.value = true
   error.value = ''
   try {
-    const result = await apiCreateSshTab(profile.id, undefined, abortController.signal)
+    const result = await apiCreateSshTab(profile.id, undefined, undefined, abortController.signal)
     emit('connect', result)
     close()
   } catch (e: any) {

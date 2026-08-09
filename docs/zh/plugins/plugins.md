@@ -1,6 +1,8 @@
-# 插件系统
+# 安装与使用插件
 
-Dinotty 支持通过插件扩展功能。插件在独立标签页中运行，使用 Vue 3 渲染 UI，可调用终端、通知、持久化存储等内建 API。
+Dinotty 通过插件扩展功能。插件在独立标签页中运行，使用 Vue 3 渲染 UI，可调用终端、通知、持久化存储等内建 API。
+
+本文面向**插件使用者**：如何安装、卸载、使用内置插件。如果你要开发自己的插件，请看 [插件开发指南](plugin-development)。
 
 ## 安装插件
 
@@ -40,6 +42,8 @@ curl.exe -X POST http://127.0.0.1:8999/api/plugins/dev-link `
 
 ## 插件清单（plugin.json）
 
+插件目录下必须有 `plugin.json` 描述插件元信息。用户安装第三方插件前可以查看清单了解插件行为，**清单里声明的权限就是插件能调用的 API 上限**。
+
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `id` | ✅ | 唯一标识，小写字母 + 连字符，须与目录名一致 |
@@ -53,9 +57,11 @@ curl.exe -X POST http://127.0.0.1:8999/api/plugins/dev-link `
 | `permissions` | ❌ | 声明插件所需权限（如 `["terminal.output"]`） |
 | `description` | ❌ | 插件描述，显示在下拉菜单中 |
 
-## 插件 API
+清单字段的完整定义和写法见 [插件开发指南 -> 插件清单](plugin-development)。
 
-插件 JS 入口导出 `activate(context)` 函数，`context` 提供以下 API：
+## 插件 API 速查
+
+插件 JS 入口导出 `activate(context)` 函数，`context` 提供以下 API（开发细节见 [插件开发指南](plugin-development)）：
 
 | 类别 | API | 说明 |
 |------|-----|------|

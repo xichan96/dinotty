@@ -101,6 +101,17 @@ describe('TerminalPane host clipboard input path', () => {
     wrapper.unmount()
   })
 
+  it('pastes without focusing xterm while a full action panel owns the viewport', () => {
+    const wrapper = mountPane()
+    const terminal = paneMocks.instances[0]
+
+    expect((wrapper.vm as any).pasteFromClipboard('echo background', false, false)).toBe(true)
+
+    expect(terminal.focus).not.toHaveBeenCalled()
+    expect(terminal.pasteText).toHaveBeenCalledWith('echo background')
+    wrapper.unmount()
+  })
+
   it('fans both pasted text and Enter out to broadcast peers', () => {
     const peer = { sendData: vi.fn() }
     const tabs = ref<Tab[]>([
@@ -122,10 +133,6 @@ describe('TerminalPane host clipboard input path', () => {
         broadcastMode: true,
         broadcastActivity: 0,
         paneMru: ['p1', 'p2'],
-        previewVisible: false,
-        previewAddress: '',
-        previewKind: 'web',
-        previewUrl: '',
       } as any,
     ])
     const split = useSplitPane({
@@ -136,6 +143,7 @@ describe('TerminalPane host clipboard input path', () => {
       sendSync: vi.fn(),
       sendLayoutSync: vi.fn(),
       persist: vi.fn(),
+      showSplitTerminalError: vi.fn(),
     })
 
     split.onTerminalInput('p1', 'echo ok')

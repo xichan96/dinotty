@@ -66,11 +66,14 @@ export function useTokenManagement(opts: TokenManagementOptions): TokenManagemen
   }
 
   async function regenerateToken() {
-    if (!(await uiConfirm(t('settings.token.confirmRegenerate'), {
-      title: t('settings.token.regenerate'),
-      confirmText: t('settings.token.regenerate'),
-      cancelText: t('filePreview.cancel'),
-    }))) return
+    if (
+      !(await uiConfirm(t('settings.token.confirmRegenerate'), {
+        title: t('settings.token.regenerate'),
+        confirmText: t('settings.token.regenerate'),
+        cancelText: t('filePreview.cancel'),
+      }))
+    )
+      return
     const buf = new Uint8Array(32)
     crypto.getRandomValues(buf)
     const token = Array.from(buf)
@@ -90,6 +93,7 @@ export function useTokenManagement(opts: TokenManagementOptions): TokenManagemen
       })
       if (res.ok) {
         setAuthToken(token)
+        currentToken.value = token
         onTokenChanged()
       } else {
         tokenError.value = t('settings.token.saveFailed')

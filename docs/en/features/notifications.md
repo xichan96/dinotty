@@ -2,6 +2,36 @@
 
 Dinotty has a built-in notification system supporting terminal bell detection and custom notification push, designed for AI agent and automation tool integration.
 
+## User Side
+
+### Notification Panel
+
+When a notification arrives, a toast pops up in the bottom right; the notification panel (sidebar bell icon) accumulates history:
+
+- **Toast**: auto-dismisses after 5s; has a "Jump" button
+- **Notification panel**: lists notifications in reverse chronological order, unread highlighted
+- **Unread count**: badge on the bell icon
+- **Clear**: "Mark all read" button at the top of the panel
+
+### Notification Types
+
+| Type | Use | Visual |
+|------|-----|--------|
+| `info` | General info | Gray |
+| `success` | Task succeeded | Green |
+| `warning` | Needs attention | Yellow |
+| `error` | Error | Red |
+| `urgent` | Urgent (agent waiting for input) | Red, emphasized |
+
+### Click to Jump
+
+Each notification card shows a `workspace › tab / pane` label for easy source identification:
+
+- **Click a card in the panel**: auto-switch workspace -> open the tab -> focus the pane
+- **Click "Jump" on a toast**: same full jump chain
+
+Jump requires the sender to include `pane_id` when calling the HTTP API (see below).
+
 ## HTTP API
 
 Send notifications via `POST /api/notify`:
@@ -21,14 +51,7 @@ Request body fields:
 | `pane_id` | string | ❌ | Associated pane ID (enables click-to-jump) |
 | `notification_type` | string | ❌ | Type: `info` (default) / `success` / `warning` / `error` / `urgent` |
 
-### Click to Jump
-
-After receiving a notification, you can jump directly to the target location:
-
-- **Notification panel**: click the notification card → auto-switch workspace → open the tab → focus the pane
-- **Toast popup**: click the **「Jump」** button → same full jump chain
-
-The notification card displays a `workspace › tab / pane` label for easy source identification.
+Include `pane_id` to enable click-to-jump (see [User Side -> Click to Jump](#click-to-jump) above).
 
 ## Environment Variables
 

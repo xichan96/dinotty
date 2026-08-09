@@ -39,6 +39,16 @@ pub async fn put_settings(
     let _ = clamp_quick_send_threshold(&mut new_settings);
     let _ = clamp_theme_on_put(&mut new_settings);
     let _ = normalize_action_keyboards(&mut new_settings);
+    // Preserve `active_workspace_id`: it is server-owned (mutated via
+    // /api/workspace/activate and /api/workspace/deactivate) and absent from
+    // the frontend's SettingsData payload. Without this, a full-overwrite PUT
+    // would reset it to None (via #[serde(default)]) and clobber the user's
+    // last-activated workspace - causing the next launch to land in the wrong
+    // workspace.
+    {
+        let existing = state.1.read().await;
+        new_settings.active_workspace_id = existing.active_workspace_id.clone();
+    }
     match save_settings(&new_settings) {
         Ok(()) => {
             *state.1.write().await = new_settings;

@@ -169,9 +169,9 @@ pub async fn auth_middleware(
         return next.run(request).await;
     }
 
-    // Agent WS has its own agent-token middleware; skip main auth so agent
-    // clients (which carry an agent token, not a session cookie) can connect.
-    if path == "/ws/agent" {
+    // Event stream WS has its own sessions-token middleware; skip main auth so
+    // agent clients (which carry an agent token, not a session cookie) can connect.
+    if path == "/ws/events" {
         return next.run(request).await;
     }
 

@@ -68,10 +68,6 @@ function terminalTab(id: string): Tab {
     paneMru: [`${id}-leaf`],
     broadcastMode: false,
     broadcastActivity: 0,
-    previewVisible: false,
-    previewAddress: '',
-    previewUrl: '',
-    previewKind: 'web',
   }
 }
 

@@ -157,6 +157,18 @@ Expected artifacts:
 
 After publishing, verify that the GitHub Release tag, title, and asset versions match. Perform at least a basic install and startup check for the supported platforms.
 
+## 7. Withdraw a Broken Release
+
+Dinotty applies a 24-hour notification grace period to new versions. If a Release is deleted within 24 hours of publication, clients revalidate it with GitHub when the grace period ends and do not notify users about that version.
+
+For a serious issue, select **Delete this release** on the GitHub Release page, or run:
+
+```bash
+gh release delete "v0.20.0" --repo xichan96/dinotty --yes
+```
+
+Delete only the Release and keep its Git tag; never move or reuse that tag. Fix the issue on `dev`, increment the PATCH version, and publish the replacement through the normal flow. If the Release was already more than 24 hours old, prompts already shown and the backend's successful cache of up to six hours cannot be revoked immediately; they disappear only after the page lifecycle ends or the cache revalidates, so publish the fixed version promptly.
+
 ## Failure Handling
 
 - **Temporary CI or infrastructure failure**: rerun the original workflow; keep the tag and commit unchanged.

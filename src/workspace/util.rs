@@ -40,8 +40,10 @@ pub(crate) fn get_session(
 
 pub(crate) fn get_root(manager: &SessionManager, pane_id: &str) -> Result<PathBuf, Response> {
     let session = get_session(manager, pane_id)?;
-    let state = session.cwd_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    Ok(state.cwd.canonicalize().unwrap_or_else(|_| state.cwd.clone()))
+    let cwd = session
+        .cwd_for_workspace()
+        .ok_or_else(|| json_err(StatusCode::CONFLICT, "cwd_unavailable_for_backend"))?;
+    Ok(cwd.canonicalize().unwrap_or(cwd))
 }
 
 /// Check if a session is SSH. Returns `Some(session)` if SSH, `None` if local.

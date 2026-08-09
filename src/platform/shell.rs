@@ -1,10 +1,75 @@
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShellLaunchKind {
+    Native,
+    Wsl { distro: Option<String> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShellPreference {
+    pub kind: String,
+    pub custom_path: Option<String>,
+    pub wsl_distro: Option<String>,
+}
+
+impl ShellPreference {
+    #[must_use]
+    pub fn new(
+        kind: impl Into<String>,
+        custom_path: Option<String>,
+        wsl_distro: Option<String>,
+    ) -> Self {
+        Self { kind: kind.into(), custom_path, wsl_distro }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShellSpec {
     pub program: String,
     pub args: Vec<String>,
     pub shell_type: String,
+    pub launch_kind: ShellLaunchKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct DetectedShell {
+    pub kind: String,
+    pub program: String,
+    pub distro: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShellResolveError {
+    pub code: &'static str,
+    pub detail: String,
+}
+
+impl ShellResolveError {
+    #[must_use]
+    pub fn new(code: &'static str, detail: impl Into<String>) -> Self {
+        Self { code, detail: detail.into() }
+    }
+}
+
+impl std::fmt::Display for ShellResolveError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.detail)
+    }
+}
+
+impl std::error::Error for ShellResolveError {}
+
+impl ShellSpec {
+    fn native(program: String, normalized_type: Option<&str>) -> Self {
+        let shell_type = normalized_type.map_or_else(|| shell_type(&program), str::to_string);
+        Self {
+            args: shell_args_for_type(&program, &shell_type),
+            shell_type,
+            program,
+            launch_kind: ShellLaunchKind::Native,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,47 +88,99 @@ pub fn default_shell() -> ShellSpec {
     default_shell_impl()
 }
 
-/// Resolve a shell based on user preference (`settings.shell` + `settings.shell_path`).
-/// - `auto` or empty: falls back to `default_shell()` (system auto-detect).
-/// - `custom`: uses `shell_path` if non-empty, else falls back to `auto`.
-/// - `zsh`/`bash`/`sh`/`fish`/`powershell`/`cmd`: searches common install paths + PATH.
-/// - If the preferred shell cannot be found, falls back to `default_shell()` and
-///   prints a warning to stderr so the user knows why their setting was ignored.
-#[must_use]
-pub fn shell_with_preference(shell_kind: &str, shell_path: &Option<String>) -> ShellSpec {
-    let kind = shell_kind.trim();
+/// Resolve native shell preferences. WSL resolution is asynchronous and lives in
+/// `ShellProbeService`, which validates the selected distribution before launch.
+///
+/// # Errors
+///
+/// Returns `shell_unavailable` when a custom shell path does not resolve to an
+/// executable file, or `wsl_capability_unsupported` when called for WSL.
+pub fn resolve_native_preference(
+    preference: &ShellPreference,
+) -> Result<ShellSpec, ShellResolveError> {
+    let kind = preference.kind.trim();
     if kind.is_empty() || kind == "auto" {
-        return default_shell_impl();
+        return Ok(default_shell_impl());
     }
 
     let program = match kind {
         "custom" => {
-            let Some(p) = shell_path else {
-                eprintln!("dinotty: shell=custom but shell_path is empty, falling back to auto");
-                return default_shell_impl();
+            let Some(path) = preference.custom_path.as_deref() else {
+                return Err(ShellResolveError::new(
+                    "shell_unavailable",
+                    "custom shell path is empty",
+                ));
             };
-            let trimmed = p.trim();
+            let trimmed = path.trim();
             if trimmed.is_empty() {
-                eprintln!("dinotty: shell=custom but shell_path is empty, falling back to auto");
-                return default_shell_impl();
+                return Err(ShellResolveError::new(
+                    "shell_unavailable",
+                    "custom shell path is empty",
+                ));
             }
-            trimmed.to_string()
+            resolve_command(trimmed)
+                .filter(|path| is_executable_file(path))
+                .map(|path| path.to_string_lossy().into_owned())
+                .ok_or_else(|| {
+                    ShellResolveError::new(
+                        "shell_unavailable",
+                        format!("custom shell is not executable: {trimmed}"),
+                    )
+                })?
+        }
+        "wsl" => {
+            return Err(ShellResolveError::new(
+                "wsl_capability_unsupported",
+                "WSL must be resolved asynchronously",
+            ));
         }
         other => {
             let Some(p) = find_shell_program(other) else {
-                eprintln!(
-                    "dinotty: shell '{other}' not found on this system, falling back to auto"
-                );
-                return default_shell_impl();
+                tracing::warn!(shell_kind = other, "Configured shell was not detected; using auto");
+                return Ok(default_shell_impl());
             };
             p
         }
     };
 
-    ShellSpec { args: shell_args(&program), shell_type: shell_type(&program), program }
+    let normalized_type = (kind != "custom").then_some(kind);
+    Ok(ShellSpec::native(program, normalized_type))
+}
+
+#[must_use]
+pub fn available_native_shells() -> Vec<DetectedShell> {
+    ["zsh", "bash", "sh", "fish", "powershell", "cmd"]
+        .into_iter()
+        .filter_map(|kind| {
+            find_shell_program(kind).map(|program| DetectedShell {
+                kind: kind.to_string(),
+                program,
+                distro: None,
+            })
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn default_shell_kind(spec: &ShellSpec) -> String {
+    match spec.shell_type.as_str() {
+        "zsh" | "bash" | "sh" | "fish" | "powershell" | "cmd" => spec.shell_type.clone(),
+        _ => "custom".to_string(),
+    }
 }
 
 fn find_shell_program(kind: &str) -> Option<String> {
+    #[cfg(windows)]
+    if !matches!(kind, "powershell" | "cmd") {
+        // bash.exe on Windows is a legacy WSL launcher, while Git Bash,
+        // Cygwin, and MSYS2 require distinct argv/path semantics.
+        return None;
+    }
+    #[cfg(not(windows))]
+    if kind == "cmd" {
+        return None;
+    }
+
     let candidates: &[&str] = match kind {
         "zsh" => {
             &["/bin/zsh", "/usr/bin/zsh", "/opt/homebrew/bin/zsh", "/usr/local/bin/zsh", "zsh"]
@@ -80,7 +197,7 @@ fn find_shell_program(kind: &str) -> Option<String> {
     for candidate in candidates {
         let path = Path::new(candidate);
         if path.is_absolute() {
-            if path.exists() {
+            if is_executable_file(path) {
                 return Some((*candidate).to_string());
             }
             continue;
@@ -108,6 +225,8 @@ pub fn shell_type(program: &str) -> String {
         "zsh".into()
     } else if lower.contains("bash") {
         "bash".into()
+    } else if lower.contains("fish") {
+        "fish".into()
     } else {
         "sh".into()
     }
@@ -115,7 +234,11 @@ pub fn shell_type(program: &str) -> String {
 
 #[must_use]
 pub fn shell_args(program: &str) -> Vec<String> {
-    match shell_type(program).as_str() {
+    shell_args_for_type(program, &shell_type(program))
+}
+
+fn shell_args_for_type(_program: &str, shell_type: &str) -> Vec<String> {
+    match shell_type {
         "zsh" | "bash" => vec!["-i".into(), "-l".into()],
         "powershell" => vec![
             "-NoLogo".into(),
@@ -151,16 +274,16 @@ fn default_shell_impl() -> ShellSpec {
 
     let program = std::env::var("SHELL")
         .ok()
-        .filter(|s| Path::new(s).exists() && !BLOCKED.contains(&s.as_str()))
+        .filter(|s| is_executable_file(Path::new(s)) && !BLOCKED.contains(&s.as_str()))
         .or_else(|| {
             ["/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"]
                 .into_iter()
-                .find(|s| Path::new(s).exists())
+                .find(|s| is_executable_file(Path::new(s)))
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "/bin/sh".into());
 
-    ShellSpec { args: shell_args(&program), shell_type: shell_type(&program), program }
+    ShellSpec::native(program, None)
 }
 
 #[cfg(windows)]
@@ -184,13 +307,13 @@ fn default_shell_impl() -> ShellSpec {
         .or_else(|| resolve_command("cmd.exe").map(|path| path.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "cmd.exe".into());
 
-    ShellSpec { args: shell_args(&program), shell_type: shell_type(&program), program }
+    ShellSpec::native(program, None)
 }
 
 #[cfg(not(any(unix, windows)))]
 fn default_shell_impl() -> ShellSpec {
     let program = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
-    ShellSpec { args: shell_args(&program), shell_type: shell_type(&program), program }
+    ShellSpec::native(program, None)
 }
 
 #[cfg(unix)]
@@ -232,7 +355,7 @@ fn resolve_command_impl(program: &str) -> Option<PathBuf> {
 
     let path = PathBuf::from(program);
     if path.is_absolute() || program.contains('\\') || program.contains('/') {
-        return path.exists().then_some(path);
+        return is_executable_file(&path).then_some(path);
     }
 
     let candidates = command_candidates(program);
@@ -252,14 +375,27 @@ fn resolve_command_impl(program: &str) -> Option<PathBuf> {
 
     let path = PathBuf::from(program);
     if path.is_absolute() || program.contains('/') {
-        return path.exists().then_some(path);
+        return is_executable_file(&path).then_some(path);
     }
 
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
             .map(|dir| dir.join(program))
-            .find(|candidate| candidate.is_file())
+            .find(|candidate| is_executable_file(candidate))
     })
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 #[cfg(windows)]
@@ -293,13 +429,33 @@ fn root_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     #[cfg(windows)]
-    use super::{default_shell, notification_hook_shell, resolve_command};
-    use super::{shell_args, shell_type};
+    use super::{default_shell, find_shell_program, notification_hook_shell, resolve_command};
+    use super::{resolve_native_preference, shell_args, shell_type, ShellPreference};
 
     #[test]
     fn detects_windows_shell_types() {
         assert_eq!(shell_type(r"C:\Program Files\PowerShell\7\pwsh.exe"), "powershell");
         assert_eq!(shell_type(r"C:\Windows\System32\cmd.exe"), "cmd");
+        assert_eq!(shell_type("/usr/bin/fish"), "fish");
+    }
+
+    #[test]
+    fn invalid_custom_shell_is_not_silently_replaced() {
+        let preference = ShellPreference::new(
+            "custom",
+            Some("this-shell-does-not-exist-anywhere".to_string()),
+            None,
+        );
+
+        let error = resolve_native_preference(&preference).unwrap_err();
+
+        assert_eq!(error.code, "shell_unavailable");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_windows_bash_launcher_is_not_a_native_shell_candidate() {
+        assert_eq!(find_shell_program("bash"), None);
     }
 
     #[test]

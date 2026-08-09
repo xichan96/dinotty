@@ -1,88 +1,11 @@
 <template>
-  <div v-if="visible && embedded" class="file-workspace-embedded">
-    <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
+  <div
+    v-if="visible"
+    class="file-workspace"
+    :class="inLeaf ? ['in-leaf'] : [layout.direction.value]"
+  >
     <div
-      ref="fileWorkspaceBodyRef"
-      class="file-workspace-body"
-      :class="{ embedded }"
-      @dragover.prevent
-      @dragenter.prevent="onWorkspaceDragEnter($event)"
-      @dragleave="ops.onWorkspaceDragLeave()"
-      @drop.prevent="onWorkspaceDrop($event)"
-    >
-      <div v-if="ops.dragging.value" class="file-workspace-drop-overlay">
-        {{ t('filePreview.dropHint') }}
-      </div>
-      <div
-        v-if="!treeCollapsed"
-        class="file-workspace-tree-wrap"
-        :class="{ narrow: layout.narrow.value }"
-        :style="layout.treeWrapStyle.value"
-      >
-        <div
-          class="file-workspace-tree tree-host"
-          @click.stop
-          @pointerdown.capture="bumpTreePointerTs"
-          @contextmenu.prevent="ctxMenu.onTreeBgContextMenu"
-        >
-          <TreeRows
-            :pane-id="paneId"
-            :depth="0"
-            rel-path=""
-            :workspace-root="cwdLabel"
-            :cache="childCache"
-            :expanded="expanded"
-            :selected-rel="selectedRel ?? undefined"
-            :inline-create="inlineCreateForTree"
-            :inline-placeholder="inlineInputPlaceholder"
-            :inline-rename="inlineRename ?? undefined"
-            :git-status="gitStatusMap"
-            @toggle="onToggle"
-            @select-file="trySelectFile"
-            @select-dir="trySelectDir"
-            @inline-create-commit="onInlineCreateCommit"
-            @inline-create-cancel="onInlineCreateCancel"
-            @inline-rename-commit="onInlineRenameCommit"
-            @inline-rename-cancel="onInlineRenameCancel"
-            @context-menu="ctxMenu.onTreeContextMenu"
-            @long-press="ctxMenu.onTreeLongPress"
-            @move-entry="ctxMenu.onMoveEntry"
-            @swipe-action="onSwipeAction"
-            @upload-to-dir="onUploadToDir"
-            :on-dir-drag-enter="ops.setHoveredDir"
-            :on-dir-drag-leave="ops.clearHoveredDir"
-          />
-        </div>
-      </div>
-      <div
-        v-if="!treeCollapsed"
-        class="file-workspace-tree-splitter"
-        @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
-        @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
-      ></div>
-      <div class="file-workspace-preview-wrap">
-        <button
-          type="button"
-          class="tree-collapse-btn"
-          :title="treeCollapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')"
-          @click="treeCollapsed = !treeCollapsed"
-        >
-          <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
-        </button>
-        <EditorSplitContainer
-          :layout="editorSplit.editorLayout.value"
-          :active-leaf-id="editorSplit.activeEditorLeafId.value"
-          :pane-id="paneId"
-          :show-header="editorSplit.isSplit.value"
-          @focus="(id: string) => editorSplit.focusEditorPane(id)"
-          @close="(id: string) => editorSplit.closeEditorPane(id)"
-          @file-drop="onEditorFileDrop"
-        />
-      </div>
-    </div>
-  </div>
-  <div v-else-if="visible" class="file-workspace" :class="layout.direction.value">
-    <div
+      v-if="!inLeaf"
       class="file-workspace-divider"
       @mousedown.prevent="startDrag"
       @touchstart.prevent="startDrag"
@@ -119,50 +42,7 @@
             @close="recentDropdownOpen = false"
           />
         </div>
-        <button
-          type="button"
-          :class="{ 'star-active': isSelectedBookmarked }"
-          :disabled="!selectedRel || selectedIsDir"
-          :title="isSelectedBookmarked ? t('fileBookmark.removeFrom') : t('fileBookmark.addTo')"
-          @click="onToggleBookmark"
-        >
-          <Star :size="14" :fill="isSelectedBookmarked ? 'currentColor' : 'none'" />
-        </button>
-        <div class="file-workspace-add-menu">
-          <button
-            type="button"
-            @click="ctxMenu.addMenuOpen.value = !ctxMenu.addMenuOpen.value"
-            title="New"
-          >
-            +
-          </button>
-          <div
-            v-if="ctxMenu.addMenuOpen.value"
-            class="file-workspace-add-backdrop"
-            @click="ctxMenu.addMenuOpen.value = false"
-          ></div>
-          <div v-if="ctxMenu.addMenuOpen.value" class="file-workspace-add-dropdown">
-            <button
-              type="button"
-              @click="
-                ctxMenu.addMenuOpen.value = false;
-                startNewFile();
-              "
-            >
-              {{ t('filePreview.ctxNewFile') }}
-            </button>
-            <button
-              type="button"
-              @click="
-                ctxMenu.addMenuOpen.value = false;
-                startNewFolder();
-              "
-            >
-              {{ t('filePreview.ctxNewFolder') }}
-            </button>
-          </div>
-        </div>
-        <button type="button" @click="close" title="Close">✕</button>
+        <button v-if="!inLeaf" type="button" @click="close" title="Close">✕</button>
       </div>
       <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
       <div
@@ -232,7 +112,7 @@
           <EditorSplitContainer
             :layout="editorSplit.editorLayout.value"
             :active-leaf-id="editorSplit.activeEditorLeafId.value"
-            :pane-id="paneId"
+            :pane-id="apiPaneId"
             :show-header="editorSplit.isSplit.value"
             @focus="(id: string) => editorSplit.focusEditorPane(id)"
             @close="(id: string) => editorSplit.closeEditorPane(id)"
@@ -408,11 +288,18 @@ import ConfirmModal from '../ui/ConfirmModal.vue'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
-import { Star, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 
 const props = withDefaults(
-  defineProps<{ visible: boolean; paneId: string; embedded?: boolean }>(),
-  { embedded: false }
+  defineProps<{
+    visible: boolean
+    paneId: string
+    inLeaf?: boolean
+    shellType?: string
+    initialPath?: string
+    sourcePaneId?: string
+  }>(),
+  { inLeaf: true }
 )
 const treeCollapsed = defineModel<boolean>('treeCollapsed', { default: false })
 const emit = defineEmits<{
@@ -423,6 +310,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// Terminal paneId that owns this leaf; needed for workspace API calls
+// (list/cwd/git-status) which look up the PTY session. Falls back to the
+// leaf's own paneId for legacy leaves without sourcePaneId.
+const apiPaneId = computed(() => props.sourcePaneId || props.paneId)
 
 // --- Shared state ---
 const cwdLabel = ref('')
@@ -438,7 +330,7 @@ const nav = useFileNavigation()
 const layout = useFileWorkspaceLayout()
 const recentFiles = useRecentFiles()
 const workspaceBookmarks = useWorkspaceBookmarks()
-const editorSplit = useEditorSplit({ paneId: () => props.paneId })
+const editorSplit = useEditorSplit({ paneId: () => apiPaneId.value })
 
 // Derived from active editor pane — keeps tree highlight and context menu working
 const selectedRel = ref<string | null>(null)
@@ -446,18 +338,20 @@ const selectedIsDir = ref(false)
 const meta = ref<any | null>(null)
 const previewErr = ref('')
 
-// Keep selectedRel in sync with active editor pane
+// Keep selectedRel in sync with active editor pane. When focus moves to a
+// different pane (or the displayed file is deleted), the tree highlight
+// follows the active leaf and selectedIsDir resets - clicking a directory
+// only sets selectedIsDir temporarily until focus shifts.
 watch(
   () => editorSplit.activeLeaf.value?.filePath,
-  (fp) => { selectedRel.value = fp ?? null }
-)
-watch(
-  () => editorSplit.activeLeaf.value?.isDir,
-  (isDir) => { selectedIsDir.value = isDir ?? false }
+  (fp) => {
+    selectedRel.value = fp ?? null
+    selectedIsDir.value = false
+  }
 )
 watch(
   () => editorSplit.activeEditorLeafId.value,
-  (id) => { setActiveLeaf(id ?? null) },
+  () => { setActiveLeaf(editorSplit.activeEditorLeafId.value ?? null) },
   { immediate: true }
 )
 
@@ -477,7 +371,7 @@ const {
   onInlineRenameCommit,
   onInlineRenameCancel,
 } = useInlineCreateRename({
-  paneId: toRef(props, 'paneId'),
+  paneId: apiPaneId,
   cwdLabel,
   selectedRel,
   selectedIsDir,
@@ -491,7 +385,7 @@ const {
 })
 
 const ops = useFileOperations({
-  paneId: () => props.paneId,
+  paneId: () => apiPaneId.value,
   selectedRel,
   selectedIsDir,
   meta,
@@ -523,7 +417,7 @@ const ctxMenu = useTreeContextMenu({
   onSelectDir,
   triggerUpload: ops.triggerUpload,
   downloadFile: ops.downloadFile,
-  paneId: () => props.paneId,
+  paneId: () => apiPaneId.value,
   t,
 })
 
@@ -531,13 +425,18 @@ watch(nav.canGoBack, (v) => emit('update:canGoBack', v), { immediate: true })
 watch(nav.canGoForward, (v) => emit('update:canGoForward', v), { immediate: true })
 
 // --- File Watch ---
+// File watch tracks the file currently displayed in the active editor pane,
+// not the tree selection - so clicking a directory doesn't stop the right
+// pane from refreshing when the displayed file changes on disk.
+const displayedFileRel = computed(() => editorSplit.activeLeaf.value?.filePath ?? null)
+const displayedFileIsDir = computed(() => editorSplit.activeLeaf.value?.isDir ?? false)
 const fileWatch = useFileWatch({
-  paneId: () => props.paneId,
+  paneId: () => apiPaneId.value,
   cwdLabel,
   expanded,
   childCache,
-  selectedRel,
-  selectedIsDir,
+  selectedRel: displayedFileRel,
+  selectedIsDir: displayedFileIsDir,
   meta,
   editorDirty: () => false,
   onFileDeleted: () => {
@@ -567,9 +466,13 @@ const {
   openFromTerminal,
 } = useFileWorkspaceBoot({
   paneId: toRef(props, 'paneId'),
+  sourcePaneId: toRef(props, 'sourcePaneId'),
   visible: toRef(props, 'visible'),
+  shellType: toRef(props, 'shellType'),
+  initialPath: toRef(props, 'initialPath'),
   childCache,
   expanded,
+  cwdLabel,
   previewErr,
   meta,
   selectedRel,
@@ -600,17 +503,6 @@ const inlineInputPlaceholder = computed(() => {
   if (!inlineCreate.value) return ''
   return inlineCreate.value.kind === 'dir' ? t('filePreview.nameFolder') : t('filePreview.nameFile')
 })
-
-const isSelectedBookmarked = computed(() => {
-  if (!selectedRel.value || selectedIsDir.value) return false
-  return workspaceBookmarks.isBookmarked(ops.absolutePath(selectedRel.value))
-})
-
-function onToggleBookmark() {
-  if (!selectedRel.value || selectedIsDir.value) return
-  const name = selectedRel.value.split('/').pop() || selectedRel.value
-  workspaceBookmarks.toggleBookmark(name, ops.absolutePath(selectedRel.value), false)
-}
 
 const ctxIsBookmarked = computed(() => {
   const rel = ctxMenu.contextMenu.value?.rel || selectedRel.value
@@ -731,8 +623,10 @@ function trySelectDir(rel: string) {
 const { selectedPath: globalSelectedPath } = useSelectedPath()
 
 function onSelectDir(rel: string) {
-  editorSplit.openFileInActivePane(rel, true)
-  meta.value = null
+  // Only update tree selection — keep the editor leaf showing the last opened
+  // file so the right pane doesn't go blank when a directory is clicked.
+  selectedRel.value = rel
+  selectedIsDir.value = true
   nav.pushNav(rel, true)
   globalSelectedPath.value = ops.absolutePath(rel)
   emit('navigate', ops.absolutePath(rel))
@@ -743,6 +637,8 @@ async function loadMetaForActivePane(rel: string) {
 }
 
 async function onSelectFile(rel: string) {
+  selectedRel.value = rel
+  selectedIsDir.value = false
   editorSplit.openFileInActivePane(rel, false)
   meta.value = null
   nav.pushNav(rel, false)
@@ -754,7 +650,7 @@ async function onSelectFile(rel: string) {
 // --- Tree data ---
 async function fetchList(rel: string): Promise<DirEntry[]> {
   await getApiBase()
-  const q = new URLSearchParams({ pane_id: props.paneId, path: rel })
+  const q = new URLSearchParams({ pane_id: apiPaneId.value, path: rel })
   if (cwdLabel.value) q.set('root', cwdLabel.value)
   const res = await authFetch(apiUrl(`/api/workspace/list?${q}`))
   if (!res.ok) throw new Error('list failed')
@@ -766,7 +662,7 @@ async function fetchList(rel: string): Promise<DirEntry[]> {
 async function fetchGitStatus() {
   try {
     await getApiBase()
-    const q = new URLSearchParams({ pane_id: props.paneId })
+    const q = new URLSearchParams({ pane_id: apiPaneId.value })
     const res = await authFetch(apiUrl(`/api/workspace/git-status?${q}`))
     if (!res.ok) return
     const data = await res.json()
@@ -875,7 +771,7 @@ watch(
 )
 
 watch(
-  () => [props.visible, props.paneId, props.embedded],
+  () => [props.visible, props.paneId, props.inLeaf],
   () => {
     if (props.visible && props.paneId) void boot()
   },
@@ -934,7 +830,7 @@ defineExpose({
   border: 0;
 }
 
-.file-workspace-embedded {
+.file-workspace.in-leaf {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1015,41 +911,6 @@ defineExpose({
 .file-workspace-toolbar button:disabled {
   opacity: 0.35;
   cursor: default;
-}
-
-.file-workspace-add-menu {
-  position: relative;
-}
-.file-workspace-add-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 199;
-}
-.file-workspace-add-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  min-width: 120px;
-  background: var(--bg-surface, #1a1a1a);
-  border: 1px solid var(--border, #333);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  z-index: 200;
-  padding: 4px 0;
-  display: flex;
-  flex-direction: column;
-}
-.file-workspace-add-dropdown button {
-  padding: 8px 16px;
-  font-size: 13px;
-  color: var(--fg, #c7c7c7);
-  text-align: left;
-  white-space: nowrap;
-  border-radius: 0;
-}
-.file-workspace-add-dropdown button:hover {
-  background: rgba(255, 255, 255, 0.06);
 }
 
 .file-workspace-cwd {
@@ -1153,10 +1014,6 @@ defineExpose({
 
 .file-workspace-tree-wrap.narrow {
   border-right: 1px solid var(--border, #333);
-}
-
-.star-active {
-  color: var(--accent, #89b4fa) !important;
 }
 </style>
 

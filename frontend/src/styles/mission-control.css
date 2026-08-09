@@ -295,6 +295,59 @@
   border-left-color: var(--accent);
 }
 
+.mc-ws-list-item.dragging {
+  opacity: 0.5;
+  background: var(--bg-hover);
+  cursor: grabbing;
+}
+
+.mc-ws-list:has(.dragging) .mc-ws-list-item {
+  cursor: grabbing;
+}
+
+.mc-ws-list-item.drag-over-top,
+.mc-ws-list-item.drag-over-bottom {
+  position: relative;
+}
+
+.mc-ws-list-item.drag-over-top::before,
+.mc-ws-list-item.drag-over-bottom::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.mc-ws-list-item.drag-over-top::before {
+  top: -1px;
+}
+
+.mc-ws-list-item.drag-over-bottom::after {
+  bottom: -1px;
+}
+
+.mc-ws-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -8px;
+  padding: 4px;
+  color: var(--text-muted, #888);
+  cursor: grab;
+  opacity: 0.6;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.mc-ws-drag-handle:hover {
+  opacity: 1;
+  color: var(--fg-bright);
+}
+
 .mc-ws-dot {
   flex-shrink: 0;
   font-size: 10px;

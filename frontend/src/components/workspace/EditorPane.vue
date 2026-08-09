@@ -224,6 +224,7 @@ watch(
       }
       meta.value = await res.json()
       if (meta.value?.kind === 'office') void office.loadOfficePreview(filePath)
+      editor.mdShowPreview.value = meta.value?.kind === 'markdown'
     } catch {
       previewErr.value = 'network'
     } finally {

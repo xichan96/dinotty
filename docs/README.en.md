@@ -19,7 +19,9 @@
 
 ---
 
-A **multi-device** terminal server purpose-built for **coding agents**. Run Claude Code, opencode, Codex, or OpenClaw on any device — desktop-class on your laptop, always in your pocket on your phone. Switch seamlessly, never lose a session.
+A terminal built for coding agents.
+
+Run Claude Code, opencode, Codex, or OpenClaw on any device -- simple, extensible, multi-device, never lose a session.
 
 ## Screenshots
 
@@ -77,14 +79,29 @@ The desktop client delivers a professional experience comparable to iTerm2:
   <img src="images/gif/6-layout-sys.gif" alt="Unified layout system demo" width="600" />
 </p>
 
-## Why Dinotty?
+## Philosophy
 
-Terminal-based coding agents (Claude Code, opencode, Codex, OpenClaw, etc.) are powerful, but they're locked inside a single terminal window. Dinotty lets you:
+Terminal coding agents - Claude Code, opencode, Codex, OpenClaw - are powerful, yet confined to a single window. Dinotty sets them free. One terminal. Every device. Every possibility.
 
-- **Manage agents from any device** — deep coding on desktop, scan a QR code on your phone when you leave your desk to keep monitoring and managing your agent's work without interruption
-- **Multi-device sync, seamless switching** — start on your laptop, continue on your phone; return to your laptop and pick up right where you left off
-- **Verify agent output directly** — code diffs, rendered pages, generated files, all visible in the built-in browser
-- **Never lose your session** — disconnect, lock your screen, switch devices — come back and everything is exactly where you left it
+### Sync everywhere
+
+Half-done on your laptop. Pick up your phone, keep going. Back to your laptop, exactly as you left it.
+
+### Endless extensibility
+
+JS plugins with hot reload. CC Switch, JSON Formatter, Claude Code dialog management - built in. Custom commands, terminal interaction, event subscriptions, CLI integration - the API is ready.
+
+### Everything is a pane
+
+Terminal, files, web preview, Git changes, SSH remote. Drag to split, move across tabs. All in one flow.
+
+### Never drops
+
+Server-side VTE. PTY survives disconnects. Refresh the page, you're back where you were.
+
+### Free and open
+
+Self-hosted. No subscriptions. No relay. Your data stays on your machine.
 
 ### Lightweight — Not a Remote Desktop
 
@@ -256,7 +273,6 @@ If verification code login is stuck (notifier plugin uninstalled, subscription l
 - [Notification System](features/notifications.en.md) — HTTP API, Claude Code integration, Open API
 - [Plugin System](plugins/plugins.en.md) — installation, manifest, API, built-in plugins
 - [Plugin Development](plugins/plugin-development.md) — full plugin development guide
-- [Agent API](api/agent-api.md) — HTTP/WebSocket structured interaction for AI agents and automation scripts
 - [Host Clipboard API](api/clipboard-api.md) — sensitive authenticated endpoint used by mobile host paste
 - [MCP Server](api/mcp-server.md) — built-in MCP JSON-RPC server for AI assistants to operate terminal sessions
 - [Token Permission System](internals/token-system.md) — capability-based multi-token fine-grained access control

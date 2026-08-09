@@ -21,19 +21,12 @@
       :title="leaf.title || 'Terminal'"
       :is-active="leaf.paneId === activePaneId"
       :direction="parentDirection"
+      :allow-close="allowClose"
+      @close="emit('close', leaf.paneId)"
       @reorder="(src, tgt, pos) => emit('reorder', src, tgt, pos)"
       @drop-on-tab="(srcTab, srcPane, dstTab, pos) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)"
       @drop-extract="(srcTab, srcPane, idx) => emit('dropExtract', srcTab, srcPane, idx)"
     />
-    <button
-      v-if="allowClose"
-      class="pane-close-btn"
-      :title="t('split.closePane')"
-      @mousedown.stop
-      @click.stop="emit('close', leaf!.paneId)"
-    >
-      &times;
-    </button>
     <template v-if="broadcastActive">
       <div class="broadcast-icon broadcast-icon--active" :title="t('split.broadcastTooltip')">
         <svg
@@ -292,48 +285,8 @@ function getChildStyle(idx: number) {
   opacity: 1;
 }
 
-/* Close button — visible on hover, positioned inside header when present */
-.pane-close-btn {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  z-index: 20;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary, #888);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition:
-    opacity 0.15s,
-    background 0.15s,
-    color 0.15s;
-}
-
-/* Adjust close button position when vertical header with expanded padding is present */
-.split-leaf:has(.direction-vertical) .pane-close-btn {
-  top: 11px;
-}
-
-/* Push header title right to avoid overlapping the close button */
-.split-leaf:has(.pane-close-btn) .pane-header {
-  padding-left: 28px;
-}
-
-.split-leaf:hover .pane-close-btn {
+.split-leaf:hover :deep(.pane-close-btn) {
   opacity: 1;
-}
-
-.pane-close-btn:hover {
-  background: var(--hover-bg, var(--bg-hover));
-  color: var(--text-primary, var(--fg-bright));
 }
 
 /* Broadcast indicator — radar style */

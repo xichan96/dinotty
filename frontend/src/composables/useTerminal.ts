@@ -5,7 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
 import { isTauri, createTransport, type Transport } from './useTransport'
-import { onThemeChange, settings } from './useSettings'
+import { onThemeChange, settings, type MobileInputMode } from './useSettings'
 import {
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
@@ -16,25 +16,30 @@ import {
 } from './useDeviceTextSettings'
 import { wsUrlWithToken } from './apiBase'
 import { useKeybindings } from './useKeybindings'
-import { isWindowsClient } from '../utils/clientPlatform'
+import { hostTarget, isWindowsClient } from '../utils/clientPlatform'
 import { setupTouchScroll } from '../utils/touchScroll'
 import {
   DEDUP_WINDOW_MS,
   IME_SYM_PAIR_MS,
+  applyMobileTerminalModifiers,
   handleTerminalShortcutKeydown,
   isDuplicateOnData,
   isShiftSymbolChar,
   isTouchDevice,
   stripImeConfirmSpace,
+  type MobileTerminalModifiers,
 } from '../utils/terminalInput'
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { createTerminalOverlay } from './useTerminalOverlay'
+import { t } from './useI18n'
 
 // Re-export pure helpers so existing callers (App.vue, useTabLifecycle,
 // useSplitPane, tests) don't need to update their import paths.
 export {
   DEDUP_WINDOW_MS,
+  applyAfterTerminalComposition,
+  applyMobileTerminalModifiers,
   handleTerminalShortcutKeydown,
   isDuplicateOnData,
   isShiftSymbolChar,
@@ -49,6 +54,12 @@ export {
 let _activePaneId: string | null = null
 export function setActivePaneId(paneId: string | null) {
   _activePaneId = paneId
+}
+
+function resolveTerminalFontFamily(configuredFamily: string, cssFallback: string): string {
+  if (configuredFamily) return configuredFamily
+  if (isTauri() && hostTarget()?.startsWith('linux-')) return 'monospace'
+  return cssFallback
 }
 
 // Sticky typing mode (mobile web): while the user is typing in the app's own
@@ -73,6 +84,29 @@ export function setKbTypingLock(active: boolean) {
 // moves that would blur the mobile keyboard input and close the iOS keyboard.
 export function isKbTypingLocked(): boolean {
   return _kbTypingLock
+}
+
+export function configureMobileInputTextarea(
+  textarea: HTMLTextAreaElement,
+  mode: MobileInputMode | null | undefined = settings.mobile_input_mode
+) {
+  if (mode === 'system') {
+    textarea.inputMode = 'text'
+    textarea.setAttribute('virtualkeyboardpolicy', 'auto')
+    textarea.enterKeyHint = 'enter'
+  } else {
+    textarea.inputMode = 'none'
+    textarea.setAttribute('virtualkeyboardpolicy', 'manual')
+    textarea.removeAttribute('enterkeyhint')
+  }
+  textarea.disabled = _kbTypingLock
+}
+
+export function configureAllMobileInputTextareas(mode: MobileInputMode | null | undefined) {
+  if (typeof document === 'undefined') return
+  document.querySelectorAll<HTMLTextAreaElement>('.xterm-helper-textarea').forEach((textarea) => {
+    configureMobileInputTextarea(textarea, mode)
+  })
 }
 
 export class TerminalInstance {
@@ -108,6 +142,7 @@ export class TerminalInstance {
   // composition - those calls interrupt the IME session and cause xterm's
   // diff-fallback to leak preedit text as raw input.
   private _composing = false
+  private _mobileModifiers: MobileTerminalModifiers = { ctrl: false, alt: false }
   private _writeQueue: string[] = []
   private _writing = false
   // Output transaction buffer shared by DEC mode 2026 (sync_begin/sync_end)
@@ -209,7 +244,7 @@ export class TerminalInstance {
     const v = (name: string) => s.getPropertyValue(name).trim()
 
     const text = getEffectiveText()
-    const fontFamily = text.font_family || v('--font-mono')
+    const fontFamily = resolveTerminalFontFamily(text.font_family, v('--font-mono'))
 
     this.xterm = new XTerm({
       cursorBlink: text.cursor_blink,
@@ -400,24 +435,27 @@ export class TerminalInstance {
     this.xterm.loadAddon(this.searchAddon)
 
     const textarea = wrapper.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
-    if (textarea && isTouchDevice()) {
-      textarea.inputMode = 'none'
-      textarea.setAttribute('virtualkeyboardpolicy', 'manual')
-      textarea.disabled = _kbTypingLock
-    }
+    if (textarea && isTouchDevice()) configureMobileInputTextarea(textarea)
     // Track IME composition state on all platforms so focusActive() can
     // defer .focus()/.blur()/.fit() during composition. Interrupting an
     // in-flight composition causes xterm's diff-fallback to leak preedit
     // text as raw input (P3).
     if (textarea) {
-      const onStart = () => { this._composing = true }
-      const onEnd = () => { this._composing = false }
+      const onStart = () => {
+        this._composing = true
+        textarea.dataset.dinottyComposing = 'true'
+      }
+      const onEnd = () => {
+        this._composing = false
+        textarea.dataset.dinottyComposing = 'false'
+      }
       textarea.addEventListener('compositionstart', onStart)
       textarea.addEventListener('compositionend', onEnd)
       const prevCleanup = this._compositionCleanup
       this._compositionCleanup = () => {
         textarea.removeEventListener('compositionstart', onStart)
         textarea.removeEventListener('compositionend', onEnd)
+        delete textarea.dataset.dinottyComposing
         this._composing = false
         prevCleanup?.()
       }
@@ -441,7 +479,10 @@ export class TerminalInstance {
         // insertText is normal typing and must not send backspaces.
         if (ie.inputType !== 'insertReplacementText') return
         const ranges = typeof ie.getTargetRanges === 'function' ? ie.getTargetRanges() : []
-        const rangeLen = ranges.length > 0 ? ((ranges[0] as StaticRange).endOffset - (ranges[0] as StaticRange).startOffset) : 0
+        const rangeLen =
+          ranges.length > 0
+            ? (ranges[0] as StaticRange).endOffset - (ranges[0] as StaticRange).startOffset
+            : 0
         const deleteLen = Math.max(rangeLen, _trackedTextareaValue.length)
         if (deleteLen > 0) {
           this.sendData('\x7f'.repeat(deleteLen))
@@ -545,7 +586,7 @@ export class TerminalInstance {
       this._connectWS()
     }
     this._dropCleanup = setupTerminalDrop(wrapper, {
-      sendData: (d) => this.sendData(d),
+      sendData: (d, force) => this.sendData(d, force),
       onFileUpload: (files) => this.onFileUpload?.(files),
     })
     this._wheel = createTerminalWheel({
@@ -612,9 +653,10 @@ export class TerminalInstance {
         text.letter_spacing !== lastLayout.letter_spacing ||
         text.scrollback !== lastLayout.scrollback
       this.xterm.options.fontSize = text.font_size
-      this.xterm.options.fontFamily =
-        text.font_family ||
+      this.xterm.options.fontFamily = resolveTerminalFontFamily(
+        text.font_family,
         getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
+      )
       this.xterm.options.lineHeight = text.line_height
       this.xterm.options.letterSpacing = text.letter_spacing
       this.xterm.options.cursorBlink = text.cursor_blink
@@ -639,7 +681,24 @@ export class TerminalInstance {
   }
 
   blur() {
+    this.clearVirtualModifiers()
     this.xterm?.blur()
+  }
+
+  setVirtualModifiers(modifiers: MobileTerminalModifiers) {
+    this._mobileModifiers = { ...modifiers }
+  }
+
+  clearVirtualModifiers(notify = true) {
+    const hadModifiers = this._mobileModifiers.ctrl || this._mobileModifiers.alt
+    this._mobileModifiers = { ctrl: false, alt: false }
+    if (notify && hadModifiers && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('dinotty-mobile-modifiers-consumed', {
+          detail: { paneId: this.paneId, modifiers: { ...this._mobileModifiers } },
+        })
+      )
+    }
   }
 
   fit() {
@@ -650,7 +709,7 @@ export class TerminalInstance {
     if (!this.xterm) return
     const newSize = Math.max(
       FONT_SIZE_MIN,
-      Math.min(FONT_SIZE_MAX, getEffectiveText().font_size + delta),
+      Math.min(FONT_SIZE_MAX, getEffectiveText().font_size + delta)
     )
     setOverride('font_size', newSize)
   }
@@ -692,7 +751,7 @@ export class TerminalInstance {
       return
     }
     const tauri = isTauri()
-    const data = tauri ? stripImeConfirmSpace(rawData) : rawData
+    let data = tauri ? stripImeConfirmSpace(rawData) : rawData
     if (!data) return
     const now = performance.now()
     // Gate the WKWebView replay dedup to Tauri only. On web, browsers don't
@@ -705,6 +764,16 @@ export class TerminalInstance {
     this._lastInputTime = now
     if (tauri && isShiftSymbolChar(data)) {
       if (!this._resolveSym(data, 1, now)) return
+    }
+    const modified = applyMobileTerminalModifiers(data, this._mobileModifiers)
+    data = modified.data
+    this._mobileModifiers = modified.modifiers
+    if (modified.consumed && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('dinotty-mobile-modifiers-consumed', {
+          detail: { paneId: this.paneId, modifiers: { ...this._mobileModifiers } },
+        })
+      )
     }
     this._emitInput(data)
   }
@@ -821,6 +890,8 @@ export class TerminalInstance {
       } else if (msg.type === 'shell_info') {
         this._shellType = msg.shell_type
         this.onShellInfo?.(msg.shell_type)
+      } else if (msg.type === 'session_error') {
+        this._handleSessionError(msg.code)
       } else if (msg.type === 'reconnected') {
         this._suppressTitleChange = true
         this.xterm.reset()
@@ -945,6 +1016,8 @@ export class TerminalInstance {
       } else if (msg.type === 'shell_info') {
         this._shellType = msg.shell_type
         this.onShellInfo?.(msg.shell_type)
+      } else if (msg.type === 'session_error') {
+        this._handleSessionError(msg.code)
       } else if (msg.type === 'resize') {
         // Server breaks sync mode before broadcasting Resize (see
         // apply_and_broadcast_resize), so SyncEnd lands before Resize. Flush
@@ -1063,12 +1136,14 @@ export class TerminalInstance {
         // Compare xterm's current cols/rows (already fit) to what the
         // snapshot was encoded at. If they differ, the wrapper changed
         // during replay.
-        if (this.xterm.cols !== this._snapshotRequestedSize.cols
-          || this.xterm.rows !== this._snapshotRequestedSize.rows) {
+        if (
+          this.xterm.cols !== this._snapshotRequestedSize.cols ||
+          this.xterm.rows !== this._snapshotRequestedSize.rows
+        ) {
           console.warn(
             `[dinotty] replay_end size mismatch: snapshot ` +
-            `${this._snapshotRequestedSize.cols}x${this._snapshotRequestedSize.rows}, ` +
-            `xterm now ${this.xterm.cols}x${this.xterm.rows} — snapshot may misalign`
+              `${this._snapshotRequestedSize.cols}x${this._snapshotRequestedSize.rows}, ` +
+              `xterm now ${this.xterm.cols}x${this.xterm.rows} — snapshot may misalign`
           )
         }
       }
@@ -1226,7 +1301,9 @@ export class TerminalInstance {
       this._writeWatchdog = setTimeout(() => {
         this._writeWatchdog = null
         this._writeWatchdogFires++
-        console.warn(`[dinotty] write pump watchdog fired (${this._writeWatchdogFires}); xterm.write callback lost, force-advancing`)
+        console.warn(
+          `[dinotty] write pump watchdog fired (${this._writeWatchdogFires}); xterm.write callback lost, force-advancing`
+        )
         advance()
       }, 1000)
       try {
@@ -1258,6 +1335,16 @@ export class TerminalInstance {
     this._sessionExited = true
     this._overlayCtl?.showExit()
     this.onSessionExit?.()
+  }
+
+  private _handleSessionError(code: string) {
+    this._sessionExited = true
+    const key = `terminal.sessionError.${code}`
+    const translated = t(key)
+    this._overlayCtl?.showError(translated === key ? code : translated)
+    this._transport?.disconnect()
+    this.ws?.close(1000)
+    this.onDisconnect?.()
   }
 
   _refit() {
@@ -1425,7 +1512,7 @@ export class TerminalInstance {
     if (this._zeroSizeRetryTimer) return
     if (this._zeroSizeRetries >= TerminalInstance.ZERO_SIZE_MAX_RETRIES) {
       console.warn(
-        `[dinotty] terminal wrapper still 0×0 after ${this._zeroSizeRetries} retries (~${Math.round(this._zeroSizeRetries * TerminalInstance.ZERO_SIZE_RETRY_MS / 1000)}s); giving up, will recover on next ResizeObserver event`
+        `[dinotty] terminal wrapper still 0×0 after ${this._zeroSizeRetries} retries (~${Math.round((this._zeroSizeRetries * TerminalInstance.ZERO_SIZE_RETRY_MS) / 1000)}s); giving up, will recover on next ResizeObserver event`
       )
       this._zeroSizeRetries = 0
       return

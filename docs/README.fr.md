@@ -19,7 +19,9 @@
 
 ---
 
-Serveur terminal **multi-appareils** conçu spécifiquement pour les **agents de code**. Lancez Claude Code, opencode, Codex ou OpenClaw sur n'importe quel appareil - expérience desktop sur votre laptop, toujours dans votre poche sur votre mobile. Basculez sans interruption, ne perdez jamais une session.
+Un terminal pour agents de code.
+
+Lancez Claude Code, opencode, Codex ou OpenClaw sur n'importe quel appareil -- simple, extensible, multi-appareils, ne perd jamais une session.
 
 ## Captures d'écran
 
@@ -246,7 +248,6 @@ cargo run
 - [Système de notifications](features/notifications.en.md) - HTTP API, intégration Claude Code, Open API
 - [Système de plugins](plugins/plugins.en.md) - installation, manifeste, API, plugins intégrés
 - [Développement de plugins](plugins/plugin-development.md) - guide complet de développement de plugins
-- [Agent API](api/agent-api.md) - interaction structurée HTTP/WebSocket pour agents IA et scripts d'automatisation
 - [API presse-papiers hôte](api/clipboard-api.md) - endpoint sensible authentifié utilisé par le paste hôte mobile
 - [MCP Server](api/mcp-server.md) - serveur MCP JSON-RPC intégré pour que les assistants IA opèrent des sessions terminal
 - [Système de permissions par token](internals/token-system.md) - contrôle d'accès fine-grained multi-token basé sur capabilities

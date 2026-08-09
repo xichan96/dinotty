@@ -18,9 +18,9 @@ use crate::history::HistoryState;
 use crate::mission_control::{MissionControlState, NavDir};
 use crate::monitor::MonitorState;
 use crate::notification::NotificationBroadcast;
-use crate::session::{SessionManager, SyncMsg};
+use crate::session::{SessionManager, SyncMsg, TabInfo};
 use crate::settings::SettingsState;
-use crate::workspace_mgmt::WorkspacesState;
+use crate::workspace_mgmt::{tab_workspace_id, Workspace, WorkspacesState};
 
 use super::types::SyncClientMsg;
 
@@ -284,6 +284,7 @@ async fn handle_sync_socket(
                                     layout: Some(layout.clone()),
                                     cwd: None,
                                     connection_id: None,
+                                    workspace_id: None,
                                 })
                                 .unwrap(),
                             );
@@ -295,6 +296,7 @@ async fn handle_sync_socket(
                                     layout: Some(layout),
                                     cwd: None,
                                     connection_id: None,
+                                    workspace_id: None,
                                 },
                                 &client_id,
                             );
@@ -437,6 +439,67 @@ fn tab_leaf_for(manager: &SessionManager, tab_id: &str) -> Option<String> {
     })
 }
 
+/// Pure tab navigation within a workspace. Filters `tabs` to those belonging
+/// to `selected_workspace_id` (mirroring frontend `filteredCards`) and steps
+/// `selected_tab_id` left/right within that filtered list. Returns `None`
+/// when the highlight should land on the "add" card - this happens when:
+///   - the workspace has no tabs, or
+///   - the user arrows past the last tab (Right) or before the first tab
+///     (Left), wrapping through the "add" card.
+///
+/// Wrap-around: from the "add" card, Right wraps to the first tab and Left
+/// wraps to the last tab. This lets the keyboard cycle through every card
+/// the user sees, including "add".
+///
+/// Extracted from `handle_mission_control_op` so the bug-fix path can be
+/// unit-tested without spinning up a `SessionManager`.
+fn navigate_tab_in_workspace(
+    tabs: &[TabInfo],
+    workspaces: &[Workspace],
+    selected_workspace_id: Option<&str>,
+    selected_tab_id: Option<&str>,
+    dir: NavDir,
+) -> Option<String> {
+    let filtered_ids: Vec<&str> = tabs
+        .iter()
+        .filter(|t| {
+            tab_workspace_id(workspaces, t.cwd.as_deref(), t.connection_id.as_deref()).as_deref()
+                == selected_workspace_id
+        })
+        .map(|t| t.tab_id.as_str())
+        .collect();
+    if filtered_ids.is_empty() {
+        return None;
+    }
+    let cur_idx = selected_tab_id.and_then(|id| filtered_ids.iter().position(|t| *t == id));
+    match cur_idx {
+        None => {
+            // Currently on the "add" card (or stale). Wrap to the opposite
+            // end of the filtered list.
+            if dir == NavDir::Left {
+                filtered_ids.last().map(std::string::ToString::to_string)
+            } else {
+                Some(filtered_ids[0].to_string())
+            }
+        }
+        Some(i) => {
+            if dir == NavDir::Left {
+                if i == 0 {
+                    None // First tab -> "add" card
+                } else {
+                    Some(filtered_ids[i - 1].to_string())
+                }
+            } else {
+                if i + 1 >= filtered_ids.len() {
+                    None // Last tab -> "add" card
+                } else {
+                    Some(filtered_ids[i + 1].to_string())
+                }
+            }
+        }
+    }
+}
+
 /// Apply a Mission Control operation. The lock is held only while mutating
 /// `mc`; broadcasts happen after release so a slow WS write cannot block
 /// other clients' mutations.
@@ -502,7 +565,6 @@ async fn handle_mission_control_op(
                     return;
                 }
                 let (tabs, _) = manager.tab_list();
-                let tab_ids: Vec<String> = tabs.iter().map(|t| t.tab_id.clone()).collect();
                 match dir {
                     NavDir::Up | NavDir::Down => {
                         // Cycle through [None (=default workspace), ...workspace ids].
@@ -529,26 +591,23 @@ async fn handle_mission_control_op(
                     }
                     NavDir::Left | NavDir::Right => {
                         // Left/Right navigates tabs within the current workspace -
-                        // the tab grid is laid out horizontally.
-                        if tab_ids.is_empty() {
-                            snap.selected_tab_id = None;
-                        } else {
-                            let cur_idx = snap
-                                .selected_tab_id
-                                .as_deref()
-                                .and_then(|id| tab_ids.iter().position(|t| t == id));
-                            let new_idx = match cur_idx {
-                                None => 0,
-                                Some(i) => {
-                                    if dir == NavDir::Left {
-                                        i.saturating_sub(1)
-                                    } else {
-                                        (i + 1).min(tab_ids.len() - 1)
-                                    }
-                                }
-                            };
-                            snap.selected_tab_id = Some(tab_ids[new_idx].clone());
-                        }
+                        // the tab grid is laid out horizontally. Filter to the
+                        // selected workspace so the keyboard highlight stays on
+                        // cards the user actually sees (frontend `filteredCards`
+                        // filters the same way). Without this filter, tabs from
+                        // other workspaces interleaved in `tab_order` would
+                        // cause ArrowRight to land on an off-screen tab and the
+                        // frontend's `focusedIndex` would fall through to the
+                        // "add" card.
+                        let selected_ws = snap.selected_workspace_id.clone();
+                        let ws_snapshot = workspaces.read().await.clone();
+                        snap.selected_tab_id = navigate_tab_in_workspace(
+                            &tabs,
+                            &ws_snapshot,
+                            selected_ws.as_deref(),
+                            snap.selected_tab_id.as_deref(),
+                            dir,
+                        );
                     }
                 }
                 let selected_workspace_id = snap.selected_workspace_id.clone();
@@ -624,5 +683,194 @@ async fn handle_mission_control_op(
                 selected_tab_id,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace_mgmt::Workspace;
+
+    fn tab(tab_id: &str, cwd: Option<&str>, connection_id: Option<&str>) -> TabInfo {
+        TabInfo {
+            tab_id: tab_id.to_string(),
+            pane_id: tab_id.to_string(),
+            layout: None,
+            active_pane_id: None,
+            cwd: cwd.map(String::from),
+            connection_id: connection_id.map(String::from),
+            workspace_id: None,
+            title: None,
+        }
+    }
+
+    fn ws_local(id: &str, path: &str) -> Workspace {
+        Workspace {
+            id: id.to_string(),
+            name: id.to_string(),
+            path: path.to_string(),
+            order: 0,
+            connection_id: None,
+            abbr: None,
+            color: None,
+        }
+    }
+
+    /// Reproduces the user-reported bug: with two tabs in the default
+    /// workspace and one tab in another workspace interleaved in
+    /// `tab_order`, ArrowRight from the first tab must land on the second
+    /// tab of the same workspace, not skip to the "add" card because an
+    /// off-workspace tab sits between them in the global order.
+    #[test]
+    fn navigate_right_skips_off_workspace_tabs_in_tab_order() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        // tab_order = [tab1_default, tab3_other, tab2_default]
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+            tab("tab2", Some("/tmp/default/2"), None),
+        ];
+        let new_id = navigate_tab_in_workspace(
+            &tabs,
+            &workspaces,
+            None, // selected_workspace_id = None (default)
+            Some("tab1"),
+            NavDir::Right,
+        );
+        assert_eq!(new_id.as_deref(), Some("tab2"));
+    }
+
+    /// ArrowRight on the last tab of a workspace lands on the "add" card
+    /// (selected_tab_id = None) so the user can press Enter to create a new
+    /// tab. Without this, the keyboard could never reach the "add" card.
+    #[test]
+    fn navigate_right_at_last_tab_goes_to_add_card() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+            tab("tab2", Some("/tmp/default/2"), None),
+        ];
+        let new_id =
+            navigate_tab_in_workspace(&tabs, &workspaces, None, Some("tab2"), NavDir::Right);
+        assert!(new_id.is_none());
+    }
+
+    /// ArrowLeft on the first tab of a workspace lands on the "add" card
+    /// (symmetric to ArrowRight on the last tab).
+    #[test]
+    fn navigate_left_at_first_tab_goes_to_add_card() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+        ];
+        let new_id =
+            navigate_tab_in_workspace(&tabs, &workspaces, None, Some("tab1"), NavDir::Left);
+        assert!(new_id.is_none());
+    }
+
+    /// From the "add" card, ArrowRight wraps to the first tab of the
+    /// workspace. This lets the keyboard cycle: tab1 -> ... -> tabN ->
+    /// add card -> tab1 -> ...
+    #[test]
+    fn navigate_right_from_add_card_wraps_to_first() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+            tab("tab2", Some("/tmp/default/2"), None),
+        ];
+        let new_id = navigate_tab_in_workspace(
+            &tabs,
+            &workspaces,
+            None,
+            None, // on add card
+            NavDir::Right,
+        );
+        assert_eq!(new_id.as_deref(), Some("tab1"));
+    }
+
+    /// From the "add" card, ArrowLeft wraps to the last tab of the
+    /// workspace (symmetric to ArrowRight wrap).
+    #[test]
+    fn navigate_left_from_add_card_wraps_to_last() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+            tab("tab2", Some("/tmp/default/2"), None),
+        ];
+        let new_id = navigate_tab_in_workspace(
+            &tabs,
+            &workspaces,
+            None,
+            None, // on add card
+            NavDir::Left,
+        );
+        assert_eq!(new_id.as_deref(), Some("tab2"));
+    }
+
+    #[test]
+    fn navigate_left_within_default_workspace() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+            tab("tab2", Some("/tmp/default/2"), None),
+        ];
+        let new_id =
+            navigate_tab_in_workspace(&tabs, &workspaces, None, Some("tab2"), NavDir::Left);
+        assert_eq!(new_id.as_deref(), Some("tab1"));
+    }
+
+    /// Tabs in a non-default workspace navigate independently of the
+    /// default workspace's tabs.
+    #[test]
+    fn navigate_within_named_workspace() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+            tab("tab4", Some("/Users/me/other/y"), None),
+            tab("tab2", Some("/tmp/default/2"), None),
+        ];
+        let new_id = navigate_tab_in_workspace(
+            &tabs,
+            &workspaces,
+            Some("other"),
+            Some("tab3"),
+            NavDir::Right,
+        );
+        assert_eq!(new_id.as_deref(), Some("tab4"));
+    }
+
+    #[test]
+    fn navigate_with_no_tabs_in_workspace_returns_none() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![tab("tab1", Some("/tmp/default"), None)];
+        let new_id =
+            navigate_tab_in_workspace(&tabs, &workspaces, Some("other"), None, NavDir::Right);
+        assert!(new_id.is_none());
+    }
+
+    /// When `selected_tab_id` is stale (belongs to another workspace),
+    /// navigation treats the highlight as being on the "add" card and
+    /// wraps to the appropriate end of the filtered list.
+    #[test]
+    fn navigate_from_stale_selected_wraps_to_first_on_right() {
+        let workspaces = vec![ws_local("other", "/Users/me/other")];
+        let tabs = vec![
+            tab("tab1", Some("/tmp/default"), None),
+            tab("tab3", Some("/Users/me/other/x"), None),
+        ];
+        let new_id = navigate_tab_in_workspace(
+            &tabs,
+            &workspaces,
+            None,         // default workspace
+            Some("tab3"), // stale - from `other`
+            NavDir::Right,
+        );
+        assert_eq!(new_id.as_deref(), Some("tab1"));
     }
 }

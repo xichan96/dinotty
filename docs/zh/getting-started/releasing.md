@@ -157,6 +157,18 @@ tag push 会触发 `.github/workflows/package.yml`：
 
 发布完成后检查 GitHub Release 的 tag、标题和资产版本一致，并至少对所支持平台的安装包做基本启动验证。
 
+## 7. 撤回有问题的 Release
+
+Dinotty 对新版本设置了 24 小时提示缓冲。若 Release 在发布后 24 小时内被删除，客户端会在缓冲结束时重新向 GitHub 确认，不会提示该问题版本。
+
+发现严重问题时，在 GitHub Release 页面选择 **Delete this release**，或执行：
+
+```bash
+gh release delete "v0.20.0" --repo xichan96/dinotty --yes
+```
+
+只删除 Release，保留对应 Git tag；不要移动或复用该 tag。随后在 `dev` 修复问题、提升 PATCH 版本，并按正常流程发布新版本。若删除时 Release 已发布超过 24 小时，已经显示的提示及后端最长 6 小时的成功缓存无法立即撤回，只会在页面生命周期结束或缓存重新验证后消失，因此应尽快发布修复版本。
+
 ## 失败处理
 
 - **临时 CI 或基础设施故障**：rerun 原 workflow；tag 和 commit 保持不变。

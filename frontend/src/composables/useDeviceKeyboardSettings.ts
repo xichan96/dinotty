@@ -3,8 +3,9 @@ import { computed, reactive, readonly, type WritableComputedRef } from 'vue'
 export const IME_KEYBOARD_OVERLAP_MIN = 0
 export const IME_KEYBOARD_OVERLAP_MAX = 300
 
-const STORAGE_KEY = 'dinotty.device-keyboard.v1'
-const STORAGE_VERSION = 1
+const STORAGE_KEY = 'dinotty.device-keyboard.v2'
+const LEGACY_STORAGE_KEY = 'dinotty.device-keyboard.v1'
+const STORAGE_VERSION = 2
 
 interface DeviceKeyboardSettings {
   ime_keyboard_overlap_px: number
@@ -30,10 +31,10 @@ function resetToDefaults() {
   settings.ime_keyboard_overlap_px = defaults.ime_keyboard_overlap_px
 }
 
-function removeStoredSettings() {
+function removeStoredSettings(key = STORAGE_KEY) {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.removeItem(STORAGE_KEY)
+    window.localStorage.removeItem(key)
   } catch {}
 }
 
@@ -48,7 +49,35 @@ function persistSettings() {
         JSON.stringify({ version: STORAGE_VERSION, settings: { ...settings } })
       )
     }
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY)
   } catch {}
+}
+
+function parseSettings(raw: string, expectedVersion: 1 | 2): DeviceKeyboardSettings | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    (parsed as { version?: unknown }).version !== expectedVersion ||
+    typeof (parsed as { settings?: unknown }).settings !== 'object' ||
+    (parsed as { settings?: unknown }).settings === null ||
+    Array.isArray((parsed as { settings?: unknown }).settings)
+  ) {
+    return null
+  }
+
+  const stored = (parsed as { settings: Record<string, unknown> }).settings
+  const overlapPx = normalizeOverlapPx(stored.ime_keyboard_overlap_px)
+  if (overlapPx === undefined) return null
+
+  return { ime_keyboard_overlap_px: overlapPx }
 }
 
 function loadStoredSettings() {
@@ -61,37 +90,32 @@ function loadStoredSettings() {
   } catch {
     return
   }
-  if (raw === null) return
 
-  let parsed: unknown
+  if (raw !== null) {
+    const stored = parseSettings(raw, STORAGE_VERSION)
+    if (!stored) {
+      removeStoredSettings()
+      return
+    }
+    Object.assign(settings, stored)
+    persistSettings()
+    return
+  }
+
+  let legacyRaw: string | null
   try {
-    parsed = JSON.parse(raw)
+    legacyRaw = window.localStorage.getItem(LEGACY_STORAGE_KEY)
   } catch {
-    removeStoredSettings()
     return
   }
+  if (legacyRaw === null) return
 
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    Array.isArray(parsed) ||
-    (parsed as { version?: unknown }).version !== STORAGE_VERSION ||
-    typeof (parsed as { settings?: unknown }).settings !== 'object' ||
-    (parsed as { settings?: unknown }).settings === null ||
-    Array.isArray((parsed as { settings?: unknown }).settings)
-  ) {
-    removeStoredSettings()
+  const migrated = parseSettings(legacyRaw, 1)
+  if (!migrated) {
+    removeStoredSettings(LEGACY_STORAGE_KEY)
     return
   }
-
-  const stored = (parsed as { settings: Record<string, unknown> }).settings
-  const overlapPx = normalizeOverlapPx(stored.ime_keyboard_overlap_px)
-  if (overlapPx === undefined) {
-    removeStoredSettings()
-    return
-  }
-
-  settings.ime_keyboard_overlap_px = overlapPx
+  Object.assign(settings, migrated)
   persistSettings()
 }
 

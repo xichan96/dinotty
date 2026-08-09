@@ -122,6 +122,43 @@ export interface PluginContext {
     ): void
   }
 
+  /**
+   * File system access. Paths must be absolute (use `~/` for home dir).
+   * Sensitive system directories (e.g. `/etc`, `~/.ssh`) are blocked.
+   * Declare `workspace.read` / `workspace.write` in manifest permissions.
+   */
+  workspace: {
+    readDir(path: string): Promise<{
+      path: string
+      entries: Array<{ name: string; is_dir: boolean; size: number }>
+    }>
+    readFile(path: string): Promise<{
+      kind: string
+      content: string | null
+      truncated: boolean
+      language: string | null
+    }>
+    writeFile(path: string, content: string): Promise<void>
+    stat(path: string): Promise<{
+      size: number
+      is_dir: boolean
+      modified: number | null
+    }>
+    watch(
+      path: string,
+      cb: (event: {
+        type: 'file_event' | 'error'
+        path?: string
+        kind?: string
+        message?: string
+      }) => void,
+    ): Disposable
+    mkdir(path: string): Promise<void>
+    delete(path: string): Promise<void>
+    rename(path: string, newName: string): Promise<void>
+    move(src: string, dest: string): Promise<void>
+  }
+
   /** 获取插件资源的 HTTP URL（不含认证信息，认证由调用方处理）
    *  @param relativePath 相对于插件目录的路径，如 './vendor/lib.js'
    *  @returns 完整 HTTP URL，路径段已 encodeURIComponent

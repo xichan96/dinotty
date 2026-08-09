@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { settings, type SettingsData } from '../composables/useSettings'
 
 describe('useSettings - confirm_before_close_tab mirror', () => {
+  it('exposes mobile_input_mode as a global setting with no initial choice', () => {
+    expect(settings.mobile_input_mode).toBeNull()
+  })
+
   it('exposes confirm_before_close_tab field on SettingsData', () => {
     // Type-level assertion: this line will fail TS compile if the field
     // is missing from the SettingsData interface.

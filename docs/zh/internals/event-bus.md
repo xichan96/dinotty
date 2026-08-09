@@ -150,9 +150,9 @@ tokio::spawn(async move {
 });
 ```
 
-### WebSocket Agent API
+### WebSocket 事件流
 
-连接 `WS /ws/agent` 后自动接收所有事件：
+连接 `WS /ws/events` 后自动接收所有事件：
 
 ```json
 {

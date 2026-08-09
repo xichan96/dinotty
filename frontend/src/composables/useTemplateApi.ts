@@ -1,4 +1,5 @@
 import { authFetch, apiUrl } from './apiBase'
+import { apiErrorFromResponse } from '../utils/apiError'
 import type {
   LayoutTemplate,
   TemplateIndex,
@@ -89,8 +90,7 @@ export async function apiApplyTemplate(
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => null)
-    throw new Error(data?.error || `apply template failed: ${res.status}`)
+    throw await apiErrorFromResponse(res, 'apply template failed')
   }
   return res.json()
 }

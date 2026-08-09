@@ -94,7 +94,7 @@ const emit = defineEmits<{
   'close-tab': [paneId: string]
   'close-tabs': [paneIds: string[]]
   'new-tab': [cwd?: string, workspaceId?: string | null]
-  'new-tab-ssh': [connectionId: string, initialCwd?: string]
+  'new-tab-ssh': [connectionId: string, initialCwd?: string, workspaceId?: string]
   'rename-tab': [paneId: string, title: string]
 }>()
 
@@ -267,7 +267,7 @@ function onNewTabForSelected() {
   } else {
     const ws = workspaces.value.find((w) => w.id === sel)
     if (ws?.connection_id) {
-      emit('new-tab-ssh', ws.connection_id, ws.path)
+      emit('new-tab-ssh', ws.connection_id, ws.path, sel)
     } else {
       emit('new-tab', ws?.path, sel)
     }

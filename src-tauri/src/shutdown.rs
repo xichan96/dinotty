@@ -99,7 +99,9 @@ impl ShutdownCoordinator {
                 tracing::warn!(request_id, %error, "desktop quit frontend emit failed");
             }
         } else {
-            tracing::warn!(request_id, "desktop quit frontend unavailable");
+            tracing::info!(request_id, "desktop quit has no frontend; finalizing immediately");
+            self.finalize_if_current(app, &request_id, "no_frontend");
+            return;
         }
 
         let app = app.clone();
@@ -127,6 +129,9 @@ impl ShutdownCoordinator {
         if self.cleanup_started.swap(true, Ordering::SeqCst) {
             return;
         }
+        // Sync-flush the session snapshot before killing sessions so their
+        // cwd/layout are captured (mirrors src/main.rs graceful shutdown).
+        self.manager.flush_snapshot_sync();
         let pane_ids: Vec<String> =
             self.manager.sessions.iter().map(|entry| entry.key().clone()).collect();
         tracing::info!(sessions = pane_ids.len(), "desktop quit terminating sessions");
@@ -147,6 +152,7 @@ impl ShutdownCoordinator {
         if self.cleanup_started.swap(true, Ordering::SeqCst) {
             return;
         }
+        self.manager.flush_snapshot_sync();
         let pane_ids: Vec<String> =
             self.manager.sessions.iter().map(|entry| entry.key().clone()).collect();
         for pane_id in pane_ids {

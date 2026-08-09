@@ -13,6 +13,7 @@
 - [CSS 样式](#css-样式)
 - [命令面板集成](#命令面板集成)
 - [持久化存储](#持久化存储)
+- [文件系统访问](#文件系统访问)
 - [调用 CLI 工具](#调用-cli-工具)
 - [事件订阅](#事件订阅)
 - [TypeScript 支持](#typescript-支持)
@@ -415,24 +416,47 @@ return {
 "styles": "./styles.css"
 ```
 
-**建议为所有选择器加上插件 id 前缀**，以避免与主应用或其他插件的样式冲突：
+**必须为所有选择器加上插件 id 前缀**，或使用宿主提供的 `.plugin-host-{id}` 容器 class 限定作用域，避免与主应用或其他插件的样式冲突。Dinotty 会在插件渲染时为容器自动加上 `.plugin-host-{插件id}` class：
 
 ```css
-/* ✅ 推荐 */
+/* ✅ 推荐：使用插件 id 前缀 */
 .json-formatter .jf-root { ... }
 
-/* ❌ 避免 */
+/* ✅ 推荐：使用 .plugin-host-{id} 容器 */
+.plugin-host-json-formatter .root { ... }
+
+/* ❌ 避免：会污染主 UI */
 .root { ... }
 button { ... }
 ```
 
-CSS 变量可用于读取主题色（主应用已定义）：
+避免使用 `:root` / `body` / `html` / `*` 等全局选择器 —— 加载时会在控制台告警，且会污染主应用样式。
+
+### 可用 CSS 变量（Design Tokens）
+
+主应用在 `:root` 定义了以下 token，插件可直接 `var()` 引用，**无需写 fallback**：
+
+| 类别 | Token |
+|------|-------|
+| 背景 | `--bg` / `--bg-surface` / `--bg-overlay` / `--bg-input` / `--bg-hover` / `--bg-elevated` / `--bg-surface-hover` / `--bg-main` |
+| 前景 | `--fg` / `--fg-bright` / `--fg-muted` |
+| 边框 | `--border` / `--border-focus` / `--border-hover` / `--divider` |
+| 强调 | `--accent` / `--accent-hover` |
+| 语义色 | `--success` / `--danger` / `--warning` |
+| 字体 | `--font-ui` / `--font-mono` |
+| 其他 | `--radius` / `--scrollbar-thumb` / `--scrollbar-thumb-hover` |
+
+示例：
 
 ```css
 .my-card {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+
+.my-error {
+  color: var(--danger);
 }
 ```
 
@@ -491,6 +515,68 @@ await ctx.storage.delete('providers')
 ```
 
 存储路径：Linux/macOS 为 `~/.dinotty/plugin-data/<plugin-id>/<key>.json`，Windows 为 `%USERPROFILE%\.dinotty\plugin-data\<plugin-id>\<key>.json`。
+
+---
+
+## 文件系统访问
+
+`ctx.workspace` 提供文件系统读写能力，无需自带 CLI wrapper。路径必须为绝对路径（`~/` 会展开为用户主目录）。
+
+**权限声明**：在 `plugin.json` 的 `permissions` 中声明：
+
+```json
+{
+  "permissions": ["workspace.read", "workspace.write"]
+}
+```
+
+- `workspace.read` - 读文件 / 目录
+- `workspace.write` - 写文件 / 创建目录 / 删除 / 重命名 / 移动
+
+### API
+
+```js
+// 列目录
+const { entries } = await ctx.workspace.readDir('~/.claude/projects')
+// entries: [{ name: 'proj-1', is_dir: true, size: 0 }, ...]
+
+// 读文件（自动检测语言，超过 512KB 截断）
+const { content, truncated, language } = await ctx.workspace.readFile('~/notes.md')
+// language: 'markdown' | 'javascript' | 'json' | ...
+
+// 写文件
+await ctx.workspace.writeFile('~/foo.txt', 'hello world')
+
+// 文件信息
+const { size, is_dir, modified } = await ctx.workspace.stat('~/foo.txt')
+// modified: Unix epoch 秒
+
+// 创建目录（递归）
+await ctx.workspace.mkdir('~/foo/bar/baz')
+
+// 删除（文件或目录）
+await ctx.workspace.delete('~/foo.txt')
+
+// 重命名
+await ctx.workspace.rename('~/foo.txt', 'bar.txt')
+
+// 移动
+await ctx.workspace.move('~/foo.txt', '~/bar/')
+
+// 监听文件变化
+const watcher = ctx.workspace.watch('~/notes.md', (event) => {
+  console.log(event.type, event.path, event.kind)
+  // type: 'file_event' | 'error'
+  // kind: 'changed' | 'created' | 'deleted'
+})
+watcher.dispose()  // 停止监听
+```
+
+### 路径安全
+
+- 敏感系统目录（`/etc`、`~/.ssh`、`/var` 等）会被拒绝，返回 403
+- macOS 上 `/etc` -> `/private/etc` 的符号链接也会被双校验拦截
+- 插件卸载时未 dispose 的 watch 会自动关闭
 
 ---
 

@@ -1,4 +1,4 @@
-import { reactive, readonly, ref } from 'vue'
+import { reactive, readonly, ref, watch } from 'vue'
 import { applyThemeToDOM, getXtermTheme } from '../themes'
 import { getApiBase, apiUrl, authFetch, hasAuthToken } from './apiBase'
 import { resolveEffectiveTheme } from './useDeviceThemeSelection'
@@ -10,6 +10,7 @@ import type { KeyboardGuardMode } from '../utils/keyboardGuardMode'
 import type { KeyBinding } from './useKeybindings'
 import type { SavedTheme } from './useDeviceThemeSelection'
 export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
+export type MobileInputMode = 'builtin' | 'system'
 
 export interface SettingsData {
   theme: {
@@ -52,16 +53,19 @@ export interface SettingsData {
   keyboard_sound: boolean
   quick_send_threshold: number
   show_virtual_keyboard: boolean
+  mobile_input_mode: MobileInputMode | null
   keyboard_guard_mode: KeyboardGuardMode
   workspace_badge_mode: WorkspaceBadgeMode | null
   confirm_before_close_tab: boolean
+  restore_session_on_startup: boolean
   reload_after_supervise_tabs: boolean
   space_confirms_dialogs: boolean
   windowsAltAsCmd: boolean
   locale: string
-  panel_position: 'auto' | 'right' | 'left' | 'top' | 'bottom'
+  auto_check_updates: boolean
   shell: string
   shell_path: string | null
+  wsl_distro: string | null
   port?: number | null
   monitor: MonitorConfig
   notification: NotificationConfig
@@ -410,16 +414,19 @@ export const settings = reactive<SettingsData>({
   keyboard_sound: false,
   quick_send_threshold: 63,
   show_virtual_keyboard: false,
+  mobile_input_mode: null,
   keyboard_guard_mode: 'off',
   workspace_badge_mode: null,
   confirm_before_close_tab: true,
+  restore_session_on_startup: true,
   reload_after_supervise_tabs: false,
   space_confirms_dialogs: false,
   windowsAltAsCmd: isWindowsClient,
   locale: 'zh',
-  panel_position: 'auto',
+  auto_check_updates: true,
   shell: 'auto',
   shell_path: null,
+  wsl_distro: null,
   monitor: {
     enabled: true,
     cpu: true,
@@ -481,14 +488,25 @@ export const settings = reactive<SettingsData>({
 
 let loaded = false
 let loadPromise: Promise<void> | null = null
+let saveTail: Promise<void> | null = null
+let saveTailRevision: number | null = null
 let loadGeneration = 0
 let loadsInFlight = 0
+let settingsRevision = 0
 let loadedNotificationPresentationEcho: {
   channels?: unknown
   sounds?: unknown
 } | null = null
 const settingsLoadedState = ref(false)
 export const settingsLoaded = readonly(settingsLoadedState)
+
+watch(
+  settings,
+  () => {
+    settingsRevision++
+  },
+  { deep: true, flush: 'sync' }
+)
 
 export function __setSettingsLoadedForTest(value: boolean) {
   settingsLoadedState.value = value
@@ -497,8 +515,11 @@ export function __setSettingsLoadedForTest(value: boolean) {
 export function __resetSettingsLoadStateForTest() {
   loaded = false
   loadPromise = null
+  saveTail = null
+  saveTailRevision = null
   loadGeneration = 0
   loadsInFlight = 0
+  settingsRevision = 0
   loadedNotificationPresentationEcho = null
   settingsLoadedState.value = false
 }
@@ -560,12 +581,18 @@ export function restoreActionIcons() {
 
 export async function loadSettings() {
   if (!hasAuthToken()) return
+  // A refresh that overtakes an already-started save can fetch the old server
+  // value and put it back into the UI. Only wait for saves that existed when
+  // this load was requested; later local edits are handled by the revision guard.
+  const pendingSaves = saveTail
   let requestStarted = false
   try {
     loadGeneration++
     loadsInFlight++
     requestStarted = true
+    if (pendingSaves) await pendingSaves
     await getApiBase()
+    const revisionAtRequest = settingsRevision
     const res = await authFetch(apiUrl('/api/settings'))
     if (res.ok) {
       const data = await res.json()
@@ -579,8 +606,12 @@ export async function loadSettings() {
           ? { sounds: JSON.parse(JSON.stringify(notification.sounds)) }
           : {}),
       }
-      Object.assign(settings, data)
       loadGeneration++
+      // Once settings have loaded successfully, a response that started before
+      // a local edit is stale. Applying it would make the picker show the new
+      // value briefly while saving the previous server value again.
+      if (settingsLoadedState.value && settingsRevision !== revisionAtRequest) return
+      Object.assign(settings, data)
       settings.action_keyboard = normalizeActionKeyboard(settings.action_keyboard)
       settings.action_keyboard_user_default = normalizeActionKeyboard(
         settings.action_keyboard_user_default ?? null
@@ -596,7 +627,7 @@ export async function loadSettings() {
   }
 }
 
-export async function saveSettings() {
+async function persistSettings() {
   try {
     // Wait for initial load to complete before saving, to avoid overwriting server data with defaults
     if (loadPromise) await loadPromise
@@ -650,6 +681,33 @@ export async function saveSettings() {
   } catch (e) {
     console.error('[settings] save failed:', e)
   }
+}
+
+export function saveSettings(): Promise<void> {
+  // Full settings PUTs must stay ordered. Otherwise an earlier, slower request
+  // can finish after a newer Shell selection and restore the old preference.
+  if (saveTail && saveTailRevision === settingsRevision) return saveTail
+  const predecessor = saveTail
+  const operation = predecessor
+    ? predecessor.then(persistSettings, persistSettings)
+    : persistSettings()
+  saveTail = operation
+  saveTailRevision = settingsRevision
+  void operation.then(
+    () => {
+      if (saveTail === operation) {
+        saveTail = null
+        saveTailRevision = null
+      }
+    },
+    () => {
+      if (saveTail === operation) {
+        saveTail = null
+        saveTailRevision = null
+      }
+    }
+  )
+  return operation
 }
 
 const themeChangeListeners = new Set<(xtermTheme: ReturnType<typeof getXtermTheme>) => void>()

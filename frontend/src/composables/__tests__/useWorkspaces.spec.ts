@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../useWorkspaces'
+import {
+  DEFAULT_WORKSPACE_ID,
+  isPathWithinWorkspace,
+  useWorkspaces,
+  workspaceBasename,
+} from '../useWorkspaces'
 import { settings } from '../useSettings'
 import type { Workspace } from '../../types/workspace'
 import type { TerminalTab } from '../../types/pane'
@@ -15,13 +20,38 @@ function makeTab(paneId: string, cwd?: string): TerminalTab {
     paneMru: [paneId],
     broadcastMode: false,
     broadcastActivity: 0,
-    previewVisible: false,
-    previewAddress: '',
-    previewUrl: '',
-    previewKind: 'web',
     cwd,
   }
 }
+
+describe('workspace path helpers', () => {
+  it.each([
+    [String.raw`C:\repo\dinotty`, 'dinotty'],
+    ['C:/repo/dinotty/', 'dinotty'],
+    ['/home/user/dinotty/', 'dinotty'],
+    ['\\\\server\\share\\project\\', 'project'],
+  ])('gets the basename of %s', (path, expected) => {
+    expect(workspaceBasename(path)).toBe(expected)
+  })
+
+  it('matches Windows drive paths by segment with mixed case and separators', () => {
+    expect(isPathWithinWorkspace(String.raw`c:\REPO\dinotty\src`, 'C:/repo/Dinotty/')).toBe(true)
+    expect(isPathWithinWorkspace(String.raw`C:\repo\dinotty-old`, String.raw`C:\repo\dinotty`)).toBe(
+      false
+    )
+  })
+
+  it('matches UNC paths case-insensitively', () => {
+    expect(
+      isPathWithinWorkspace(String.raw`\\SERVER\Share\Project\src`, '//server/share/project/')
+    ).toBe(true)
+  })
+
+  it('keeps POSIX path matching case-sensitive', () => {
+    expect(isPathWithinWorkspace('/Users/me/Project/src', '/Users/me/Project///')).toBe(true)
+    expect(isPathWithinWorkspace('/Users/me/project/src', '/Users/me/Project')).toBe(false)
+  })
+})
 
 describe('useWorkspaces', () => {
   const { workspaces, activeWorkspaceId, activeWorkspace, matchWorkspace, filterTabs } = useWorkspaces()
@@ -104,6 +134,17 @@ describe('useWorkspaces', () => {
       const result = matchWorkspace('/Users/talentc/projects/my-app')
       expect(result?.id).toBe('ws2')
     })
+
+    it('uses Windows path semantics while preserving longest-prefix matching', () => {
+      workspaces.value = [
+        { id: 'parent', name: 'repo', path: String.raw`C:\Repo`, order: 0 },
+        { id: 'child', name: 'dinotty', path: 'c:/repo/dinotty/', order: 1 },
+      ]
+
+      const result = matchWorkspace(String.raw`C:\REPO\Dinotty\src`)
+
+      expect(result?.id).toBe('child')
+    })
   })
 
   describe('filterTabs', () => {
@@ -143,6 +184,20 @@ describe('useWorkspaces', () => {
       const resultWs3 = filterTabs(tabs, 'ws3')
       expect(resultWs3).toHaveLength(1)
       expect(resultWs3[0].paneId).toBe('t2')
+    })
+
+    it('uses explicit workspace attribution when remote workspaces share a profile', () => {
+      workspaces.value = [
+        { id: 'remote-a', name: 'app-a', path: '/srv/a', order: 0, connection_id: 'shared' },
+        { id: 'remote-b', name: 'app-b', path: '/srv/b', order: 1, connection_id: 'shared' },
+      ]
+      const tabs = [
+        { ...makeTab('ssh-a'), connectionId: 'shared', workspaceId: 'remote-a' },
+        { ...makeTab('ssh-b'), connectionId: 'shared', workspaceId: 'remote-b' },
+      ]
+
+      expect(filterTabs(tabs, 'remote-a').map((tab) => tab.paneId)).toEqual(['ssh-a'])
+      expect(filterTabs(tabs, 'remote-b').map((tab) => tab.paneId)).toEqual(['ssh-b'])
     })
   })
 

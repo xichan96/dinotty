@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 pub struct CwdState {
     pub cwd: PathBuf,
+    pub host_cwd: Option<PathBuf>,
     pub sniff_buf: Vec<u8>,
 }
 
@@ -15,6 +16,7 @@ pub(crate) fn sniff_cwd_from_title_osc(
     chunk: &[u8],
     home: &Path,
     cwd: &mut PathBuf,
+    canonicalize_local: bool,
 ) {
     buf.extend_from_slice(chunk);
     if buf.len() > OSC_SNIFF_CAP {
@@ -36,10 +38,7 @@ pub(crate) fn sniff_cwd_from_title_osc(
         let title_end = payload_start + rel;
         let title = String::from_utf8_lossy(&buf[payload_start..title_end]);
         if let Some(p) = parse_title_cwd(&title, home) {
-            // canonicalize resolves symlinks on the local filesystem. For SSH
-            // sessions the path is remote and canonicalize fails - fall back
-            // to the raw path so cwd tracking still works.
-            *cwd = p.canonicalize().unwrap_or(p);
+            *cwd = if canonicalize_local { dunce::canonicalize(&p).unwrap_or(p) } else { p };
         }
         buf.drain(..title_end + terminator_len);
     }

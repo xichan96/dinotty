@@ -113,6 +113,17 @@ describe('unified keybindings', () => {
     expect(useKeybindings().defs.some((def) => def.id === 'pasteTerminal')).toBe(false)
   })
 
+  it('renders every shortcut icon inside the same fixed alignment slot', () => {
+    const wrapper = trackWrapper(mount(KeyboardTab))
+    const rows = wrapper.findAll('[data-kb-id]')
+
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      const label = row.get('.kb-shortcut-label')
+      expect(label.get('.kb-icon').find('svg').exists()).toBe(true)
+    }
+  })
+
   it('ignores a persisted pasteTerminal keybinding override', () => {
     settings.keybindings.pasteTerminal = { key: 'v', shift: false }
 

@@ -41,8 +41,18 @@ export function useSplitPane(opts: {
   sendSync: (msg: SyncClientMsg) => void
   sendLayoutSync: (tabPaneId: string, layout: any, activePaneId: string) => void
   persist: () => void
+  showSplitTerminalError: (error: unknown) => void
 }) {
-  const { tabs, activePaneId, termRefs, genPaneId, sendSync, sendLayoutSync, persist } = opts
+  const {
+    tabs,
+    activePaneId,
+    termRefs,
+    genPaneId,
+    sendSync,
+    sendLayoutSync,
+    persist,
+    showSplitTerminalError,
+  } = opts
 
   /** Sync layout to server for a given tab */
   function syncTabLayout(tab: TerminalTab) {
@@ -96,6 +106,7 @@ export function useSplitPane(opts: {
       })
     } catch (e) {
       console.error('Failed to split pane:', e)
+      showSplitTerminalError(e)
     }
   }
 
@@ -176,18 +187,16 @@ export function useSplitPane(opts: {
           apiDirection
         )
       } else if (kind === 'files') {
-        if (!payload.path) throw new Error('path required')
         result = await apiCreateFilesPane(
           tab.paneId,
-          payload.path,
+          payload.path ?? '',
           tab.activePaneId,
           apiDirection
         )
       } else {
-        if (!payload.url) throw new Error('url required')
         result = await apiCreateWebPane(
           tab.paneId,
-          payload.url,
+          payload.url ?? '',
           tab.activePaneId,
           apiDirection
         )
@@ -363,10 +372,6 @@ export function useSplitPane(opts: {
           paneMru: [result.pane_id],
           broadcastMode: false,
           broadcastActivity: 0,
-          previewVisible: false,
-          previewAddress: '',
-          previewUrl: '',
-          previewKind: 'web',
           cwd: inheritedCwd,
           connectionId: inheritedConnectionId,
           workspaceId: inheritedWorkspaceId,

@@ -36,7 +36,8 @@ pub use upload::{
 // matching the original `pub(super)` semantics of the un-split module.
 pub(crate) use util::{
     detect_language, get_root, json_err, media_kind, normalize_join, office_kind,
-    skip_text_preview, MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
+    resolve_user_path, skip_text_preview, try_res, validate_entry_name, MAX_DOWNLOAD,
+    MAX_TEXT_PREVIEW,
 };
 
 // Re-export helpers that `tests.rs` consumes via `use super::*`. Gated on
@@ -47,9 +48,7 @@ pub(crate) use upload::{
     prepare_upload_base, suffixed_upload_name, upload_io_err, INSUFFICIENT_STORAGE,
 };
 #[cfg(test)]
-pub(crate) use util::{
-    byte_offset_to_column, parse_rg_json, path_must_be_under, resolve_user_path,
-};
+pub(crate) use util::{byte_offset_to_column, parse_rg_json, path_must_be_under};
 
 #[cfg(test)]
 mod tests;

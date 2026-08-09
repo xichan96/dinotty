@@ -48,6 +48,8 @@ describe('useAppForeground', () => {
   it('registers the Tauri listener before querying and lets an early event win', async () => {
     vi.resetModules()
     vi.doMock('../useTransport', () => ({ isTauri: () => true }))
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
     let resolveInitialFocus!: (value: boolean) => void
     const initialFocus = new Promise<boolean>((resolve) => {
       resolveInitialFocus = resolve
@@ -82,5 +84,22 @@ describe('useAppForeground', () => {
     await Promise.resolve()
     expect(foreground.getIsAppForeground()).toBe(true)
     expect(gained).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the focused visible WebView when the initial Tauri query reports false', async () => {
+    vi.resetModules()
+    vi.doMock('../useTransport', () => ({ isTauri: () => true }))
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    const appWindow = {
+      onFocusChanged: vi.fn(async () => () => {}),
+      isFocused: vi.fn(async () => false),
+    }
+    vi.doMock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => appWindow }))
+
+    const foreground = await import('../useAppForeground')
+    await vi.waitFor(() => expect(appWindow.isFocused).toHaveBeenCalledTimes(1))
+
+    expect(foreground.getIsAppForeground()).toBe(true)
   })
 })

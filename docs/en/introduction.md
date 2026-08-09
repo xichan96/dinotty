@@ -1,15 +1,32 @@
 # Introduction
 
-**Dinotty** is a multi-device terminal server purpose-built for coding agents. Run Claude Code, opencode, Codex, or OpenClaw on any device -- desktop-class on your laptop, always in your pocket on your phone. Switch seamlessly, never lose a session.
+A terminal built for coding agents.
 
-## Why Dinotty
+Run Claude Code, opencode, Codex, or OpenClaw on any device -- simple, extensible, multi-device, never lose a session.
 
-Terminal coding agents are powerful but confined to a single terminal window. Dinotty lets you:
+## Philosophy
 
-- **Manage agents from any device** -- deep coding on desktop, scan a QR code on mobile to keep monitoring your agent's work
-- **Multi-device sync, seamless switching** -- start on laptop, continue on phone, return to laptop with everything intact
-- **Verify agent output directly** -- code diffs, rendered web pages, generated files, all visible in the built-in browser
-- **Never lose a session** -- disconnect, screen-off, switch devices -- everything is still there when you return
+Terminal coding agents - Claude Code, opencode, Codex, OpenClaw - are powerful, yet confined to a single window. Dinotty sets them free. One terminal. Every device. Every possibility.
+
+### Sync everywhere
+
+Half-done on your laptop. Pick up your phone, keep going. Back to your laptop, exactly as you left it.
+
+### Endless extensibility
+
+JS plugins with hot reload. CC Switch, JSON Formatter, Claude Code dialog management - built in. Custom commands, terminal interaction, event subscriptions, CLI integration - the API is ready.
+
+### Everything is a pane
+
+Terminal, files, web preview, Git changes, SSH remote. Drag to split, move across tabs. All in one flow.
+
+### Never drops
+
+Server-side VTE. PTY survives disconnects. Refresh the page, you're back where you were.
+
+### Free and open
+
+Self-hosted. No subscriptions. No relay. Your data stays on your machine.
 
 ### Lightweight -- Not a Remote Desktop
 

@@ -139,6 +139,51 @@ fn test_validate_path_accepts_real_dir() {
 }
 
 #[test]
+#[cfg(windows)]
+fn test_validate_path_simplifies_windows_verbatim_prefix() {
+    let temp_dir = std::env::temp_dir();
+    let canonical = validate_workspace_path(&temp_dir.to_string_lossy()).unwrap();
+
+    assert!(!canonical.to_string_lossy().starts_with(r"\\?\"));
+}
+
+#[test]
+fn test_simplify_local_workspace_paths_preserves_remote_paths() {
+    let remote_path = r"\\?\C:\remote\project";
+    let mut workspaces = vec![Workspace {
+        id: "remote".to_string(),
+        name: "remote".to_string(),
+        path: remote_path.to_string(),
+        order: 0,
+        connection_id: Some("ssh-profile".to_string()),
+        abbr: None,
+        color: None,
+    }];
+
+    simplify_local_workspace_paths(&mut workspaces);
+
+    assert_eq!(workspaces[0].path, remote_path);
+}
+
+#[test]
+#[cfg(windows)]
+fn test_simplify_local_workspace_paths_updates_legacy_windows_paths_in_memory() {
+    let mut workspaces = vec![Workspace {
+        id: "local".to_string(),
+        name: "local".to_string(),
+        path: r"\\?\C:\repo\dinotty".to_string(),
+        order: 0,
+        connection_id: None,
+        abbr: None,
+        color: None,
+    }];
+
+    simplify_local_workspace_paths(&mut workspaces);
+
+    assert_eq!(workspaces[0].path, r"C:\repo\dinotty");
+}
+
+#[test]
 fn test_derive_name_with_special_chars() {
     assert_eq!(derive_name("/home/user/my project"), "my project");
     assert_eq!(derive_name("/home/user/项目"), "项目");
@@ -221,4 +266,91 @@ fn test_workspace_palette_is_pinned_uppercase_hex6() {
         assert!(is_valid_hex6(color), "invalid palette color: {color}");
         assert_eq!(color, color.to_uppercase(), "palette color is not uppercase: {color}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// tab_workspace_id
+// ---------------------------------------------------------------------------
+
+fn ws_local(id: &str, path: &str) -> Workspace {
+    Workspace {
+        id: id.to_string(),
+        name: id.to_string(),
+        path: path.to_string(),
+        order: 0,
+        connection_id: None,
+        abbr: None,
+        color: None,
+    }
+}
+
+fn ws_remote(id: &str, path: &str, connection_id: &str) -> Workspace {
+    Workspace {
+        id: id.to_string(),
+        name: id.to_string(),
+        path: path.to_string(),
+        order: 0,
+        connection_id: Some(connection_id.to_string()),
+        abbr: None,
+        color: None,
+    }
+}
+
+#[test]
+fn tab_workspace_id_local_tab_longest_prefix_wins() {
+    let workspaces = vec![ws_local("outer", "/Users/me"), ws_local("inner", "/Users/me/work")];
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("/Users/me/work/project"), None),
+        Some("inner".to_string())
+    );
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("/Users/me/other"), None),
+        Some("outer".to_string())
+    );
+}
+
+#[test]
+fn tab_workspace_id_no_match_returns_none() {
+    let workspaces = vec![ws_local("ws1", "/Users/me/work")];
+    assert_eq!(tab_workspace_id(&workspaces, Some("/tmp"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, None), None);
+    assert_eq!(tab_workspace_id(&workspaces, Some(""), None), None);
+}
+
+#[test]
+fn tab_workspace_id_sibling_prefix_not_match() {
+    // `/etcfoo` should NOT match workspace at `/etc` (no path separator)
+    let workspaces = vec![ws_local("etc", "/etc")];
+    assert_eq!(tab_workspace_id(&workspaces, Some("/etcfoo"), None), None);
+}
+
+#[test]
+fn tab_workspace_id_ssh_tab_matches_by_connection_id() {
+    let workspaces = vec![
+        ws_local("local", "/Users/me"),
+        ws_remote("remote", "/home/deploy/app", "ssh-profile-1"),
+    ];
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("/Users/me"), Some("ssh-profile-1")),
+        Some("remote".to_string())
+    );
+    // SSH tab with connection_id that matches no workspace -> default (None)
+    assert_eq!(tab_workspace_id(&workspaces, Some("/Users/me"), Some("unknown-profile")), None);
+}
+
+#[test]
+fn tab_workspace_id_local_tab_skips_remote_workspaces() {
+    // Local tab (no connection_id) should not match a remote workspace even
+    // if its path happens to prefix-match.
+    let workspaces = vec![ws_remote("remote", "/Users/me", "ssh-profile-1")];
+    assert_eq!(tab_workspace_id(&workspaces, Some("/Users/me/project"), None), None);
+}
+
+#[test]
+fn tab_workspace_id_trailing_slash_on_workspace_path_is_tolerated() {
+    let workspaces = vec![ws_local("ws1", "/Users/me/work/")];
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("/Users/me/work/project"), None),
+        Some("ws1".to_string())
+    );
 }

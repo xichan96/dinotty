@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_lines)]
 use crate::event_bus::BusEvent;
-use crate::platform::shell::{self, ShellSpec};
+use crate::platform::shell::{self, ShellLaunchKind, ShellSpec};
 use crate::session::{
     CloseReason, Session, SessionBackend, SessionManager, SessionStatus, SyncMsg, SyncState,
 };
@@ -10,6 +10,11 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info, warn};
+
+#[derive(Clone, Debug)]
+pub enum LaunchCwd {
+    Host(PathBuf),
+}
 
 struct PendingSpawn<'a> {
     child: Option<Box<dyn Child + Send + Sync>>,
@@ -220,7 +225,7 @@ pub fn create_session(
     pane_id: &str,
     tab_id: Option<&str>,
     tauri_on_exit: Option<crate::session::TauriOnExit>,
-    cwd: Option<PathBuf>,
+    cwd: Option<LaunchCwd>,
     argv: Option<Vec<String>>,
     shell_spec: Option<ShellSpec>,
 ) -> Result<(Arc<Session>, String), String> {
@@ -235,18 +240,50 @@ pub fn create_session(
         .map_err(|e| e.to_string())?;
 
     #[allow(clippy::single_match_else)]
-    let (mut cmd, shell_type) = match argv {
-        Some(argv) => {
-            let mut cmd = CommandBuilder::new(&argv[0]);
-            cmd.args(&argv[1..]);
-            (cmd, "command".to_string())
+    let home_path = shell::home_dir();
+    let requested_host_cwd = cwd.and_then(|cwd| match cwd {
+        LaunchCwd::Host(path) => {
+            if path.is_dir() {
+                Some(simplify_host_cwd(path))
+            } else {
+                warn!(cwd = %path.display(), "Requested terminal CWD is unavailable");
+                None
+            }
         }
-        None => {
-            let shell_spec = shell_spec.unwrap_or_else(shell::default_shell);
-            let mut cmd = CommandBuilder::new(&shell_spec.program);
-            cmd.args(&shell_spec.args);
-            (cmd, shell_spec.shell_type.clone())
-        }
+    });
+
+    let (mut cmd, shell_type, shell_launch_kind, effective_cwd, host_cwd) = if let Some(argv) = argv
+    {
+        let effective_cwd = requested_host_cwd.clone().unwrap_or_else(|| home_path.clone());
+        let program =
+            crate::platform::process::resolve_terminal_program(argv[0].as_ref(), &effective_cwd)?;
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(&argv[1..]);
+        (
+            cmd,
+            "command".to_string(),
+            ShellLaunchKind::Native,
+            effective_cwd.clone(),
+            Some(effective_cwd),
+        )
+    } else {
+        let mut shell_spec = shell_spec.unwrap_or_else(shell::default_shell);
+        let (effective_cwd, host_cwd) = match &shell_spec.launch_kind {
+            ShellLaunchKind::Native => {
+                let selected = requested_host_cwd.clone().unwrap_or_else(|| home_path.clone());
+                (selected.clone(), Some(selected))
+            }
+            ShellLaunchKind::Wsl { .. } => {
+                append_wsl_cwd_args(&mut shell_spec.args, requested_host_cwd.as_deref());
+                (
+                    requested_host_cwd.clone().unwrap_or_else(|| home_path.clone()),
+                    requested_host_cwd.clone(),
+                )
+            }
+        };
+        let mut cmd = CommandBuilder::new(&shell_spec.program);
+        cmd.args(&shell_spec.args);
+        (cmd, shell_spec.shell_type.clone(), shell_spec.launch_kind, effective_cwd, host_cwd)
     };
     for key in claude_session_env_keys_to_strip() {
         cmd.env_remove(&key);
@@ -266,9 +303,6 @@ pub fn create_session(
     }
     configure_utf8_locale(&mut cmd);
 
-    let home_path = shell::home_dir();
-
-    let effective_cwd = cwd.filter(|p| p.is_dir()).unwrap_or_else(|| home_path.clone());
     cmd.cwd(&effective_cwd);
 
     // Shell-specific hooks depend on HOME-style prompt expansion.
@@ -296,8 +330,6 @@ pub fn create_session(
         }
     }
 
-    let home_for_cwd = effective_cwd;
-
     let child = pair.slave.spawn_command(cmd).map_err(|e| format!("spawn shell: {e}"))?;
     let mut pending_spawn = PendingSpawn::new(child, pane_id);
     drop(pair.slave);
@@ -315,13 +347,7 @@ pub fn create_session(
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: Box<dyn Write + Send> = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-    // Strip the \\?\ verbatim prefix that std::canonicalize adds on Windows.
-    // PowerShell renders verbatim paths as `Microsoft.PowerShell.Core\FileSystem::\\?\D:\...`
-    // which breaks tools that parse $PWD (e.g. pi agent). dunce::simplified is a
-    // no-op on non-Windows.
-    let initial_cwd =
-        dunce::simplified(&home_for_cwd.canonicalize().unwrap_or_else(|_| home_for_cwd.clone()))
-            .to_path_buf();
+    let initial_cwd = effective_cwd;
     let (resize_tx, resize_rx) = tokio::sync::watch::channel(None);
     let (output_tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
     let registered_child = pending_spawn.take_child()?;
@@ -343,9 +369,11 @@ pub fn create_session(
         size: std::sync::Mutex::new((80, 24)),
         exited: std::sync::Mutex::new(false),
         shell_type: shell_type.clone(),
+        shell_launch_kind,
         tauri_on_exit: std::sync::Mutex::new(tauri_on_exit),
         cwd_state: std::sync::Mutex::new(crate::session::CwdState {
             cwd: initial_cwd,
+            host_cwd,
             sniff_buf: Vec::new(),
         }),
         sync: std::sync::Mutex::new(SyncState::default()),
@@ -576,6 +604,16 @@ pub fn create_session(
     Ok((session, shell_type))
 }
 
+fn simplify_host_cwd(path: PathBuf) -> PathBuf {
+    let canonical = dunce::canonicalize(&path).unwrap_or(path);
+    dunce::simplified(&canonical).to_path_buf()
+}
+
+fn append_wsl_cwd_args(args: &mut Vec<String>, host_cwd: Option<&std::path::Path>) {
+    args.push("--cd".to_string());
+    args.push(host_cwd.map_or_else(|| "~".to_string(), |path| path.to_string_lossy().into_owned()));
+}
+
 #[must_use]
 pub fn setup_zsh_title_hooks(home: &str) -> Option<std::path::PathBuf> {
     let zdotdir = std::env::temp_dir().join(format!("dinotty_zsh_{}", std::process::id()));
@@ -729,12 +767,29 @@ pub fn get_shell_args(shell: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_claude_session_env_key, locale_adjustment, notify_url_for, LocaleAdjustment};
+    #[cfg(windows)]
+    use super::simplify_host_cwd;
+    use super::{
+        append_wsl_cwd_args, is_claude_session_env_key, locale_adjustment, notify_url_for,
+        LocaleAdjustment,
+    };
 
     #[test]
     fn builds_notify_url_for_bound_port() {
         assert_eq!(notify_url_for(8999), Some("http://127.0.0.1:8999".to_string()));
         assert_eq!(notify_url_for(0), None);
+    }
+
+    #[test]
+    fn wsl_cwd_is_always_passed_as_a_separate_argument() {
+        let mut default_args = vec!["--distribution".to_string(), "Ubuntu Dev".to_string()];
+        append_wsl_cwd_args(&mut default_args, None);
+        assert_eq!(default_args, ["--distribution", "Ubuntu Dev", "--cd", "~"]);
+
+        let host_path = std::path::Path::new(r"C:\Work Files\project");
+        let mut explicit_args = Vec::new();
+        append_wsl_cwd_args(&mut explicit_args, Some(host_path));
+        assert_eq!(explicit_args, ["--cd", r"C:\Work Files\project"]);
     }
 
     #[test]
@@ -765,6 +820,18 @@ mod tests {
         ] {
             assert!(!is_claude_session_env_key(k), "should preserve {k}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn local_cwd_is_simplified_before_pty_spawn() {
+        let temp = std::env::temp_dir();
+        let verbatim = std::path::PathBuf::from(format!(r"\\?\{}", temp.display()));
+
+        let effective = simplify_host_cwd(verbatim);
+
+        assert!(!effective.to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(effective, dunce::canonicalize(temp).unwrap());
     }
 
     #[test]

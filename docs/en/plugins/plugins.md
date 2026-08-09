@@ -1,6 +1,8 @@
-# Plugin System
+# Install & Use Plugins
 
-Dinotty supports extending functionality through plugins. Plugins run in dedicated tabs, render UI with Vue 3, and have access to built-in APIs for the terminal, notifications, persistent storage, and more.
+Dinotty extends functionality through plugins. Plugins run in dedicated tabs, render UI with Vue 3, and have access to built-in APIs for the terminal, notifications, persistent storage, and more.
+
+This page is for **plugin users**: how to install, uninstall, and use built-in plugins. If you want to develop your own plugin, see the [Plugin Development Guide (中文)](/zh/plugins/plugin-development).
 
 ## Installing Plugins
 
@@ -40,6 +42,8 @@ Plugins support **hot-reload** — edit plugin files and the browser picks up ch
 
 ## Plugin Manifest (plugin.json)
 
+Each plugin directory must have a `plugin.json` describing its metadata. Users can inspect the manifest before installing a third-party plugin -- **the permissions declared in the manifest are the upper bound of what the plugin can do**.
+
 | Field | Required | Description |
 |-------|----------|-------------|
 | `id` | ✅ | Unique identifier, lowercase letters + hyphens; must match the directory name |
@@ -53,9 +57,11 @@ Plugins support **hot-reload** — edit plugin files and the browser picks up ch
 | `permissions` | ❌ | Permissions the plugin requires (e.g., `["terminal.output"]`) |
 | `description` | ❌ | Plugin description, shown in the dropdown menu |
 
-## Plugin API
+Full field definitions and how to write them: [Plugin Development Guide (中文) -> Plugin Manifest](/zh/plugins/plugin-development).
 
-A plugin's JS entry exports an `activate(context)` function. The `context` object provides:
+## Plugin API Quick Reference
+
+A plugin's JS entry exports an `activate(context)` function. The `context` object provides (full dev details in the [Plugin Development Guide (中文)](/zh/plugins/plugin-development)):
 
 | Category | API | Description |
 |----------|-----|-------------|

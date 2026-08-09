@@ -2,7 +2,7 @@ import { isTauri, tauriInvoke } from './useTransport'
 import { escapeShellPath } from '../utils/tauriDragDrop'
 
 export interface DropHost {
-  sendData(data: string): void
+  sendData(data: string, force?: boolean): void
   onFileUpload?(files: File[]): void
 }
 
@@ -53,6 +53,11 @@ export function setupTerminalDrop(
     const files = Array.from(dt.files ?? []) as any[]
     const paths: string[] = []
 
+    // Drop is a user-confirmed action aimed at THIS terminal - bypass the
+    // active-pane input guard so the path lands here even if the drag started
+    // from another pane (e.g. the file-workspace pane mousedown stole focus).
+    const sendPath = (s: string) => host.sendData(s, true)
+
     // 0. Tauri (macOS WKWebView): read NSDragPboard directly. WKWebView's
     //    DataTransfer sanitizes non-text types, so VSCode's `public.file-url`
     //    drags show up with empty dt.files and unreachable text/plain. This
@@ -61,7 +66,7 @@ export function setupTerminalDrop(
     if (isTauri()) {
       const pboardPaths = await readDragPboard()
       if (pboardPaths.length > 0) {
-        host.sendData(pboardPaths.map(escapeShellPath).join(' '))
+        sendPath(pboardPaths.map(escapeShellPath).join(' '))
         return
       }
     }
@@ -73,7 +78,7 @@ export function setupTerminalDrop(
       if (typeof f.path === 'string' && f.path.length > 0) paths.push(f.path)
     }
     if (paths.length > 0) {
-      host.sendData(paths.map(escapeShellPath).join(' '))
+      sendPath(paths.map(escapeShellPath).join(' '))
       return
     }
 
@@ -102,7 +107,7 @@ export function setupTerminalDrop(
     }
 
     if (paths.length > 0) {
-      host.sendData(paths.map(escapeShellPath).join(' '))
+      sendPath(paths.map(escapeShellPath).join(' '))
       return
     }
 
@@ -123,7 +128,7 @@ export function setupTerminalDrop(
         } catch {}
       })
       if (paths.length > 0) {
-        host.sendData(paths.map(escapeShellPath).join(' '))
+        sendPath(paths.map(escapeShellPath).join(' '))
         return
       }
     }
@@ -134,7 +139,7 @@ export function setupTerminalDrop(
       for (const f of files) {
         if (f.name) fallback.push(f.name)
       }
-      if (fallback.length) host.sendData(fallback.map(escapeShellPath).join(' '))
+      if (fallback.length) sendPath(fallback.map(escapeShellPath).join(' '))
     }
   }
   target.addEventListener('drop', dropHandler, true)

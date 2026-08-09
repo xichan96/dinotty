@@ -97,6 +97,9 @@ pub enum ServerMsg<'a> {
     ShellInfo {
         shell_type: &'a str,
     },
+    SessionError {
+        code: &'a str,
+    },
     Reconnected {
         cols: u16,
         rows: u16,

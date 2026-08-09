@@ -8,6 +8,10 @@ mod registry;
 mod storage;
 mod subscriptions;
 mod types;
+mod workspace;
+
+#[cfg(test)]
+mod tests;
 
 pub use crud::{
     delete_plugin, dev_link_plugin, install_from_dir, install_plugin, list_plugins, plugin_asset,
@@ -26,3 +30,8 @@ pub use storage::{
 };
 pub use subscriptions::{has_subscriber, subscribe, unsubscribe, SubscriptionRegistry};
 pub use types::*;
+pub use workspace::{
+    plugin_workspace_delete, plugin_workspace_mkdir, plugin_workspace_move,
+    plugin_workspace_put_file, plugin_workspace_read_dir, plugin_workspace_read_file,
+    plugin_workspace_rename, plugin_workspace_stat, plugin_workspace_watch,
+};

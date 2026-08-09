@@ -6,8 +6,8 @@ export interface FileWatchOptions {
   cwdLabel: Ref<string>
   expanded: Ref<Set<string>>
   childCache: Ref<Record<string, any[]>>
-  selectedRel: Ref<string | null>
-  selectedIsDir: Ref<boolean>
+  selectedRel: Readonly<Ref<string | null>>
+  selectedIsDir: Readonly<Ref<boolean>>
   meta: Ref<any>
   editorDirty: () => boolean
   onFileDeleted: () => void

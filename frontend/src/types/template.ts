@@ -63,4 +63,5 @@ export interface ApplyTemplateResult {
   warnings: string[]
   cwd?: string
   connection_id?: string
+  workspace_id?: string
 }

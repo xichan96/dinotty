@@ -15,6 +15,41 @@ import { useI18n } from './useI18n'
 
 export const DEFAULT_WORKSPACE_ID = '__default__'
 
+function isWindowsPath(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(path) || /^(?:\\\\|\/\/)/.test(path)
+}
+
+function normalizeWindowsPath(path: string): string {
+  return path
+    .replace(/[\\/]+/g, '/')
+    .replace(/\/+$/, '')
+    .replace(/[A-Z]/g, (char) => char.toLowerCase())
+}
+
+export function isPathWithinWorkspace(cwd: string, workspacePath: string): boolean {
+  if (!cwd || !workspacePath) return false
+
+  const windowsPath = isWindowsPath(cwd) || isWindowsPath(workspacePath)
+  const normalizedCwd = windowsPath ? normalizeWindowsPath(cwd) : cwd.replace(/\/+$/, '')
+  const normalizedWorkspace = windowsPath
+    ? normalizeWindowsPath(workspacePath)
+    : workspacePath.replace(/\/+$/, '')
+
+  return (
+    normalizedCwd === normalizedWorkspace ||
+    (normalizedCwd.startsWith(normalizedWorkspace) &&
+      normalizedCwd[normalizedWorkspace.length] === '/')
+  )
+}
+
+export function workspaceBasename(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, '')
+  if (!trimmed) return ''
+  const parts = trimmed.split(/[\\/]/).filter(Boolean)
+  const basename = parts[parts.length - 1] ?? ''
+  return /^[A-Za-z]:$/.test(basename) ? '' : basename
+}
+
 const workspaces = ref<Workspace[]>([])
 const activeWorkspaceId = ref<string | null>(null)
 const { t } = useI18n()
@@ -128,7 +163,7 @@ export function useWorkspaces() {
     for (const ws of candidates) {
       if (ws.connection_id) continue // skip remote workspaces for path matching
       if (!ws.path) continue
-      if (cwd === ws.path || (cwd.startsWith(ws.path) && cwd[ws.path.length] === '/')) {
+      if (isPathWithinWorkspace(cwd, ws.path)) {
         if (ws.path.length > bestLen) {
           best = ws
           bestLen = ws.path.length
@@ -145,8 +180,11 @@ export function useWorkspaces() {
     const ws = workspaces.value.find((w) => w.id === workspaceId)
     if (!ws) return []
     if (ws.connection_id) {
-      // Remote workspace: match by connection_id on the tab
-      return tabs.filter((tab) => tab.connectionId === ws.connection_id)
+      // Explicit attribution disambiguates workspaces that share one SSH profile.
+      // Keep the connection fallback for tabs created by older servers/clients.
+      return tabs.filter((tab) =>
+        tab.workspaceId ? tab.workspaceId === workspaceId : tab.connectionId === ws.connection_id
+      )
     }
     // Local workspace: match by path prefix
     return tabs.filter((tab) => {

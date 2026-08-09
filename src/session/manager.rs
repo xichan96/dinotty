@@ -2,12 +2,12 @@ use super::layout::{
     collect_leaf_pane_ids, collect_terminal_leaf_pane_ids, ensure_leaf_kind, first_leaf_id,
     layout_has_pane, remove_pane_from_layout,
 };
+#[cfg(test)]
+use super::types::SessionStatus;
+use super::types::{CloseReason, SyncClient, SyncMsg, TabInfo};
 use super::Session;
-use crate::attention::{MarkReadResult, Severity, Snapshot, StateDelta};
 use crate::event_bus::{BusEvent, EventBus};
-use crate::workspace_mgmt::Workspace;
 use dashmap::DashMap;
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{
     atomic::{AtomicU16, Ordering},
@@ -19,14 +19,6 @@ use tracing::{info, warn};
 
 const SESSION_REAP_TICK: Duration = Duration::from_secs(30);
 const SESSION_UNOWNED_GRACE: Duration = Duration::from_mins(1);
-
-#[derive(Clone, Copy, Debug)]
-pub enum CloseReason {
-    Explicit,
-    NaturalExit,
-    Reaped,
-    Shutdown,
-}
 
 struct LayoutUpdate {
     tab_id: String,
@@ -49,200 +41,6 @@ struct ClosePlan {
 enum PaneClosePlan {
     Session(ClosePlan),
     Layout(LayoutChanges),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum SessionStatus {
-    Connected,
-    Detached { since: Instant },
-}
-
-pub struct SyncClient {
-    pub id: String,
-    pub tx: mpsc::UnboundedSender<String>,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SyncMsg {
-    TabList {
-        tabs: Vec<TabInfo>,
-        active_pane_id: Option<String>,
-    },
-    TabCreated {
-        tab_id: String,
-        pane_id: String,
-        layout: Option<serde_json::Value>,
-        cwd: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        connection_id: Option<String>,
-    },
-    TabClosed {
-        pane_id: String,
-    },
-    TabActivated {
-        pane_id: String,
-    },
-    LayoutUpdated {
-        pane_id: String,
-        layout: serde_json::Value,
-        active_pane_id: String,
-    },
-    PluginChanged {
-        plugin_id: String,
-        change: String,
-    },
-    ProcessExited {
-        plugin_id: String,
-        pid: u32,
-        exit_code: Option<i32>,
-    },
-    CommandFinished {
-        pane_id: String,
-        command: String,
-        exit_code: i32,
-        duration_ms: u64,
-        stdout: String,
-        method: String,
-    },
-    WorkspaceCreated {
-        workspace: Workspace,
-    },
-    WorkspaceUpdated {
-        workspace: Workspace,
-    },
-    WorkspaceDeleted {
-        id: String,
-    },
-    WorkspaceActivated {
-        id: Option<String>,
-    },
-    WorkspaceReordered {
-        ids: Vec<String>,
-    },
-    WorkspaceList {
-        workspaces: Vec<Workspace>,
-        active_workspace_id: Option<String>,
-    },
-    Event {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        source_pane_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        plugin_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        target_plugin_id: Option<String>,
-        event_name: String,
-        data: serde_json::Value,
-    },
-    SyncHello {
-        client_id: String,
-    },
-    Bell {
-        v: u64,
-        pane_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-        body: String,
-        notification_type: String,
-        #[serde(rename = "eventSeq")]
-        event_seq: String,
-        #[serde(rename = "occurredAt")]
-        occurred_at: u64,
-        severity: Severity,
-        #[serde(rename = "notifId", skip_serializing_if = "Option::is_none")]
-        notif_id: Option<String>,
-    },
-    Notify {
-        v: u64,
-        pane_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-        body: String,
-        notification_type: String,
-        #[serde(rename = "eventSeq")]
-        event_seq: String,
-        #[serde(rename = "occurredAt")]
-        occurred_at: u64,
-        severity: Severity,
-        #[serde(rename = "notifId", skip_serializing_if = "Option::is_none")]
-        notif_id: Option<String>,
-    },
-    StateDelta {
-        #[serde(flatten)]
-        delta: StateDelta,
-    },
-    Snapshot {
-        #[serde(flatten)]
-        snapshot: Snapshot,
-    },
-    MarkReadResult {
-        #[serde(flatten)]
-        result: MarkReadResult,
-    },
-    ResyncRequired {
-        v: u64,
-    },
-    Suggestions {
-        items: Vec<crate::history::SuggestionItem>,
-    },
-    MonitorData {
-        data: serde_json::Value,
-    },
-    MonitorHistory {
-        data: Vec<serde_json::Value>,
-    },
-    TabRenamed {
-        tab_id: String,
-        title: String,
-    },
-    /// Mission Control open/close flipped. Contains the full snapshot so
-    /// receivers can refresh both `open` and the selected card atomically.
-    /// Broadcast includes the sender - frontend treats it as the authoritative
-    /// mirror update and does not re-send. `selected_*` are always sent
-    /// (as `null` when cleared) so clients can distinguish "unchanged" from
-    /// "cleared" - critical for the default workspace, which is encoded as
-    /// `selected_workspace_id: null`.
-    MissionControlToggled {
-        open: bool,
-        selected_workspace_id: Option<String>,
-        selected_tab_id: Option<String>,
-    },
-    /// Selected card inside MC moved (arrow keys / mouse). `tab_title` is the
-    /// title of `selected_tab_id` looked up at the server, so touchscreen
-    /// clients can render the name without a separate `tab_list` round-trip.
-    /// `selected_*` are always sent (as `null` when cleared) so the frontend
-    /// can mirror clears, not just sets. `tab_title` is omitted when None
-    /// because it's purely informational.
-    SelectionChanged {
-        selected_workspace_id: Option<String>,
-        selected_tab_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tab_title: Option<String>,
-    },
-    /// Initial MC snapshot sent on sync WS connect (after `tab_list` /
-    /// `workspace_list` so the selected ids can be resolved by the client).
-    McSnapshot {
-        open: bool,
-        selected_workspace_id: Option<String>,
-        selected_tab_id: Option<String>,
-    },
-}
-
-#[derive(Serialize, Clone)]
-pub struct TabInfo {
-    pub tab_id: String,
-    pub pane_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub layout: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_pane_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    /// The `SshProfile.id` if this tab is an SSH session created from a profile.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connection_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
 }
 
 #[derive(Default)]
@@ -308,6 +106,11 @@ pub struct SessionManager {
     /// natural PTY/SSH exit, which never goes through `kill_and_remove` - can notify the
     /// attention ledger without threading a notifier handle through every call site.
     notifier: std::sync::OnceLock<Arc<crate::notification::NotificationBroadcast>>,
+    /// Snapshot debounce signal channel. Layout-changing methods send `()` here;
+    /// the debounce task (started by `start_snapshot_task`) drains and writes
+    /// `session.json` after 1s of quiet.
+    snapshot_tx: mpsc::UnboundedSender<()>,
+    snapshot_rx: Mutex<Option<mpsc::UnboundedReceiver<()>>>,
 }
 
 pub(crate) struct SessionReservation {
@@ -370,6 +173,7 @@ impl Default for SessionManager {
 impl SessionManager {
     #[must_use]
     pub fn new() -> Self {
+        let (snapshot_tx, snapshot_rx) = mpsc::unbounded_channel();
         Self {
             sessions: DashMap::new(),
             sync_clients: Arc::new(Mutex::new(Vec::new())),
@@ -383,6 +187,66 @@ impl SessionManager {
             unowned_since: Mutex::new(HashMap::new()),
             notify_port: AtomicU16::new(0),
             notifier: std::sync::OnceLock::new(),
+            snapshot_tx,
+            snapshot_rx: Mutex::new(Some(snapshot_rx)),
+        }
+    }
+
+    /// Signal the snapshot debounce task that a layout change occurred.
+    /// Non-blocking; safe to call from within `lifecycle` lock holds.
+    fn schedule_snapshot(&self) {
+        let _ = self.snapshot_tx.send(());
+    }
+
+    /// Start the background debounce task that writes `session.json` to disk
+    /// after 1s of layout-quiet. Idempotent: a second call is a no-op.
+    /// Must be called from a tokio runtime context (main.rs does this after
+    /// `SessionManager::new()`).
+    pub fn start_snapshot_task(self: &Arc<Self>) {
+        let mut rx_opt = self.snapshot_rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(mut rx) = rx_opt.take() else {
+            return; // already started
+        };
+        drop(rx_opt);
+
+        let manager = Arc::clone(self);
+        tokio::spawn(async move {
+            loop {
+                if rx.recv().await.is_none() {
+                    break; // all senders dropped (manager shutting down)
+                }
+                // Debounce: extend the quiet window on every new signal.
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = rx.recv() => {},
+                        () = tokio::time::sleep(Duration::from_secs(1)) => break,
+                    }
+                }
+                let manager_clone = Arc::clone(&manager);
+                let _ = tokio::task::spawn_blocking(move || {
+                    let store = super::snapshot::SessionSnapshotStore::new();
+                    let tab_count = manager_clone.tab_layouts.len();
+                    let session_count = manager_clone.sessions.len();
+                    info!(tab_count, session_count, "debounce: writing session.json");
+                    if let Err(e) = store.build_and_save(&manager_clone) {
+                        warn!("session snapshot save failed: {e}");
+                    }
+                })
+                .await;
+            }
+        });
+    }
+
+    /// Sync-flush the snapshot to disk immediately. Called on shutdown so the
+    /// most recent state is persisted without waiting for the debounce window.
+    pub fn flush_snapshot_sync(&self) {
+        let store = super::snapshot::SessionSnapshotStore::new();
+        let tab_count = self.tab_layouts.len();
+        let session_count = self.sessions.len();
+        info!(tab_count, session_count, "flush_snapshot_sync: writing session.json");
+        if let Err(e) = store.build_and_save(self) {
+            warn!("session snapshot flush failed: {e}");
         }
     }
 
@@ -411,6 +275,7 @@ impl SessionManager {
         }
         drop(order);
         self.tab_layouts.insert(tab_id, value);
+        self.schedule_snapshot();
     }
 
     /// Insert a tab layout and record its order position.
@@ -462,6 +327,7 @@ impl SessionManager {
             layout: Some(layout),
             cwd: None,
             connection_id: None,
+            workspace_id: None,
         });
         if self.is_current_session(pane_id, session) {
             true
@@ -476,6 +342,9 @@ impl SessionManager {
         let removed = self.tab_layouts.remove(tab_id).is_some();
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         order.retain(|id| id != tab_id);
+        if removed {
+            self.schedule_snapshot();
+        }
         removed
     }
 
@@ -514,6 +383,7 @@ impl SessionManager {
         if let Some(mut entry) = self.tab_layouts.get_mut(tab_id) {
             if let Some(obj) = entry.as_object_mut() {
                 obj.insert("title".to_string(), serde_json::Value::String(title.to_string()));
+                self.schedule_snapshot();
                 return true;
             }
         }
@@ -541,6 +411,7 @@ impl SessionManager {
     pub fn set_active_pane_id(&self, pane_id: Option<String>) {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *self.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = pane_id;
+        self.schedule_snapshot();
     }
 
     /// Insert a session only when the pane generation is vacant.
@@ -836,15 +707,28 @@ impl SessionManager {
                     layout.as_ref().and_then(first_leaf_id).unwrap_or_else(|| tab_id.clone());
                 let active_pane_id =
                     v.get("active_pane_id").and_then(|v| v.as_str()).map(String::from);
-                let cwd = self.sessions.get(&pane_id).and_then(|s| {
-                    s.cwd_state.lock().ok().map(|state| state.cwd.to_string_lossy().to_string())
+                let cwd = self.sessions.get(&pane_id).and_then(|session| {
+                    session.cwd_for_workspace().map(|path| path.to_string_lossy().to_string())
                 });
                 let connection_id = self
                     .sessions
                     .get(&pane_id)
                     .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.profile_id.clone()));
+                let workspace_id = self
+                    .sessions
+                    .get(&pane_id)
+                    .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()));
                 let title = v.get("title").and_then(|v| v.as_str()).map(String::from);
-                TabInfo { tab_id, pane_id, layout, active_pane_id, cwd, connection_id, title }
+                TabInfo {
+                    tab_id,
+                    pane_id,
+                    layout,
+                    active_pane_id,
+                    cwd,
+                    connection_id,
+                    workspace_id,
+                    title,
+                }
             })
             .collect();
 

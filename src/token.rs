@@ -335,23 +335,28 @@ impl TokenManager {
     }
 }
 
-// ── Agent Token Middleware ──
+// ── Sessions Token Middleware ──
 
-/// State for the agent token middleware, holding both the global token and token manager.
+/// State for the sessions token middleware, holding both the global token and token manager.
 #[derive(Clone)]
-pub struct AgentAuthState {
+pub struct SessionsAuthState {
     pub global_token: Arc<tokio::sync::RwLock<String>>,
     pub tokens: TokenState,
 }
 
-/// Middleware that validates agent tokens and injects `TokenInfo` into request extensions.
-/// Accepts both the global token and agent tokens. The global token gets full capabilities.
-pub async fn agent_token_middleware(
-    State(auth): State<AgentAuthState>,
+/// Middleware that validates tokens and injects `TokenInfo` into request extensions.
+/// Dual-track: accepts agent Bearer (with capability), global Bearer (full caps),
+/// `?token=` query param (browser WS compatibility), or no Bearer for HTTP requests
+/// (defers to outer `auth_middleware` for session cookie; injects global).
+///
+/// WS upgrade requests bypass outer `auth_middleware` (exempt list), so they MUST
+/// carry a Bearer header or `?token=` query param - otherwise 401.
+pub async fn sessions_token_middleware(
+    State(auth): State<SessionsAuthState>,
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    // Extract Bearer token
+    // Extract Bearer token from Authorization header
     let bearer = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -359,12 +364,40 @@ pub async fn agent_token_middleware(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(str::trim);
 
-    let Some(raw_token) = bearer else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "Missing Authorization header"}})),
-        )
-            .into_response();
+    // Fall back to ?token= query param (browser WS clients can't set headers)
+    let query_token = request.uri().query().and_then(|q| {
+        q.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            if k == "token" {
+                Some(v.to_string())
+            } else {
+                None
+            }
+        })
+    });
+
+    let raw_token = bearer.or(query_token.as_deref());
+
+    let Some(raw_token) = raw_token else {
+        // No Bearer and no ?token= query param.
+        let is_ws_upgrade = request
+            .headers()
+            .get(axum::http::header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+        if is_ws_upgrade {
+            // WS routes are in the outer auth_middleware exempt list, so we can't
+            // assume a session cookie was validated. Require explicit token.
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "WS requires Bearer or ?token= query param"}})),
+            )
+                .into_response();
+        }
+        // HTTP request: outer auth_middleware has already validated the session
+        // cookie. Inject TokenInfo::global() so handler capability checks pass.
+        request.extensions_mut().insert(TokenInfo::global());
+        return next.run(request).await;
     };
 
     // Check global token first

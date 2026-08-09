@@ -3,7 +3,7 @@
 use dinotty_server::{
     agent, api::clipboard, audit, auth, event_bus, events, file_watcher, history, mcp,
     mission_control, monitor, notification, openapi, plugin, proxy, session, settings, tabs,
-    templates, token, webhook, workspace, workspace_mgmt, ws,
+    templates, token, update_check, webhook, workspace, workspace_mgmt, ws,
 };
 
 use axum::{
@@ -16,20 +16,26 @@ use axum::{
     Json, Router,
 };
 use rust_embed::Embed;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
 use std::sync::Arc;
 
 use crate::auth::session::SessionStore;
 use crate::auth::verification_code::CodeStore;
-use crate::event_bus::BusEvent;
 use crate::file_watcher::FileWatcherState;
 use crate::history::HistoryState;
 use crate::monitor::MonitorState;
 use crate::notification::NotificationBroadcast;
-use crate::plugin::PluginManagerState;
 use crate::session::SessionManager;
-use crate::settings::SettingsState;
+
+mod app_state;
+use app_state::AppState;
+
+mod auth_handlers;
+use auth_handlers::{
+    auto_token, check_auth, get_token, list_sessions, login, logout, put_settings_with_session_ttl,
+    request_code, revoke_other_sessions, revoke_session, token_configured, update_token,
+};
 
 /// Dynamic CORS middleware that reads `allowed_origins` from settings on each request.
 /// Default empty = same-origin only (Origin = Host, which browsers allow without CORS).
@@ -107,226 +113,6 @@ fn read_git_info() -> GitInfo {
     GitInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         repo_url: env!("CARGO_PKG_REPOSITORY").to_string(),
-    }
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    pub manager: Arc<SessionManager>,
-    pub settings: SettingsState,
-    pub file_watcher: Arc<FileWatcherState>,
-    pub monitor: MonitorState,
-    pub notifier: Arc<NotificationBroadcast>,
-    pub history: HistoryState,
-    pub auth_token: Arc<tokio::sync::RwLock<String>>,
-    pub port: u16,
-    pub plugins: PluginManagerState,
-    pub git_info: GitInfo,
-    pub tokens: token::TokenState,
-    pub audit: audit::AuditState,
-    pub agent: agent::AgentState,
-    pub webhooks: webhook::WebhookState,
-    pub mcp: mcp::transport::McpState,
-    pub mcp_sse: Arc<mcp::transport::SseState>,
-    pub workspaces: workspace_mgmt::WorkspacesState,
-    pub mc: mission_control::MissionControlState,
-    pub sessions: Arc<SessionStore>,
-    pub code_store: Arc<CodeStore>,
-    pub subscriptions: plugin::SubscriptionRegistry,
-}
-
-// Allow extracting Arc<SessionManager> from AppState for ws handlers
-impl axum::extract::FromRef<AppState> for Arc<SessionManager> {
-    fn from_ref(state: &AppState) -> Self {
-        state.manager.clone()
-    }
-}
-
-// Allow extracting (Arc<SessionManager>, SettingsState) for settings handlers
-impl axum::extract::FromRef<AppState> for (Arc<SessionManager>, SettingsState) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.manager.clone(), state.settings.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for SettingsState {
-    fn from_ref(state: &AppState) -> Self {
-        state.settings.clone()
-    }
-}
-
-// Allow extracting (Arc<SessionManager>, Arc<FileWatcherState>) for file watcher handlers
-impl axum::extract::FromRef<AppState> for (Arc<SessionManager>, Arc<FileWatcherState>) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.manager.clone(), state.file_watcher.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for MonitorState {
-    fn from_ref(state: &AppState) -> Self {
-        state.monitor.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<NotificationBroadcast> {
-    fn from_ref(state: &AppState) -> Self {
-        state.notifier.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for (Arc<NotificationBroadcast>, Arc<SessionManager>) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.notifier.clone(), state.manager.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for HistoryState {
-    fn from_ref(state: &AppState) -> Self {
-        state.history.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for PluginManagerState {
-    fn from_ref(state: &AppState) -> Self {
-        state.plugins.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for plugin::SubscriptionRegistry {
-    fn from_ref(state: &AppState) -> Self {
-        state.subscriptions.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for (PluginManagerState, plugin::SubscriptionRegistry) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.plugins.clone(), state.subscriptions.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for (PluginManagerState, SettingsState, plugin::SubscriptionRegistry)
-{
-    fn from_ref(state: &AppState) -> Self {
-        (state.plugins.clone(), state.settings.clone(), state.subscriptions.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for (PluginManagerState, Arc<SessionManager>) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.plugins.clone(), state.manager.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for (PluginManagerState, Arc<SessionManager>, workspace_mgmt::WorkspacesState)
-{
-    fn from_ref(state: &AppState) -> Self {
-        (state.plugins.clone(), state.manager.clone(), state.workspaces.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for token::TokenState {
-    fn from_ref(state: &AppState) -> Self {
-        state.tokens.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for audit::AuditState {
-    fn from_ref(state: &AppState) -> Self {
-        state.audit.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for agent::AgentState {
-    fn from_ref(state: &AppState) -> Self {
-        state.agent.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for mcp::transport::McpState {
-    fn from_ref(state: &AppState) -> Self {
-        state.mcp.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<mcp::transport::SseState> {
-    fn from_ref(state: &AppState) -> Self {
-        state.mcp_sse.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<SessionStore> {
-    fn from_ref(state: &AppState) -> Self {
-        state.sessions.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for Arc<tokio::sync::RwLock<String>> {
-    fn from_ref(state: &AppState) -> Self {
-        state.auth_token.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for clipboard::ClipboardState {
-    fn from_ref(state: &AppState) -> Self {
-        clipboard::ClipboardState::new(state.auth_token.clone(), state.sessions.clone(), state.port)
-    }
-}
-
-impl axum::extract::FromRef<AppState> for workspace_mgmt::WorkspacesState {
-    fn from_ref(state: &AppState) -> Self {
-        state.workspaces.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState> for mission_control::MissionControlState {
-    fn from_ref(state: &AppState) -> Self {
-        state.mc.clone()
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for (mission_control::MissionControlState, Arc<SessionManager>, workspace_mgmt::WorkspacesState)
-{
-    fn from_ref(state: &AppState) -> Self {
-        (state.mc.clone(), state.manager.clone(), state.workspaces.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for (workspace_mgmt::WorkspacesState, Arc<SessionManager>) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.workspaces.clone(), state.manager.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for (workspace_mgmt::WorkspacesState, Arc<SessionManager>, SettingsState)
-{
-    fn from_ref(state: &AppState) -> Self {
-        (state.workspaces.clone(), state.manager.clone(), state.settings.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for (workspace_mgmt::WorkspacesState, SettingsState, Arc<SessionManager>)
-{
-    fn from_ref(state: &AppState) -> Self {
-        (state.workspaces.clone(), state.settings.clone(), state.manager.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState> for (SettingsState, Arc<SessionManager>) {
-    fn from_ref(state: &AppState) -> Self {
-        (state.settings.clone(), state.manager.clone())
-    }
-}
-
-impl axum::extract::FromRef<AppState>
-    for (Arc<SessionManager>, workspace_mgmt::WorkspacesState, SettingsState)
-{
-    fn from_ref(state: &AppState) -> Self {
-        (state.manager.clone(), state.workspaces.clone(), state.settings.clone())
     }
 }
 
@@ -421,532 +207,6 @@ async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
     }))
 }
 
-#[derive(serde::Deserialize)]
-struct UpdateTokenRequest {
-    token: String,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum LoginBody {
-    Token { token: String },
-    Code { request_id: String, code: String },
-}
-
-fn build_session_cookie(session_id: &str, ttl_days: u64, port: u16) -> String {
-    let max_age = ttl_days * 86_400;
-    format!(
-        "{name}={value}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}",
-        name = auth::session_cookie_name(port),
-        value = session_id,
-    )
-}
-
-fn clear_session_cookie(port: u16) -> String {
-    format!(
-        "{name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
-        name = auth::session_cookie_name(port)
-    )
-}
-
-/// Login endpoint. Dispatches to either token login or verification-code login
-/// based on the `login_method` setting. The two modes are mutually exclusive:
-/// `login_method=token` rejects `{request_id, code}` bodies; `verification_code`
-/// rejects `{token}`. Brute-force lockout is enforced here (the middleware
-/// exempts /api/auth).
-async fn login(
-    State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: axum::http::HeaderMap,
-    Json(body): Json<LoginBody>,
-) -> impl IntoResponse {
-    let stored = state.auth_token.read().await.clone();
-    if stored.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "no token configured"})),
-        )
-            .into_response();
-    }
-
-    let (
-        real_ip,
-        lockout_strategy,
-        max_failures,
-        lockout_secs,
-        global_max_failures,
-        global_lockout_secs,
-        login_method,
-    ) = {
-        let s = state.settings.read().await;
-        (
-            auth::real_client_ip(&headers, addr.ip(), &s.auth.trusted_proxies),
-            s.auth.lockout_strategy.clone(),
-            s.auth.lockout_max_failures,
-            s.auth.lockout_secs,
-            s.auth.global_lockout_max_failures,
-            s.auth.global_lockout_secs,
-            s.auth.login_method.clone(),
-        )
-    };
-
-    // Brute-force lockout check before credential validation. The login
-    // endpoint is exempt from the middleware's check (so unauthenticated
-    // users can reach it), so we must enforce it here.
-    if let Some(retry_after) = auth::check_lockout(
-        real_ip,
-        &lockout_strategy,
-        max_failures,
-        lockout_secs,
-        global_max_failures,
-        global_lockout_secs,
-    ) {
-        let attempt_count = auth::get_fail_count(real_ip);
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        state.manager.event_bus.publish(BusEvent::AuthLoginFailed {
-            ip: real_ip.to_string(),
-            reason: "locked_out".into(),
-            attempt_count,
-            locked_until: Some(now.saturating_add(retry_after)),
-        });
-        let () = state.audit.record(
-            "anonymous",
-            "login_failed",
-            "auth",
-            serde_json::json!({
-                "ip": real_ip.to_string(),
-                "reason": "locked_out",
-                "attempt_count": attempt_count,
-            }),
-        );
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [
-                (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
-                (header::RETRY_AFTER, HeaderValue::from_str(&retry_after.to_string()).unwrap()),
-            ],
-            Json(serde_json::json!({"error": "too many failed attempts, please try again later"})),
-        )
-            .into_response();
-    }
-
-    // Reject empty payloads early so we return 400 (bad request) rather than
-    // 401 (login method mismatch) for malformed submissions.
-    match &body {
-        LoginBody::Token { token } if token.trim().is_empty() => {
-            return (
-                StatusCode::BAD_REQUEST,
-                [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-                Json(serde_json::json!({"error": "token cannot be empty"})),
-            )
-                .into_response();
-        }
-        LoginBody::Code { request_id, code }
-            if request_id.trim().is_empty() || code.trim().is_empty() =>
-        {
-            return (
-                StatusCode::BAD_REQUEST,
-                [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-                Json(serde_json::json!({"error": "request_id and code are required"})),
-            )
-                .into_response();
-        }
-        _ => {}
-    }
-
-    match (login_method.as_str(), body) {
-        ("token", LoginBody::Token { token }) => {
-            handle_token_login(&state, real_ip, &headers, &token, &stored, global_lockout_secs)
-                .await
-        }
-        ("verification_code", LoginBody::Code { request_id, code }) => {
-            handle_code_login(&state, real_ip, &headers, request_id, code).await
-        }
-        (_, _) => {
-            // Cross-case: login_method does not match the body shape. Account as
-            // a brute-force attempt to discourage probing.
-            let attempt_count = auth::record_auth_failure(real_ip, global_lockout_secs);
-            state.manager.event_bus.publish(BusEvent::AuthLoginFailed {
-                ip: real_ip.to_string(),
-                reason: "wrong_login_method".into(),
-                attempt_count,
-                locked_until: None,
-            });
-            let () = state.audit.record(
-                "anonymous",
-                "login_failed",
-                "auth",
-                serde_json::json!({
-                    "ip": real_ip.to_string(),
-                    "reason": "wrong_login_method",
-                    "attempt_count": attempt_count,
-                }),
-            );
-            (
-                StatusCode::UNAUTHORIZED,
-                [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-                Json(serde_json::json!({"error": "login method mismatch"})),
-            )
-                .into_response()
-        }
-    }
-}
-
-/// Build the success response (session cookie + audit + 200 body) shared by
-/// token and code login paths.
-async fn create_session_response(
-    state: &AppState,
-    real_ip: IpAddr,
-    headers: &axum::http::HeaderMap,
-) -> axum::response::Response {
-    let ua = headers
-        .get(header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())
-        .map(std::string::ToString::to_string);
-    let session_id = state.sessions.create(Some(real_ip), ua);
-    let ttl_days = {
-        let s = state.settings.read().await;
-        s.auth.session_ttl_days
-    };
-    let cookie = build_session_cookie(&session_id, ttl_days, state.port);
-    let () = state.audit.record(
-        &session_id,
-        "login",
-        "session",
-        serde_json::json!({ "ip": real_ip.to_string() }),
-    );
-    (
-        StatusCode::OK,
-        [
-            (header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap()),
-            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
-        ],
-        Json(serde_json::json!({"ok": true})),
-    )
-        .into_response()
-}
-
-/// Token login: constant-time compare the posted token against the stored
-/// master token. Records a brute-force attempt on mismatch.
-async fn handle_token_login(
-    state: &AppState,
-    real_ip: IpAddr,
-    headers: &axum::http::HeaderMap,
-    token: &str,
-    stored: &str,
-    global_lockout_secs: u64,
-) -> axum::response::Response {
-    if !auth::constant_time_eq(token.trim(), stored) {
-        let attempt_count = auth::record_auth_failure(real_ip, global_lockout_secs);
-        state.manager.event_bus.publish(BusEvent::AuthLoginFailed {
-            ip: real_ip.to_string(),
-            reason: "token_mismatch".into(),
-            attempt_count,
-            locked_until: None,
-        });
-        let () = state.audit.record(
-            "anonymous",
-            "login_failed",
-            "auth",
-            serde_json::json!({
-                "ip": real_ip.to_string(),
-                "reason": "token_mismatch",
-                "attempt_count": attempt_count,
-            }),
-        );
-        return (
-            StatusCode::UNAUTHORIZED,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "unauthorized"})),
-        )
-            .into_response();
-    }
-    create_session_response(state, real_ip, headers).await
-}
-
-/// Verification-code login: delegate to `CodeStore::verify`. Per-request
-/// attempt counting is handled inside `CodeEntry`; we do NOT call
-/// `record_auth_failure` here, since the rate limit / attempt cap on the code
-/// itself is the relevant gate (code is bound to `request_id`, not IP).
-async fn handle_code_login(
-    state: &AppState,
-    real_ip: IpAddr,
-    headers: &axum::http::HeaderMap,
-    request_id: String,
-    code: String,
-) -> axum::response::Response {
-    let outcome = state.code_store.verify(&request_id, &code);
-    match outcome {
-        crate::auth::verification_code::VerifyOutcome::Ok => {
-            let ua = headers
-                .get(header::USER_AGENT)
-                .and_then(|v| v.to_str().ok())
-                .map(std::string::ToString::to_string);
-            let occurred_at: u64 = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-                .try_into()
-                .unwrap_or_default();
-            state.manager.event_bus.publish(BusEvent::VerificationCodeConsumed {
-                request_id: request_id.clone(),
-                ip: real_ip.to_string(),
-                user_agent: ua,
-                occurred_at,
-            });
-            let () = state.audit.record(
-                "anonymous",
-                "login",
-                "verification_code",
-                serde_json::json!({
-                    "request_id": request_id,
-                    "ip": real_ip.to_string(),
-                }),
-            );
-            create_session_response(state, real_ip, headers).await
-        }
-        crate::auth::verification_code::VerifyOutcome::NotFound => (
-            StatusCode::UNAUTHORIZED,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "code not found"})),
-        )
-            .into_response(),
-        crate::auth::verification_code::VerifyOutcome::Expired => (
-            StatusCode::UNAUTHORIZED,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "code expired"})),
-        )
-            .into_response(),
-        crate::auth::verification_code::VerifyOutcome::Consumed => (
-            StatusCode::UNAUTHORIZED,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "code already used"})),
-        )
-            .into_response(),
-        crate::auth::verification_code::VerifyOutcome::TooManyAttempts => (
-            StatusCode::UNAUTHORIZED,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "too many attempts"})),
-        )
-            .into_response(),
-        crate::auth::verification_code::VerifyOutcome::Mismatch => (
-            StatusCode::UNAUTHORIZED,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "code mismatch"})),
-        )
-            .into_response(),
-    }
-}
-
-/// Request a verification code. Public endpoint (exempt from auth middleware
-/// alongside /api/auth). Generates a 6-digit code, emits `auth.verification_code`
-/// event so subscribers (e.g. feishu-notify) can push it to the user, and
-/// returns only the `request_id` (never the code itself).
-async fn request_code(
-    State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: axum::http::HeaderMap,
-) -> impl IntoResponse {
-    let real_ip = {
-        let s = state.settings.read().await;
-        auth::real_client_ip(&headers, addr.ip(), &s.auth.trusted_proxies)
-    };
-
-    let Ok((request_id, code)) = state.code_store.create(real_ip) else {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-            Json(serde_json::json!({"error": "rate limited, try again later"})),
-        )
-            .into_response();
-    };
-
-    let occurred_at: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or_default();
-
-    state.manager.event_bus.publish(BusEvent::VerificationCode {
-        request_id: request_id.clone(),
-        code,
-        occurred_at,
-    });
-
-    let () = state.audit.record(
-        "anonymous",
-        "request_verification_code",
-        "auth",
-        serde_json::json!({ "ip": real_ip.to_string() }),
-    );
-
-    (
-        StatusCode::OK,
-        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
-        Json(serde_json::json!({"request_id": request_id})),
-    )
-        .into_response()
-}
-
-async fn logout(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> impl IntoResponse {
-    // Best-effort: extract session id from Cookie header and revoke it.
-    if let Some(cookie_hdr) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
-        for pair in cookie_hdr.split(';') {
-            let pair = pair.trim();
-            let cookie_prefix = format!("{}=", auth::session_cookie_name(state.port));
-            if let Some(rest) = pair.strip_prefix(&cookie_prefix) {
-                let sid = rest.to_string();
-                let () = state.audit.record(&sid, "logout", "session", serde_json::json!({}));
-                let _ = state.sessions.revoke(&sid);
-                break;
-            }
-        }
-    }
-    (
-        StatusCode::OK,
-        [
-            (header::SET_COOKIE, HeaderValue::from_str(&clear_session_cookie(state.port)).unwrap()),
-            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
-        ],
-        Json(serde_json::json!({"ok": true})),
-    )
-}
-
-async fn put_settings_with_session_ttl(
-    State(state): State<AppState>,
-    body: axum::extract::Json<settings::Settings>,
-) -> impl IntoResponse {
-    let new_ttl = body.auth.session_ttl_days;
-    let status =
-        settings::put_settings(State((state.manager.clone(), state.settings.clone())), body).await;
-    state.sessions.update_ttl_days(new_ttl);
-    status
-}
-
-async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
-    let sessions = state.sessions.list();
-    Json(serde_json::json!({ "sessions": sessions }))
-}
-
-#[derive(serde::Deserialize)]
-struct RevokeSessionPath {
-    id: String,
-}
-
-async fn revoke_session(
-    State(state): State<AppState>,
-    Path(path): Path<RevokeSessionPath>,
-) -> impl IntoResponse {
-    let ok = state.sessions.revoke(&path.id);
-    let () = state.audit.record(&path.id, "revoke", "session", serde_json::json!({ "by": "user" }));
-    Json(serde_json::json!({ "ok": ok }))
-}
-
-async fn revoke_other_sessions(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> impl IntoResponse {
-    // Preserve the caller's session by extracting it from the cookie.
-    let current = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|raw| {
-        for pair in raw.split(';') {
-            let pair = pair.trim();
-            let cookie_prefix = format!("{}=", auth::session_cookie_name(state.port));
-            if let Some(rest) = pair.strip_prefix(&cookie_prefix) {
-                return Some(rest.to_string());
-            }
-        }
-        None
-    });
-    match current {
-        Some(ref sid) => state.sessions.revoke_all_except(sid),
-        None => state.sessions.revoke_all(),
-    }
-    Json(serde_json::json!({ "ok": true }))
-}
-
-async fn check_auth(State(_state): State<AppState>) -> impl IntoResponse {
-    // Legacy endpoint kept for backward compat - returns 200 if middleware passed.
-    StatusCode::OK
-}
-
-async fn get_token(State(state): State<AppState>) -> impl IntoResponse {
-    let token = state.auth_token.read().await;
-    Json(serde_json::json!({ "token": *token }))
-}
-
-async fn token_configured(State(state): State<AppState>) -> impl IntoResponse {
-    let token = state.auth_token.read().await;
-    let login_method = {
-        let s = state.settings.read().await;
-        s.auth.login_method.clone()
-    };
-    Json(serde_json::json!({
-        "configured": !token.is_empty(),
-        "server_mode": cfg!(feature = "server"),
-        "login_method": login_method,
-    }))
-}
-
-async fn auto_token(
-    State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-) -> impl IntoResponse {
-    if cfg!(feature = "server") {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "not available"})))
-            .into_response();
-    }
-    if !addr.ip().is_loopback() {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "auto-token is only available from localhost"})),
-        )
-            .into_response();
-    }
-    let token = state.auth_token.read().await;
-    if token.is_empty() {
-        return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "no token"})))
-            .into_response();
-    }
-    Json(serde_json::json!({ "token": *token })).into_response()
-}
-
-async fn update_token(
-    State(state): State<AppState>,
-    Json(body): Json<UpdateTokenRequest>,
-) -> impl IntoResponse {
-    let new_token = body.token.trim().to_string();
-    if new_token.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "token cannot be empty"})),
-        )
-            .into_response();
-    }
-    // Update in-memory token
-    *state.auth_token.write().await = new_token.clone();
-    // Persist to dedicated token file
-    if let Err(e) = settings::save_token(&new_token) {
-        tracing::error!("Failed to persist token: {}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "failed to save"})),
-        )
-            .into_response();
-    }
-    // Revoke all existing sessions: they were authenticated against the old
-    // token; if it was compromised, all sessions must be invalidated.
-    state.sessions.revoke_all();
-    StatusCode::OK.into_response()
-}
-
 #[tokio::main]
 async fn main() {
     let _guard = settings::init_logging();
@@ -967,6 +227,24 @@ async fn main() {
     ));
     let settings_state = settings::create_settings_state();
     notifier.set_settings(settings_state.clone());
+
+    // Restore tabs/panes from the last session (if enabled in settings).
+    // Done before `start_cleanup_task` so the reaper never sees restoring
+    // sessions as unowned (it has a 60s grace anyway, but this is cleaner).
+    {
+        let restore_enabled = settings_state.read().await.restore_session_on_startup;
+        if restore_enabled {
+            let snapshot = session::SessionSnapshotStore::new().load();
+            if !snapshot.tabs.is_empty() {
+                tracing::info!("Restoring session: {} tabs in snapshot", snapshot.tabs.len());
+                session::restore_session(&manager, &snapshot).await;
+            }
+        }
+    }
+    // Start the snapshot debounce task after restore so restore-time layout
+    // commits don't trigger a redundant write.
+    manager.start_snapshot_task();
+
     manager.register_notifier(Arc::clone(&notifier));
     manager.start_cleanup_task();
     manager.start_event_bridge();
@@ -1038,6 +316,12 @@ async fn main() {
     let mcp_sse = Arc::new(mcp::transport::SseState::new());
     let workspaces_state = workspace_mgmt::create_workspaces_state();
     let mc_state = mission_control::create_mission_control_state();
+    // Sync MC's selected_workspace_id to active_workspace_id so the overview
+    // highlights the workspace the user is landing in.
+    {
+        let active_ws = settings_state.read().await.active_workspace_id.clone();
+        mc_state.write().await.selected_workspace_id = active_ws;
+    }
 
     let session_ttl_days = settings::load_settings().auth.session_ttl_days;
     let sessions = Arc::new(SessionStore::new(session_ttl_days));
@@ -1052,8 +336,9 @@ async fn main() {
 
     let file_watcher_event_bus = manager.event_bus.clone();
     let state = AppState {
-        manager,
+        manager: Arc::clone(&manager),
         settings: settings_state,
+        shell_probe: Arc::new(dinotty_server::platform::shell_probe::ShellProbeService::new()),
         file_watcher: Arc::new(FileWatcherState::new(file_watcher_event_bus)),
         monitor: monitor_state,
         notifier,
@@ -1073,6 +358,7 @@ async fn main() {
         sessions,
         code_store,
         subscriptions: plugin::SubscriptionRegistry::new(),
+        update_checker: update_check::UpdateChecker::new(),
     };
 
     state.plugins.watch_changes(state.manager.clone());
@@ -1083,10 +369,11 @@ async fn main() {
             .route("/ws", get(ws::ws_handler))
             .route("/ws/sync", get(ws::sync_handler))
             .route("/ws/watch", get(file_watcher::watch_handler))
+            .route("/ws/plugins/:id/workspace/watch", get(plugin::plugin_workspace_watch))
             .route("/api/notify", post(notification::post_notify))
             .route("/api/events/emit", post(events::emit_event))
             .route("/api/input", post(ws::post_input))
-            // Open API
+            // Open API - public endpoints (session cookie / global Bearer via outer auth_middleware)
             .route("/api/sessions", get(openapi::list_sessions))
             .route("/api/sessions/:pane_id/screen", get(openapi::get_screen))
             .route("/api/sessions/:pane_id/scrollback", get(openapi::get_scrollback))
@@ -1118,6 +405,7 @@ async fn main() {
             .route("/api/token-configured", get(token_configured))
             .route("/api/auto-token", get(auto_token))
             .route("/api/settings", get(settings::get_settings).put(put_settings_with_session_ttl))
+            .route("/api/shells", get(dinotty_server::api::shells::get_shells))
             .route("/api/clipboard", get(clipboard::get_clipboard))
             .route(
                 "/api/settings/background",
@@ -1184,6 +472,7 @@ async fn main() {
             .route("/api/history", get(history::get_history).delete(history::delete_history))
             .route("/api/proxy", any(proxy::external_proxy_handler))
             .route("/api/info", get(server_info))
+            .route("/api/update-check", get(update_check::get_update_status))
             .route("/api/token", get(get_token).put(update_token))
             // Plugin management
             .route("/api/plugins", get(plugin::list_plugins))
@@ -1219,14 +508,24 @@ async fn main() {
             .route("/api/plugins/:id/events/subscribe", post(plugin::subscribe))
             .route("/api/plugins/:id/events/unsubscribe", post(plugin::unsubscribe))
             .route("/api/plugins/events/has-subscriber", get(plugin::has_subscriber))
+            .route("/api/plugins/:id/workspace/readDir", get(plugin::plugin_workspace_read_dir))
+            .route("/api/plugins/:id/workspace/readFile", get(plugin::plugin_workspace_read_file))
+            .route("/api/plugins/:id/workspace/file", put(plugin::plugin_workspace_put_file))
+            .route("/api/plugins/:id/workspace/stat", get(plugin::plugin_workspace_stat))
+            .route("/api/plugins/:id/workspace/mkdir", post(plugin::plugin_workspace_mkdir))
+            .route("/api/plugins/:id/workspace/delete", delete(plugin::plugin_workspace_delete))
+            .route("/api/plugins/:id/workspace/rename", post(plugin::plugin_workspace_rename))
+            .route("/api/plugins/:id/workspace/move", post(plugin::plugin_workspace_move))
             .route("/api/plugins/:id/*path", get(plugin::plugin_asset))
-            // Agent API + Token management + MCP — protected by agent token middleware
+            // Sessions extended API (run/send/read/events) + Token management + MCP
+            // - dual-track auth via sessions_token_middleware
+            //   (session cookie / global Bearer -> TokenInfo::global(); agent Bearer -> capability check)
             .merge(
                 Router::new()
-                    .route("/api/agent/run", post(agent::agent_run))
-                    .route("/api/agent/send", post(agent::agent_send))
-                    .route("/api/agent/read", get(agent::agent_read))
-                    .route("/ws/agent", get(agent::agent_ws_handler))
+                    .route("/api/sessions/:pane_id/run", post(agent::sessions_run))
+                    .route("/api/sessions/:pane_id/send", post(agent::sessions_send))
+                    .route("/api/sessions/:pane_id/read", get(agent::sessions_read))
+                    .route("/ws/events", get(agent::events_ws_handler))
                     .route("/api/tokens", post(token::create_token).get(token::list_tokens))
                     .route(
                         "/api/tokens/:id",
@@ -1237,11 +536,11 @@ async fn main() {
                     .route("/mcp/sse", get(mcp::transport::mcp_sse_handler))
                     .route("/mcp/message", post(mcp::transport::mcp_message_handler))
                     .layer(middleware::from_fn_with_state(
-                        token::AgentAuthState {
+                        token::SessionsAuthState {
                             global_token: auth_token.clone(),
                             tokens: state.tokens.clone(),
                         },
-                        token::agent_token_middleware,
+                        token::sessions_token_middleware,
                     )),
             )
             .route("/preview/:port", any(proxy::proxy_handler_root))
@@ -1292,11 +591,15 @@ async fn main() {
     tracing::info!("Listening on http://0.0.0.0:{}", port);
 
     notify_manager.set_notify_port(port);
+    let shutdown_manager = Arc::clone(&manager);
     let shutdown_plugins = Arc::clone(&plugins);
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             shutdown_plugins.shutdown_all().await;
+            // Sync-flush the session snapshot so the most recent layout is
+            // persisted without waiting for the 1s debounce window.
+            shutdown_manager.flush_snapshot_sync();
         })
         .await
         .unwrap();

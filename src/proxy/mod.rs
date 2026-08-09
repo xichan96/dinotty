@@ -90,8 +90,12 @@ fn is_valid_proxy_host(host: &str) -> bool {
 }
 
 /// Auth check for `/preview/*` requests.
-/// - `allow_external = false`: only loopback IPs allowed.
-/// - `allow_external = true`: any IP, but must have a valid session cookie or Bearer token.
+/// - Loopback IPs are always trusted (matches the main auth middleware's IP
+///   whitelist behavior: localhost users who bypass login still get preview
+///   access).
+/// - Non-loopback IPs:
+///   - `allow_external = false`: forbidden.
+///   - `allow_external = true`: must have a valid session cookie or Bearer token.
 ///
 /// Returns `Some(Response)` if the request should be rejected, `None` to proceed.
 fn check_preview_auth(
@@ -101,7 +105,10 @@ fn check_preview_auth(
     sessions: &SessionStore,
     token: &str,
 ) -> Option<Response> {
-    if !allow_external && !real_ip.is_loopback() {
+    if real_ip.is_loopback() {
+        return None;
+    }
+    if !allow_external {
         return Some(
             Response::builder()
                 .status(StatusCode::FORBIDDEN)
@@ -109,7 +116,7 @@ fn check_preview_auth(
                 .unwrap(),
         );
     }
-    if allow_external && !crate::auth::has_valid_auth(req, sessions, token) {
+    if !crate::auth::has_valid_auth(req, sessions, token) {
         return Some(
             Response::builder()
                 .status(StatusCode::UNAUTHORIZED)

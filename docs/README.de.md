@@ -19,7 +19,9 @@
 
 ---
 
-**Multi-Gerät** Terminalserver, speziell für **Coding-Agenten** gebaut. Starte Claude Code, opencode, Codex oder OpenClaw auf jedem Gerät - Desktop-Erlebnis auf dem Laptop, immer in der Tasche auf dem Handy. Wechsel nahtlos, verliere nie eine Session.
+Ein Terminal für Coding-Agenten.
+
+Claude Code, opencode, Codex oder OpenClaw auf jedem Gerät -- schlicht, erweiterbar, geräteübergreifend, verliert nie eine Session.
 
 ## Screenshots
 
@@ -246,7 +248,6 @@ cargo run
 - [Benachrichtigungssystem](features/notifications.en.md) - HTTP API, Claude Code-Integration, Open API
 - [Plugin-System](plugins/plugins.en.md) - Installation, Manifest, API, eingebaute Plugins
 - [Plugin-Entwicklung](plugins/plugin-development.md) - vollständiger Plugin-Entwicklungs-Guide
-- [Agent API](api/agent-api.md) - strukturierte HTTP/WebSocket-Interaktion für AI-Agenten und Automatisierungs-Skripte
 - [Host-Zwischenablage-API](api/clipboard-api.md) - sensibler authentifizierter Endpoint für Mobile-Host-Paste
 - [MCP Server](api/mcp-server.md) - eingebauter MCP JSON-RPC-Server für AI-Assistenten zum Operieren von Terminal-Sessions
 - [Token-Berechtigungssystem](internals/token-system.md) - Capability-basierte Multi-Token-Fine-Grained-Access-Control

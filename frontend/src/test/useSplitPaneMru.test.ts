@@ -46,6 +46,7 @@ function layout(...ids: string[]): PaneLayout {
 }
 
 function setup() {
+  const showSplitTerminalError = vi.fn()
   const tab: TerminalTab = {
     type: 'terminal',
     paneId: 'tab-1',
@@ -54,10 +55,6 @@ function setup() {
     paneMru: ['b', 'a', 'c'],
     broadcastMode: false,
     broadcastActivity: 0,
-    previewVisible: false,
-    previewAddress: '',
-    previewUrl: '',
-    previewKind: 'web',
   }
   const tabs = ref<Tab[]>([tab])
   const termRefs = Object.fromEntries(
@@ -74,8 +71,9 @@ function setup() {
     sendSync: vi.fn(),
     sendLayoutSync: vi.fn(),
     persist: vi.fn(),
+    showSplitTerminalError,
   })
-  return { tab, subject, termRefs }
+  return { tab, subject, termRefs, showSplitTerminalError }
 }
 
 describe('useSplitPane MRU', () => {
@@ -91,6 +89,18 @@ describe('useSplitPane MRU', () => {
     await subject.splitPane('horizontal')
     expect(tab.paneMru).toEqual(['d', 'b', 'a', 'c'])
     expect(tab.activePaneId).toBe('d')
+  })
+
+  it('reports a failed split without changing the layout', async () => {
+    const { tab, subject, showSplitTerminalError } = setup()
+    const before = JSON.stringify(tab)
+    const error = new Error('split failed')
+    api.split.mockRejectedValue(error)
+
+    await subject.splitPane('horizontal')
+
+    expect(showSplitTerminalError).toHaveBeenCalledWith(error)
+    expect(JSON.stringify(tab)).toBe(before)
   })
 
   it('moves an existing pane to the MRU head on focus', () => {

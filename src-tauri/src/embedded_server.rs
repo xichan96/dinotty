@@ -27,12 +27,14 @@ use dinotty_server::mission_control;
 use dinotty_server::monitor::MonitorState;
 use dinotty_server::notification::{self, NotificationBroadcast};
 use dinotty_server::platform::process::CommandNoWindowExt;
+use dinotty_server::platform::shell_probe::ShellProbeService;
 use dinotty_server::plugin::{self, PluginManager, PluginManagerState};
 use dinotty_server::proxy;
-use dinotty_server::session::SessionManager;
+use dinotty_server::session::{restore_session, SessionManager, SessionSnapshotStore};
 use dinotty_server::settings;
 use dinotty_server::tabs;
 use dinotty_server::templates;
+use dinotty_server::update_check;
 use dinotty_server::workspace;
 use dinotty_server::workspace_mgmt;
 use dinotty_server::ws;
@@ -51,6 +53,7 @@ pub struct GitInfo {
 pub struct AppState {
     pub manager: Arc<SessionManager>,
     pub settings: settings::SettingsState,
+    pub shell_probe: Arc<ShellProbeService>,
     pub file_watcher: Arc<FileWatcherState>,
     pub monitor: MonitorState,
     pub notifier: Arc<NotificationBroadcast>,
@@ -64,6 +67,7 @@ pub struct AppState {
     pub mc: mission_control::MissionControlState,
     pub subscriptions: plugin::SubscriptionRegistry,
     pub code_store: Arc<CodeStore>,
+    pub update_checker: update_check::UpdateCheckState,
 }
 
 impl axum::extract::FromRef<AppState> for Arc<SessionManager> {
@@ -75,6 +79,12 @@ impl axum::extract::FromRef<AppState> for Arc<SessionManager> {
 impl axum::extract::FromRef<AppState> for settings::SettingsState {
     fn from_ref(state: &AppState) -> Self {
         state.settings.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<ShellProbeService> {
+    fn from_ref(state: &AppState) -> Self {
+        state.shell_probe.clone()
     }
 }
 
@@ -163,6 +173,12 @@ impl axum::extract::FromRef<AppState> for Arc<SessionStore> {
 impl axum::extract::FromRef<AppState> for Arc<tokio::sync::RwLock<String>> {
     fn from_ref(state: &AppState) -> Self {
         state.auth_token.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for update_check::UpdateCheckState {
+    fn from_ref(state: &AppState) -> Self {
+        state.update_checker.clone()
     }
 }
 
@@ -731,6 +747,7 @@ impl Drop for PluginProcessGuard {
 pub fn run_server(
     listener: std::net::TcpListener,
     manager: Arc<SessionManager>,
+    shell_probe: Arc<ShellProbeService>,
 ) -> impl std::future::Future<Output = ()> {
     // Guard is created synchronously and moved into the returned future, so notify_port
     // resets to 0 on ANY termination of the future — normal exit, panic, task abort, or a
@@ -760,6 +777,22 @@ pub fn run_server(
         ));
         let settings_state = settings::create_settings_state();
         notifier.set_settings(settings_state.clone());
+        // Restore tabs/panes from the last session (if enabled in settings).
+        // Done before `start_cleanup_task` so the reaper never sees restoring
+        // sessions as unowned (mirrors src/main.rs server wiring).
+        {
+            let restore_enabled = settings_state.read().await.restore_session_on_startup;
+            if restore_enabled {
+                let snapshot = SessionSnapshotStore::new().load();
+                if !snapshot.tabs.is_empty() {
+                    tracing::info!("Restoring session: {} tabs in snapshot", snapshot.tabs.len());
+                    restore_session(&manager, &snapshot).await;
+                }
+            }
+        }
+        // Start the snapshot debounce task after restore so restore-time layout
+        // commits don't trigger a redundant write.
+        manager.start_snapshot_task();
         // Registering the notifier is independent of starting the reaper: a bind failure or
         // startup-ordering issue here must never suppress the detached-session reaper itself
         // (mirrors src/main.rs server wiring).
@@ -808,6 +841,14 @@ pub fn run_server(
 
         let workspaces_state = workspace_mgmt::create_workspaces_state();
         let mc_state = mission_control::create_mission_control_state();
+        // Sync MC's selected_workspace_id to active_workspace_id so the
+        // overview highlights the workspace the user is landing in (otherwise
+        // MC opens with nothing selected, even though the workspace view
+        // correctly shows the restored workspace's tabs).
+        {
+            let active_ws = settings_state.read().await.active_workspace_id.clone();
+            mc_state.write().await.selected_workspace_id = active_ws;
+        }
 
         let (verification_code_ttl, verification_code_rate_limit) = {
             let s = settings::load_settings();
@@ -820,6 +861,7 @@ pub fn run_server(
         let state = AppState {
             manager: manager.clone(),
             settings: settings_state,
+            shell_probe,
             file_watcher: Arc::new(FileWatcherState::new(manager.event_bus.clone())),
             monitor: monitor_state,
             notifier,
@@ -833,6 +875,7 @@ pub fn run_server(
             mc: mc_state,
             subscriptions: plugin::SubscriptionRegistry::new(),
             code_store,
+            update_checker: update_check::UpdateChecker::new(),
         };
 
         state.plugins.watch_changes(manager);
@@ -859,6 +902,7 @@ pub fn run_server(
             .route("/api/tabs/:tab_id/layout", put(tabs::update_layout))
             .route("/api/input", post(ws::post_input))
             .route("/api/settings", get(settings::get_settings).put(settings::put_settings))
+            .route("/api/shells", get(dinotty_server::api::shells::get_shells))
             .route("/api/clipboard", get(clipboard::get_clipboard))
             .route(
                 "/api/settings/background",
@@ -918,6 +962,7 @@ pub fn run_server(
             .route("/api/events/emit", post(events::emit_event))
             .route("/api/history", get(history::get_history).delete(history::delete_history))
             .route("/api/info", get(server_info))
+            .route("/api/update-check", get(update_check::get_update_status))
             .route("/api/auth", post(check_auth))
             .route("/api/auth/request-code", post(request_code))
             .route("/api/auth/check", get(check_auth_session))

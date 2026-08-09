@@ -33,20 +33,20 @@ async function initializeTauriForeground() {
       setForeground(payload)
     })
     const initiallyFocused = await appWindow.isFocused()
-    if (!focusEventApplied) setForeground(initiallyFocused)
+    if (!focusEventApplied) setForeground(initiallyFocused || readWebForeground())
   } catch {
-    setForeground(false)
+    refreshWebForeground()
   }
 }
 
-if (isTauri()) {
-  void initializeTauriForeground()
-} else {
-  refreshWebForeground()
-  document.addEventListener('visibilitychange', refreshWebForeground)
-  window.addEventListener('focus', refreshWebForeground)
-  window.addEventListener('blur', refreshWebForeground)
-}
+// DOM focus is available before Tauri's async native focus query settles.
+// Keep it as a fallback so startup notifications are not lost in that gap.
+refreshWebForeground()
+document.addEventListener('visibilitychange', refreshWebForeground)
+window.addEventListener('focus', refreshWebForeground)
+window.addEventListener('blur', refreshWebForeground)
+
+if (isTauri()) void initializeTauriForeground()
 
 export function getIsAppForeground(): boolean {
   return isAppForeground.value

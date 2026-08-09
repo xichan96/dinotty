@@ -1,5 +1,5 @@
 <template>
-  <div class="plugin-view">
+  <div class="plugin-view" :class="plugin ? `plugin-host-${plugin.id}` : ''">
     <template v-if="plugin">
       <component
         v-if="plugin.state === 'active' && plugin.exports?.component && !hasError"

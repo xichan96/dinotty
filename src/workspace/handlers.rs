@@ -578,6 +578,8 @@ pub async fn workspace_cwd(
     let Some(session) = manager.sessions.get(&q.pane_id) else {
         return json_err(StatusCode::NOT_FOUND, "unknown pane");
     };
-    let state = session.cwd_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    Json(serde_json::json!({ "cwd": state.cwd.to_string_lossy() })).into_response()
+    let Some(cwd) = session.cwd_for_workspace() else {
+        return json_err(StatusCode::CONFLICT, "cwd_unavailable_for_backend");
+    };
+    Json(serde_json::json!({ "cwd": cwd.to_string_lossy() })).into_response()
 }

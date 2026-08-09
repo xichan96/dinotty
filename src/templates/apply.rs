@@ -22,10 +22,14 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::platform::shell;
+use crate::platform::{
+    shell::{self, ShellPreference, ShellResolveError, ShellSpec},
+    shell_probe::ShellProbeService,
+};
 use crate::plugin::PluginManagerState;
 use crate::pty;
 use crate::session::{SessionManager, SyncMsg};
+use crate::settings::SettingsState;
 use crate::workspace_mgmt;
 
 use super::store::{StoreError, TemplateStore};
@@ -33,6 +37,39 @@ use super::types::{ApplyTemplateBody, Template, TemplateScope};
 
 fn err_response(status: StatusCode, msg: &str) -> axum::response::Response {
     (status, Json(json!({ "error": msg }))).into_response()
+}
+
+fn shell_err_response(error: &ShellResolveError) -> axum::response::Response {
+    let status = match error.code {
+        "wsl_timeout" | "wsl_list_failed" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::CONFLICT,
+    };
+    (status, Json(json!({ "error": { "code": error.code } }))).into_response()
+}
+
+fn layout_contains_terminal(layout: &Value) -> bool {
+    match layout.get("type").and_then(Value::as_str) {
+        Some("leaf") => {
+            layout.get("kind").and_then(Value::as_str).unwrap_or("terminal") == "terminal"
+        }
+        Some("split") => layout
+            .get("children")
+            .and_then(Value::as_array)
+            .is_some_and(|children| children.iter().any(layout_contains_terminal)),
+        _ => false,
+    }
+}
+
+async fn resolve_shell_for_layout(
+    shell_probe: &ShellProbeService,
+    preference: &ShellPreference,
+    layout: &Value,
+) -> Result<Option<ShellSpec>, ShellResolveError> {
+    if layout_contains_terminal(layout) {
+        shell_probe.resolve(preference).await.map(Some)
+    } else {
+        Ok(None)
+    }
 }
 
 /// Walk the layout tree and prepare every leaf in place:
@@ -47,7 +84,7 @@ fn err_response(status: StatusCode, msg: &str) -> axum::response::Response {
 ///
 /// On any PTY creation failure, returns `Err` and the caller must roll back
 /// the already-created PTY sessions listed in `created_pty_ids`.
-fn prepare_layout(
+fn prepare_layout_with_shell(
     layout: &mut Value,
     manager: &Arc<SessionManager>,
     plugins: &PluginManagerState,
@@ -57,6 +94,7 @@ fn prepare_layout(
     startup_commands: &mut Vec<(String, String)>,
     warnings: &mut Vec<String>,
     workspace: Option<&workspace_mgmt::Workspace>,
+    shell_spec: Option<&ShellSpec>,
 ) -> Result<(), (StatusCode, String)> {
     let Some(node_type) = layout.get("type").and_then(|v| v.as_str()).map(str::to_string) else {
         return Ok(());
@@ -68,7 +106,13 @@ fn prepare_layout(
 
         match kind.as_str() {
             "terminal" => {
-                // Resolve cwd: template-provided > workspace root > home.
+                let Some(shell_spec) = shell_spec else {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "terminal layout is missing a resolved shell".to_string(),
+                    ));
+                };
+                // Preserve a missing CWD so the selected backend can choose its own home.
                 let workspace_path = workspace.map(|ws| PathBuf::from(&ws.path));
                 let cwd = layout.get("cwd").and_then(|v| v.as_str());
                 let cwd_path = match cwd {
@@ -79,7 +123,7 @@ fn prepare_layout(
                     }
                     _ => workspace_path.clone(),
                 };
-                let cwd_path = cwd_path.filter(|p| p.is_dir()).or_else(|| Some(shell::home_dir()));
+                let cwd_path = cwd_path.filter(|p| p.is_dir());
 
                 // Check if this was originally an SSH pane (we can't restore
                 // the connection). Downgrade to a plain terminal with a warning.
@@ -112,9 +156,9 @@ fn prepare_layout(
                     &new_pane_id,
                     Some(new_tab_id),
                     None,
-                    cwd_path,
+                    cwd_path.map(pty::LaunchCwd::Host),
                     None,
-                    None,
+                    Some(shell_spec.clone()),
                 ) {
                     Ok((_session, _shell_type)) => {
                         created_pty_ids.push(new_pane_id.clone());
@@ -192,7 +236,7 @@ fn prepare_layout(
     } else if node_type == "split" {
         if let Some(children) = layout.get_mut("children").and_then(|c| c.as_array_mut()) {
             for child in children {
-                prepare_layout(
+                prepare_layout_with_shell(
                     child,
                     manager,
                     plugins,
@@ -202,6 +246,7 @@ fn prepare_layout(
                     startup_commands,
                     warnings,
                     workspace,
+                    shell_spec,
                 )?;
             }
         }
@@ -234,6 +279,8 @@ pub async fn apply_template(
         Arc<SessionManager>,
         workspace_mgmt::WorkspacesState,
     )>,
+    State(settings): State<SettingsState>,
+    State(shell_probe): State<Arc<ShellProbeService>>,
     Json(req): Json<ApplyTemplateBody>,
 ) -> impl IntoResponse {
     let template = match load_template_any_scope(&req) {
@@ -248,10 +295,23 @@ pub async fn apply_template(
         _ => None,
     };
 
+    let mut layout = template.layout.clone();
     let installed_plugin_ids: HashSet<String> =
         plugins.list().into_iter().map(|p| p.manifest.id).collect();
+    let shell_preference = {
+        let settings = settings.read().await;
+        ShellPreference::new(
+            settings.shell.clone(),
+            settings.shell_path.clone(),
+            settings.wsl_distro.clone(),
+        )
+    };
+    let shell_spec = match resolve_shell_for_layout(&shell_probe, &shell_preference, &layout).await
+    {
+        Ok(spec) => spec,
+        Err(error) => return shell_err_response(&error),
+    };
 
-    let mut layout = template.layout.clone();
     let new_tab_id = Uuid::new_v4().to_string();
     let mut created_pty_ids: Vec<String> = Vec::new();
     let mut startup_commands: Vec<(String, String)> = Vec::new();
@@ -259,7 +319,7 @@ pub async fn apply_template(
 
     // Phase 1: prepare all leaves. On failure, roll back any PTY sessions
     // we already created.
-    if let Err((status, msg)) = prepare_layout(
+    if let Err((status, msg)) = prepare_layout_with_shell(
         &mut layout,
         &manager,
         &plugins,
@@ -269,6 +329,7 @@ pub async fn apply_template(
         &mut startup_commands,
         &mut warnings,
         workspace.as_ref(),
+        shell_spec.as_ref(),
     ) {
         for pane_id in &created_pty_ids {
             manager.kill_and_remove(pane_id);
@@ -286,6 +347,7 @@ pub async fn apply_template(
         collect_first_terminal_cwd(&layout)
     });
     let connection_id = workspace.as_ref().and_then(|ws| ws.connection_id.clone());
+    let workspace_id = workspace.as_ref().map(|ws| ws.id.clone());
 
     manager.insert_tab(
         new_tab_id.clone(),
@@ -303,6 +365,7 @@ pub async fn apply_template(
         layout: Some(layout.clone()),
         cwd: effective_cwd.clone(),
         connection_id: connection_id.clone(),
+        workspace_id: workspace_id.clone(),
     });
     manager.broadcast_sync(&SyncMsg::LayoutUpdated {
         pane_id: new_tab_id.clone(),
@@ -334,8 +397,36 @@ pub async fn apply_template(
         "warnings": warnings,
         "cwd": effective_cwd,
         "connection_id": connection_id,
+        "workspace_id": workspace_id,
     }))
     .into_response()
+}
+
+#[cfg(test)]
+fn prepare_layout(
+    layout: &mut Value,
+    manager: &Arc<SessionManager>,
+    plugins: &PluginManagerState,
+    new_tab_id: &str,
+    installed_plugin_ids: &HashSet<String>,
+    created_pty_ids: &mut Vec<String>,
+    startup_commands: &mut Vec<(String, String)>,
+    warnings: &mut Vec<String>,
+    workspace: Option<&workspace_mgmt::Workspace>,
+) -> Result<(), (StatusCode, String)> {
+    let shell_spec = shell::default_shell();
+    prepare_layout_with_shell(
+        layout,
+        manager,
+        plugins,
+        new_tab_id,
+        installed_plugin_ids,
+        created_pty_ids,
+        startup_commands,
+        warnings,
+        workspace,
+        Some(&shell_spec),
+    )
 }
 
 /// Return the paneId of the first leaf (pre-order traversal) in the tree.
@@ -404,6 +495,48 @@ mod tests {
     fn collect_first_pane_id_empty_tree() {
         let layout = json!({"type": "split", "direction": "horizontal", "children": []});
         assert!(collect_first_pane_id(&layout).is_none());
+    }
+
+    fn missing_custom_shell_preference() -> ShellPreference {
+        let path = std::env::temp_dir()
+            .join(format!("dinotty-missing-shell-{}", Uuid::new_v4()))
+            .join("shell");
+        ShellPreference::new("custom", Some(path.to_string_lossy().into_owned()), None)
+    }
+
+    #[tokio::test]
+    async fn non_terminal_layout_skips_invalid_shell_resolution() {
+        let layout = json!({
+            "type": "split",
+            "direction": "horizontal",
+            "children": [
+                {"type": "leaf", "kind": "plugin", "paneId": "a", "pluginId": "git"},
+                {"type": "leaf", "kind": "web", "paneId": "b", "url": "http://localhost"}
+            ]
+        });
+        let result = resolve_shell_for_layout(
+            &ShellProbeService::default(),
+            &missing_custom_shell_preference(),
+            &layout,
+        )
+        .await
+        .expect("non-terminal layouts must not require a shell");
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn terminal_layout_still_validates_shell_preference() {
+        let layout = json!({"type": "leaf", "kind": "terminal", "paneId": "terminal"});
+        let error = resolve_shell_for_layout(
+            &ShellProbeService::default(),
+            &missing_custom_shell_preference(),
+            &layout,
+        )
+        .await
+        .expect_err("terminal layouts must reject an unavailable shell");
+
+        assert_eq!(error.code, "shell_unavailable");
     }
 
     fn fresh_plugin_manager() -> PluginManagerState {

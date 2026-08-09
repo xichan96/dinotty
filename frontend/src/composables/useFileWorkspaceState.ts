@@ -6,6 +6,7 @@ export interface PersistedFileWorkspaceState {
   activeEditorLeafId: string | null
   childCache: Record<string, DirEntry[]>
   expanded: Set<string>
+  cwdLabel: string
 }
 
 const store = new Map<string, PersistedFileWorkspaceState>()

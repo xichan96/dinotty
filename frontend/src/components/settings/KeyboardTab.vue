@@ -1,5 +1,17 @@
 <template>
   <div>
+    <div class="settings-group mobile-input-settings">
+      <h3 class="settings-group-title">{{ t('settings.keyboard.mobileInputMode.label') }}</h3>
+      <SegmentedControl
+        class="mobile-input-mode-control"
+        data-setting="mobile-input-mode"
+        :model-value="settings.mobile_input_mode ?? ''"
+        :options="mobileInputModeOptions"
+        :aria-label="t('settings.keyboard.mobileInputMode.label')"
+        @update:model-value="onMobileInputModeChange"
+      />
+    </div>
+
     <div class="settings-group">
       <h3 class="settings-group-title">{{ t('keybinding.title') }}</h3>
       <div v-if="isWindowsClient" class="settings-row">
@@ -20,16 +32,46 @@
             class="settings-row kb-shortcut-row"
             :data-kb-id="def.id"
           >
-            <label><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label>
+            <label class="kb-shortcut-label">
+              <span class="kb-icon" aria-hidden="true"
+                ><component :is="def.icon" :size="14"
+              /></span>
+              <span>{{ t(def.titleKey) }}</span>
+            </label>
             <div class="kb-shortcut-ctrl">
               <span v-if="kbRecording !== def.id" class="kb-keys">
-                <kbd v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')" :key="i">{{ k }}</kbd>
+                <kbd
+                  v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')"
+                  :key="i"
+                  >{{ k }}</kbd
+                >
               </span>
               <span v-else class="kb-keys recording">{{ t('keybinding.pressKeys') }}</span>
               <template v-if="!isReadOnly(def.id)">
-                <button v-if="kbRecording !== def.id" class="shortcut-add" data-kb-action="record" @click="startKbRecord(def.id)">{{ t('settings.record') }}</button>
-                <button v-else class="shortcut-add kb-stop" data-kb-action="stop" @click="stopKbRecord()">{{ t('settings.stop') }}</button>
-                <button v-if="settings.keybindings[def.id]" class="shortcut-del" data-kb-action="reset" @click="resetKbBinding(def.id)">{{ t('keybinding.reset') }}</button>
+                <button
+                  v-if="kbRecording !== def.id"
+                  class="shortcut-add"
+                  data-kb-action="record"
+                  @click="startKbRecord(def.id)"
+                >
+                  {{ t('settings.record') }}
+                </button>
+                <button
+                  v-else
+                  class="shortcut-add kb-stop"
+                  data-kb-action="stop"
+                  @click="stopKbRecord()"
+                >
+                  {{ t('settings.stop') }}
+                </button>
+                <button
+                  v-if="settings.keybindings[def.id]"
+                  class="shortcut-del"
+                  data-kb-action="reset"
+                  @click="resetKbBinding(def.id)"
+                >
+                  {{ t('keybinding.reset') }}
+                </button>
               </template>
             </div>
           </div>
@@ -42,16 +84,46 @@
             class="settings-row kb-shortcut-row"
             :data-kb-id="def.id"
           >
-            <label><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label>
+            <label class="kb-shortcut-label">
+              <span class="kb-icon" aria-hidden="true"
+                ><component :is="def.icon" :size="14"
+              /></span>
+              <span>{{ t(def.titleKey) }}</span>
+            </label>
             <div class="kb-shortcut-ctrl">
               <span v-if="kbRecording !== def.id" class="kb-keys">
-                <kbd v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')" :key="i">{{ k }}</kbd>
+                <kbd
+                  v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')"
+                  :key="i"
+                  >{{ k }}</kbd
+                >
               </span>
               <span v-else class="kb-keys recording">{{ t('keybinding.pressKeys') }}</span>
               <template v-if="!isReadOnly(def.id)">
-                <button v-if="kbRecording !== def.id" class="shortcut-add" data-kb-action="record" @click="startKbRecord(def.id)">{{ t('settings.record') }}</button>
-                <button v-else class="shortcut-add kb-stop" data-kb-action="stop" @click="stopKbRecord()">{{ t('settings.stop') }}</button>
-                <button v-if="settings.keybindings[def.id]" class="shortcut-del" data-kb-action="reset" @click="resetKbBinding(def.id)">{{ t('keybinding.reset') }}</button>
+                <button
+                  v-if="kbRecording !== def.id"
+                  class="shortcut-add"
+                  data-kb-action="record"
+                  @click="startKbRecord(def.id)"
+                >
+                  {{ t('settings.record') }}
+                </button>
+                <button
+                  v-else
+                  class="shortcut-add kb-stop"
+                  data-kb-action="stop"
+                  @click="stopKbRecord()"
+                >
+                  {{ t('settings.stop') }}
+                </button>
+                <button
+                  v-if="settings.keybindings[def.id]"
+                  class="shortcut-del"
+                  data-kb-action="reset"
+                  @click="resetKbBinding(def.id)"
+                >
+                  {{ t('keybinding.reset') }}
+                </button>
               </template>
             </div>
           </div>
@@ -59,20 +131,47 @@
 
         <CollapsibleSection :title="t('keybinding.group.nav')" level="section" default-open>
           <template v-for="def in navDefs" :key="def.id">
-            <div
-              class="settings-row kb-shortcut-row"
-              :data-kb-id="def.id"
-            >
-              <label><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label>
+            <div class="settings-row kb-shortcut-row" :data-kb-id="def.id">
+              <label class="kb-shortcut-label">
+                <span class="kb-icon" aria-hidden="true"
+                  ><component :is="def.icon" :size="14"
+                /></span>
+                <span>{{ t(def.titleKey) }}</span>
+              </label>
               <div class="kb-shortcut-ctrl">
                 <span v-if="kbRecording !== def.id" class="kb-keys">
-                  <kbd v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')" :key="i">{{ k }}</kbd>
+                  <kbd
+                    v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')"
+                    :key="i"
+                    >{{ k }}</kbd
+                  >
                 </span>
                 <span v-else class="kb-keys recording">{{ t('keybinding.pressKeys') }}</span>
                 <template v-if="!isReadOnly(def.id)">
-                  <button v-if="kbRecording !== def.id" class="shortcut-add" data-kb-action="record" @click="startKbRecord(def.id)">{{ t('settings.record') }}</button>
-                  <button v-else class="shortcut-add kb-stop" data-kb-action="stop" @click="stopKbRecord()">{{ t('settings.stop') }}</button>
-                  <button v-if="settings.keybindings[def.id]" class="shortcut-del" data-kb-action="reset" @click="resetKbBinding(def.id)">{{ t('keybinding.reset') }}</button>
+                  <button
+                    v-if="kbRecording !== def.id"
+                    class="shortcut-add"
+                    data-kb-action="record"
+                    @click="startKbRecord(def.id)"
+                  >
+                    {{ t('settings.record') }}
+                  </button>
+                  <button
+                    v-else
+                    class="shortcut-add kb-stop"
+                    data-kb-action="stop"
+                    @click="stopKbRecord()"
+                  >
+                    {{ t('settings.stop') }}
+                  </button>
+                  <button
+                    v-if="settings.keybindings[def.id]"
+                    class="shortcut-del"
+                    data-kb-action="reset"
+                    @click="resetKbBinding(def.id)"
+                  >
+                    {{ t('keybinding.reset') }}
+                  </button>
                 </template>
               </div>
             </div>
@@ -116,16 +215,46 @@
             class="settings-row kb-shortcut-row"
             :data-kb-id="def.id"
           >
-            <label><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label>
+            <label class="kb-shortcut-label">
+              <span class="kb-icon" aria-hidden="true"
+                ><component :is="def.icon" :size="14"
+              /></span>
+              <span>{{ t(def.titleKey) }}</span>
+            </label>
             <div class="kb-shortcut-ctrl">
               <span v-if="kbRecording !== def.id" class="kb-keys">
-                <kbd v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')" :key="i">{{ k }}</kbd>
+                <kbd
+                  v-for="(k, i) in formatBinding(getBinding(def.id), def.kind ?? 'app')"
+                  :key="i"
+                  >{{ k }}</kbd
+                >
               </span>
               <span v-else class="kb-keys recording">{{ t('keybinding.pressKeys') }}</span>
               <template v-if="!isReadOnly(def.id)">
-                <button v-if="kbRecording !== def.id" class="shortcut-add" data-kb-action="record" @click="startKbRecord(def.id)">{{ t('settings.record') }}</button>
-                <button v-else class="shortcut-add kb-stop" data-kb-action="stop" @click="stopKbRecord()">{{ t('settings.stop') }}</button>
-                <button v-if="settings.keybindings[def.id]" class="shortcut-del" data-kb-action="reset" @click="resetKbBinding(def.id)">{{ t('keybinding.reset') }}</button>
+                <button
+                  v-if="kbRecording !== def.id"
+                  class="shortcut-add"
+                  data-kb-action="record"
+                  @click="startKbRecord(def.id)"
+                >
+                  {{ t('settings.record') }}
+                </button>
+                <button
+                  v-else
+                  class="shortcut-add kb-stop"
+                  data-kb-action="stop"
+                  @click="stopKbRecord()"
+                >
+                  {{ t('settings.stop') }}
+                </button>
+                <button
+                  v-if="settings.keybindings[def.id]"
+                  class="shortcut-del"
+                  data-kb-action="reset"
+                  @click="resetKbBinding(def.id)"
+                >
+                  {{ t('keybinding.reset') }}
+                </button>
               </template>
             </div>
           </div>
@@ -141,9 +270,10 @@
           class="settings-row kb-shortcut-row"
           :data-kb-id="def.id"
         >
-          <label
-            ><component :is="def.icon" :size="14" class="kb-icon" /> {{ t(def.titleKey) }}</label
-          >
+          <label class="kb-shortcut-label">
+            <span class="kb-icon" aria-hidden="true"><component :is="def.icon" :size="14" /></span>
+            <span>{{ t(def.titleKey) }}</span>
+          </label>
           <div class="kb-shortcut-ctrl">
             <span v-if="kbRecording !== def.id" class="kb-keys">
               <kbd
@@ -204,11 +334,7 @@
               >
                 ⌨
               </div>
-              <div
-                class="ak-wyg-target-row"
-                data-ak-zone="main"
-                :data-ak-row="ri"
-              >
+              <div class="ak-wyg-target-row" data-ak-zone="main" :data-ak-row="ri">
                 <div
                   v-for="(key, ki) in row"
                   :key="akItemKey(key)"
@@ -273,17 +399,9 @@
           :style="{ '--ak-enter-width': (actionBottom.enter_width ?? 0.28) * 100 + '%' }"
         >
           <div class="mkb-action-grid">
-            <div
-              v-for="(row, ri) in actionBottom.rows"
-              :key="ri"
-              class="ak-wyg-row-outer"
-            >
+            <div v-for="(row, ri) in actionBottom.rows" :key="ri" class="ak-wyg-row-outer">
               <div class="mkb-action-grid-row">
-                <div
-                  class="ak-wyg-target-row"
-                  data-ak-zone="bottom"
-                  :data-ak-row="ri"
-                >
+                <div class="ak-wyg-target-row" data-ak-zone="bottom" :data-ak-row="ri">
                   <div
                     v-for="(key, ki) in row"
                     :key="akItemKey(key)"
@@ -301,7 +419,9 @@
                         type="button"
                         class="ak-key-grip"
                         :title="t('settings.dragSort')"
-                        @pointerdown="akDragPointerDown({ zone: 'bottom', row: ri, index: ki }, $event)"
+                        @pointerdown="
+                          akDragPointerDown({ zone: 'bottom', row: ri, index: ki }, $event)
+                        "
                       >
                         ⠿
                       </button>
@@ -665,6 +785,7 @@ import type {
   ActionBottomCluster,
   ActionKey,
   ActionKeyboardConfig,
+  MobileInputMode,
 } from '../../composables/useSettings'
 import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
 import { APP_ACTIONS, APP_ACTION_IDS } from '../../utils/appActionCatalog'
@@ -677,6 +798,7 @@ import { useOpenApiTest } from '../../composables/useOpenApiTest'
 import { useKbRecording } from '../../composables/useKbRecording'
 import { useActionKeyboardGesture } from '../../composables/useActionKeyboardGesture'
 import { useDeviceKeyboardSettings } from '../../composables/useDeviceKeyboardSettings'
+import { applyAfterTerminalComposition } from '../../utils/terminalInput'
 import {
   escapeForDisplay,
   unescapeFromDisplay,
@@ -696,6 +818,18 @@ const keyboardGuardModeOptions = computed(() => [
   { value: 'both', label: t('settings.keyboard.guardMode.both') },
 ])
 
+const mobileInputModeOptions = computed(() => [
+  { value: 'builtin', label: t('settings.keyboard.mobileInputMode.builtin') },
+  { value: 'system', label: t('settings.keyboard.mobileInputMode.system') },
+])
+
+function onMobileInputModeChange(value: string) {
+  applyAfterTerminalComposition(() => {
+    settings.mobile_input_mode = value as MobileInputMode
+    void saveSettings()
+  })
+}
+
 function onKeyboardGuardModeChange(value: string) {
   settings.keyboard_guard_mode = value as KeyboardGuardMode
   void saveSettings()
@@ -710,14 +844,29 @@ const appDefs = computed(() => defs.filter((def) => (def.kind ?? 'app') === 'app
 const terminalDefs = computed(() => defs.filter((def) => def.kind === 'terminal'))
 
 const tabGroupIds = ['newTab', 'closeTab', 'switchTab']
-const paneGroupIds = ['splitHorizontal', 'splitVertical', 'toggleBroadcast', 'toggleZoom', 'equalizePanes', 'focusNextPane', 'focusPrevPane']
-const navGroupIds = ['togglePalette', 'openBookmarks', 'searchTerminal', 'missionControl', 'superviseTabs', 'sshConnect']
+const paneGroupIds = [
+  'splitHorizontal',
+  'splitVertical',
+  'toggleBroadcast',
+  'toggleZoom',
+  'equalizePanes',
+  'focusNextPane',
+  'focusPrevPane',
+]
+const navGroupIds = [
+  'togglePalette',
+  'openBookmarks',
+  'searchTerminal',
+  'missionControl',
+  'superviseTabs',
+  'sshConnect',
+]
 const fontGroupIds = ['fontSizeUp', 'fontSizeDown', 'fontSizeReset']
 
-const tabDefs = computed(() => appDefs.value.filter(d => tabGroupIds.includes(d.id)))
-const paneDefs = computed(() => appDefs.value.filter(d => paneGroupIds.includes(d.id)))
-const navDefs = computed(() => appDefs.value.filter(d => navGroupIds.includes(d.id)))
-const fontDefs = computed(() => appDefs.value.filter(d => fontGroupIds.includes(d.id)))
+const tabDefs = computed(() => appDefs.value.filter((d) => tabGroupIds.includes(d.id)))
+const paneDefs = computed(() => appDefs.value.filter((d) => paneGroupIds.includes(d.id)))
+const navDefs = computed(() => appDefs.value.filter((d) => navGroupIds.includes(d.id)))
+const fontDefs = computed(() => appDefs.value.filter((d) => fontGroupIds.includes(d.id)))
 
 const {
   openApiPaneId,
@@ -753,8 +902,8 @@ const {
 
 const actionRows = computed(() => (akDraft.value ?? effectiveActionKeyboard()).rows)
 
-const actionBottom = computed<ActionBottomCluster>(() =>
-  (akDraft.value ?? effectiveActionKeyboard()).bottom ?? DEFAULT_ACTION_BOTTOM
+const actionBottom = computed<ActionBottomCluster>(
+  () => (akDraft.value ?? effectiveActionKeyboard()).bottom ?? DEFAULT_ACTION_BOTTOM
 )
 
 const toolbarQuickKeys = computed(() => settings.toolbar_quick_keys ?? [])
@@ -944,11 +1093,12 @@ const akEdit = ref<{
 const akRecording = ref(false)
 const recordFocusSinkRef = ref<HTMLElement | null>(null)
 const akIsEnterEdit = computed(() => akEdit.value?.scope === 'bottom-enter')
-const akSupportsAutoEnter = computed(() =>
-  !!akEdit.value &&
-  !akIsEnterEdit.value &&
-  (akEdit.value.kind === 'send' ||
-    (akEdit.value.kind === 'action' && akEdit.value.action === 'pasteTerminal'))
+const akSupportsAutoEnter = computed(
+  () =>
+    !!akEdit.value &&
+    !akIsEnterEdit.value &&
+    (akEdit.value.kind === 'send' ||
+      (akEdit.value.kind === 'action' && akEdit.value.action === 'pasteTerminal'))
 )
 
 const akCanSave = computed(() => {
@@ -957,7 +1107,9 @@ const akCanSave = computed(() => {
     return akEdit.value.scope !== 'toolbar' && APP_ACTION_IDS.has(akEdit.value.action)
   }
   if (akEdit.value.scope !== 'toolbar') return true
-  return akEdit.value.label.trim().length > 0 && unescapeFromDisplay(akEdit.value.sendRaw).length > 0
+  return (
+    akEdit.value.label.trim().length > 0 && unescapeFromDisplay(akEdit.value.sendRaw).length > 0
+  )
 })
 
 function editActionKey(ri: number, ki: number) {
@@ -1033,27 +1185,28 @@ function saveActionKey() {
     return
   }
   const label = edit.scope === 'toolbar' ? edit.label.trim() : edit.label
-  const next: ActionKey = edit.kind === 'action'
-    ? {
-        label,
-        kind: 'action',
-        action: edit.action,
-        display: edit.display,
-        style: edit.style || undefined,
-        ...(edit.action === 'pasteTerminal' ? { auto_enter: edit.auto_enter } : {}),
-        grow: edit.grow,
-      }
-    : {
-        label,
-        kind: 'send',
-        send: unescapeFromDisplay(edit.sendRaw),
-        style: edit.style || undefined,
-        repeat: edit.repeat || undefined,
-        auto_enter: edit.auto_enter,
-        special: edit.special,
-        grow: edit.grow,
-        icon: edit.icon,
-      }
+  const next: ActionKey =
+    edit.kind === 'action'
+      ? {
+          label,
+          kind: 'action',
+          action: edit.action,
+          display: edit.display,
+          style: edit.style || undefined,
+          ...(edit.action === 'pasteTerminal' ? { auto_enter: edit.auto_enter } : {}),
+          grow: edit.grow,
+        }
+      : {
+          label,
+          kind: 'send',
+          send: unescapeFromDisplay(edit.sendRaw),
+          style: edit.style || undefined,
+          repeat: edit.repeat || undefined,
+          auto_enter: edit.auto_enter,
+          special: edit.special,
+          grow: edit.grow,
+          icon: edit.icon,
+        }
   if (edit.scope === 'toolbar') {
     ensureToolbarQuickKeys()
     if (ki < settings.toolbar_quick_keys.length) {
@@ -1125,7 +1278,6 @@ onBeforeUnmount(() => {
   stopRecord()
   stopKbRecord()
 })
-
 </script>
 
 <style scoped>
@@ -1246,6 +1398,15 @@ onBeforeUnmount(() => {
 .keyboard-guard-control {
   width: 100%;
 }
+.mobile-input-settings {
+  border: 1px solid color-mix(in srgb, var(--accent), var(--border) 68%);
+  border-radius: 8px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--bg-surface), var(--accent) 4%);
+}
+.mobile-input-mode-control {
+  width: 100%;
+}
 .send-btn:disabled {
   opacity: 0.4;
   cursor: default;
@@ -1287,6 +1448,11 @@ onBeforeUnmount(() => {
 }
 .kb-shortcut-row {
   justify-content: space-between;
+}
+.kb-shortcut-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .kb-group + .kb-group {
   margin-top: 12px;
@@ -1350,6 +1516,9 @@ onBeforeUnmount(() => {
   height: 18px;
   flex-shrink: 0;
   color: var(--fg-muted);
+}
+.kb-icon > svg {
+  display: block;
 }
 .kb-stop {
   color: #ef4444 !important;

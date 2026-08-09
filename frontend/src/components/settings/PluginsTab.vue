@@ -203,7 +203,7 @@
         </button>
       </div>
       <div v-if="showDirInstall" class="plugin-dir-install">
-        <button class="plugin-browse-btn" @click="showPicker = true">
+        <button class="plugin-browse-btn" @click="browseInstallDirectory">
           {{ installDirPath || t('settings.plugins.browseFolder') }}
         </button>
         <label class="plugin-dev-toggle" :title="t('settings.plugins.devLinkHint')">
@@ -312,6 +312,7 @@
     </div>
 
     <FilePickerModal
+      v-if="!isTauri()"
       :visible="showPicker"
       pane-id=""
       root="~"
@@ -341,6 +342,7 @@ import { useMarketplace, type MarketPlugin } from '../../composables/useMarketpl
 import { describeHttpError, describeRequestError } from '../../utils/httpError'
 import { uiConfirm } from '../../composables/useConfirm'
 import { settings, saveSettings } from '../../composables/useSettings'
+import { isTauri, tauriInvoke } from '../../composables/useTransport'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
 
@@ -558,6 +560,23 @@ async function onUpdateFromRepo(mp: MarketPlugin) {
 
 function onPickerSelect(path: string) {
   installDirPath.value = path
+  showPicker.value = false
+}
+
+async function browseInstallDirectory() {
+  if (!isTauri()) {
+    showPicker.value = true
+    return
+  }
+
+  try {
+    const selected = (await tauriInvoke('pick_workspace_dir', {
+      base: installDirPath.value.trim() || undefined,
+    })) as string | null
+    if (selected) onPickerSelect(selected)
+  } catch (error) {
+    setStatus(describeRequestError(error, 'Unable to open folder picker'), false)
+  }
 }
 
 async function requestedNativePermissions(res: Response): Promise<string[] | null> {
@@ -844,16 +863,19 @@ async function onRefresh() {
   align-items: center;
   padding: 5px 12px;
   border-radius: 5px;
-  background: none;
+  background: var(--bg-input);
   color: var(--fg-bright, #d0d0d0);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  border: none;
-  transition: background 0.15s;
+  border: 1px solid var(--border, #444);
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 .plugin-install-btn:hover {
   background: var(--bg-hover);
+  border-color: var(--fg-muted, #858585);
 }
 .plugin-action-btn {
   display: inline-flex;

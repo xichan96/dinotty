@@ -20,6 +20,10 @@ export interface LeafPane {
   path?: string
   /** Required for kind=web. Full URL or :port/path. */
   url?: string
+  /** Terminal paneId that owns this non-terminal leaf. Used for workspace API
+   *  calls (list/cwd/git-status) which need the PTY session. Set by backend
+   *  on creation; undefined for terminal leaves (they ARE the session). */
+  sourcePaneId?: string
 }
 
 /** 分割容器：水平或垂直排列子节点 */
@@ -50,15 +54,24 @@ export interface TerminalTab {
   paneMru: string[] // Runtime-only; most recently focused pane first
   broadcastMode: boolean
   broadcastActivity: number // Incremented on each broadcast input to re-trigger banner
-  previewVisible: boolean
-  previewAddress: string
-  previewUrl: string
-  previewKind: 'web' | 'files'
   customTitle?: string // User-set tab title (overrides shell title)
   cwd?: string // Current working directory (from backend)
   connectionId?: string // SSH profile ID when this tab is an SSH session from a profile
   workspaceId?: string // Explicit workspace assignment (set when SSH tab is created in a workspace)
 }
+
+/** Legacy preview side-panel state. Removed from TerminalTab after the
+ *  PreviewPanel retirement (preview is now a layout leaf). These fields
+ *  still appear in old localStorage, so migratePreviewToLeaf reads them
+ *  to convert legacy tabs into layout leaves on load. */
+export interface LegacyPreviewState {
+  previewVisible?: boolean
+  previewAddress?: string
+  previewUrl?: string
+  previewKind?: 'web' | 'files'
+}
+
+type TabWithLegacyPreview = TerminalTab & LegacyPreviewState
 
 /** Plugin tab */
 export interface PluginTab {
@@ -92,15 +105,11 @@ export function migrateTab(raw: any): TerminalTab {
       paneMru: [paneId],
       broadcastMode: false,
       broadcastActivity: 0,
-      previewVisible: false,
-      previewAddress: '',
-      previewUrl: '',
-      previewKind: 'web',
       workspaceId: raw.workspaceId,
     }
   }
   if (raw.paneId && !raw.layout) {
-    return {
+    const tab: TabWithLegacyPreview = {
       type: 'terminal',
       paneId: raw.paneId,
       layout: ensureSplitRoot({
@@ -115,21 +124,23 @@ export function migrateTab(raw: any): TerminalTab {
       paneMru: [raw.paneId],
       broadcastMode: false,
       broadcastActivity: 0,
-      previewVisible: raw.previewVisible ?? false,
-      previewAddress: raw.previewAddress ?? '',
-      previewUrl: raw.previewUrl ?? '',
-      previewKind: raw.previewKind ?? 'web',
       connectionId: raw.connectionId,
       cwd: raw.cwd,
       workspaceId: raw.workspaceId,
+      previewVisible: raw.previewVisible,
+      previewAddress: raw.previewAddress,
+      previewUrl: raw.previewUrl,
+      previewKind: raw.previewKind,
     }
+    return migratePreviewToLeaf(tab)
   }
-  const tab = raw as TerminalTab
+  const tab = raw as TabWithLegacyPreview
   const paneIds = getAllLeaves(tab.layout).map((leaf) => leaf.paneId)
-  return {
+  const withMru: TabWithLegacyPreview = {
     ...tab,
     paneMru: initializePaneMru(paneIds, tab.activePaneId),
   }
+  return migratePreviewToLeaf(withMru)
 }
 
 /**
@@ -137,10 +148,12 @@ export function migrateTab(raw: any): TerminalTab {
  * add a corresponding leaf to the layout. This converts side previews into
  * layout leaves so they participate in drag/split/close like any other pane.
  */
-export function migratePreviewToLeaf(tab: TerminalTab): TerminalTab {
+export function migratePreviewToLeaf(tab: TabWithLegacyPreview): TerminalTab {
   if (!tab.previewVisible) return tab
-  const kind = tab.previewKind
-  if (kind !== 'files' && kind !== 'web') return tab
+  const { previewVisible, previewKind, previewAddress, previewUrl, ...rest } = tab
+  void previewVisible
+  const kind = previewKind
+  if (kind !== 'files' && kind !== 'web') return rest
 
   // Generate a new paneId for the preview leaf.
   const newPaneId = 'leaf-' + randomId()
@@ -150,23 +163,23 @@ export function migratePreviewToLeaf(tab: TerminalTab): TerminalTab {
           type: 'leaf',
           kind: 'files',
           paneId: newPaneId,
-          title: tab.previewAddress || 'Files',
+          title: previewAddress || 'Files',
           ratio: 1,
           zoomed: false,
-          path: tab.previewAddress,
+          path: previewAddress,
         }
       : {
           type: 'leaf',
           kind: 'web',
           paneId: newPaneId,
-          title: tab.previewUrl || 'Web',
+          title: previewUrl || 'Web',
           ratio: 1,
           zoomed: false,
-          url: tab.previewUrl,
+          url: previewUrl,
         }
 
   // Wrap existing layout in a horizontal split with the preview on the right.
-  const root = ensureSplitRoot(tab.layout)
+  const root = ensureSplitRoot(rest.layout)
   const newSplit: SplitPane = {
     type: 'split',
     id: genSplitId(),
@@ -176,15 +189,11 @@ export function migratePreviewToLeaf(tab: TerminalTab): TerminalTab {
   }
 
   return {
-    ...tab,
+    ...rest,
     layout: newSplit,
-    previewVisible: false,
-    previewAddress: '',
-    previewUrl: '',
-    previewKind: 'web',
     paneMru: initializePaneMru(
       [...getAllLeaves(newSplit).map((l) => l.paneId)],
-      tab.activePaneId
+      rest.activePaneId
     ),
   }
 }

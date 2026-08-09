@@ -1,4 +1,5 @@
 import { authFetch, apiUrl } from './apiBase'
+import { apiErrorFromResponse } from '../utils/apiError'
 
 export interface CreateTabResult {
   tab_id: string
@@ -6,6 +7,7 @@ export interface CreateTabResult {
   layout: any
   cwd?: string
   connection_id?: string
+  workspace_id?: string
 }
 
 export interface SplitPaneResult {
@@ -21,7 +23,15 @@ export interface ClosePaneResult {
 }
 
 export interface ListTabsResult {
-  tabs: Array<{ tab_id: string; pane_id: string; layout?: any; active_pane_id?: string; cwd?: string; connection_id?: string }>
+  tabs: Array<{
+    tab_id: string
+    pane_id: string
+    layout?: any
+    active_pane_id?: string
+    cwd?: string
+    connection_id?: string
+    workspace_id?: string
+  }>
   active_pane_id: string | null
 }
 
@@ -41,7 +51,7 @@ export async function apiCreateTab(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cwd, argv, title }),
   })
-  if (!res.ok) throw new Error(`create tab failed: ${res.status}`)
+  if (!res.ok) throw await apiErrorFromResponse(res, 'create tab failed')
   return res.json()
 }
 
@@ -62,7 +72,7 @@ export async function apiSplitPane(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pane_id: paneId, direction, force_local: forceLocal ?? false, cwd }),
   })
-  if (!res.ok) throw new Error(`split pane failed: ${res.status}`)
+  if (!res.ok) throw await apiErrorFromResponse(res, 'split pane failed')
   return res.json()
 }
 
@@ -250,6 +260,8 @@ export interface SshConnectRequest {
 
 export interface SshProfileConnectRequest {
   profile_id: string
+  initial_cwd?: string
+  workspace_id?: string
 }
 
 export async function apiCreateSshQuickTab(req: SshConnectRequest, signal?: AbortSignal): Promise<CreateTabResult> {
@@ -269,12 +281,17 @@ export async function apiCreateSshQuickTab(req: SshConnectRequest, signal?: Abor
 export async function apiCreateSshTab(
   profileId: string,
   initialCwd?: string,
+  workspaceId?: string,
   signal?: AbortSignal
 ): Promise<CreateTabResult> {
   const res = await authFetch(apiUrl('/api/tabs/ssh'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profile_id: profileId, initial_cwd: initialCwd }),
+    body: JSON.stringify({
+      profile_id: profileId,
+      initial_cwd: initialCwd,
+      workspace_id: workspaceId,
+    }),
     signal,
   })
   if (!res.ok) {

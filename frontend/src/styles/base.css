@@ -24,6 +24,7 @@
   /* Semantic */
   --success: #49cc90;
   --danger: #f44747;
+  --warning: #d7a34a;
 
   /* Aliases for plugin compatibility */
   --text-color: var(--fg);
@@ -162,6 +163,10 @@ input {
 }
 .notif-toast-btn:hover {
   background: var(--bg-hover);
+}
+
+.update-available-toast {
+  cursor: pointer;
 }
 
 @media (max-width: 480px) and (orientation: portrait) {

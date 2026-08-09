@@ -1,82 +1,202 @@
 <template>
-  <div v-if="visible" class="web-preview" :class="direction">
+  <div v-if="visible" class="web-preview" :class="{ 'in-leaf': inLeaf }">
     <div
+      v-if="!inLeaf"
       class="web-preview-divider"
       @mousedown.prevent="startDrag"
       @touchstart.prevent="startDragTouch"
     ></div>
     <div class="web-preview-panel">
       <div class="web-preview-toolbar">
-        <button type="button" @click="refresh" title="Refresh">↻</button>
-        <form class="web-preview-address" @submit.prevent="navigateFromInput">
-          <input
-            ref="addressInput"
-            v-model="addressValue"
-            type="text"
-            enterkeyhint="go"
-            inputmode="url"
-            autocapitalize="none"
-            autocorrect="off"
-            spellcheck="false"
-            placeholder="URL or :port/path"
+        <button type="button" :disabled="!canGoBack" @click="goBack" title="Back">
+          <ChevronLeft :size="14" />
+        </button>
+        <button type="button" :disabled="!canGoForward" @click="goForward" title="Forward">
+          <ChevronRight :size="14" />
+        </button>
+        <button type="button" @click="refresh" title="Refresh"><RotateCw :size="14" /></button>
+        <div class="preview-address-wrap">
+          <form class="web-preview-address" @submit.prevent="navigateFromInput">
+            <input
+              ref="addressInput"
+              v-model="addressValue"
+              type="text"
+              enterkeyhint="go"
+              inputmode="url"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="t('previewPanel.placeholder')"
+              @focus="onAddressFocus"
+              @blur="onAddressBlur"
+            />
+            <button type="submit" class="go-btn" title="Go"><ArrowRight :size="14" /></button>
+          </form>
+          <AddressDropdown
+            :visible="addressDropdownVisible"
+            @select="onDropdownSelect"
+            @close="addressDropdownVisible = false"
           />
-          <button type="submit" class="go-btn" title="Go">→</button>
-        </form>
-        <button type="button" @click="close" title="Close">✕</button>
+        </div>
+        <button
+          v-if="currentUrl"
+          type="button"
+          @click="openInBrowser"
+          :title="t('previewPanel.openInBrowser')"
+        >
+          <ExternalLink :size="14" />
+        </button>
+        <button
+          v-if="currentUrl"
+          type="button"
+          :class="{ 'star-active': isBookmarked }"
+          @click="onToggleBookmark"
+          :title="isBookmarked ? t('webBookmark.removeFrom') : t('webBookmark.addTo')"
+        >
+          <Star :size="14" :fill="isBookmarked ? 'currentColor' : 'none'" />
+        </button>
+        <button
+          type="button"
+          :class="{ 'devtools-active': devtoolsVisible }"
+          @click="devtoolsVisible = !devtoolsVisible"
+          :title="t('devtools.toggleDevtools')"
+        >
+          <Bug :size="14" />
+        </button>
+        <button v-if="!inLeaf" type="button" @click="close" title="Close">
+          <X :size="14" />
+        </button>
       </div>
       <div class="web-preview-content">
         <iframe
           ref="iframeRef"
           :src="resolvedSrc"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"
         ></iframe>
       </div>
+      <DevToolsPanel
+        v-model:visible="devtoolsVisible"
+        :console-entries="consoleEntries"
+        :network-entries="networkEntries"
+        :error-count="errorCount"
+        @clear-console="clearConsole"
+        @clear-network="clearNetwork"
+        @eval="evalInIframe"
+      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import DevToolsPanel from './DevToolsPanel.vue'
+import AddressDropdown from './AddressDropdown.vue'
+import { urlToPreviewSrc } from '../../utils/previewRouting'
+import { getApiBase } from '../../composables/apiBase'
+import { useI18n } from '../../composables/useI18n'
+import { useWebBookmarks } from '../../composables/useWebBookmarks'
+import { useDevTools } from '../../composables/useDevTools'
+import { useRecentUrls } from '../../composables/useRecentAccess'
+import { settings } from '../../composables/useSettings'
+import {
+  ChevronLeft,
+  ChevronRight,
+  RotateCw,
+  ArrowRight,
+  ExternalLink,
+  X,
+  Star,
+  Bug,
+} from 'lucide-vue-next'
 
-const props = defineProps<{
-  visible: boolean
-  url: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    url: string
+    inLeaf?: boolean
+  }>(),
+  { inLeaf: true }
+)
 
 const emit = defineEmits<{
   close: []
 }>()
+
+const { t } = useI18n()
 
 const iframeRef = ref<HTMLIFrameElement>()
 const addressInput = ref<HTMLInputElement>()
 const addressValue = ref('')
 const currentUrl = ref('')
 const navCounter = ref(0)
+const previewHttpBase = ref('')
+const addressDropdownVisible = ref(false)
+const devtoolsVisible = ref(false)
 const isLandscape = ref(window.innerWidth > window.innerHeight)
 
-function urlToSrc(url: string): string {
-  if (!url) return 'about:blank'
-  try {
-    const parsed = new URL(url)
-    const host = parsed.hostname
-    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
-      const port = parsed.port || '80'
-      return `/preview/${port}${parsed.pathname}${parsed.search}`
-    }
-  } catch {}
-  return url
+const webBookmarks = useWebBookmarks()
+const recentUrlsComposable = useRecentUrls()
+const {
+  consoleEntries,
+  networkEntries,
+  errorCount,
+  clearConsole,
+  clearNetwork,
+  allowOrigin,
+  isAllowedOrigin,
+} = useDevTools()
+
+const navHistory = ref<string[]>([])
+const navIndex = ref(-1)
+const navFromHistory = ref(false)
+
+const canGoBack = computed(() => navIndex.value > 0)
+const canGoForward = computed(() => navIndex.value < navHistory.value.length - 1)
+
+const isBookmarked = computed(() => {
+  if (!currentUrl.value) return false
+  return webBookmarks.isBookmarked(currentUrl.value)
+})
+
+function pushHistory(url: string) {
+  if (navFromHistory.value) {
+    navFromHistory.value = false
+    return
+  }
+  if (navHistory.value[navIndex.value] === url) return
+  navHistory.value = navHistory.value.slice(0, navIndex.value + 1)
+  navHistory.value.push(url)
+  navIndex.value = navHistory.value.length - 1
+}
+
+function goBack() {
+  if (!canGoBack.value) return
+  navFromHistory.value = true
+  navIndex.value--
+  const url = navHistory.value[navIndex.value]
+  currentUrl.value = url
+  addressValue.value = url
+  navCounter.value++
+}
+
+function goForward() {
+  if (!canGoForward.value) return
+  navFromHistory.value = true
+  navIndex.value++
+  const url = navHistory.value[navIndex.value]
+  currentUrl.value = url
+  addressValue.value = url
+  navCounter.value++
 }
 
 const resolvedSrc = computed(() => {
   if (!currentUrl.value) return 'about:blank'
-  const base = urlToSrc(currentUrl.value)
+  const base = urlToPreviewSrc(currentUrl.value, previewHttpBase.value || undefined)
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}_t=${navCounter.value}`
 })
 
-const direction = computed(() => {
-  return isLandscape.value ? 'horizontal' : 'vertical'
-})
+const direction = computed(() => (isLandscape.value ? 'horizontal' : 'vertical'))
 
 function onResize() {
   isLandscape.value = window.innerWidth > window.innerHeight
@@ -88,7 +208,9 @@ watch(
     if (props.visible && props.url) {
       currentUrl.value = props.url
       addressValue.value = props.url
+      pushHistory(props.url)
       navCounter.value++
+      recentUrlsComposable.recordUrl(props.url)
     }
   },
   { immediate: true }
@@ -98,26 +220,29 @@ function navigateFromInput() {
   const val = addressValue.value.trim()
   if (!val) return
 
+  let next: string
   if (val.startsWith('http://') || val.startsWith('https://')) {
-    currentUrl.value = val
+    next = val
   } else if (val.match(/^:?(\d+)(\/.*)?$/)) {
     const m = val.match(/^:?(\d+)(\/.*)?$/)!
-    currentUrl.value = `http://localhost:${m[1]}${m[2] || '/'}`
-    addressValue.value = currentUrl.value
+    next = `http://localhost:${m[1]}${m[2] || '/'}`
   } else if (val.startsWith('/')) {
     try {
       const prev = new URL(currentUrl.value)
       prev.pathname = val
-      currentUrl.value = prev.toString()
-      addressValue.value = currentUrl.value
+      next = prev.toString()
     } catch {
       return
     }
   } else {
-    currentUrl.value = `http://${val}`
-    addressValue.value = currentUrl.value
+    next = `http://${val}`
   }
+
+  currentUrl.value = next
+  addressValue.value = next
+  pushHistory(next)
   navCounter.value++
+  recentUrlsComposable.recordUrl(next)
   addressInput.value?.blur()
 }
 
@@ -127,6 +252,90 @@ function refresh() {
 
 function close() {
   emit('close')
+}
+
+function openInBrowser() {
+  if (currentUrl.value) window.open(currentUrl.value, '_blank')
+}
+
+function onToggleBookmark() {
+  if (!currentUrl.value) return
+  webBookmarks.toggleBookmark(currentUrl.value, currentUrl.value)
+}
+
+function onAddressFocus() {
+  if (webBookmarks.bookmarks.value.length > 0 || settings.recent_urls.length > 0) {
+    addressDropdownVisible.value = true
+  }
+}
+
+function onAddressBlur() {
+  setTimeout(() => {
+    addressDropdownVisible.value = false
+  }, 200)
+}
+
+function onDropdownSelect(url: string) {
+  addressValue.value = url
+  navigateFromInput()
+  addressDropdownVisible.value = false
+}
+
+function evalInIframe(code: string) {
+  const iframe = iframeRef.value
+  if (!iframe?.contentWindow) return
+  try {
+    const result = (iframe.contentWindow as any).eval(code)
+    const display =
+      result === undefined
+        ? 'undefined'
+        : typeof result === 'object'
+          ? JSON.stringify(result, null, 2)
+          : String(result)
+    consoleEntries.value.push({
+      id: Date.now(),
+      level: 'log',
+      args: ['> ' + code, display],
+      ts: Date.now(),
+    })
+  } catch (err: any) {
+    consoleEntries.value.push({
+      id: Date.now(),
+      level: 'error',
+      args: ['> ' + code, err.message],
+      ts: Date.now(),
+    })
+  }
+}
+
+function openFromWebUrl(url: string) {
+  currentUrl.value = url
+  addressValue.value = url
+  pushHistory(url)
+  navCounter.value++
+  recentUrlsComposable.recordUrl(url)
+}
+
+defineExpose({ openFromWebUrl })
+
+function stripCacheBuster(url: string): string {
+  try {
+    const u = new URL(url)
+    u.searchParams.delete('_t')
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
+function onProxyMessage(e: MessageEvent) {
+  if (!isAllowedOrigin(e.origin)) return
+  if (e.data?.type === 'proxy-navigate' && e.data.url) {
+    const url = stripCacheBuster(e.data.url)
+    currentUrl.value = url
+    addressValue.value = url
+    pushHistory(url)
+  }
 }
 
 function startDrag(e: MouseEvent) {
@@ -185,11 +394,15 @@ function startDragTouch(e: TouchEvent) {
   window.addEventListener('touchend', onEnd)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  window.addEventListener('message', onProxyMessage)
   window.addEventListener('resize', onResize)
+  previewHttpBase.value = await getApiBase()
+  allowOrigin(previewHttpBase.value)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('message', onProxyMessage)
   window.removeEventListener('resize', onResize)
 })
 </script>
@@ -203,12 +416,12 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.web-preview.horizontal {
+.web-preview:not(.in-leaf).horizontal {
   flex-direction: row;
   height: 100%;
 }
 
-.web-preview.vertical {
+.web-preview:not(.in-leaf).vertical {
   flex-direction: column;
   width: 100%;
 }
@@ -220,12 +433,12 @@ onBeforeUnmount(() => {
   z-index: 2;
 }
 
-.web-preview.horizontal .web-preview-divider {
+.web-preview:not(.in-leaf).horizontal .web-preview-divider {
   width: 6px;
   cursor: col-resize;
 }
 
-.web-preview.vertical .web-preview-divider {
+.web-preview:not(.in-leaf).vertical .web-preview-divider {
   height: 6px;
   cursor: row-resize;
 }
@@ -258,15 +471,36 @@ onBeforeUnmount(() => {
   background: none;
   border: none;
   color: var(--fg-muted, #888);
-  font-size: 14px;
   padding: 2px 6px;
   border-radius: 3px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
 }
 
-.web-preview-toolbar button:hover {
+.web-preview-toolbar button:hover:not(:disabled) {
   color: var(--fg);
   background: var(--tab-hover-bg, #333);
+}
+
+.web-preview-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.web-preview-toolbar button.star-active {
+  color: var(--accent, #e5c07b);
+}
+
+.web-preview-toolbar button.devtools-active {
+  color: var(--accent, #89b4fa);
+}
+
+.preview-address-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
 }
 
 .web-preview-address {
@@ -299,9 +533,10 @@ onBeforeUnmount(() => {
   background: none;
   border: none;
   color: var(--fg-muted, #888);
-  font-size: 14px;
   padding: 2px 6px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
 }
 
 .go-btn:hover {

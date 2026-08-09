@@ -26,7 +26,7 @@ Other web terminals are thin WebSocket-to-PTY pipes. Dinotty runs a **full virtu
 
 | | Dinotty | Claude Code Remote | Codex Web | Happy | hapi | Termius | tmux |
 |---|---|---|---|---|---|---|---|
-| Positioning | Web terminal server | Built-in multi-device | Cloud agent | AI Agent remote client | AI Agent remote client | SSH client | Terminal multiplexer |
+| Positioning | Web terminal | Built-in multi-device | Cloud agent | AI Agent remote client | AI Agent remote client | SSH client | Terminal multiplexer |
 | Approach | Server-side VTE + Web UI | Anthropic cloud + local | OpenAI cloud | CLI proxy wrapper | CLI proxy wrapper | Native app | Server-side process |
 | Web access | ✅ | ✅ claude.ai/code | ✅ chatgpt.com/codex | ✅ | ✅ PWA | ❌ | ❌ |
 | Native app | Tauri (macOS/Linux/Windows) | iOS + Android | ❌ | iOS + Android | ❌ (PWA) | All platforms | ❌ |
@@ -43,4 +43,4 @@ Other web terminals are thin WebSocket-to-PTY pipes. Dinotty runs a **full virtu
 | Code runs on | Your own server | Local / Anthropic cloud | OpenAI cloud | Local | Local | Remote SSH | Remote server |
 | Price | 🆓 Free & open source | 💰 Pro subscription | 💰 Plus subscription | Relay service | Self-hosted/relay | 💰 $10/mo | 🆓 but painful |
 
-Claude Code and Codex each offer built-in remote solutions, but are limited to their own agent ecosystem. Happy and hapi are third-party remote control layers that wrap CLI tools for phone-based approval and voice interaction. Dinotty is a general-purpose web terminal server where agents run natively on the server, with a full working environment including file browser, web preview, and plugin system, delivering a professional experience on both desktop and mobile.
+Claude Code and Codex each offer built-in remote solutions, but are limited to their own agent ecosystem. Happy and hapi are third-party remote control layers that wrap CLI tools for phone-based approval and voice interaction. Dinotty is a general-purpose web terminal where agents run natively on the server, with a full working environment including file browser, web preview, and plugin system, delivering a professional experience on both desktop and mobile.

@@ -66,10 +66,6 @@ function makeTab(): TerminalTab {
     paneMru: ['b', 'a', 'c'],
     broadcastMode: false,
     broadcastActivity: 0,
-    previewVisible: false,
-    previewAddress: '',
-    previewUrl: '',
-    previewKind: 'web',
   }
 }
 
@@ -165,10 +161,6 @@ describe('useSyncWebSocket pane MRU', () => {
       paneMru: [`${paneId}-leaf`],
       broadcastMode: false,
       broadcastActivity: 0,
-      previewVisible: false,
-      previewAddress: '',
-      previewUrl: '',
-      previewKind: 'web',
       cwd,
     })
     session.tabs = [

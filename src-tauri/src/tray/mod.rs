@@ -88,7 +88,7 @@ fn try_build(app: &App) -> Result<(), String> {
     Ok(())
 }
 
-pub fn install_tray(app: &App) {
+pub fn install_tray(app: &App) -> state::TrayCapability {
     tracing::info!("tray.install.started");
     let result = try_build(app);
     match result {
@@ -103,6 +103,7 @@ pub fn install_tray(app: &App) {
             tracing::warn!(platform = std::env::consts::OS, %error, "tray.install.failed");
         }
     }
+    app.state::<TrayCapabilityState>().get()
 }
 
 #[cfg(test)]

@@ -28,15 +28,20 @@
   />
   <FileWorkspacePreview
     v-else-if="kind === 'files'"
+    :ref="(el: any) => emit('register', leaf.paneId, el)"
     :visible="true"
     :pane-id="leaf.paneId"
-    embedded
+    :shell-type="leaf.shell_type"
+    :initial-path="leaf.path"
+    :source-pane-id="leaf.sourcePaneId"
     @close="emit('close', leaf.paneId)"
   />
   <WebPreview
     v-else-if="kind === 'web'"
+    :ref="(el: any) => emit('register', leaf.paneId, el)"
     :visible="true"
     :url="leaf.url || ''"
+    :source-pane-id="leaf.sourcePaneId"
     @close="emit('close', leaf.paneId)"
   />
   <div v-else class="pane-content-empty">

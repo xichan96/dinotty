@@ -198,9 +198,9 @@ pub fn strip_ansi(s: &str) -> String {
     out
 }
 
-// ── POST /api/agent/run ──
+// ── POST /api/sessions/:pane_id/run ──
 
-pub async fn agent_run(
+pub async fn sessions_run(
     State(state): State<AgentState>,
     axum::Extension(token_info): axum::Extension<TokenInfo>,
     Json(req): Json<AgentRunRequest>,
@@ -272,17 +272,19 @@ pub async fn agent_run(
 
     match result {
         Ok(resp) => {
-            // Audit log
-            state.audit.record(
-                "agent",
-                "terminal:execute",
-                &pane_id,
-                serde_json::json!({
-                    "command": req.command,
-                    "exit_code": resp.exit_code,
-                    "duration": resp.duration,
-                }),
-            );
+            // Audit log (only for agent tokens; global/session-cookie callers are trusted UI users)
+            if !token_info.is_global {
+                state.audit.record(
+                    "agent",
+                    "terminal:execute",
+                    &pane_id,
+                    serde_json::json!({
+                        "command": req.command,
+                        "exit_code": resp.exit_code,
+                        "duration": resp.duration,
+                    }),
+                );
+            }
             (StatusCode::OK, Json(serde_json::to_value(&resp).unwrap())).into_response()
         }
         Err((status, err)) => error_response(status, &err.code, &err.message),
@@ -398,9 +400,9 @@ async fn execute_command(
     }
 }
 
-// ── POST /api/agent/send ──
+// ── POST /api/sessions/:pane_id/send ──
 
-pub async fn agent_send(
+pub async fn sessions_send(
     State(state): State<AgentState>,
     axum::Extension(token_info): axum::Extension<TokenInfo>,
     Json(req): Json<AgentSendRequest>,
@@ -441,12 +443,14 @@ pub async fn agent_send(
                     &format!("Write failed: {e}"),
                 );
             }
-            state.audit.record(
-                "agent",
-                "terminal:send",
-                &pane_id,
-                serde_json::json!({"command": req.command}),
-            );
+            if !token_info.is_global {
+                state.audit.record(
+                    "agent",
+                    "terminal:send",
+                    &pane_id,
+                    serde_json::json!({"command": req.command}),
+                );
+            }
             (StatusCode::OK, Json(serde_json::json!({"ok": true, "pane_id": pane_id})))
                 .into_response()
         }
@@ -454,9 +458,9 @@ pub async fn agent_send(
     }
 }
 
-// ── GET /api/agent/read ──
+// ── GET /api/sessions/:pane_id/read ──
 
-pub async fn agent_read(
+pub async fn sessions_read(
     State(state): State<AgentState>,
     axum::Extension(token_info): axum::Extension<TokenInfo>,
     Query(q): Query<AgentReadQuery>,
@@ -512,13 +516,7 @@ pub async fn agent_read(
                 CursorInfo { row, col }
             };
 
-            let cwd = session
-                .cwd_state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .cwd
-                .to_str()
-                .map(String::from);
+            let cwd = session.cwd_for_workspace().and_then(|path| path.to_str().map(String::from));
 
             (
                 StatusCode::OK,
@@ -536,9 +534,9 @@ pub async fn agent_read(
     }
 }
 
-// ── WS /ws/agent ──
+// ── WS /ws/events ──
 
-pub async fn agent_ws_handler(
+pub async fn events_ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AgentState>,
     State(settings): State<SettingsState>,

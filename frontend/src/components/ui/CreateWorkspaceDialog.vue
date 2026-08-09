@@ -138,7 +138,11 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { FolderOpen } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
-import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../../composables/useWorkspaces'
+import {
+  DEFAULT_WORKSPACE_ID,
+  useWorkspaces,
+  workspaceBasename,
+} from '../../composables/useWorkspaces'
 import { useSettings } from '../../composables/useSettings'
 import { isTauri, tauriInvoke } from '../../composables/useTransport'
 import type { Workspace } from '../../types/workspace'
@@ -255,8 +259,7 @@ function autoFillName() {
   if (!name.value.trim()) {
     const p = path.value.trim()
     if (p) {
-      const parts = p.split('/').filter(Boolean)
-      name.value = parts[parts.length - 1] || ''
+      name.value = workspaceBasename(p)
     }
   }
 }

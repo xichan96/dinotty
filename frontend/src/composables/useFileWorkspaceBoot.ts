@@ -9,9 +9,13 @@ import type { DirEntry } from '../components/workspace/TreeRows'
 
 export interface FileWorkspaceBootOptions {
   paneId: Ref<string>
+  sourcePaneId: Ref<string | undefined>
   visible: Ref<boolean>
+  shellType: Ref<string | undefined>
+  initialPath: Ref<string | undefined>
   childCache: Ref<Record<string, DirEntry[]>>
   expanded: Ref<Set<string>>
+  cwdLabel: Ref<string>
   previewErr: Ref<string>
   meta: Ref<any>
   selectedRel: Ref<string | null>
@@ -41,8 +45,12 @@ export interface FileWorkspaceBoot {
 export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorkspaceBoot {
   const {
     paneId,
+    sourcePaneId,
+    shellType,
+    initialPath,
     childCache,
     expanded,
+    cwdLabel,
     previewErr,
     meta,
     selectedRel,
@@ -89,6 +97,7 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
       activeEditorLeafId: activeEditorLeafId.value,
       childCache: childCache.value,
       expanded: expanded.value,
+      cwdLabel: cwdLabel.value,
     }
   }
 
@@ -97,6 +106,7 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     activeEditorLeafId.value = s.activeEditorLeafId
     childCache.value = s.childCache
     expanded.value = s.expanded
+    cwdLabel.value = s.cwdLabel ?? ''
   }
 
   async function boot(): Promise<void> {
@@ -112,8 +122,25 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
       } catch {
         // best-effort
       }
+      // Old saved states (pre-cwdLabel persistence) restore childCache without
+      // cwdLabel, leaving the tree draggable but with no absolute path for
+      // drag-to-terminal. Refresh from backend to recover.
+      if (!cwdLabel.value) {
+        try {
+          await ensureChildren('')
+        } catch {
+          // best-effort; tree stays interactive with cached entries
+        }
+      }
       const leaf = activeLeaf.value
-      if (leaf?.filePath && !leaf.isDir) void onSelectFile(leaf.filePath)
+      // Old in-memory state (pre-decoupling) may have a leaf stuck on a
+      // directory - clear it so the placeholder shows instead of a blank
+      // dir leaf, then re-open the file if one was remembered.
+      if (leaf?.isDir) {
+        leaf.filePath = null
+        leaf.isDir = false
+      }
+      if (leaf?.filePath) void onSelectFile(leaf.filePath)
       return
     }
     selectedRel.value = null
@@ -121,6 +148,41 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     meta.value = null
     childCache.value = {}
     expanded.value = new Set()
+
+    // Prefer explicit initial path (e.g. from leaf.path or openFromPath call)
+    if (initialPath.value) {
+      try {
+        await openFromTerminal(initialPath.value)
+        connectTreeWatchSocket()
+        fetchGitStatus()
+      } catch {
+        previewErr.value = 'list failed'
+      }
+      return
+    }
+
+    // SSH pane with no explicit path: auto-navigate to the pane's cwd so the
+    // file tree opens at the directory the user is working in, not `/`.
+    const sshPaneId = sourcePaneId.value
+    if (shellType.value === 'ssh' && sshPaneId) {
+      try {
+        await getApiBase()
+        const q = new URLSearchParams({ pane_id: sshPaneId })
+        const res = await authFetch(apiUrl(`/api/workspace/cwd?${q}`))
+        if (res.ok) {
+          const { cwd } = (await res.json()) as { cwd?: string }
+          if (cwd) {
+            await openFromTerminal(cwd)
+            connectTreeWatchSocket()
+            fetchGitStatus()
+            return
+          }
+        }
+      } catch {
+        // best-effort; fall through to default tree (root listing)
+      }
+    }
+
     try {
       await ensureChildren('')
       connectTreeWatchSocket()
@@ -131,8 +193,9 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
   }
 
   async function openFromTerminal(path: string): Promise<void> {
+    const apiPane = sourcePaneId.value || paneId.value
     await getApiBase()
-    const q = new URLSearchParams({ pane_id: paneId.value, path })
+    const q = new URLSearchParams({ pane_id: apiPane, path })
     const res = await authFetch(apiUrl(`/api/workspace/resolve?${q}`))
     if (!res.ok) return
     const { rel } = await res.json()

@@ -85,6 +85,15 @@ pub(crate) fn migrate_colors(ws: &mut Vec<Workspace>) -> bool {
     changed
 }
 
+fn simplify_local_workspace_paths(workspaces: &mut [Workspace]) {
+    for workspace in workspaces {
+        if workspace.connection_id.is_none() {
+            workspace.path =
+                dunce::simplified(FsPath::new(&workspace.path)).to_string_lossy().into_owned();
+        }
+    }
+}
+
 fn workspaces_path() -> PathBuf {
     settings::config_dir().join("workspaces.json")
 }
@@ -94,8 +103,9 @@ pub fn load_workspaces() -> Vec<Workspace> {
     let path = workspaces_path();
     if path.exists() {
         match std::fs::read_to_string(&path) {
-            Ok(data) => match serde_json::from_str(&data) {
+            Ok(data) => match serde_json::from_str::<Vec<Workspace>>(&data) {
                 Ok(mut ws) => {
+                    simplify_local_workspace_paths(&mut ws);
                     if migrate_colors(&mut ws) {
                         if let Err(e) = save_workspaces(&ws) {
                             error!("save workspaces: {}", e);
@@ -164,7 +174,7 @@ pub fn validate_workspace_path(path: &str) -> Result<PathBuf, String> {
     if is_sensitive_workspace_target(raw) {
         return Err(format!("cannot use sensitive system directory: {}", raw.display()));
     }
-    let canonical = std::fs::canonicalize(trimmed).map_err(|e| format!("invalid path: {e}"))?;
+    let canonical = dunce::canonicalize(trimmed).map_err(|e| format!("invalid path: {e}"))?;
     if !canonical.is_dir() {
         return Err("path is not a directory".into());
     }
@@ -184,6 +194,50 @@ pub fn derive_name(path: &str) -> String {
         .map(|n| n.to_string_lossy().to_string())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "root".to_string())
+}
+
+/// Resolve the workspace id a tab belongs to, mirroring frontend
+/// `useWorkspaces.ts:matchWorkspace`:
+///   - SSH tabs (`connection_id` set) match by `Workspace.connection_id`.
+///   - Local tabs match by longest path-prefix of `cwd` against `Workspace.path`.
+///
+/// Returns `None` when no workspace matches, meaning the tab belongs to the
+/// default workspace (`selected_workspace_id == None` in MC state). The
+/// frontend-only `tab.workspaceId` field (explicit assignment via Command
+/// Palette) is not visible to the backend; we accept this edge-case
+/// divergence to keep the backend stateless on that dimension.
+#[must_use]
+pub fn tab_workspace_id(
+    workspaces: &[Workspace],
+    cwd: Option<&str>,
+    connection_id: Option<&str>,
+) -> Option<String> {
+    if let Some(cid) = connection_id {
+        return workspaces
+            .iter()
+            .find(|w| w.connection_id.as_deref() == Some(cid))
+            .map(|w| w.id.clone());
+    }
+    let cwd = cwd.filter(|s| !s.is_empty())?;
+    let mut best: Option<&Workspace> = None;
+    let mut best_len = 0;
+    for ws in workspaces {
+        if ws.connection_id.is_some() {
+            continue;
+        }
+        let path = ws.path.as_str();
+        let path = path.trim_end_matches('/');
+        if path.is_empty() {
+            continue;
+        }
+        if (cwd == path || (cwd.starts_with(path) && cwd.as_bytes().get(path.len()) == Some(&b'/')))
+            && path.len() > best_len
+        {
+            best = Some(ws);
+            best_len = path.len();
+        }
+    }
+    best.map(|w| w.id.clone())
 }
 
 // ---------------------------------------------------------------------------

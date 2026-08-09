@@ -15,6 +15,7 @@ export interface OverviewCallbacksOptions {
     renameTab: (tabId: string, title: string) => void
   }
   activateTab: (paneId: string) => Promise<boolean> | boolean
+  activateWorkspace: (workspaceId: string | null) => Promise<boolean>
   closeTab: (paneId: string) => Promise<void>
   requestCloseTab: (paneId: string) => Promise<void> | void
   newTab: (cwd?: string, argv?: string[], title?: string, workspaceId?: string | null) => Promise<string | void>
@@ -32,16 +33,22 @@ export interface OverviewCallbacks {
   onOverviewCloseTab: (tabId: string) => void
   onCloseTabsBulk: (paneIds: string[]) => Promise<void>
   onOverviewNewTab: (cwd?: string, workspaceId?: string | null) => Promise<void>
-  onOverviewNewTabSsh: (connectionId: string, initialCwd?: string) => Promise<void>
+  onOverviewNewTabSsh: (
+    connectionId: string,
+    initialCwd?: string,
+    workspaceId?: string
+  ) => Promise<void>
   onOverviewRenameTab: (paneId: string, title: string) => void
 }
 
 export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCallbacks {
   const {
     tabs,
+    activeWorkspaceId,
     termRefs,
     session,
     activateTab,
+    activateWorkspace,
     closeTab,
     requestCloseTab,
     newTab,
@@ -89,17 +96,38 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
 
   async function onOverviewNewTab(cwd?: string, workspaceId?: string | null): Promise<void> {
     closeOverview()
+    if (workspaceId !== undefined && workspaceId !== activeWorkspaceId.value) {
+      try {
+        if (!(await activateWorkspace(workspaceId))) return
+      } catch (e) {
+        console.error('Failed to activate workspace:', e)
+        return
+      }
+    }
     await newTab(cwd, undefined, undefined, workspaceId)
   }
 
-  async function onOverviewNewTabSsh(connectionId: string, initialCwd?: string): Promise<void> {
+  async function onOverviewNewTabSsh(
+    connectionId: string,
+    initialCwd?: string,
+    workspaceId?: string
+  ): Promise<void> {
     closeOverview()
     try {
-      const result = await apiCreateSshTab(connectionId, initialCwd)
+      if (
+        workspaceId !== undefined
+        && workspaceId !== activeWorkspaceId.value
+        && !(await activateWorkspace(workspaceId))
+      ) return
+      const result = await apiCreateSshTab(connectionId, initialCwd, workspaceId)
+      const resolvedWorkspaceId = result.workspace_id ?? workspaceId
       const existing = tabs.value.find(
         (t) => t.type === 'terminal' && t.paneId === result.tab_id,
       )
       if (existing) {
+        if (existing.type === 'terminal' && resolvedWorkspaceId) {
+          existing.workspaceId = resolvedWorkspaceId
+        }
         commitLocalActivePane(result.tab_id)
         persist()
         nextTick(() => focusActive())
@@ -114,11 +142,8 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
         paneMru: [result.pane_id],
         broadcastMode: false,
         broadcastActivity: 0,
-        previewVisible: false,
-        previewAddress: '',
-        previewUrl: '',
-        previewKind: 'web',
         connectionId,
+        workspaceId: resolvedWorkspaceId,
       } as TerminalTab)
       commitLocalActivePane(result.tab_id)
       persist()

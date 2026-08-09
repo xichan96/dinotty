@@ -130,6 +130,9 @@ jobs:
           - platform: linux
             os: ubuntu-22.04
             bundles: deb,appimage
+          - platform: linux-arm64
+            os: ubuntu-22.04-arm
+            bundles: deb,appimage
           - platform: windows
             os: windows-latest
             bundles: nsis
@@ -154,7 +157,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install Linux bundle dependencies
-        if: matrix.platform == 'linux'
+        if: startsWith(matrix.platform, 'linux')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -255,14 +258,14 @@ jobs:
           done < <(find target src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print0 2>/dev/null || true)
 
       - name: Install cargo-deb
-        if: matrix.platform == 'linux'
+        if: startsWith(matrix.platform, 'linux')
         run: |
           if ! command -v cargo-deb >/dev/null 2>&1; then
             cargo install cargo-deb --locked
           fi
 
       - name: Build server deb package
-        if: matrix.platform == 'linux'
+        if: startsWith(matrix.platform, 'linux')
         run: cargo deb --profile release --package dinotty-server
 
       - name: Stage Windows portable executable

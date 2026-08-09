@@ -1,3 +1,5 @@
+import { t } from './useI18n'
+
 export interface OverlayHost {
   getWrapper(): HTMLElement | null
   isSsh(): boolean
@@ -9,6 +11,7 @@ export interface TerminalOverlay {
   showReconnect(): void
   hide(): void
   showExit(): void
+  showError(message: string): void
   cleanup(): void
 }
 
@@ -83,9 +86,31 @@ export function createTerminalOverlay(host: OverlayHost): TerminalOverlay {
     wrapper.appendChild(overlay)
   }
 
+  function showError(message: string) {
+    const wrapper = host.getWrapper()
+    if (!wrapper) return
+    hide()
+    overlay = document.createElement('div')
+    overlay.className = 'reconnect-overlay'
+
+    const text = document.createElement('span')
+    text.textContent = message
+    overlay.appendChild(text)
+
+    const button = document.createElement('button')
+    button.className = 'reconnect-retry-btn'
+    button.textContent = t('settings.title')
+    button.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('dinotty:open-settings'))
+    })
+    overlay.appendChild(button)
+    wrapper.style.position = 'relative'
+    wrapper.appendChild(overlay)
+  }
+
   function cleanup() {
     hide()
   }
 
-  return { showReconnect, hide, showExit, cleanup }
+  return { showReconnect, hide, showExit, showError, cleanup }
 }

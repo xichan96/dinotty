@@ -5,6 +5,7 @@ import type { Workspace } from '../types/workspace'
 
 const mocks = vi.hoisted(() => ({
   apiCloseTab: vi.fn(),
+  apiApplyTemplate: vi.fn(),
   clearFileWorkspaceState: vi.fn(),
   invalidatePluginPreview: vi.fn(),
 }))
@@ -15,7 +16,7 @@ vi.mock('../composables/useTabApi', () => ({
   apiCreateTab: vi.fn(),
   apiCreateSshTab: vi.fn(),
 }))
-vi.mock('../composables/useTemplateApi', () => ({ apiApplyTemplate: vi.fn() }))
+vi.mock('../composables/useTemplateApi', () => ({ apiApplyTemplate: mocks.apiApplyTemplate }))
 vi.mock('../composables/useTerminal', () => ({ isKbTypingLocked: () => false }))
 vi.mock('../composables/useFileWorkspaceState', () => ({
   clearFileWorkspaceState: mocks.clearFileWorkspaceState,
@@ -38,7 +39,10 @@ function terminalTab(tabId: string, paneId: string): Tab {
   }
 }
 
-function setup() {
+function setup(options: {
+  activeWorkspaceId?: string | null
+  matchWorkspace?: () => Workspace | null
+} = {}) {
   const tabs = ref<Tab[]>([
     terminalTab('tab-closing', 'pane-closing'),
     terminalTab('tab-remaining', 'pane-remaining'),
@@ -47,16 +51,18 @@ function setup() {
   const termRef = { focus: vi.fn() }
   const termRefs: Record<string, unknown> = { 'pane-closing': termRef }
   const clearForPaneIds = vi.fn()
+  const activeWorkspaceId = ref<string | null>(options.activeWorkspaceId ?? null)
+  const activateWorkspace = vi.fn(async () => true)
   const lifecycle = useTabLifecycle({
     tabs,
     activePaneId,
     session: { reorderTab: vi.fn(), renameTab: vi.fn() },
     ui: { requestCloseTab: vi.fn(), requestClosePane: vi.fn(), cancelClose: vi.fn() },
     appSettings: {},
-    activeWorkspaceId: ref<string | null>(null),
+    activeWorkspaceId,
     workspaces: ref<Workspace[]>([]),
-    matchWorkspace: () => null,
-    activateWorkspace: vi.fn(async () => true),
+    matchWorkspace: options.matchWorkspace ?? (() => null),
+    activateWorkspace,
     cancelPendingWorkspaceActivation: vi.fn(),
     workspaceIdOfTab: () => null,
     activeWorkspacePath: ref<string | undefined>(undefined),
@@ -70,7 +76,7 @@ function setup() {
     sendSync: vi.fn(),
     showCreateTerminalError: vi.fn(),
   })
-  return { lifecycle, tabs, termRefs, termRef, clearForPaneIds }
+  return { lifecycle, tabs, termRefs, termRef, clearForPaneIds, activeWorkspaceId, activateWorkspace }
 }
 
 describe('useTabLifecycle close consistency', () => {
@@ -101,5 +107,59 @@ describe('useTabLifecycle close consistency', () => {
     expect(termRefs).not.toHaveProperty('pane-closing')
     expect(mocks.clearFileWorkspaceState).toHaveBeenCalledWith('pane-closing')
     expect(clearForPaneIds).toHaveBeenCalledWith(['tab-closing', 'pane-closing'], 'tab_close')
+  })
+})
+
+describe('useTabLifecycle template workspace identity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.apiApplyTemplate.mockResolvedValue({
+      tab_id: 'template-tab',
+      layout: {
+        type: 'leaf',
+        paneId: 'template-pane',
+        title: 'Template',
+        ratio: 1,
+        zoomed: false,
+      },
+      cwd: '/workspace/default/project',
+      connection_id: null,
+      warnings: [],
+    })
+  })
+
+  const defaultWorkspace: Workspace = {
+    id: '__default__',
+    name: 'Default',
+    path: '/workspace/default',
+    order: 0,
+  }
+
+  it('stores default template ownership as undefined without a same-workspace hop', async () => {
+    const { lifecycle, tabs, activateWorkspace } = setup({
+      matchWorkspace: () => defaultWorkspace,
+    })
+
+    await lifecycle.applyTemplate('template-default')
+
+    expect(activateWorkspace).not.toHaveBeenCalled()
+    expect(tabs.value.find((tab) => tab.paneId === 'template-tab')).toMatchObject({
+      workspaceId: undefined,
+    })
+  })
+
+  it('deactivates to the default workspace before selecting a default template tab', async () => {
+    const { lifecycle, tabs, activateWorkspace } = setup({
+      activeWorkspaceId: 'workspace-a',
+      matchWorkspace: () => defaultWorkspace,
+    })
+
+    await lifecycle.applyTemplate('template-default')
+
+    expect(activateWorkspace).toHaveBeenCalledOnce()
+    expect(activateWorkspace).toHaveBeenCalledWith(null)
+    expect(tabs.value.find((tab) => tab.paneId === 'template-tab')).toMatchObject({
+      workspaceId: undefined,
+    })
   })
 })

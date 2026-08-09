@@ -466,7 +466,11 @@ import {
 import WorkspaceOverview from './components/overview/WorkspaceOverview.vue'
 import { refreshPluginPreview, invalidatePluginPreview } from './composables/useTabPreview'
 import { useIsMobile } from './composables/useIsMobile'
-import { useWorkspaces, DEFAULT_WORKSPACE_ID } from './composables/useWorkspaces'
+import {
+  useWorkspaces,
+  DEFAULT_WORKSPACE_ID,
+  toActiveWorkspaceId,
+} from './composables/useWorkspaces'
 // formatCloseTabMessage moved to ConfirmCloseDialog component
 import LoginPage from './components/LoginPage.vue'
 import SetupPage from './components/SetupPage.vue'
@@ -621,9 +625,9 @@ const {
 
 function workspaceIdOfTab(tab: Tab): string | null {
   if (tab.type === 'plugin') {
-    return tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId) ?? null
+    return toActiveWorkspaceId(tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId))
   }
-  return (
+  return toActiveWorkspaceId(
     matchWorkspace(
       tab.cwd ?? '',
       tab.connectionId,
@@ -1589,8 +1593,11 @@ window.__dinotty_terminal_api = {
   },
   async createTerminalTab(opts: { cwd: string; argv: string[]; title?: string }) {
     const ws = matchWorkspace(opts.cwd)
-    const targetId = ws?.id ?? null
-    if (targetId !== activeWorkspaceId.value) await activateWorkspace(targetId)
+    const targetId = toActiveWorkspaceId(ws?.id)
+    if (targetId !== activeWorkspaceId.value) {
+      const committed = await activateWorkspace(targetId)
+      if (!committed) return ''
+    }
     return newTab(opts.cwd, opts.argv, opts.title)
   },
 }

@@ -341,7 +341,10 @@ export const SplitContainerStub = defineComponent({
 
 export const TabBarStub = defineComponent({
   name: 'TabBar',
-  props: { indicators: { type: Object, default: () => ({}) } },
+  props: {
+    tabs: { type: Array as PropType<any[]>, default: () => [] },
+    indicators: { type: Object, default: () => ({}) },
+  },
   setup(props, { slots, expose }) {
     expose({
       hasTab: () => true,

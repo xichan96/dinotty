@@ -18,7 +18,7 @@ import {
 } from './apiBase'
 import { isTauri } from './useTransport'
 import { handlePluginChanged } from './usePluginLoader'
-import { useWorkspaces } from './useWorkspaces'
+import { toActiveWorkspaceId, useWorkspaces } from './useWorkspaces'
 import { apiCreatePluginTab } from './useTabApi'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
 import { useMissionControlState } from './useMissionControlState'
@@ -111,9 +111,9 @@ export function useSyncWebSocket(opts: {
 
   function workspaceIdOfTab(tab: Tab): string | null {
     if (tab.type === 'plugin') {
-      return tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId) ?? null
+      return toActiveWorkspaceId(tab.workspaceId ?? workspaceIdFromPaneId(tab.paneId))
     }
-    return (
+    return toActiveWorkspaceId(
       matchWorkspace(
         tab.cwd ?? '',
         tab.connectionId,
@@ -615,7 +615,7 @@ export function useSyncWebSocket(opts: {
         onSshAuthPrompt?.(msg.pane_id, msg.prompts)
       } else if (msg.type === 'workspace_list') {
         workspaces.value = msg.workspaces
-        activeWorkspaceId.value = msg.active_workspace_id
+        activeWorkspaceId.value = toActiveWorkspaceId(msg.active_workspace_id)
         workspaceListReceived = true
         if (pendingAutoNewTab) {
           pendingAutoNewTab = false
@@ -643,7 +643,7 @@ export function useSyncWebSocket(opts: {
           }
         }
       } else if (msg.type === 'workspace_activated') {
-        activeWorkspaceId.value = msg.id
+        activeWorkspaceId.value = toActiveWorkspaceId(msg.id)
       } else if (msg.type === 'workspace_reordered') {
         for (let i = 0; i < msg.ids.length; i++) {
           const ws = workspaces.value.find((w) => w.id === msg.ids[i])

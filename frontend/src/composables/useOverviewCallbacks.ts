@@ -5,6 +5,7 @@ import { ensureSplitRoot } from '../types/pane'
 import type { TerminalTab, Tab } from '../types/pane'
 import type { SyncClientMsg } from '../types/protocol'
 import { useMissionControlState } from './useMissionControlState'
+import { toActiveWorkspaceId } from './useWorkspaces'
 
 export interface OverviewCallbacksOptions {
   tabs: Ref<Tab[]>
@@ -96,15 +97,16 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
 
   async function onOverviewNewTab(cwd?: string, workspaceId?: string | null): Promise<void> {
     closeOverview()
-    if (workspaceId !== undefined && workspaceId !== activeWorkspaceId.value) {
+    const targetWorkspaceId = toActiveWorkspaceId(workspaceId)
+    if (workspaceId !== undefined && targetWorkspaceId !== activeWorkspaceId.value) {
       try {
-        if (!(await activateWorkspace(workspaceId))) return
+        if (!(await activateWorkspace(targetWorkspaceId))) return
       } catch (e) {
         console.error('Failed to activate workspace:', e)
         return
       }
     }
-    await newTab(cwd, undefined, undefined, workspaceId)
+    await newTab(cwd, undefined, undefined, targetWorkspaceId)
   }
 
   async function onOverviewNewTabSsh(
@@ -114,10 +116,11 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
   ): Promise<void> {
     closeOverview()
     try {
+      const targetWorkspaceId = toActiveWorkspaceId(workspaceId)
       if (
         workspaceId !== undefined
-        && workspaceId !== activeWorkspaceId.value
-        && !(await activateWorkspace(workspaceId))
+        && targetWorkspaceId !== activeWorkspaceId.value
+        && !(await activateWorkspace(targetWorkspaceId))
       ) return
       const result = await apiCreateSshTab(connectionId, initialCwd, workspaceId)
       const resolvedWorkspaceId = result.workspace_id ?? workspaceId

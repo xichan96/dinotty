@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   DEFAULT_WORKSPACE_ID,
   isPathWithinWorkspace,
+  toActiveWorkspaceId,
   useWorkspaces,
   workspaceBasename,
 } from '../useWorkspaces'
@@ -25,6 +26,13 @@ function makeTab(paneId: string, cwd?: string): TerminalTab {
 }
 
 describe('workspace path helpers', () => {
+  it('normalizes the default workspace sentinel to the runtime null identity', () => {
+    expect(toActiveWorkspaceId(undefined)).toBeNull()
+    expect(toActiveWorkspaceId(null)).toBeNull()
+    expect(toActiveWorkspaceId(DEFAULT_WORKSPACE_ID)).toBeNull()
+    expect(toActiveWorkspaceId('workspace-a')).toBe('workspace-a')
+  })
+
   it.each([
     [String.raw`C:\repo\dinotty`, 'dinotty'],
     ['C:/repo/dinotty/', 'dinotty'],

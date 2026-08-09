@@ -72,6 +72,17 @@ describe('useOverviewCallbacks workspace activation', () => {
     expect(newTab).toHaveBeenCalledOnce()
   })
 
+  it('treats the default workspace sentinel as the already-active runtime default', async () => {
+    const { options, activeWorkspaceId, activateWorkspace, newTab } = createOptions()
+    activeWorkspaceId.value = null
+    const callbacks = useOverviewCallbacks(options)
+
+    await callbacks.onOverviewNewTab('C:/work/default', '__default__')
+
+    expect(activateWorkspace).not.toHaveBeenCalled()
+    expect(newTab).toHaveBeenCalledWith('C:/work/default', undefined, undefined, null)
+  })
+
   it('activates a selected SSH workspace before creating its tab', async () => {
     const { options, activateWorkspace, tabs } = createOptions()
     mocks.apiCreateSshTab.mockResolvedValue({

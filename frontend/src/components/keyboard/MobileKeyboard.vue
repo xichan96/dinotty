@@ -402,6 +402,15 @@ let sendLocked = false
 let sendGeneration = 0
 let componentMounted = false
 
+watch(
+  () => props.paneId,
+  () => {
+    if (!sendLocked) return
+    sendLocked = false
+    sendGeneration++
+  }
+)
+
 const {
   resetTextareaMetrics,
   getTextareaMetrics,
@@ -531,9 +540,7 @@ async function sendTextInput() {
   }
 
   const direct =
-    !text.includes('\n') &&
-    settings.quick_send_threshold > 0 &&
-    text.length <= settings.quick_send_threshold
+    settings.quick_send_threshold > 0 && text.length <= settings.quick_send_threshold
   if (!direct) {
     send(text)
     clearSentText()

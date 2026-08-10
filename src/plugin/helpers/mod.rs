@@ -48,6 +48,9 @@ fn is_development_cache(path: &std::path::Path, name: &std::ffi::OsStr) -> bool 
     if name == ".git" {
         return true;
     }
+    if name == "node_modules" {
+        return true;
+    }
     name == "target"
         && (path.join("CACHEDIR.TAG").is_file() || path.join(".rustc_info.json").is_file())
 }
@@ -138,10 +141,7 @@ mod tests {
             b"runtime asset"
         );
         assert!(!dest.join(".git").exists());
-        assert_eq!(
-            std::fs::read(dest.join("node_modules/package/index.js")).unwrap(),
-            b"dependency cache"
-        );
+        assert!(!dest.join("node_modules").exists());
         assert!(!dest.join("native/target").exists());
     }
 

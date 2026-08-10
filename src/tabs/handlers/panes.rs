@@ -111,13 +111,14 @@ pub async fn split_pane(
             }
         }
     } else {
-        // Local PTY - inherit CWD from source pane
+        // Local PTY - honor explicit cwd override, otherwise inherit from source pane
+        let local_cwd = req.cwd.map(std::path::PathBuf::from).or(source_cwd);
         match pty::create_session(
             &manager,
             &new_pane_id,
             Some(&tab_id),
             None,
-            source_cwd.map(pty::LaunchCwd::Host),
+            local_cwd.map(pty::LaunchCwd::Host),
             None,
             shell_spec,
         ) {

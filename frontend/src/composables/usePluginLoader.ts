@@ -112,11 +112,20 @@ export interface PluginContext {
   terminal: {
     send(paneId: string, data: string): void
     activePaneId(): string | null
+    /** Returns the active terminal tab's cwd, or the last known terminal cwd,
+     *  or the active workspace path. null if none are available. */
+    activeCwd(): string | null
     listPanes(): Array<{ id: string; title: string; active: boolean }>
     onOutput(callback: (paneId: string, data: string) => void): Disposable
     createTab(command?: string): Promise<string>
     /** Open a terminal tab in cwd and execute argv directly, without an intermediary shell. */
     createTerminalTab(opts: { cwd: string; argv: string[]; title?: string }): Promise<string>
+    /** Split the active terminal pane. Returns the new pane id, or null if no
+     *  terminal tab is active. */
+    splitTerminalPane(opts?: {
+      direction?: 'horizontal' | 'vertical'
+      cwd?: string
+    }): Promise<string | null>
   }
 
   settings: {
@@ -174,7 +183,7 @@ export interface PluginContext {
   }
 
   events: {
-    subscribe<T = unknown>(eventName: string, handler: (data: T, e: SyncEvent) => void): () => void
+    subscribe<T = unknown>(eventName: string, handler: (data: T, e: SyncEvent) => void): Disposable
     emit(
       eventName: string,
       data: unknown,
@@ -595,10 +604,12 @@ function createPluginContext(pluginId: string): PluginContext {
     terminal: window.__dinotty_terminal_api ?? {
       send() {},
       activePaneId: () => null,
+      activeCwd: () => null,
       listPanes: () => [],
       onOutput: () => ({ dispose() {} }),
       createTab: async () => '',
       createTerminalTab: async () => '',
+      splitTerminalPane: async () => null,
     },
     settings: {
       get: () => (window as any).__dinotty_settings_data ?? {},
@@ -615,8 +626,10 @@ function createPluginContext(pluginId: string): PluginContext {
       window.__dinotty_open_plugin?.(pluginId)
     },
     events: {
-      subscribe: <T = unknown>(name: string, handler: (data: T, e: SyncEvent) => void) =>
-        eventSubscribe(name, handler, { pluginId: pluginId }),
+      subscribe: <T = unknown>(name: string, handler: (data: T, e: SyncEvent) => void) => {
+        const unsubscribe = eventSubscribe(name, handler, { pluginId: pluginId })
+        return { dispose: unsubscribe }
+      },
       emit: (name: string, data: unknown, opts?: { target_plugin_id?: string }) =>
         eventEmit(name, data, { plugin_id: pluginId, ...opts }),
     },

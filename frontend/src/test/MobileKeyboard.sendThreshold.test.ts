@@ -201,30 +201,41 @@ describe('MobileKeyboard configurable send threshold', () => {
   })
 
   it('scenario 9: a pane switch during the window drops Enter without cross-pane submission', async () => {
-    let activePane = 'p1'
-    const delivered: Array<[string, string]> = []
-    const panePinnedSend: SendDataFn = (data) => {
-      if (activePane === 'p1') delivered.push(['p1', data])
-    }
-    const mounted = mountKeyboard(() => panePinnedSend)
+    const p1Send = vi.fn()
+    const p2Send = vi.fn()
+    let currentSend: SendDataFn = p1Send
+    const mounted = mountKeyboard(() => currentSend)
 
     await enterText(mounted, 'pane-pinned')
     await advance(20)
-    activePane = 'p2'
+    currentSend = p2Send
+    await mounted.setProps({ paneId: 'p2' })
     await advance(30)
 
-    expect(delivered).toEqual([['p1', 'pane-pinned']])
+    expect(p1Send.mock.calls).toEqual([['pane-pinned']])
+    expect(p2Send).not.toHaveBeenCalled()
+
+    await enterText(mounted, 'new-pane')
+    await advance(50)
+    expect(p2Send.mock.calls).toEqual([['new-pane'], ['\r']])
   })
 
-  it('scenario 10: sends multiline text without a trailing Enter at any N', async () => {
-    settings.quick_send_threshold = 5000
+  it('scenario 10: applies the length threshold to multiline text', async () => {
+    const text = 'one\ntwo'
+    settings.quick_send_threshold = text.length
     const send = vi.fn()
     const mounted = mountKeyboard(() => send)
 
-    await enterText(mounted, 'one\ntwo')
+    await enterText(mounted, text)
+    await advance(50)
+
+    expect(send.mock.calls).toEqual([[text], ['\r']])
+
+    settings.quick_send_threshold = text.length - 1
+    await enterText(mounted, text)
     await advance(100)
 
-    expect(send.mock.calls).toEqual([['one\ntwo']])
+    expect(send.mock.calls).toEqual([[text], ['\r'], [text]])
   })
 
   it('scenario 11: unmount invalidates the pending Enter generation', async () => {
@@ -346,5 +357,51 @@ describe('MobileKeyboard configurable send threshold', () => {
     expect(ptyWrites).toEqual(['native', '\r'])
 
     transport.disconnect()
+  })
+
+  it('scenario 17: a pane switch while the text leg is pending cancels Enter and unlocks the new pane', async () => {
+    const textLeg = deferred<void>()
+    const p1Send = vi.fn((data: string) => (data === 'pending-pane' ? textLeg.promise : undefined))
+    const p2Send = vi.fn()
+    let currentSend: SendDataFn = p1Send
+    const mounted = mountKeyboard(() => currentSend)
+
+    await enterText(mounted, 'pending-pane')
+    currentSend = p2Send
+    await mounted.setProps({ paneId: 'p2' })
+    await enterText(mounted, 'new-pane')
+
+    textLeg.resolve()
+    await Promise.resolve()
+    await advance(50)
+
+    expect(p1Send.mock.calls).toEqual([['pending-pane']])
+    expect(p2Send.mock.calls).toEqual([['new-pane'], ['\r']])
+  })
+
+  it('scenario 18: stale completion cannot unlock a new pane send', async () => {
+    const p1Send = vi.fn()
+    const p2Send = vi.fn()
+    let currentSend: SendDataFn = p1Send
+    const mounted = mountKeyboard(() => currentSend)
+
+    await enterText(mounted, 'old-pane')
+    await advance(20)
+    currentSend = p2Send
+    await mounted.setProps({ paneId: 'p2' })
+    await enterText(mounted, 'new-pane')
+
+    await advance(30)
+    const key = mounted.findAllComponents(MkbKeyStub)[0]
+    key.vm.$emit('key-press', 'x')
+    key.vm.$emit('app-action', 'term.newline', {})
+    await nextTick()
+
+    expect(p1Send.mock.calls).toEqual([['old-pane']])
+    expect(p2Send.mock.calls).toEqual([['new-pane']])
+    expect(mounted.emitted('app-action')).toBeUndefined()
+
+    await advance(20)
+    expect(p2Send.mock.calls).toEqual([['new-pane'], ['\r']])
   })
 })

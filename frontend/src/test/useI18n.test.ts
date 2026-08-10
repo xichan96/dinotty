@@ -166,3 +166,43 @@ describe('useI18n - QKB1 strings', () => {
     )
   })
 })
+
+describe('useI18n - quick-send and keyboard-guard copy', () => {
+  it.each([
+    ['en', 'settings.keyboard.quickSendThreshold', 'Single-confirmation character limit'],
+    [
+      'en',
+      'settings.keyboard.quickSendThresholdHint',
+      'At or below this character count, one confirmation sends the message; above it, confirm again. Set to 0 to always require two confirmations.',
+    ],
+    ['en', 'settings.keyboard.guardMode.label', 'Keyboard guard'],
+    ['en', 'settings.keyboard.guardMode.off', 'Off'],
+    ['en', 'settings.keyboard.guardMode.collapseOnly', 'Manual close'],
+    ['en', 'settings.keyboard.guardMode.openOnly', 'Manual open'],
+    ['en', 'settings.keyboard.guardMode.both', 'Manual open & close'],
+    [
+      'en',
+      'settings.keyboard.guardMode.hint',
+      'Choose whether opening or closing the keyboard must always use the keyboard button to prevent accidental activation.',
+    ],
+    ['zh', 'settings.keyboard.quickSendThreshold', '消息发送仅需单次确认的字符上限'],
+    [
+      'zh',
+      'settings.keyboard.quickSendThresholdHint',
+      '不超过该字符数时，确认一次即可发送；超过后需再次确认。0 表示始终需要二次确认。',
+    ],
+    ['zh', 'settings.keyboard.guardMode.label', '键盘防护'],
+    ['zh', 'settings.keyboard.guardMode.off', '关闭'],
+    ['zh', 'settings.keyboard.guardMode.collapseOnly', '手动关闭'],
+    ['zh', 'settings.keyboard.guardMode.openOnly', '手动开启'],
+    ['zh', 'settings.keyboard.guardMode.both', '手动开关'],
+    [
+      'zh',
+      'settings.keyboard.guardMode.hint',
+      '控制键盘是否一定需通过键盘按钮手动开启或关闭，从而防止误触。',
+    ],
+  ] as const)('keeps the audited %s value for %s', (locale, key, expected) => {
+    settings.locale = locale
+    expect(useI18n().t(key)).toBe(expected)
+  })
+})

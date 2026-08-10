@@ -9,7 +9,8 @@ pub struct SplitPaneRequest {
     /// When true, always create a local PTY even if the source pane is SSH.
     #[serde(default)]
     pub force_local: bool,
-    /// Optional CWD override for the new pane (used with `force_local`).
+    /// Optional CWD override for the new pane. Honored for local PTY splits
+    /// (including non-`force_local`); falls back to the source pane's CWD when absent.
     #[serde(default)]
     pub cwd: Option<String>,
 }

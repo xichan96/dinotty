@@ -73,10 +73,12 @@ export function useSplitPane(opts: {
     return tab as TerminalTab | null
   }
 
-  /** Split the active pane in the given direction */
-  async function splitPane(direction: 'horizontal' | 'vertical', forceLocal?: boolean, cwd?: string) {
+  /** Split the active pane in the given direction.
+   *  Returns the new pane id, or null if there is no active terminal tab
+   *  or the split failed. */
+  async function splitPane(direction: 'horizontal' | 'vertical', forceLocal?: boolean, cwd?: string): Promise<string | null> {
     const tab = getActiveTerminal()
-    if (!tab) return
+    if (!tab) return null
     if (getAllLeaves(tab.layout).length >= 6) {
       const { t } = useI18n()
       usePaneWarning().show(t('split.tooManyPanes'))
@@ -104,9 +106,11 @@ export function useSplitPane(opts: {
         }
         termRefs[result.new_pane_id]?.focus()
       })
+      return result.new_pane_id
     } catch (e) {
       console.error('Failed to split pane:', e)
       showSplitTerminalError(e)
+      return null
     }
   }
 

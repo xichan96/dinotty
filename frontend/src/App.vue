@@ -853,15 +853,18 @@ watch(
 )
 
 // Capture plugin preview when active tab changes to a plugin tab (handles initial load)
+// and remember the last terminal cwd so plugins can derive a default working directory
+// even when a non-terminal tab (e.g. a plugin tab) is currently active.
+const lastTerminalCwd = ref<string | null>(null)
 watch(activePaneId, (paneId) => {
   const tab = tabs.value.find((t) => t.paneId === paneId)
   if (!tab) return
-  // Legacy PluginTab or migrated TerminalTab-with-plugin-leaf.
-  if (tab.type === 'plugin') {
-    nextTick(() => refreshPluginPreview(tab.paneId))
-  } else if (tab.type === 'terminal') {
+  if (tab.type === 'terminal') {
+    if (tab.cwd) lastTerminalCwd.value = tab.cwd
     const pluginLeaf = getAllLeaves(tab.layout).find((l) => l.kind === 'plugin')
     if (pluginLeaf) nextTick(() => refreshPluginPreview(pluginLeaf.paneId))
+  } else if (tab.type === 'plugin') {
+    nextTick(() => refreshPluginPreview(tab.paneId))
   }
 })
 
@@ -1564,6 +1567,13 @@ window.__dinotty_terminal_api = {
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
     return tab?.type === 'terminal' ? tab.activePaneId : activePaneId.value
   },
+  activeCwd() {
+    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+    if (tab?.type === 'terminal' && tab.cwd) return tab.cwd
+    if (lastTerminalCwd.value) return lastTerminalCwd.value
+    const wsPath = activeWorkspacePath.value
+    return wsPath ?? null
+  },
   listPanes() {
     const result: { id: string; title: string; active: boolean }[] = []
     for (const t of tabs.value) {
@@ -1599,6 +1609,13 @@ window.__dinotty_terminal_api = {
       if (!committed) return ''
     }
     return newTab(opts.cwd, opts.argv, opts.title)
+  },
+  async splitTerminalPane(opts?: {
+    direction?: 'horizontal' | 'vertical'
+    cwd?: string
+  }): Promise<string | null> {
+    const direction = opts?.direction ?? 'vertical'
+    return splitPane.splitPane(direction, false, opts?.cwd)
   },
 }
 // Test hooks for P3 verification (focusActive + isComposing guard).

@@ -259,6 +259,7 @@ pub fn create_session(
             crate::platform::process::resolve_terminal_program(argv[0].as_ref(), &effective_cwd)?;
         let mut cmd = CommandBuilder::new(program);
         cmd.args(&argv[1..]);
+        ensure_command_path(&mut cmd);
         (
             cmd,
             "command".to_string(),
@@ -733,6 +734,30 @@ pub(crate) fn claude_session_env_keys_to_strip() -> Vec<String> {
 fn is_claude_session_env_key(key: &str) -> bool {
     let ku = key.to_ascii_uppercase();
     ku.starts_with("CLAUDE_CODE_") || ku == "CLAUDECODE" || ku == "CLAUDE_SESSION_ID"
+}
+
+/// Augment PATH for direct-argv spawns (createTerminalTab) so commands installed
+/// via Homebrew / nvm / pyenv are resolvable even when dinotty itself was launched
+/// from a GUI context with a minimal PATH (e.g. `/Applications/Dinotty.app` on
+/// macOS, which inherits `PATH=/usr/bin:/bin:/usr/sbin:/sbin` from launchd).
+fn ensure_command_path(cmd: &mut CommandBuilder) {
+    let current = cmd.get_env("PATH").map(|v| v.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut parts: Vec<String> = if current.is_empty() {
+        Vec::new()
+    } else {
+        current.split(':').map(str::to_string).collect()
+    };
+    let extras: &[&str] = if cfg!(target_os = "macos") {
+        &["/opt/homebrew/bin", "/usr/local/bin"]
+    } else {
+        &["/usr/local/bin"]
+    };
+    for dir in extras {
+        if !parts.iter().any(|p| p == dir) {
+            parts.push((*dir).to_string());
+        }
+    }
+    cmd.env("PATH", parts.join(":"));
 }
 
 fn configure_utf8_locale(cmd: &mut CommandBuilder) {

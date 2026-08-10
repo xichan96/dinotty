@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "dinotty-desktop"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "axum 0.7.9",
  "base64 0.22.1",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "dinotty-server"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "arboard",
  "axum 0.7.9",

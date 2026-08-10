@@ -47,7 +47,9 @@ import { settings } from '../useSettings'
 import {
   __dispatchServerMessageForTest,
   __pendingRequestCountForTest,
+  __restoreNotificationSessionHistoryForTest,
   __resetForTest,
+  NOTIFICATION_SESSION_HISTORY_KEY,
   useNotification,
   type NotificationItem,
 } from '../useNotification'
@@ -227,6 +229,147 @@ describe('useNotification protocol dispatcher', () => {
       legacyEvent({ pane_id: '', notifId: 'notif-1', eventSeq: '11', body: 'new epoch' })
     )
     expect(notif.historyCount.value).toBe(4)
+  })
+
+  it('restores notification cards across a page reload before the same-epoch snapshot arrives', () => {
+    const notif = current()
+    __dispatchServerMessageForTest(snapshot('1'))
+    __dispatchServerMessageForTest(legacyEvent({ body: 'survives reload' }))
+    __dispatchServerMessageForTest(
+      legacyEvent({ pane_id: '', notifId: 'notif-1', eventSeq: '2', body: 'plugin survives' })
+    )
+
+    const persisted = sessionStorage.getItem(NOTIFICATION_SESSION_HISTORY_KEY)
+    expect(persisted).not.toBeNull()
+
+    notif.notifications.value = []
+    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, persisted!)
+    __restoreNotificationSessionHistoryForTest()
+
+    expect(notif.notifications.value.map(({ body }) => body)).toEqual([
+      'plugin survives',
+      'survives reload',
+    ])
+
+    __dispatchServerMessageForTest(snapshot(
+      '2',
+      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'info' }],
+      [{ notifId: 'notif-1', read: false }],
+    ))
+    expect(notif.unreadAttentionCount.value).toBe(2)
+    expect(notif.notifications.value).toHaveLength(2)
+  })
+
+  it('ignores corrupt persisted notification history', () => {
+    const notif = current()
+    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, '{not-json')
+
+    __restoreNotificationSessionHistoryForTest()
+
+    expect(notif.notifications.value).toEqual([])
+    expect(sessionStorage.getItem(NOTIFICATION_SESSION_HISTORY_KEY)).toBeNull()
+  })
+
+  it('defers restored-card dismissal until the first snapshot resolves its epoch', () => {
+    const notif = current()
+    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, JSON.stringify([{
+      id: 'restored-pane',
+      type: 'warning',
+      paneId: 'pane-a',
+      title: null,
+      body: 'restored',
+      timestamp: 100,
+      source: 'terminal',
+      eventSeq: '1',
+      epoch: 'epoch-a',
+    }]))
+    __restoreNotificationSessionHistoryForTest()
+
+    notif.dismissOne('restored-pane')
+
+    expect(notif.notifications.value).toHaveLength(1)
+    expect(syncMock.sentPayloads).toEqual([])
+
+    __dispatchServerMessageForTest(snapshot(
+      '1',
+      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' }],
+    ))
+
+    expect(notif.notifications.value).toEqual([])
+    expect(syncMock.sentPayloads).toHaveLength(1)
+    expect(syncMock.sentPayloads[0]).toMatchObject({
+      reason: 'dismiss',
+      panes: [{ paneId: 'pane-a', throughEventSeq: '1' }],
+    })
+  })
+
+  it('defers restored-card clear actions until the first snapshot can mark their targets read', () => {
+    const notif = current()
+    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, JSON.stringify([
+      {
+        id: 'restored-pane', type: 'info', paneId: 'pane-a', title: null,
+        body: 'pane', timestamp: 100, source: 'terminal', eventSeq: '1', epoch: 'epoch-a',
+      },
+      {
+        id: 'restored-notif', type: 'success', title: null,
+        body: 'plugin', timestamp: 101, source: 'plugin', eventSeq: '2',
+        notifId: 'notif-a', epoch: 'epoch-a',
+      },
+    ]))
+    __restoreNotificationSessionHistoryForTest()
+
+    notif.clearForPaneIds(['pane-a'], 'tab_activate')
+    notif.clearAll()
+
+    expect(notif.notifications.value).toHaveLength(2)
+    expect(syncMock.sentPayloads).toEqual([])
+
+    __dispatchServerMessageForTest(snapshot(
+      '1',
+      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'info' }],
+      [{ notifId: 'notif-a', read: false }],
+    ))
+
+    expect(notif.notifications.value).toEqual([])
+    expect(syncMock.sentPayloads.map(({ reason }) => reason)).toEqual(['tab_activate', 'clear_all'])
+    expect(notif.unreadAttentionCount.value).toBe(0)
+  })
+
+  it('keeps restored-card actions deferred when a delta arrives before the first snapshot', () => {
+    const notif = current()
+    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, JSON.stringify([{
+      id: 'restored-pane',
+      type: 'warning',
+      paneId: 'pane-a',
+      title: null,
+      body: 'restored',
+      timestamp: 100,
+      source: 'terminal',
+      eventSeq: '1',
+      epoch: 'epoch-a',
+    }]))
+    __restoreNotificationSessionHistoryForTest()
+
+    notif.clearAll()
+    __dispatchServerMessageForTest(delta(
+      '1',
+      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' }],
+    ))
+
+    expect(notif.notifications.value).toHaveLength(1)
+    expect(syncMock.sentPayloads).toEqual([])
+
+    __dispatchServerMessageForTest(snapshot(
+      '2',
+      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' }],
+    ))
+
+    expect(notif.notifications.value).toEqual([])
+    expect(syncMock.sentPayloads).toHaveLength(1)
+    expect(syncMock.sentPayloads[0]).toMatchObject({
+      reason: 'clear_all',
+      panes: [{ paneId: 'pane-a', throughEventSeq: '1' }],
+    })
   })
 
   it('keeps authoritative attention count independent from history count', () => {

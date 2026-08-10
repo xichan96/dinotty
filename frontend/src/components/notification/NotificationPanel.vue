@@ -19,7 +19,7 @@
       />
       <div v-if="notifications.length === 0" class="panel-empty">{{ t('notification.empty') }}</div>
     </div>
-    <button v-if="notifications.length > 0" class="panel-clear" @click="clearAll">
+    <button class="panel-clear" @click="clearAll">
       {{ t('notification.clearAll') }}
     </button>
   </div>

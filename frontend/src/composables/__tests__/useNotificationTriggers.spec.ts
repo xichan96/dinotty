@@ -325,6 +325,50 @@ describe('raised envelope compatibility', () => {
 })
 
 describe('notification panel visibility', () => {
+  it('keeps the clear action visible when both history and unread attention are empty', async () => {
+    const notif = useNotification()
+    const wrapper = mount(NotificationPanel, {
+      props: { paneLabels: {} },
+    })
+
+    expect(notif.notifications.value).toEqual([])
+    expect(notif.unreadAttentionCount.value).toBe(0)
+    expect(wrapper.find('.panel-empty').exists()).toBe(true)
+    expect(wrapper.find('.panel-clear').exists()).toBe(true)
+
+    await wrapper.find('.panel-clear').trigger('click')
+
+    expect(syncMock.sentPayloads).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('can clear authoritative unread attention when reconnect history is empty', async () => {
+    const notif = useNotification()
+    __dispatchServerMessageForTest(
+      snapshot('1', [
+        pane('pane-a', '1'),
+        pane('pane-b', '2'),
+        pane('pane-c', '3'),
+        pane('pane-d', '4'),
+      ])
+    )
+    notif.panelVisible.value = true
+    const wrapper = mount(NotificationPanel, {
+      props: { paneLabels: {} },
+    })
+
+    expect(notif.notifications.value).toEqual([])
+    expect(notif.unreadAttentionCount.value).toBe(4)
+    expect(wrapper.find('.panel-empty').exists()).toBe(true)
+
+    await wrapper.find('.panel-clear').trigger('click')
+
+    expect(notif.unreadAttentionCount.value).toBe(0)
+    expect(syncMock.sentPayloads).toHaveLength(1)
+    expect(syncMock.sentPayloads[0]).toMatchObject({ reason: 'clear_all' })
+    wrapper.unmount()
+  })
+
   it('hides the panel when a notification goto emits the pane target', async () => {
     const notif = useNotification()
     pushNotification({ type: 'info', body: 'done', paneId: 'pane-a' })

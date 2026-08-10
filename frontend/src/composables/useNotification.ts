@@ -94,8 +94,103 @@ const MAX_SEND_ATTEMPTS = 4
 const PENDING_CAP = 64
 const HISTORY_DEDUP_CAP = 512
 const PANEL_EMPTY_AUTOHIDE_MS = 250
+export const NOTIFICATION_SESSION_HISTORY_KEY = 'dinotty_notification_history_v1'
 
-const notifications = ref<NotificationItem[]>([])
+const notificationTypes = new Set<NotificationType>([
+  'info',
+  'success',
+  'warning',
+  'error',
+  'urgent',
+])
+
+function parseNotificationSessionHistory(raw: string | null): NotificationItem[] {
+  if (raw === null) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.slice(0, 100).flatMap((value): NotificationItem[] => {
+      if (typeof value !== 'object' || value === null) return []
+      const item = value as Record<string, unknown>
+      if (
+        typeof item.id !== 'string' ||
+        !notificationTypes.has(item.type as NotificationType) ||
+        (item.title !== null && typeof item.title !== 'string') ||
+        typeof item.body !== 'string' ||
+        typeof item.timestamp !== 'number' ||
+        !Number.isFinite(item.timestamp) ||
+        (item.source !== undefined && item.source !== 'terminal' && item.source !== 'plugin') ||
+        (item.paneId !== undefined && typeof item.paneId !== 'string') ||
+        (item.eventSeq !== undefined && typeof item.eventSeq !== 'string') ||
+        (item.notifId !== undefined && typeof item.notifId !== 'string') ||
+        (item.epoch !== undefined && typeof item.epoch !== 'string')
+      ) return []
+      return [{
+        id: item.id,
+        type: item.type as NotificationType,
+        paneId: item.paneId as string | undefined,
+        title: item.title,
+        body: item.body,
+        timestamp: item.timestamp,
+        source: item.source as NotificationItem['source'],
+        eventSeq: item.eventSeq as string | undefined,
+        notifId: item.notifId as string | undefined,
+        epoch: item.epoch as string | undefined,
+      }]
+    })
+  } catch {
+    return []
+  }
+}
+
+function loadNotificationSessionHistory(): NotificationItem[] {
+  if (typeof sessionStorage === 'undefined') return []
+  try {
+    const raw = sessionStorage.getItem(NOTIFICATION_SESSION_HISTORY_KEY)
+    const items = parseNotificationSessionHistory(raw)
+    if (raw !== null && items.length === 0) {
+      sessionStorage.removeItem(NOTIFICATION_SESSION_HISTORY_KEY)
+    }
+    return items
+  } catch {
+    return []
+  }
+}
+
+function persistNotificationSessionHistory(items: NotificationItem[]) {
+  if (typeof sessionStorage === 'undefined') return
+  try {
+    if (items.length === 0) {
+      sessionStorage.removeItem(NOTIFICATION_SESSION_HISTORY_KEY)
+      return
+    }
+    sessionStorage.setItem(
+      NOTIFICATION_SESSION_HISTORY_KEY,
+      JSON.stringify(items.map(({
+        id,
+        type,
+        paneId,
+        title,
+        body,
+        timestamp,
+        source,
+        eventSeq,
+        notifId,
+        epoch,
+      }) => ({ id, type, paneId, title, body, timestamp, source, eventSeq, notifId, epoch }))),
+    )
+  } catch {
+    // Session storage is an optional reload bridge. The authoritative ledger and
+    // the panel's clear-all recovery path remain available when it is blocked.
+  }
+}
+
+const notifications = ref<NotificationItem[]>(loadNotificationSessionHistory())
+watch(
+  notifications,
+  (items) => persistNotificationSessionHistory(items),
+  { deep: true, flush: 'sync' },
+)
 const panelVisible = ref(false)
 let panelEmptyAutohideTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -138,7 +233,7 @@ const firstUnreadAtByPane = shallowReactive<Record<string, number | null>>({})
 const projectionVersion = ref(0)
 const historyCount = computed(() => notifications.value.length)
 const unreadAttentionCount = computed(() => {
-  projectionVersion.value
+  void projectionVersion.value
   return attentionStore.unreadAttentionCount()
 })
 
@@ -148,6 +243,27 @@ let initialized = false
 let requestCounter = 0
 const pendingRequests = new Map<string, PendingRequest>()
 const historyDedup = new Set<string>()
+const deferredHistoryActions = new Map<string, () => void>()
+let hasReceivedInitialSnapshot = false
+
+function hasRestoredHistoryAwaitingSnapshot(predicate: (item: NotificationItem) => boolean) {
+  return !hasReceivedInitialSnapshot
+    && notifications.value.some((item) => item.epoch !== undefined && predicate(item))
+}
+
+function deferHistoryAction(key: string, action: () => void) {
+  if (deferredHistoryActions.size >= PENDING_CAP && !deferredHistoryActions.has(key)) {
+    const oldest = deferredHistoryActions.keys().next().value
+    if (oldest !== undefined) deferredHistoryActions.delete(oldest)
+  }
+  deferredHistoryActions.set(key, action)
+}
+
+function flushDeferredHistoryActions() {
+  const actions = [...deferredHistoryActions.values()]
+  deferredHistoryActions.clear()
+  for (const action of actions) action()
+}
 
 interface ActiveReadContext {
   getActiveFocusedPaneId: () => string | null
@@ -739,6 +855,9 @@ export function __dispatchServerMessageForTest(msg: unknown) {
       if (applied) cancelPresentationForState(snapshot)
       prunePendingWithoutOverlay()
       refreshProjection()
+      const receivedInitialSnapshot = applied && !hasReceivedInitialSnapshot
+      if (applied) hasReceivedInitialSnapshot = true
+      if (receivedInitialSnapshot) flushDeferredHistoryActions()
       if (applied) evaluateActiveRead()
       if (previousEpoch !== null && epochChanged) {
         resendPendingAfterSnapshot()
@@ -784,6 +903,11 @@ export function __pendingPresentationCountForTest(): number {
   return presentationScheduler.pendingCount()
 }
 
+export function __restoreNotificationSessionHistoryForTest() {
+  hasReceivedInitialSnapshot = false
+  notifications.value = loadNotificationSessionHistory()
+}
+
 export function __resetForTest() {
   resetPresentationEffects()
   clearPanelEmptyAutohide()
@@ -795,6 +919,8 @@ export function __resetForTest() {
   attentionStore = createAttentionStore()
   projectionVersion.value++
   historyDedup.clear()
+  deferredHistoryActions.clear()
+  hasReceivedInitialSnapshot = false
   idCounter = 0
   requestCounter = 0
   initialized = false
@@ -820,6 +946,10 @@ export function useNotification() {
     markNotifsRead,
     dismissOne(id: string) {
       const item = notifications.value.find((notification) => notification.id === id)
+      if (item && hasRestoredHistoryAwaitingSnapshot((candidate) => candidate.id === id)) {
+        deferHistoryAction(`dismiss:${id}`, () => useNotification().dismissOne(id))
+        return
+      }
       if (item) cancelPresentationForItem(item)
       notifications.value = notifications.value.filter((notification) => notification.id !== id)
       if (!item || item.epoch !== attentionStore.epoch) return
@@ -830,6 +960,10 @@ export function useNotification() {
       }
     },
     clearAll() {
+      if (hasRestoredHistoryAwaitingSnapshot(() => true)) {
+        deferHistoryAction('clear_all', () => useNotification().clearAll())
+        return
+      }
       presentationScheduler.cancelAllPanes()
       presentationScheduler.cancelAllNotifs()
       notifications.value = []
@@ -858,6 +992,14 @@ export function useNotification() {
     },
     clearForPaneIds(paneIds: string[], reason: MarkReadReason = 'tab_activate') {
       const idSet = new Set(paneIds)
+      if (hasRestoredHistoryAwaitingSnapshot(
+        (notification) => Boolean(notification.paneId && idSet.has(notification.paneId))
+      )) {
+        const deferredPaneIds = [...paneIds]
+        const key = `clear_panes:${reason}:${[...idSet].sort().join(',')}`
+        deferHistoryAction(key, () => useNotification().clearForPaneIds(deferredPaneIds, reason))
+        return
+      }
       notifications.value = notifications.value.filter(
         (notification) => !notification.paneId || !idSet.has(notification.paneId)
       )

@@ -328,7 +328,7 @@ describe('normalizeActionKeyboard', () => {
     expect(keys).toEqual(before)
   })
 
-  it('purges send-only fields and stored icons from a valid action key', () => {
+  it('purges send-only fields and stored icons but preserves repeat on a valid action key', () => {
     const icon = { render: () => null }
     const key: ActionKey = {
       label: 'New tab',
@@ -347,9 +347,21 @@ describe('normalizeActionKeyboard', () => {
       label: 'New tab',
       kind: 'action',
       action: 'newTab',
+      repeat: true,
       style: 'danger',
       grow: 1.5,
     })
+  })
+
+  it('maps action repeat into the rendered key definition', () => {
+    expect(
+      actionKeyToKeyDef({
+        label: 'New tab',
+        kind: 'action',
+        action: 'newTab',
+        repeat: true,
+      }).repeat
+    ).toBe(true)
   })
 
   it('defaults and preserves per-key auto_enter only for pasteTerminal actions', () => {

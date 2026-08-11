@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 import type { AppActionOptions, KeyDef, ModState } from './mkbTypes'
 import { settings } from '../../composables/useSettings'
 
@@ -109,7 +109,7 @@ function fireWithFeedback() {
 function onTouchDown() {
   touchActive = true
   fireWithFeedback()
-  if (props.k.repeat && !props.k.act) {
+  if (props.k.repeat) {
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(fireWithFeedback, 80)
     }, 400)
@@ -119,7 +119,7 @@ function onTouchDown() {
 function onMouseDown() {
   if (touchActive) return
   fireWithFeedback()
-  if (props.k.repeat && !props.k.act) {
+  if (props.k.repeat) {
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(fireWithFeedback, 80)
     }, 400)
@@ -127,14 +127,7 @@ function onMouseDown() {
 }
 
 function onUp(e: Event) {
-  if (repeatTimer) {
-    clearTimeout(repeatTimer)
-    repeatTimer = null
-  }
-  if (repeatInterval) {
-    clearInterval(repeatInterval)
-    repeatInterval = null
-  }
+  stopRepeat()
   if (e.type === 'touchend' || e.type === 'touchcancel') {
     setTimeout(() => {
       touchActive = false
@@ -143,4 +136,17 @@ function onUp(e: Event) {
     touchActive = false
   }
 }
+
+function stopRepeat() {
+  if (repeatTimer) {
+    clearTimeout(repeatTimer)
+    repeatTimer = null
+  }
+  if (repeatInterval) {
+    clearInterval(repeatInterval)
+    repeatInterval = null
+  }
+}
+
+onBeforeUnmount(stopRepeat)
 </script>

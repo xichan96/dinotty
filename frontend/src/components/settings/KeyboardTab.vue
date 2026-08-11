@@ -622,10 +622,10 @@
               <option value="danger">{{ t('settings.style.danger') }}</option>
             </select>
           </label>
-          <label v-if="akSupportsAutoEnter" class="shortcut-check">
+          <label v-if="akSupportsAutoEnter" class="shortcut-check ak-auto-enter-check">
             <input type="checkbox" v-model="akEdit.auto_enter" /> {{ t('settings.appendEnter') }}
           </label>
-          <label v-if="akEdit.kind === 'send' && !akIsEnterEdit" class="shortcut-check">
+          <label v-if="!akIsEnterEdit" class="shortcut-check ak-repeat-check">
             <input type="checkbox" v-model="akEdit.repeat" /> {{ t('settings.repeatHold') }}
           </label>
           <div class="ak-modal-actions">
@@ -1193,6 +1193,7 @@ function saveActionKey() {
           action: edit.action,
           display: edit.display,
           style: edit.style || undefined,
+          repeat: edit.repeat || undefined,
           ...(edit.action === 'pasteTerminal' ? { auto_enter: edit.auto_enter } : {}),
           grow: edit.grow,
         }

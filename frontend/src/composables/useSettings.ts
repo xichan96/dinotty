@@ -284,7 +284,6 @@ function normalizeActionKey(key: ActionKey): void {
   if (key.kind !== 'action' || typeof key.action !== 'string' || key.action.trim() === '') return
   delete key.send
   delete key.special
-  delete key.repeat
   if (key.action === 'pasteTerminal') {
     if (typeof key.auto_enter !== 'boolean') key.auto_enter = true
   } else {

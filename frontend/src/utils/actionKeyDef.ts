@@ -45,6 +45,7 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
           disabled: true,
         }
     if (ak.grow != null && ak.grow > 0) def.g = ak.grow
+    def.repeat = ak.repeat
     return def
   }
 

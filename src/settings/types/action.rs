@@ -58,6 +58,8 @@ impl Serialize for ActionKey {
             map.serialize_entry("send", &self.send)?;
             map.serialize_entry("repeat", &self.repeat)?;
             map.serialize_entry("special", &self.special)?;
+        } else if self.repeat {
+            map.serialize_entry("repeat", &true)?;
         }
         if (!is_valid_action || is_paste_action) && self.auto_enter.is_some() {
             map.serialize_entry("auto_enter", &self.auto_enter)?;

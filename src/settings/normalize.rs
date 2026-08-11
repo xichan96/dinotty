@@ -230,7 +230,6 @@ fn normalize_action_key(key: &mut ActionKey) {
     if is_valid_action {
         key.send.clear();
         key.special = None;
-        key.repeat = false;
         if key.action.as_deref() == Some("pasteTerminal") {
             key.auto_enter.get_or_insert(true);
         } else {

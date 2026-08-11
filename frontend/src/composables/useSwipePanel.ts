@@ -23,6 +23,25 @@ export interface SwipePanelState {
   switchMode: (mode: 'default' | 'action') => void
 }
 
+// Preserve the existing clipping guard below each panel.
+const SWIPE_PANEL_HEIGHT_GUARD = 2
+
+export function resolveSwipePanelHeight(
+  mode: 'default' | 'action',
+  mainHeight: number,
+  actionHeight: number
+): number {
+  return (mode === 'default' ? mainHeight : actionHeight) + SWIPE_PANEL_HEIGHT_GUARD
+}
+
+export function observeSwipePanelHeightTargets(observer: ResizeObserver, bar: HTMLElement) {
+  observer.observe(bar)
+  for (const selector of ['#mkb-main-panel', '#mkb-action-panel']) {
+    const panel = bar.querySelector(selector)
+    if (panel) observer.observe(panel)
+  }
+}
+
 export function useSwipePanel(opts: SwipePanelOptions): SwipePanelState {
   const { kbMode, barRef, applyHeight, fetchSuggestions } = opts
 

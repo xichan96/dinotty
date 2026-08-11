@@ -210,6 +210,7 @@
 .mkb-swipe-container {
   overflow: hidden;
   width: 100%;
+  transition: height 0.25s ease-out;
 }
 .mkb-swipe-track {
   display: flex;

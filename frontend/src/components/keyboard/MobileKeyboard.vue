@@ -353,7 +353,11 @@ import { formatMB, useUpload, type UploadProgress } from '../../composables/useU
 import type { UploadResponse } from '../../types/uploads'
 import { POSITION, useToast } from 'vue-toastification'
 import { useTextareaMetrics } from '../../composables/useTextareaMetrics'
-import { useSwipePanel } from '../../composables/useSwipePanel'
+import {
+  observeSwipePanelHeightTargets,
+  resolveSwipePanelHeight,
+  useSwipePanel,
+} from '../../composables/useSwipePanel'
 import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
 import type { SendDataFn } from '../../utils/frozenSend'
 import { hasCollapseGuard } from '../../utils/keyboardGuardMode'
@@ -614,10 +618,7 @@ function onSpecial(sp: string) {
   if (sp === 'ctrl') modState.ctrl = !modState.ctrl
   if (sp === 'alt') modState.alt = !modState.alt
   if (sp === 'kbswitch') {
-    swipeTransition.value = true
-    kbMode.value = kbMode.value === 'action' ? 'default' : 'action'
-    if (kbMode.value === 'default') fetchSuggestions()
-    nextTick(applyHeight)
+    switchMode(kbMode.value === 'action' ? 'default' : 'action')
   }
   if (sp === 'bookmarks') {
     emit('bookmarks')
@@ -802,7 +803,7 @@ function applyHeight() {
   if (swipeContainerRef.value) {
     const mainH = mainPanel ? mainPanel.scrollHeight : 0
     const actionH = actionPanel ? actionPanel.scrollHeight : 0
-    swipeContainerRef.value.style.height = `${Math.max(mainH, actionH) + 2}px`
+    swipeContainerRef.value.style.height = `${resolveSwipePanelHeight(kbMode.value, mainH, actionH)}px`
   }
   const h = props.visible ? barRef.value.getBoundingClientRect().height : 0
   document.documentElement.style.setProperty('--mkb-height', `${h}px`)
@@ -917,7 +918,7 @@ onMounted(() => {
       cancelAnimationFrame(roAf)
       roAf = requestAnimationFrame(() => updateHeight())
     })
-    resizeObserver.observe(barRef.value)
+    observeSwipePanelHeightTargets(resizeObserver, barRef.value)
   }
 })
 

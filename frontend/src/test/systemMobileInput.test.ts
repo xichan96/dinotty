@@ -51,26 +51,31 @@ describe('system mobile input', () => {
     expect(apply).toHaveBeenCalledOnce()
   })
 
-  it('converts a sticky Ctrl key once and preserves Ctrl across non-ASCII composition text', () => {
-    const nonAscii = applyMobileTerminalModifiers('中文', { ctrl: true, alt: false })
-    expect(nonAscii).toEqual({
-      data: '中文',
-      modifiers: { ctrl: true, alt: false },
-      consumed: false,
-    })
-
-    const control = applyMobileTerminalModifiers('c', nonAscii.modifiers)
+  it('keeps a held Ctrl active across multiple combinations until the button releases it', () => {
+    const held = { ctrl: 'locked', shift: 'off', alt: 'off', meta: 'off' } as const
+    const control = applyMobileTerminalModifiers('c', held)
     expect(control).toEqual({
       data: '\x03',
-      modifiers: { ctrl: false, alt: false },
+      modifiers: held,
       consumed: true,
+    })
+    expect(applyMobileTerminalModifiers('d', control.modifiers)).toMatchObject({
+      data: '\x04',
+      modifiers: held,
     })
   })
 
-  it('prefixes Alt text with Escape and releases the modifier', () => {
-    expect(applyMobileTerminalModifiers('word', { ctrl: false, alt: true })).toEqual({
+  it('uses a one-shot Alt prefix and releases it after input', () => {
+    expect(
+      applyMobileTerminalModifiers('word', {
+        ctrl: 'off',
+        shift: 'off',
+        alt: 'once',
+        meta: 'off',
+      })
+    ).toEqual({
       data: '\x1bword',
-      modifiers: { ctrl: false, alt: false },
+      modifiers: { ctrl: 'off', shift: 'off', alt: 'off', meta: 'off' },
       consumed: true,
     })
   })

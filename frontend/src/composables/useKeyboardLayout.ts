@@ -146,8 +146,8 @@ export function useKeyboardLayout(opts: KeyboardLayoutOptions): KeyboardLayoutSt
     return tail.map((r, i) => mapActionKeys(r ?? [], i === tail.length - 1))
   })
 
-  const actionBottom = computed<ActionBottomCluster>(() =>
-    effectiveActionKeyboard().bottom ?? DEFAULT_ACTION_BOTTOM
+  const actionBottom = computed<ActionBottomCluster>(
+    () => effectiveActionKeyboard().bottom ?? DEFAULT_ACTION_BOTTOM
   )
 
   function withActionFooterClass(def: KeyDef, cls: string): KeyDef {
@@ -156,10 +156,7 @@ export function useKeyboardLayout(opts: KeyboardLayoutOptions): KeyboardLayoutSt
 
   function mapActionFooterRow(row: ActionKey[]): KeyDef[] {
     return mapActionKeys(row, false).map((def, i) =>
-      withActionFooterClass(
-        def,
-        row[i].shape === 'arrow' ? 'mkb-action-arrow' : 'mkb-action-btn',
-      )
+      withActionFooterClass(def, row[i].shape === 'arrow' ? 'mkb-action-arrow' : 'mkb-action-btn')
     )
   }
 
@@ -167,7 +164,7 @@ export function useKeyboardLayout(opts: KeyboardLayoutOptions): KeyboardLayoutSt
   const actionEnter = computed(() =>
     withActionFooterClass(
       actionKeyToKeyDef(actionBottom.value.enter),
-      'mkb-action-enter mkb-return',
+      'mkb-action-enter mkb-return'
     )
   )
 

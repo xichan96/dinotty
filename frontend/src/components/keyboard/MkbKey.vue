@@ -1,15 +1,17 @@
 <template>
   <button
-    :class="['mkb-btn', k.cls, { 'mkb-active': isModActive }]"
+    :class="['mkb-btn', k.cls, { 'mkb-active': isModActive, 'mkb-locked': isModLocked }]"
     :id="k.id"
     :disabled="isDisabled"
-    :style="{ flexGrow: k.g ?? 1, flexBasis: '0' }"
+    :style="keyStyle"
     :aria-label="k.aria || k.l || undefined"
+    :aria-pressed="isModifier ? isModActive : undefined"
     :title="k.aria || undefined"
-    @touchstart.prevent="onTouchDown"
+    @touchstart="onTouchDown"
+    @touchmove="onTouchMove"
     @mousedown.prevent="onMouseDown"
-    @touchend.prevent="onUp"
-    @touchcancel.prevent="onUp"
+    @touchend="onUp"
+    @touchcancel="onUp"
     @mouseup="onUp"
     @mouseleave="onUp"
   >
@@ -20,9 +22,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, type CSSProperties } from 'vue'
 import type { AppActionOptions, KeyDef, ModState } from './mkbTypes'
 import { settings } from '../../composables/useSettings'
+import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
 
 let audioCtx: AudioContext | null = null
 
@@ -47,6 +50,7 @@ function feedback() {
 const props = defineProps<{
   k: KeyDef
   state: ModState
+  swipeAware?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -56,10 +60,28 @@ const emit = defineEmits<{
 }>()
 
 const isDisabled = computed(() => props.k.disabled === true)
+const keyStyle = computed(() => {
+  const configuredGrow = props.k.g
+  const grow =
+    typeof configuredGrow === 'number' && Number.isFinite(configuredGrow) && configuredGrow > 0
+      ? configuredGrow
+      : 1
+  return {
+    flexGrow: grow,
+    flexBasis: '0',
+  } as CSSProperties
+})
 
+const parsedSpecial = computed(() => parseKeyboardSpecial(props.k.sp))
+const isModifier = computed(() => Boolean(parsedSpecial.value?.entry.modifier))
 const isModActive = computed(() => {
-  const sp = props.k.sp
-  return sp === 'ctrl' || sp === 'alt' || sp === 'shift' ? props.state[sp] : false
+  if (!isModifier.value) return false
+  const modifier = parsedSpecial.value?.entry.modifier
+  return modifier ? props.state[modifier] : false
+})
+const isModLocked = computed(() => {
+  const modifier = parsedSpecial.value?.entry.modifier
+  return modifier ? props.state.locked?.[modifier] === true : false
 })
 
 const displayLabel = computed(() => {
@@ -78,12 +100,16 @@ const displayLabel = computed(() => {
 
 let repeatTimer: ReturnType<typeof setTimeout> | null = null
 let repeatInterval: ReturnType<typeof setInterval> | null = null
+let touchResetTimer: ReturnType<typeof setTimeout> | null = null
 let touchActive = false
+let touchMoved = false
+let touchRepeatStarted = false
+let touchStartX = 0
+let touchStartY = 0
 
 function fire() {
   if (props.k.act) {
-    const options =
-      props.k.act === 'pasteTerminal' ? { autoEnter: props.k.autoEnter ?? true } : {}
+    const options = props.k.act === 'pasteTerminal' ? { autoEnter: props.k.autoEnter ?? true } : {}
     emit('app-action', props.k.act, options)
     return
   }
@@ -106,31 +132,72 @@ function fireWithFeedback() {
   fire()
 }
 
-function onTouchDown() {
-  touchActive = true
-  fireWithFeedback()
-  if (props.k.repeat) {
-    repeatTimer = setTimeout(() => {
-      repeatInterval = setInterval(fireWithFeedback, 80)
-    }, 400)
+function startRepeat(fireAtThreshold: boolean) {
+  repeatTimer = setTimeout(() => {
+    repeatTimer = null
+    if (fireAtThreshold) {
+      touchRepeatStarted = true
+      fireWithFeedback()
+    }
+    repeatInterval = setInterval(fireWithFeedback, 80)
+  }, 400)
+}
+
+function onTouchDown(e: TouchEvent) {
+  if (touchResetTimer) {
+    clearTimeout(touchResetTimer)
+    touchResetTimer = null
   }
+  touchActive = true
+  touchMoved = false
+  touchRepeatStarted = false
+  touchStartX = e.touches[0]?.clientX ?? 0
+  touchStartY = e.touches[0]?.clientY ?? 0
+  if (props.swipeAware) {
+    if (props.k.repeat) startRepeat(true)
+    return
+  }
+  e.preventDefault()
+  fireWithFeedback()
+  if (props.k.repeat) startRepeat(false)
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (!props.swipeAware || touchMoved) return
+  const touch = e.touches[0]
+  if (!touch) return
+  if (Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY) < 10) return
+  touchMoved = true
+  stopRepeat()
 }
 
 function onMouseDown() {
   if (touchActive) return
   fireWithFeedback()
   if (props.k.repeat) {
-    repeatTimer = setTimeout(() => {
-      repeatInterval = setInterval(fireWithFeedback, 80)
-    }, 400)
+    startRepeat(false)
   }
 }
 
 function onUp(e: Event) {
+  const isTouch = e.type === 'touchend' || e.type === 'touchcancel'
+  if (isTouch) {
+    if (props.swipeAware) {
+      if (e.type === 'touchend' && !touchMoved && !touchRepeatStarted) {
+        e.preventDefault()
+        fireWithFeedback()
+      } else if (!touchMoved) {
+        e.preventDefault()
+      }
+    } else {
+      e.preventDefault()
+    }
+  }
   stopRepeat()
-  if (e.type === 'touchend' || e.type === 'touchcancel') {
-    setTimeout(() => {
+  if (isTouch) {
+    touchResetTimer = setTimeout(() => {
       touchActive = false
+      touchResetTimer = null
     }, 300)
   } else {
     touchActive = false
@@ -148,5 +215,8 @@ function stopRepeat() {
   }
 }
 
-onBeforeUnmount(stopRepeat)
+onBeforeUnmount(() => {
+  stopRepeat()
+  if (touchResetTimer) clearTimeout(touchResetTimer)
+})
 </script>

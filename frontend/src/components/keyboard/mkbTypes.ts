@@ -22,4 +22,6 @@ export interface ModState {
   shift: boolean
   ctrl: boolean
   alt: boolean
+  meta: boolean
+  locked?: Partial<Record<keyof Omit<ModState, 'locked'>, boolean>>
 }

@@ -93,6 +93,7 @@
 import { ref, shallowRef, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Terminal } from '@xterm/xterm'
 import { TerminalInstance } from '../../composables/useTerminal'
+import type { MobileTerminalModifiers } from '../../utils/terminalInput'
 import { copyToClipboard, readHostClipboard } from '../../utils/clipboard'
 import { readText as readClipboardText } from '@tauri-apps/plugin-clipboard-manager'
 import { isTauri } from '../../composables/useTransport'
@@ -266,8 +267,8 @@ function sendData(data: string, force?: boolean) {
   return terminal?.sendData(data, force)
 }
 
-function setVirtualModifiers(ctrl: boolean, alt: boolean) {
-  terminal?.setVirtualModifiers({ ctrl, alt })
+function setVirtualModifiers(modifiers: MobileTerminalModifiers) {
+  terminal?.setVirtualModifiers(modifiers)
 }
 
 function pasteFromClipboard(text: string, autoEnter = false, focusTerminal = true): boolean {

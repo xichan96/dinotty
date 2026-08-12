@@ -9,7 +9,6 @@ import {
   normalizeActionKeyboard,
   resetActionKeyboard,
   restoreActionKeyboardUserDefault,
-  restoreActionIcons,
   saveActionKeyboardUserDefault,
   settings,
   type ActionKey,
@@ -18,6 +17,7 @@ import {
 import { actionKeyToKeyDef } from '../utils/actionKeyDef'
 import {
   APP_ACTIONS,
+  SYSTEM_KEYBOARD_ACTIONS,
   getAppAction,
   isDispatchableAppAction,
 } from '../utils/appActionCatalog'
@@ -28,7 +28,7 @@ function normalize(cfg: ActionKeyboardConfig): ActionKeyboardConfig {
 }
 
 describe('app action catalog', () => {
-  it('appends pasteTerminal and the four terminal sequences after the app registry entries', () => {
+  it('appends toolbar actions and terminal sequences after the app registry entries', () => {
     expect(APP_ACTIONS.map(({ id }) => id)).toEqual([
       'togglePalette',
       'openBookmarks',
@@ -51,12 +51,14 @@ describe('app action catalog', () => {
       'reloadApp',
       'fontSizeReset',
       'pasteTerminal',
+      'insertWorkspaceFile',
+      'uploadMobileFile',
       'term.newline',
       'term.lineStart',
       'term.lineEnd',
       'term.deleteToLineStart',
     ])
-    expect(APP_ACTIONS).toHaveLength(25)
+    expect(APP_ACTIONS).toHaveLength(27)
   })
 
   it('uses the registry icons for actions whose old catalog icons differed', () => {
@@ -75,12 +77,27 @@ describe('app action catalog', () => {
       'term.deleteToLineStart',
     ]) {
       expect(isDispatchableAppAction(id), id).toBe(true)
-      expect(APP_ACTIONS.some((action) => action.id === id), id).toBe(true)
+      expect(
+        APP_ACTIONS.some((action) => action.id === id),
+        id
+      ).toBe(true)
     }
     expect(isDispatchableAppAction('searchTerminal')).toBe(true)
     expect(isDispatchableAppAction('unknown-action')).toBe(false)
     expect(getAppAction('pasteTerminal')?.labelKey).toBe('mobileKb.pasteTerminal')
     expect(getAppAction('term.newline')?.labelKey).toBe('keybinding.term.newline')
+  })
+
+  it('keeps system-panel actions out of the global dispatch authority', () => {
+    expect(SYSTEM_KEYBOARD_ACTIONS.map(({ id }) => id)).toEqual([
+      'system.history',
+      'system.extended',
+      'system.actions',
+    ])
+    for (const { id } of SYSTEM_KEYBOARD_ACTIONS) {
+      expect(getAppAction(id)).toBeDefined()
+      expect(isDispatchableAppAction(id)).toBe(false)
+    }
   })
 })
 
@@ -109,18 +126,21 @@ describe('actionKeyToKeyDef action display', () => {
     expect(def).not.toHaveProperty('icon')
   })
 
-  it.each([true, false])('carries pasteTerminal auto_enter=%s into its key definition', (autoEnter) => {
-    const def = actionKeyToKeyDef({
-      label: 'Paste',
-      kind: 'action',
-      action: 'pasteTerminal',
-      display: 'icon',
-      auto_enter: autoEnter,
-    })
+  it.each([true, false])(
+    'carries pasteTerminal auto_enter=%s into its key definition',
+    (autoEnter) => {
+      const def = actionKeyToKeyDef({
+        label: 'Paste',
+        kind: 'action',
+        action: 'pasteTerminal',
+        display: 'icon',
+        auto_enter: autoEnter,
+      })
 
-    expect(def.act).toBe('pasteTerminal')
-    expect(def.autoEnter).toBe(autoEnter)
-  })
+      expect(def.act).toBe('pasteTerminal')
+      expect(def.autoEnter).toBe(autoEnter)
+    }
+  )
 
   it.each([
     'searchTerminal',
@@ -253,12 +273,14 @@ describe('normalizeActionKeyboard', () => {
 
   it('clamps grow recursively without rounding and drops non-finite values', () => {
     const cfg = normalize({
-      rows: [[
-        { label: 'low', grow: -1 },
-        { label: 'fractional', grow: 1.75 },
-        { label: 'high', grow: 20 },
-        { label: 'nan', grow: Number.NaN },
-      ]],
+      rows: [
+        [
+          { label: 'low', grow: -1 },
+          { label: 'fractional', grow: 1.75 },
+          { label: 'high', grow: 20 },
+          { label: 'nan', grow: Number.NaN },
+        ],
+      ],
       bottom: {
         rows: [[{ label: 'infinite', grow: Number.NEGATIVE_INFINITY }]],
         enter: { label: '↵', kind: 'send', send: '\r', grow: 20 },
@@ -366,13 +388,21 @@ describe('normalizeActionKeyboard', () => {
 
   it('defaults and preserves per-key auto_enter only for pasteTerminal actions', () => {
     const defaulted: ActionKey = {
-      label: 'Paste', kind: 'action', action: 'pasteTerminal',
+      label: 'Paste',
+      kind: 'action',
+      action: 'pasteTerminal',
     }
     const disabled: ActionKey = {
-      label: 'Paste without Enter', kind: 'action', action: 'pasteTerminal', auto_enter: false,
+      label: 'Paste without Enter',
+      kind: 'action',
+      action: 'pasteTerminal',
+      auto_enter: false,
     }
     const unrelated: ActionKey = {
-      label: 'Search', kind: 'action', action: 'searchTerminal', auto_enter: true,
+      label: 'Search',
+      kind: 'action',
+      action: 'searchTerminal',
+      auto_enter: true,
     }
 
     normalize({ rows: [[defaulted, disabled, unrelated]] })
@@ -393,9 +423,17 @@ describe('normalizeActionKeyboard', () => {
     const previousSnapshot = settings.action_keyboard_user_default
     try {
       settings.action_keyboard = {
-        rows: [[{
-          label: 'Active', kind: 'action', action: 'newTab', send: 'remove', repeat: true,
-        }]],
+        rows: [
+          [
+            {
+              label: 'Active',
+              kind: 'action',
+              action: 'newTab',
+              send: 'remove',
+              repeat: true,
+            },
+          ],
+        ],
       }
       settings.action_keyboard_user_default = {
         rows: [[{ label: 'Snapshot', grow: 20 }]],
@@ -412,7 +450,9 @@ describe('normalizeActionKeyboard', () => {
       expect(settings.action_keyboard?.rows[0][0]).not.toHaveProperty('send')
       expect(settings.action_keyboard_user_default?.rows[0][0].grow).toBe(12)
       expect(settings.action_keyboard_user_default?.bottom?.enter).toEqual({
-        label: 'Snapshot Enter', kind: 'send', send: '\r',
+        label: 'Snapshot Enter',
+        kind: 'send',
+        send: '\r',
       })
     } finally {
       settings.action_keyboard = previousActive
@@ -444,27 +484,13 @@ describe('cloneWithoutIcons', () => {
     expect(cfg.bottom?.enter.icon).toBe(icon)
   })
 
-  it('restores factory send-key icons without adding them to action keys', () => {
-    const previousActive = settings.action_keyboard
-    const previousSnapshot = settings.action_keyboard_user_default
+  it('keeps factory agent identity as serializable display metadata', () => {
     const factoryKey = DEFAULT_ACTION_KEYBOARD.rows[0][1]
-    try {
-      settings.action_keyboard = cloneWithoutIcons({
-        rows: [[
-          factoryKey,
-          { label: 'Action', kind: 'action', action: 'newTab', send: factoryKey.send },
-        ]],
-      })
-      settings.action_keyboard_user_default = null
+    const clone = cloneWithoutIcons({ rows: [[factoryKey]] })
 
-      restoreActionIcons()
-
-      expect(settings.action_keyboard.rows[0][0].icon).toEqual(factoryKey.icon)
-      expect(settings.action_keyboard.rows[0][1]).not.toHaveProperty('icon')
-    } finally {
-      settings.action_keyboard = previousActive
-      settings.action_keyboard_user_default = previousSnapshot
-    }
+    expect(clone.rows[0][0]).not.toHaveProperty('icon')
+    expect(clone.rows[0][0].display).toBe('icon')
+    expect(clone.rows[0][0].kind).not.toBe('action')
   })
 })
 

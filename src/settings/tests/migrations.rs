@@ -14,7 +14,7 @@ fn v7_migrates_all_legacy_keyboard_guard_values_idempotently_and_stably() {
         let mut settings: Settings = serde_json::from_str(legacy_json).unwrap();
 
         assert!(migrate_settings(&mut settings));
-        assert_eq!(settings.settings_version, 7);
+        assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
         assert_eq!(settings.keyboard_guard_mode, expected);
         assert!(!migrate_settings(&mut settings));
 
@@ -41,10 +41,28 @@ fn legacy_keyboard_bool_deserialization_is_field_local_and_tolerant() {
         assert!(!settings.keyboard_keep_on_scroll);
         assert_eq!(settings.locale, "en");
         assert!(migrate_settings(&mut settings));
-        assert_eq!(settings.settings_version, 7);
+        assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
         assert_eq!(settings.keyboard_guard_mode, KeyboardGuardMode::Off);
         assert_eq!(settings.locale, "en");
     }
+}
+
+#[test]
+fn v8_clone_flows_into_v9_system_upper_once() {
+    let mut settings: Settings = serde_json::from_str(
+        r#"{"settings_version":7,"toolbar_quick_keys":[{"label":"Esc","send":"\\u001b"}]}"#,
+    )
+    .unwrap();
+
+    assert!(migrate_settings(&mut settings));
+    assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
+    assert!(settings.system_toolbar_quick_keys.is_empty());
+    let system = settings.system_keyboard.as_ref().unwrap();
+    assert_eq!(system.upper.last(), settings.toolbar_quick_keys.last());
+
+    settings.toolbar_quick_keys.clear();
+    assert!(!migrate_settings(&mut settings));
+    assert_eq!(settings.system_keyboard.as_ref().unwrap().upper.last().unwrap().label, "Esc");
 }
 
 #[test]

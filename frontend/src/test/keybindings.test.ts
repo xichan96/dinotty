@@ -327,7 +327,10 @@ describe('unified keybindings', () => {
       keyEventMatchesBinding(keyEvent('Dead', { code: 'Backquote', metaKey: true }), binding)
     ).toBe(true)
     expect(
-      keyEventMatchesBinding(keyEvent('~', { code: 'Backquote', metaKey: true, shiftKey: true }), binding)
+      keyEventMatchesBinding(
+        keyEvent('~', { code: 'Backquote', metaKey: true, shiftKey: true }),
+        binding
+      )
     ).toBe(false)
   })
 
@@ -354,11 +357,7 @@ describe('unified keybindings', () => {
     settings.windowsAltAsCmd = false
     const dispatch = vi.fn()
 
-    dispatchAppBinding(
-      keyEvent('t', { ctrlKey: true, altKey: true }),
-      'newTab',
-      dispatch
-    )
+    dispatchAppBinding(keyEvent('t', { ctrlKey: true, altKey: true }), 'newTab', dispatch)
     dispatchAppBinding(keyEvent('t', { ctrlKey: true }), 'newTab', dispatch)
     dispatchAppBinding(keyEvent('t', { altKey: true }), 'newTab', dispatch)
 

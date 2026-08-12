@@ -562,10 +562,16 @@
             <span>{{ t('settings.label') }}</span>
             <input v-model="akEdit.label" class="shortcut-input" />
           </label>
-          <label v-if="akEdit.scope !== 'toolbar' && !akIsEnterEdit" class="ak-field">
+          <label v-if="!akIsEnterEdit" class="ak-field">
             <span>{{ t('actionKb.kind') }}</span>
-            <select v-model="akEdit.kind" class="shortcut-input">
+            <select
+              v-model="akEdit.kind"
+              class="shortcut-input"
+              data-special-field="kind"
+              @change="onAkKindChange"
+            >
               <option value="send">{{ t('actionKb.kind.send') }}</option>
+              <option value="special">{{ t('actionKb.kind.special') }}</option>
               <option value="action">{{ t('actionKb.kind.action') }}</option>
             </select>
           </label>
@@ -586,7 +592,7 @@
                 type="button"
                 class="ak-record-btn"
                 :class="{ recording: akRecording }"
-                @click.stop="toggleRecord"
+                @click.stop="toggleRecord('action')"
               >
                 {{ akRecording ? t('settings.stop') : t('settings.record') }}
               </button>
@@ -599,11 +605,40 @@
               aria-hidden="true"
             />
           </template>
+          <template v-else-if="akEdit.kind === 'special' && !akIsEnterEdit">
+            <label class="ak-field">
+              <span>{{ t('settings.specialKey') }}</span>
+              <select
+                v-model="akEdit.specialId"
+                class="shortcut-input"
+                data-special-field="key"
+                @change="onAkSpecialChange"
+              >
+                <option v-for="item in KEYBOARD_SPECIAL_KEYS" :key="item.id" :value="item.id">
+                  {{ item.label }}
+                </option>
+              </select>
+            </label>
+            <label v-if="akSpecialEntry?.modifier" class="shortcut-check">
+              <input v-model="akEdit.keepHeld" type="checkbox" data-special-field="hold" />
+              <span>{{ t('settings.modifierKeepHeld') }}</span>
+            </label>
+            <label class="ak-field">
+              <span>{{ t('actionKb.display') }}</span>
+              <select v-model="akEdit.display" class="shortcut-input" data-special-field="display">
+                <option value="icon">{{ t('actionKb.display.icon') }}</option>
+                <option value="text">{{ t('actionKb.display.text') }}</option>
+              </select>
+            </label>
+            <p v-if="akSpecialEntry?.modifier === 'meta'" class="settings-hint">
+              {{ t('settings.terminalMetaHint') }}
+            </p>
+          </template>
           <label v-else-if="!akIsEnterEdit" class="ak-field">
             <span>{{ t('actionKb.action') }}</span>
             <select v-model="akEdit.action" class="shortcut-input">
               <option value="" disabled>{{ t('actionKb.selectAction') }}</option>
-              <option v-for="action in APP_ACTIONS" :key="action.id" :value="action.id">
+              <option v-for="action in akActionOptions" :key="action.id" :value="action.id">
                 {{ t(action.labelKey) }}
               </option>
             </select>
@@ -615,6 +650,27 @@
               <option value="text">{{ t('actionKb.display.text') }}</option>
             </select>
           </label>
+          <label
+            v-if="akEdit.kind === 'send' && !akIsEnterEdit"
+            class="shortcut-check ak-agent-icon-check"
+            :class="{ disabled: !akAgentIconAvailable }"
+          >
+            <input
+              type="checkbox"
+              :disabled="!akAgentIconAvailable"
+              :checked="akEdit.display !== 'text'"
+              @change="
+                akEdit.display = ($event.target as HTMLInputElement).checked ? 'icon' : 'text'
+              "
+            />
+            {{ t('settings.agentDisplayIcon') }}
+          </label>
+          <p
+            v-if="akEdit.kind === 'send' && !akIsEnterEdit && !akAgentIconAvailable"
+            class="settings-hint ak-agent-icon-hint"
+          >
+            {{ t('settings.agentDisplayIconHint') }}
+          </p>
           <label class="ak-field">
             <span>{{ t('settings.style') }}</span>
             <select v-model="akEdit.style" class="shortcut-input">
@@ -625,7 +681,7 @@
           <label v-if="akSupportsAutoEnter" class="shortcut-check ak-auto-enter-check">
             <input type="checkbox" v-model="akEdit.auto_enter" /> {{ t('settings.appendEnter') }}
           </label>
-          <label v-if="!akIsEnterEdit" class="shortcut-check ak-repeat-check">
+          <label v-if="!akIsEnterEdit && akSupportsRepeat" class="shortcut-check ak-repeat-check">
             <input type="checkbox" v-model="akEdit.repeat" /> {{ t('settings.repeatHold') }}
           </label>
           <div class="ak-modal-actions">
@@ -633,6 +689,465 @@
               {{ t('settings.save') }}
             </button>
             <button class="shortcut-add" @click="akEdit = null">{{ t('settings.cancel') }}</button>
+          </div>
+        </div>
+      </div>
+    </CollapsibleSection>
+
+    <CollapsibleSection :title="t('settings.systemKeyboard')" level="group" default-open>
+      <p class="settings-hint">{{ t('settings.systemKeyboardHint') }}</p>
+      <div class="settings-row">
+        <label>{{ t('settings.systemKeyboardPersistent') }}</label>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            data-setting="system-toolbar-persistent"
+            :checked="settings.system_toolbar_mode === 'persistent_mobile'"
+            @change="onSystemToolbarModeChange"
+          />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+
+      <div class="ak-zone-head system-editor-head">
+        <span class="ak-zone-title">
+          {{ t('settings.systemKeyboardUpper') }} · {{ systemStatus.upperPages }} / 5
+        </span>
+        <label class="system-editor-pin-control">
+          <span>{{ t('settings.systemKeyboardPinned') }}</span>
+          <select :value="systemStatus.upperPinned" @change="onPinnedChange('upper', $event)">
+            <option v-for="count in systemUpperPinnedOptions" :key="count" :value="count">
+              {{ count }}
+            </option>
+          </select>
+        </label>
+        <button
+          class="shortcut-add system-editor-add"
+          type="button"
+          data-system-add="upper"
+          @click="addSystemKey('upper')"
+        >
+          {{ t('settings.systemKeyboardAddKey') }}
+        </button>
+      </div>
+      <div class="system-editor-pages">
+        <div
+          v-for="(page, pageIndex) in systemUpperPages"
+          :key="`upper-${pageIndex}`"
+          class="system-editor-page system-editor-upper-page"
+          data-system-region="upper"
+          :data-system-page-end="page.end"
+        >
+          <div class="system-editor-grid">
+            <div
+              v-for="item in page.pinnedCopies"
+              :key="`copy-${systemItemKey(item.key)}`"
+              class="ak-wyg-slot system-editor-slot system-editor-pinned-copy"
+              :style="systemSlotStyle(item.units)"
+              aria-hidden="true"
+            >
+              <div class="mkb-btn ak-wyg-key" :class="systemPreviewDef(item.key).cls">
+                <Pin :size="12" class="system-editor-pin-mark" />
+                <component
+                  :is="systemPreviewDef(item.key).icon"
+                  v-if="systemPreviewDef(item.key).icon"
+                  :size="18"
+                />
+                <span v-else class="ak-wyg-label">{{ previewLabel(item.key) }}</span>
+              </div>
+            </div>
+            <div
+              v-for="item in page.items"
+              :key="systemItemKey(item.key)"
+              class="ak-wyg-slot system-editor-slot"
+              :class="{
+                'system-editor-pinned': item.index < systemStatus.upperPinned,
+                'system-editor-dragging': systemDraggedKey === systemItemKey(item.key),
+                'system-editor-compact': item.units === 1,
+                'system-editor-resizable': item.key.grow != null,
+              }"
+              data-system-region="upper"
+              :data-system-index="item.index"
+              :style="systemSlotStyle(item.units)"
+            >
+              <div class="mkb-btn ak-wyg-key" :class="systemPreviewDef(item.key).cls">
+                <button
+                  type="button"
+                  class="ak-key-grip"
+                  :title="t('settings.dragSort')"
+                  @pointerdown="
+                    systemDragPointerDown({ region: 'upper', index: item.index }, $event)
+                  "
+                >
+                  <Pin
+                    v-if="item.index < systemStatus.upperPinned"
+                    :size="12"
+                    class="system-editor-pin-mark"
+                  />
+                  <template v-else>⠿</template>
+                </button>
+                <button
+                  type="button"
+                  class="system-editor-edit-hit"
+                  :aria-label="`${t('settings.editKey')}: ${previewLabel(item.key)}`"
+                  @click="beginSystemEdit('upper', item.index)"
+                >
+                  <component
+                    :is="systemPreviewDef(item.key).icon"
+                    v-if="systemPreviewDef(item.key).icon"
+                    :size="18"
+                    class="system-editor-key-icon"
+                  />
+                  <span v-else class="ak-wyg-label">{{ previewLabel(item.key) }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ak-key-del"
+                  :aria-label="t('settings.deleteKey')"
+                  @click.stop="removeSystemKey('upper', item.index)"
+                >
+                  ✕
+                </button>
+                <div
+                  v-if="item.key.grow != null"
+                  class="ak-key-resize"
+                  :title="t('settings.dragResize')"
+                  @pointerdown="
+                    systemResizePointerDown({ region: 'upper', index: item.index }, $event)
+                  "
+                />
+              </div>
+            </div>
+            <div
+              class="mkb-btn mkb-mod system-editor-ime-pin"
+              role="img"
+              :aria-label="t('mobileKb.showKeyboard')"
+              :title="t('mobileKb.showKeyboard')"
+            >
+              <Keyboard :size="18" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ak-zone-head system-editor-head">
+        <span class="ak-zone-title">
+          {{ t('settings.systemKeyboardLower') }} · {{ systemStatus.storedLowerPages }} / 5
+        </span>
+        <label class="toggle" :title="t('settings.systemKeyboardLowerEnabled')">
+          <input
+            type="checkbox"
+            data-setting="system-lower-enabled"
+            :checked="systemLayout.lower_enabled !== false"
+            @change="onSystemLowerEnabledChange"
+          />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+        <label class="system-editor-pin-control">
+          <span>{{ t('settings.systemKeyboardPinned') }}</span>
+          <select :value="systemStatus.lowerPinned" @change="onPinnedChange('lower', $event)">
+            <option v-for="count in systemLowerPinnedOptions" :key="count" :value="count">
+              {{ count }}
+            </option>
+          </select>
+        </label>
+        <button
+          class="shortcut-add system-editor-add"
+          type="button"
+          data-system-add="lower"
+          @click="addSystemKey('lower')"
+        >
+          {{ t('settings.systemKeyboardAddKey') }}
+        </button>
+      </div>
+      <p v-if="systemLayoutMessage" class="settings-hint system-layout-warning" role="status">
+        {{ systemLayoutMessage }}
+      </p>
+      <p
+        v-else-if="systemStatus.overLimit"
+        class="settings-hint system-layout-warning"
+        role="status"
+      >
+        {{ t('settings.systemKeyboardOverLimit') }}
+      </p>
+      <p
+        v-else-if="systemStatus.upperPages === 5 || systemStatus.storedLowerPages === 5"
+        class="settings-hint system-layout-at-limit"
+      >
+        {{ t('settings.systemKeyboardAtLimit') }}
+      </p>
+      <div class="system-editor-pages">
+        <div
+          v-for="(page, pageIndex) in systemLowerPages"
+          :key="`lower-${pageIndex}`"
+          class="system-editor-page system-editor-lower-page"
+          data-system-region="lower"
+          :data-system-page-end="page.end"
+        >
+          <div class="system-editor-grid">
+            <div
+              v-for="item in page.pinnedCopies"
+              :key="`copy-${systemItemKey(item.key)}`"
+              class="ak-wyg-slot system-editor-slot system-editor-pinned-copy"
+              :style="systemSlotStyle(item.units)"
+              aria-hidden="true"
+            >
+              <div class="mkb-btn ak-wyg-key" :class="systemPreviewDef(item.key).cls">
+                <Pin :size="12" class="system-editor-pin-mark" />
+                <component
+                  :is="systemPreviewDef(item.key).icon"
+                  v-if="systemPreviewDef(item.key).icon"
+                  :size="18"
+                />
+                <span v-else class="ak-wyg-label">{{ previewLabel(item.key) }}</span>
+              </div>
+            </div>
+            <div
+              v-for="item in page.items"
+              :key="systemItemKey(item.key)"
+              class="ak-wyg-slot system-editor-slot"
+              :class="{
+                'system-editor-pinned': item.index < systemStatus.lowerPinned,
+                'system-editor-dragging': systemDraggedKey === systemItemKey(item.key),
+                'system-editor-compact': item.units === 1,
+                'system-editor-resizable': item.key.grow != null,
+              }"
+              data-system-region="lower"
+              :data-system-index="item.index"
+              :style="systemSlotStyle(item.units)"
+            >
+              <div class="mkb-btn ak-wyg-key" :class="systemPreviewDef(item.key).cls">
+                <button
+                  type="button"
+                  class="ak-key-grip"
+                  :title="t('settings.dragSort')"
+                  @pointerdown="
+                    systemDragPointerDown({ region: 'lower', index: item.index }, $event)
+                  "
+                >
+                  <Pin
+                    v-if="item.index < systemStatus.lowerPinned"
+                    :size="12"
+                    class="system-editor-pin-mark"
+                  />
+                  <template v-else>⠿</template>
+                </button>
+                <button
+                  type="button"
+                  class="system-editor-edit-hit"
+                  :aria-label="`${t('settings.editKey')}: ${previewLabel(item.key)}`"
+                  @click="beginSystemEdit('lower', item.index)"
+                >
+                  <component
+                    :is="systemPreviewDef(item.key).icon"
+                    v-if="systemPreviewDef(item.key).icon"
+                    :size="18"
+                    class="system-editor-key-icon"
+                  />
+                  <span v-else class="ak-wyg-label">{{ previewLabel(item.key) }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ak-key-del"
+                  :aria-label="t('settings.deleteKey')"
+                  @click.stop="removeSystemKey('lower', item.index)"
+                >
+                  ✕
+                </button>
+                <div
+                  v-if="item.key.grow != null"
+                  class="ak-key-resize"
+                  :title="t('settings.dragResize')"
+                  @pointerdown="
+                    systemResizePointerDown({ region: 'lower', index: item.index }, $event)
+                  "
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ak-actions">
+        <button
+          type="button"
+          class="shortcut-add ak-reset"
+          data-system-action="reset"
+          @click="resetSystemKeyboard"
+        >
+          {{ t('settings.akResetFactory') }}
+        </button>
+        <button
+          type="button"
+          class="shortcut-add"
+          data-system-action="save-default"
+          @click="saveSystemKeyboardUserDefault"
+        >
+          {{ t('settings.akSaveUserDefault') }}
+        </button>
+        <button
+          type="button"
+          class="shortcut-add"
+          data-system-action="restore-default"
+          :disabled="settings.system_keyboard_user_default == null"
+          @click="restoreSystemKeyboardUserDefault"
+        >
+          {{ t('settings.akRestoreUserDefault') }}
+        </button>
+      </div>
+
+      <div v-if="systemEdit" class="ak-modal-backdrop" @click.self="systemEdit = null">
+        <div class="ak-modal">
+          <h4>{{ t('settings.editKey') }}</h4>
+          <label class="ak-field">
+            <span>{{ t('settings.label') }}</span>
+            <input v-model="systemEdit.label" class="shortcut-input" />
+          </label>
+          <label class="ak-field">
+            <span>{{ t('actionKb.kind') }}</span>
+            <select
+              v-model="systemEdit.kind"
+              class="shortcut-input"
+              data-special-field="kind"
+              @change="onSystemKindChange"
+            >
+              <option value="send">{{ t('actionKb.kind.send') }}</option>
+              <option value="special">{{ t('actionKb.kind.special') }}</option>
+              <option value="action">{{ t('actionKb.kind.action') }}</option>
+            </select>
+          </label>
+          <template v-if="systemEdit.kind === 'send'">
+            <label class="ak-field">
+              <span>{{ t('settings.send') }}</span>
+              <textarea
+                v-model="systemEdit.sendRaw"
+                class="shortcut-input ak-send-textarea system-send-textarea"
+                rows="4"
+                spellcheck="false"
+              />
+            </label>
+            <div class="ak-send-row">
+              <code class="ak-esc-preview">{{ systemEdit.sendRaw }}</code>
+              <button
+                type="button"
+                class="ak-record-btn"
+                :class="{ recording: systemRecording }"
+                data-system-record
+                @click.stop="toggleRecord('system')"
+              >
+                {{ systemRecording ? t('settings.stop') : t('settings.record') }}
+              </button>
+            </div>
+            <div
+              v-show="systemRecording"
+              ref="recordFocusSinkRef"
+              class="ak-record-focus-sink"
+              tabindex="-1"
+              aria-hidden="true"
+            />
+          </template>
+          <template v-else-if="systemEdit.kind === 'special'">
+            <label class="ak-field">
+              <span>{{ t('settings.specialKey') }}</span>
+              <select
+                v-model="systemEdit.specialId"
+                class="shortcut-input"
+                data-special-field="key"
+                @change="onSystemSpecialChange"
+              >
+                <option v-for="item in KEYBOARD_SPECIAL_KEYS" :key="item.id" :value="item.id">
+                  {{ item.label }}
+                </option>
+              </select>
+            </label>
+            <label v-if="systemSpecialEntry?.modifier" class="shortcut-check">
+              <input v-model="systemEdit.keepHeld" type="checkbox" data-special-field="hold" />
+              <span>{{ t('settings.modifierKeepHeld') }}</span>
+            </label>
+            <label class="ak-field">
+              <span>{{ t('actionKb.display') }}</span>
+              <select
+                v-model="systemEdit.display"
+                class="shortcut-input"
+                data-special-field="display"
+              >
+                <option value="icon">{{ t('actionKb.display.icon') }}</option>
+                <option value="text">{{ t('actionKb.display.text') }}</option>
+              </select>
+            </label>
+            <p v-if="systemSpecialEntry?.modifier === 'meta'" class="settings-hint">
+              {{ t('settings.terminalMetaHint') }}
+            </p>
+          </template>
+          <label v-else class="ak-field">
+            <span>{{ t('actionKb.action') }}</span>
+            <select v-model="systemEdit.action" class="shortcut-input">
+              <option value="" disabled>{{ t('actionKb.selectAction') }}</option>
+              <option v-for="action in systemActionOptions" :key="action.id" :value="action.id">
+                {{ t(action.labelKey) }}
+              </option>
+            </select>
+          </label>
+          <label v-if="systemEdit.kind === 'action'" class="ak-field">
+            <span>{{ t('actionKb.display') }}</span>
+            <select v-model="systemEdit.display" class="shortcut-input">
+              <option value="icon">{{ t('actionKb.display.icon') }}</option>
+              <option value="text">{{ t('actionKb.display.text') }}</option>
+            </select>
+          </label>
+          <label
+            v-if="systemEdit.kind === 'send'"
+            class="shortcut-check system-agent-icon-check"
+            :class="{ disabled: !systemAgentIconAvailable }"
+          >
+            <input
+              type="checkbox"
+              :disabled="!systemAgentIconAvailable"
+              :checked="systemEdit.display !== 'text'"
+              @change="
+                systemEdit.display = ($event.target as HTMLInputElement).checked ? 'icon' : 'text'
+              "
+            />
+            {{ t('settings.agentDisplayIcon') }}
+          </label>
+          <p
+            v-if="systemEdit.kind === 'send' && !systemAgentIconAvailable"
+            class="settings-hint system-agent-icon-hint"
+          >
+            {{ t('settings.agentDisplayIconHint') }}
+          </p>
+          <label class="ak-field">
+            <span>{{ t('settings.style') }}</span>
+            <select v-model="systemEdit.style" class="shortcut-input">
+              <option value="">{{ t('settings.style.normal') }}</option>
+              <option value="danger">{{ t('settings.style.danger') }}</option>
+            </select>
+          </label>
+          <label class="shortcut-check">
+            <input
+              type="checkbox"
+              data-system-auto-width
+              :checked="systemEdit.grow == null"
+              @change="onSystemAutoWidthChange"
+            />
+            {{ t('settings.adaptiveWidth') }}
+          </label>
+          <label
+            v-if="systemEdit.kind === 'send' || systemEdit.action === 'pasteTerminal'"
+            class="shortcut-check"
+          >
+            <input type="checkbox" v-model="systemEdit.auto_enter" />
+            {{ t('settings.appendEnter') }}
+          </label>
+          <label v-if="systemSupportsRepeat" class="shortcut-check">
+            <input type="checkbox" v-model="systemEdit.repeat" /> {{ t('settings.repeatHold') }}
+          </label>
+          <div class="ak-modal-actions">
+            <button class="settings-save" :disabled="!systemCanSave" @click="saveSystemKey">
+              {{ t('settings.save') }}
+            </button>
+            <button class="shortcut-add" @click="systemEdit = null">
+              {{ t('settings.cancel') }}
+            </button>
           </div>
         </div>
       </div>
@@ -767,16 +1282,22 @@ export function normalizeQuickSendThreshold(value: unknown): number {
 </script>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, watch } from 'vue'
 import {
   useSettings,
   DEFAULT_ACTION_KEYBOARD,
   DEFAULT_ACTION_BOTTOM,
+  cloneWithoutIcons,
+  cloneSystemKeyboardWithoutIcons,
   effectiveActionKeyboard,
   ensureBottom,
   resetActionKeyboard,
   restoreActionKeyboardUserDefault,
   saveActionKeyboardUserDefault,
+  effectiveSystemKeyboard,
+  resetSystemKeyboard,
+  restoreSystemKeyboardUserDefault,
+  saveSystemKeyboardUserDefault,
 } from '../../composables/useSettings'
 import CollapsibleSection from './CollapsibleSection.vue'
 import { useI18n } from '../../composables/useI18n'
@@ -786,17 +1307,44 @@ import type {
   ActionKey,
   ActionKeyboardConfig,
   MobileInputMode,
+  SystemKeyboardConfig,
 } from '../../composables/useSettings'
 import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
-import { APP_ACTIONS, APP_ACTION_IDS } from '../../utils/appActionCatalog'
+import { isAgentIconEnabled } from '../../utils/agentShortcutIcon'
+import {
+  KEYBOARD_SPECIAL_KEYS,
+  keyboardSpecialEntry,
+  parseKeyboardSpecial,
+  serializeKeyboardSpecial,
+  type KeyboardSpecialId,
+} from '../../utils/keyboardSpecialKeys'
+import {
+  MAX_SYSTEM_PINNED,
+  SYSTEM_ROW_UNITS,
+  UPPER_USER_UNITS,
+  canonicalLowerKeys,
+  canonicalizeSystemKeyboard,
+  packSystemKeys,
+  systemKeyboardCandidateAllowed,
+  systemKeyboardLayoutStatus,
+  systemKeyUnits,
+} from '../../utils/systemKeyboardLayout'
+import {
+  APP_ACTIONS,
+  APP_ACTION_IDS,
+  SYSTEM_KEYBOARD_ACTIONS,
+  SYSTEM_KEYBOARD_ACTION_IDS,
+  TOOLBAR_CONTEXT_ACTION_IDS,
+} from '../../utils/appActionCatalog'
 import { isWindowsClient } from '../../utils/clientPlatform'
 import { useDeviceSuperviseReload } from '../../composables/useDeviceSuperviseReload'
-import { RotateCcw } from 'lucide-vue-next'
+import { Keyboard, Pin, RotateCcw } from 'lucide-vue-next'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import type { KeyboardGuardMode } from '../../utils/keyboardGuardMode'
 import { useOpenApiTest } from '../../composables/useOpenApiTest'
 import { useKbRecording } from '../../composables/useKbRecording'
 import { useActionKeyboardGesture } from '../../composables/useActionKeyboardGesture'
+import { useSystemKeyboardGesture } from '../../composables/useSystemKeyboardGesture'
 import { useDeviceKeyboardSettings } from '../../composables/useDeviceKeyboardSettings'
 import { applyAfterTerminalComposition } from '../../utils/terminalInput'
 import {
@@ -832,6 +1380,13 @@ function onMobileInputModeChange(value: string) {
 
 function onKeyboardGuardModeChange(value: string) {
   settings.keyboard_guard_mode = value as KeyboardGuardMode
+  void saveSettings()
+}
+
+function onSystemToolbarModeChange(event: Event) {
+  settings.system_toolbar_mode = (event.target as HTMLInputElement).checked
+    ? 'persistent_mobile'
+    : 'follow_ime'
   void saveSettings()
 }
 
@@ -950,21 +1505,7 @@ const akSendPreview = computed(() => {
 })
 
 function cloneActionKeyboard() {
-  const clone = JSON.parse(JSON.stringify(DEFAULT_ACTION_KEYBOARD))
-  // Restore icon references (lost in JSON serialization)
-  const iconMap = new Map<string, object>()
-  for (const row of DEFAULT_ACTION_KEYBOARD.rows) {
-    for (const k of row) {
-      if (k.icon) iconMap.set(k.send, k.icon)
-    }
-  }
-  for (const row of clone.rows) {
-    for (const k of row) {
-      const icon = iconMap.get(k.send)
-      if (icon) k.icon = icon
-    }
-  }
-  return clone
+  return cloneWithoutIcons(DEFAULT_ACTION_KEYBOARD)
 }
 
 function ensureActionKeyboard() {
@@ -977,6 +1518,267 @@ function ensureToolbarQuickKeys() {
   if (!Array.isArray(settings.toolbar_quick_keys)) {
     settings.toolbar_quick_keys = []
   }
+}
+
+const systemDraft = ref<SystemKeyboardConfig | null>(null)
+const {
+  itemKey: systemItemKey,
+  draggedKey: systemDraggedKey,
+  dragPointerDown: systemDragPointerDown,
+  resizePointerDown: systemResizePointerDown,
+  abort: abortSystemGesture,
+} = useSystemKeyboardGesture({ draft: systemDraft, settings })
+const systemLayout = computed(() => systemDraft.value ?? effectiveSystemKeyboard())
+const systemUpper = computed(() => systemLayout.value.upper)
+const systemLower = computed(() => canonicalLowerKeys(systemLayout.value))
+const systemStatus = computed(() => systemKeyboardLayoutStatus(systemLayout.value))
+type SystemEditorItem = { key: ActionKey; index: number; units: number }
+type SystemEditorPage = { items: SystemEditorItem[]; pinnedCopies: SystemEditorItem[]; end: number }
+
+function indexedSystemPages(keys: ActionKey[], capacity: number, offset = 0): SystemEditorPage[] {
+  let index = offset
+  return packSystemKeys(keys, capacity).map((page) => ({
+    items: page.map(({ key, units }) => ({ key, units, index: index++ })),
+    pinnedCopies: [],
+    end: index,
+  }))
+}
+
+function pinnedSystemPages(keys: ActionKey[], pinnedCount: number, capacity: number) {
+  const pinned: SystemEditorItem[] = keys.slice(0, pinnedCount).map((key, index) => ({
+    key,
+    index,
+    units: systemKeyUnits(key, capacity),
+  }))
+  const pagerCapacity = Math.max(1, capacity - pinned.reduce((sum, item) => sum + item.units, 0))
+  return indexedSystemPages(keys.slice(pinned.length), pagerCapacity, pinned.length).map(
+    (page, index) => ({
+      ...page,
+      items: index === 0 ? [...pinned, ...page.items] : page.items,
+      pinnedCopies: index === 0 ? [] : pinned,
+    })
+  )
+}
+const systemUpperPages = computed(() =>
+  pinnedSystemPages(systemUpper.value, systemStatus.value.upperPinned, UPPER_USER_UNITS)
+)
+const systemLowerPages = computed(() =>
+  pinnedSystemPages(systemLower.value, systemStatus.value.lowerPinned, SYSTEM_ROW_UNITS)
+)
+const systemLayoutMessage = ref('')
+const pinnedOptions = (length: number) =>
+  Array.from({ length: Math.min(MAX_SYSTEM_PINNED, length) + 1 }, (_, index) => index)
+const systemUpperPinnedOptions = computed(() => pinnedOptions(systemUpper.value.length))
+const systemLowerPinnedOptions = computed(() => pinnedOptions(systemLower.value.length))
+
+type SystemEdit = {
+  region: 'upper' | 'lower'
+  index: number
+  label: string
+  kind: 'send' | 'special' | 'action'
+  action: string
+  display: 'icon' | 'text'
+  sendRaw: string
+  style: string
+  repeat: boolean
+  auto_enter: boolean
+  special?: string
+  specialId: KeyboardSpecialId
+  keepHeld: boolean
+  grow?: number
+}
+
+const systemEdit = ref<SystemEdit | null>(null)
+const systemSpecialEntry = computed(() => keyboardSpecialEntry(systemEdit.value?.specialId))
+const systemSupportsRepeat = computed(
+  () => systemEdit.value?.kind !== 'special' || !systemSpecialEntry.value?.modifier
+)
+function editHasAgentIcon(edit: { kind: 'send' | 'special' | 'action'; label: string }): boolean {
+  return edit.kind === 'send' && isAgentIconEnabled({ kind: 'send', label: edit.label })
+}
+const systemAgentIconAvailable = computed(
+  () => !!systemEdit.value && editHasAgentIcon(systemEdit.value)
+)
+watch(
+  () => [systemEdit.value?.kind, systemEdit.value?.label] as const,
+  ([kind, label], previous) => {
+    if (!systemEdit.value || previous[1] === undefined) return
+    const matched = kind === 'send' && editHasAgentIcon(systemEdit.value)
+    const previouslyMatched =
+      previous[0] === 'send' && isAgentIconEnabled({ kind: previous[0], label: previous[1] ?? '' })
+    if (matched && !previouslyMatched) systemEdit.value.display = 'icon'
+  }
+)
+const systemActionOptions = [...APP_ACTIONS, ...SYSTEM_KEYBOARD_ACTIONS]
+const systemCanSave = computed(() => {
+  if (!systemEdit.value) return false
+  if (systemEdit.value.kind === 'special') return !!systemSpecialEntry.value
+  return systemEdit.value.kind === 'send'
+    ? systemEdit.value.label.trim().length > 0
+    : APP_ACTION_IDS.has(systemEdit.value.action) ||
+        SYSTEM_KEYBOARD_ACTION_IDS.has(systemEdit.value.action)
+})
+
+function systemPreviewDef(key: ActionKey) {
+  return actionKeyToKeyDef(key)
+}
+
+function systemSlotStyle(units: number) {
+  return { gridColumn: `span ${units}` }
+}
+
+function beginSystemEdit(region: 'upper' | 'lower', index: number) {
+  const key = region === 'upper' ? systemUpper.value[index] : systemLower.value[index]
+  if (!key) return
+  const parsedSpecial = parseKeyboardSpecial(key.special)
+  systemEdit.value = {
+    region,
+    index,
+    label: key.label,
+    kind: key.kind === 'action' ? 'action' : parsedSpecial ? 'special' : 'send',
+    action: key.action ?? '',
+    display: key.display ?? 'icon',
+    sendRaw: escapeForDisplay(key.send),
+    style: key.style ?? '',
+    repeat: key.repeat ?? false,
+    auto_enter: resolveAutoEnterForEdit(key),
+    special: key.special,
+    specialId: parsedSpecial?.id ?? 'ctrl',
+    keepHeld: parsedSpecial?.behavior === 'lock',
+    grow: key.grow,
+  }
+}
+
+function addSystemKey(region: 'upper' | 'lower') {
+  const index = region === 'upper' ? systemUpper.value.length : systemLower.value.length
+  systemEdit.value = {
+    region,
+    index,
+    label: '',
+    kind: 'send',
+    action: '',
+    display: 'icon',
+    sendRaw: '',
+    style: '',
+    repeat: false,
+    auto_enter: true,
+    specialId: 'ctrl',
+    keepHeld: false,
+  }
+}
+
+function onSystemSpecialChange() {
+  if (!systemEdit.value) return
+  const entry = keyboardSpecialEntry(systemEdit.value.specialId)
+  if (!entry) return
+  systemEdit.value.label = entry.label
+  if (!entry.modifier) systemEdit.value.keepHeld = false
+}
+
+function onSystemKindChange() {
+  if (systemEdit.value?.kind === 'special') onSystemSpecialChange()
+  else stopRecord()
+}
+
+function commitSystemCandidate(mutator: (candidate: SystemKeyboardConfig) => void): boolean {
+  const source = effectiveSystemKeyboard()
+  const candidate = cloneSystemKeyboardWithoutIcons(source)
+  mutator(candidate)
+  const canonical = canonicalizeSystemKeyboard(candidate)
+  if (!systemKeyboardCandidateAllowed(source, canonical)) {
+    systemLayoutMessage.value = t('settings.systemKeyboardPageLimit')
+    return false
+  }
+  settings.system_keyboard = canonical
+  systemLayoutMessage.value = ''
+  return true
+}
+
+function saveSystemKey() {
+  const edit = systemEdit.value
+  if (!edit || !systemCanSave.value) return
+  const key: ActionKey =
+    edit.kind === 'action'
+      ? {
+          label: edit.label,
+          kind: 'action',
+          action: edit.action,
+          display: edit.display,
+          style: edit.style || undefined,
+          repeat: edit.repeat || undefined,
+          ...(edit.action === 'pasteTerminal' ? { auto_enter: edit.auto_enter } : {}),
+          grow: edit.grow,
+        }
+      : edit.kind === 'special'
+        ? {
+            label: edit.label || keyboardSpecialEntry(edit.specialId)?.label || '',
+            kind: 'send',
+            special: serializeKeyboardSpecial(edit.specialId, edit.keepHeld ? 'lock' : 'once'),
+            display: edit.display,
+            style: edit.style || undefined,
+            repeat: systemSpecialEntry.value?.modifier ? undefined : edit.repeat || undefined,
+            grow: edit.grow,
+          }
+        : {
+            label: edit.label,
+            kind: 'send',
+            send: unescapeFromDisplay(edit.sendRaw),
+            display: editHasAgentIcon(edit) ? edit.display : undefined,
+            style: edit.style || undefined,
+            repeat: edit.repeat || undefined,
+            auto_enter: edit.auto_enter,
+            special: parseKeyboardSpecial(edit.special) ? undefined : edit.special,
+            grow: edit.grow,
+          }
+  const saved = commitSystemCandidate((config) => {
+    const row = edit.region === 'upper' ? config.upper : config.pages[0]
+    if (edit.index < row.length) row[edit.index] = key
+    else row.push(key)
+  })
+  if (saved) systemEdit.value = null
+}
+
+function onSystemAutoWidthChange(event: Event) {
+  if (!systemEdit.value) return
+  const adaptive = (event.target as HTMLInputElement).checked
+  if (adaptive) {
+    systemEdit.value.grow = undefined
+    return
+  }
+  const edit = systemEdit.value
+  const capacity = edit.region === 'upper' ? UPPER_USER_UNITS : SYSTEM_ROW_UNITS
+  systemEdit.value.grow = systemKeyUnits(
+    {
+      label: edit.label,
+      kind: edit.kind === 'action' ? 'action' : 'send',
+      action: edit.action || undefined,
+      display: edit.display,
+    },
+    capacity
+  )
+}
+
+function removeSystemKey(region: 'upper' | 'lower', index: number) {
+  commitSystemCandidate((config) => {
+    const row = region === 'upper' ? config.upper : config.pages[0]
+    row.splice(index, 1)
+    const field = region === 'upper' ? 'upper_pinned' : 'lower_pinned'
+    config[field] = Math.min(config[field] ?? 0, row.length)
+  })
+}
+
+function onSystemLowerEnabledChange(event: Event) {
+  const enabled = (event.target as HTMLInputElement).checked
+  commitSystemCandidate((config) => {
+    config.lower_enabled = enabled
+  })
+}
+
+function onPinnedChange(region: 'upper' | 'lower', event: Event) {
+  const count = Number((event.target as HTMLSelectElement).value)
+  commitSystemCandidate((config) => {
+    config[region === 'upper' ? 'upper_pinned' : 'lower_pinned'] = count
+  })
 }
 
 function addActionRow() {
@@ -1029,11 +1831,11 @@ function removeBottomKey(ri: number, ki: number) {
 
 function addToolbarQuickKey() {
   ensureToolbarQuickKeys()
-  if (settings.toolbar_quick_keys.length >= 5) return
+  if (toolbarQuickKeys.value.length >= 5) return
   akEdit.value = {
     scope: 'toolbar',
     ri: -1,
-    ki: settings.toolbar_quick_keys.length,
+    ki: toolbarQuickKeys.value.length,
     label: '',
     kind: 'send',
     action: '',
@@ -1042,26 +1844,31 @@ function addToolbarQuickKey() {
     style: '',
     repeat: false,
     auto_enter: true,
+    specialId: 'ctrl',
+    keepHeld: false,
   }
 }
 
 function editToolbarQuickKey(ki: number) {
   ensureToolbarQuickKeys()
-  const key = settings.toolbar_quick_keys[ki]
+  const key = toolbarQuickKeys.value[ki]
   if (!key) return
+  const parsedSpecial = parseKeyboardSpecial(key.special)
   akEdit.value = {
     scope: 'toolbar',
     ri: -1,
     ki,
     label: key.label,
-    kind: 'send',
-    action: '',
-    display: 'icon',
+    kind: key.kind === 'action' ? 'action' : parsedSpecial ? 'special' : 'send',
+    action: key.action || '',
+    display: key.display ?? 'icon',
     sendRaw: escapeForDisplay(key.send),
     style: key.style || '',
     repeat: key.repeat || false,
     auto_enter: resolveAutoEnterForEdit(key),
     special: key.special,
+    specialId: parsedSpecial?.id ?? 'ctrl',
+    keepHeld: parsedSpecial?.behavior === 'lock',
     grow: key.grow,
     icon: key.icon,
   }
@@ -1069,7 +1876,7 @@ function editToolbarQuickKey(ki: number) {
 
 function removeToolbarQuickKey(ki: number) {
   ensureToolbarQuickKeys()
-  settings.toolbar_quick_keys.splice(ki, 1)
+  toolbarQuickKeys.value.splice(ki, 1)
 }
 
 type AkEditScope = 'action' | 'bottom' | 'bottom-enter' | 'toolbar'
@@ -1079,7 +1886,7 @@ const akEdit = ref<{
   ri: number
   ki: number
   label: string
-  kind: 'send' | 'action'
+  kind: 'send' | 'special' | 'action'
   action: string
   display: 'icon' | 'text'
   sendRaw: string
@@ -1087,12 +1894,37 @@ const akEdit = ref<{
   repeat: boolean
   auto_enter: boolean
   special?: string
+  specialId: KeyboardSpecialId
+  keepHeld: boolean
   grow?: number
   icon?: object
 } | null>(null)
-const akRecording = ref(false)
+const recordingTarget = ref<'action' | 'system' | null>(null)
+const akRecording = computed(() => recordingTarget.value === 'action')
+const systemRecording = computed(() => recordingTarget.value === 'system')
 const recordFocusSinkRef = ref<HTMLElement | null>(null)
+watch(akEdit, (edit) => {
+  if (!edit && recordingTarget.value === 'action') stopRecord()
+})
+watch(systemEdit, (edit) => {
+  if (!edit && recordingTarget.value === 'system') stopRecord()
+})
 const akIsEnterEdit = computed(() => akEdit.value?.scope === 'bottom-enter')
+const akAgentIconAvailable = computed(() => !!akEdit.value && editHasAgentIcon(akEdit.value))
+const akSpecialEntry = computed(() => keyboardSpecialEntry(akEdit.value?.specialId))
+const akSupportsRepeat = computed(
+  () => akEdit.value?.kind !== 'special' || !akSpecialEntry.value?.modifier
+)
+watch(
+  () => [akEdit.value?.kind, akEdit.value?.label] as const,
+  ([kind], previous) => {
+    if (!akEdit.value || previous[1] === undefined) return
+    const matched = kind === 'send' && editHasAgentIcon(akEdit.value)
+    const previouslyMatched =
+      previous[0] === 'send' && isAgentIconEnabled({ kind: previous[0], label: previous[1] ?? '' })
+    if (matched && !previouslyMatched) akEdit.value.display = 'icon'
+  }
+)
 const akSupportsAutoEnter = computed(
   () =>
     !!akEdit.value &&
@@ -1100,12 +1932,18 @@ const akSupportsAutoEnter = computed(
     (akEdit.value.kind === 'send' ||
       (akEdit.value.kind === 'action' && akEdit.value.action === 'pasteTerminal'))
 )
+const akActionOptions = computed(() =>
+  akEdit.value?.scope === 'toolbar'
+    ? APP_ACTIONS
+    : APP_ACTIONS.filter((action) => !TOOLBAR_CONTEXT_ACTION_IDS.has(action.id))
+)
 
 const akCanSave = computed(() => {
   if (!akEdit.value) return false
   if (akEdit.value.kind === 'action') {
-    return akEdit.value.scope !== 'toolbar' && APP_ACTION_IDS.has(akEdit.value.action)
+    return APP_ACTION_IDS.has(akEdit.value.action)
   }
+  if (akEdit.value.kind === 'special') return !!akSpecialEntry.value
   if (akEdit.value.scope !== 'toolbar') return true
   return (
     akEdit.value.label.trim().length > 0 && unescapeFromDisplay(akEdit.value.sendRaw).length > 0
@@ -1114,12 +1952,13 @@ const akCanSave = computed(() => {
 
 function editActionKey(ri: number, ki: number) {
   const key = actionRows.value[ri][ki]
+  const parsedSpecial = parseKeyboardSpecial(key.special)
   akEdit.value = {
     scope: 'action',
     ri,
     ki,
     label: key.label,
-    kind: key.kind === 'action' ? 'action' : 'send',
+    kind: key.kind === 'action' ? 'action' : parsedSpecial ? 'special' : 'send',
     action: key.action || '',
     display: key.display ?? 'icon',
     sendRaw: escapeForDisplay(key.send),
@@ -1127,6 +1966,8 @@ function editActionKey(ri: number, ki: number) {
     repeat: key.repeat || false,
     auto_enter: resolveAutoEnterForEdit(key),
     special: key.special,
+    specialId: parsedSpecial?.id ?? 'ctrl',
+    keepHeld: parsedSpecial?.behavior === 'lock',
     grow: key.grow,
     icon: key.icon,
   }
@@ -1135,12 +1976,13 @@ function editActionKey(ri: number, ki: number) {
 function editBottomKey(ri: number, ki: number) {
   const key = actionBottom.value.rows[ri][ki]
   if (!key) return
+  const parsedSpecial = parseKeyboardSpecial(key.special)
   akEdit.value = {
     scope: 'bottom',
     ri,
     ki,
     label: key.label,
-    kind: key.kind === 'action' ? 'action' : 'send',
+    kind: key.kind === 'action' ? 'action' : parsedSpecial ? 'special' : 'send',
     action: key.action || '',
     display: key.display ?? 'icon',
     sendRaw: escapeForDisplay(key.send),
@@ -1148,6 +1990,8 @@ function editBottomKey(ri: number, ki: number) {
     repeat: key.repeat || false,
     auto_enter: resolveAutoEnterForEdit(key),
     special: key.special,
+    specialId: parsedSpecial?.id ?? 'ctrl',
+    keepHeld: parsedSpecial?.behavior === 'lock',
     grow: key.grow,
     icon: key.icon,
   }
@@ -1167,7 +2011,22 @@ function editBottomEnter() {
     style: key.style || '',
     repeat: false,
     auto_enter: false,
+    specialId: 'ctrl',
+    keepHeld: false,
   }
+}
+
+function onAkSpecialChange() {
+  if (!akEdit.value) return
+  const entry = keyboardSpecialEntry(akEdit.value.specialId)
+  if (!entry) return
+  akEdit.value.label = entry.label
+  if (!entry.modifier) akEdit.value.keepHeld = false
+}
+
+function onAkKindChange() {
+  if (akEdit.value?.kind === 'special') onAkSpecialChange()
+  else stopRecord()
 }
 
 function saveActionKey() {
@@ -1197,23 +2056,33 @@ function saveActionKey() {
           ...(edit.action === 'pasteTerminal' ? { auto_enter: edit.auto_enter } : {}),
           grow: edit.grow,
         }
-      : {
-          label,
-          kind: 'send',
-          send: unescapeFromDisplay(edit.sendRaw),
-          style: edit.style || undefined,
-          repeat: edit.repeat || undefined,
-          auto_enter: edit.auto_enter,
-          special: edit.special,
-          grow: edit.grow,
-          icon: edit.icon,
-        }
+      : edit.kind === 'special'
+        ? {
+            label: label || keyboardSpecialEntry(edit.specialId)?.label || '',
+            kind: 'send',
+            special: serializeKeyboardSpecial(edit.specialId, edit.keepHeld ? 'lock' : 'once'),
+            display: edit.display,
+            style: edit.style || undefined,
+            repeat: akSpecialEntry.value?.modifier ? undefined : edit.repeat || undefined,
+            grow: edit.grow,
+          }
+        : {
+            label,
+            kind: 'send',
+            send: unescapeFromDisplay(edit.sendRaw),
+            display: editHasAgentIcon(edit) ? edit.display : undefined,
+            style: edit.style || undefined,
+            repeat: edit.repeat || undefined,
+            auto_enter: edit.auto_enter,
+            special: parseKeyboardSpecial(edit.special) ? undefined : edit.special,
+            grow: edit.grow,
+          }
   if (edit.scope === 'toolbar') {
     ensureToolbarQuickKeys()
-    if (ki < settings.toolbar_quick_keys.length) {
-      settings.toolbar_quick_keys[ki] = next
-    } else if (settings.toolbar_quick_keys.length < 5) {
-      settings.toolbar_quick_keys.push(next)
+    if (ki < toolbarQuickKeys.value.length) {
+      toolbarQuickKeys.value[ki] = next
+    } else if (toolbarQuickKeys.value.length < 5) {
+      toolbarQuickKeys.value.push(next)
     }
   } else if (edit.scope === 'bottom') {
     ensureBottom().rows[ri][ki] = next
@@ -1226,11 +2095,12 @@ function saveActionKey() {
 
 let recordHandler: ((e: KeyboardEvent) => void) | null = null
 
-function toggleRecord() {
-  if (akRecording.value) {
+function toggleRecord(target: 'action' | 'system') {
+  if (recordingTarget.value === target) {
     stopRecord()
   } else {
-    startRecord()
+    stopRecord()
+    startRecord(target)
   }
 }
 
@@ -1240,19 +2110,20 @@ function recordingEventIgnorable(e: KeyboardEvent): boolean {
   return k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta'
 }
 
-function startRecord() {
-  akRecording.value = true
+function startRecord(target: 'action' | 'system') {
+  recordingTarget.value = target
   recordHandler = (e: KeyboardEvent) => {
     if (recordingEventIgnorable(e)) return
-    if (!akEdit.value) return
+    const edit = target === 'action' ? akEdit.value : systemEdit.value
+    if (!edit) return
     const seq = keyEventToSequence(e)
     if (!seq) return
     e.preventDefault()
     e.stopPropagation()
     e.stopImmediatePropagation()
-    akEdit.value.sendRaw = escapeForDisplay(seq)
-    if (akEdit.value.label === 'new' || akEdit.value.label === '') {
-      akEdit.value.label = keyEventToLabel(e)
+    edit.sendRaw = escapeForDisplay(seq)
+    if (edit.label === 'new' || edit.label === '') {
+      edit.label = keyEventToLabel(e)
     }
     stopRecord()
   }
@@ -1266,7 +2137,7 @@ function startRecord() {
 }
 
 function stopRecord() {
-  akRecording.value = false
+  recordingTarget.value = null
   if (recordHandler) {
     window.removeEventListener('keydown', recordHandler, true)
     recordHandler = null
@@ -1276,12 +2147,204 @@ function stopRecord() {
 
 onBeforeUnmount(() => {
   akAbortGesture()
+  abortSystemGesture()
   stopRecord()
   stopKbRecord()
 })
 </script>
 
 <style scoped>
+.system-editor-head {
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+.system-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  min-height: 44px;
+}
+.system-editor-ime-pin {
+  grid-column: 10;
+  min-width: 0;
+  min-height: 44px;
+  pointer-events: none;
+}
+.system-editor-slot {
+  position: relative;
+  min-width: 0;
+}
+.system-editor-slot .ak-wyg-key {
+  min-height: 44px;
+  padding-right: 0;
+  padding-left: 20px;
+}
+.system-editor-slot .ak-key-grip {
+  width: 20px;
+}
+.system-editor-slot .ak-key-del {
+  right: 2px;
+}
+.system-editor-slot .ak-key-resize {
+  width: 12px;
+}
+.system-editor-resizable .ak-wyg-key {
+  padding-right: 12px;
+}
+.system-editor-resizable .ak-key-del {
+  right: 8px;
+}
+.system-editor-compact .ak-wyg-key {
+  padding-left: 14px;
+}
+.system-editor-compact .ak-key-grip {
+  width: 14px;
+}
+.system-editor-compact.system-editor-resizable .ak-wyg-key {
+  padding-right: 8px;
+}
+.system-editor-compact.system-editor-resizable .ak-key-resize {
+  width: 8px;
+}
+.system-editor-edit-hit {
+  align-self: stretch;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.system-editor-key-icon {
+  flex: 0 0 auto;
+  margin: auto;
+}
+.system-editor-pinned .ak-wyg-key,
+.system-editor-pinned-copy .ak-wyg-key,
+.system-editor-ime-pin {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+}
+.system-editor-pinned-copy {
+  pointer-events: none;
+  opacity: 0.76;
+}
+.system-editor-pinned-copy .ak-wyg-key {
+  gap: 3px;
+  padding: 0 6px;
+}
+.system-editor-pin-mark {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.system-editor-dragging {
+  z-index: 4;
+}
+.system-editor-dragging::before {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: -3px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  content: '';
+}
+.system-editor-dragging .ak-wyg-key {
+  outline: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-input));
+}
+.system-editor-pin-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.system-editor-pin-control select {
+  min-width: 48px;
+}
+.system-editor-add {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 56%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  touch-action: manipulation;
+  transition:
+    transform 80ms ease,
+    border-color 80ms ease,
+    background 80ms ease,
+    box-shadow 80ms ease;
+}
+.system-editor-add:active {
+  transform: translateY(1px) scale(0.97);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-input));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 48%, transparent);
+}
+.system-editor-add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .system-editor-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+  }
+  .system-editor-pin-control {
+    grid-row: 2;
+    grid-column: 1;
+    justify-self: start;
+  }
+  .system-editor-add {
+    grid-row: 2;
+    grid-column: 2;
+  }
+  .system-editor-head > .toggle {
+    justify-self: end;
+  }
+}
+.system-layout-warning {
+  color: #ff9f43;
+}
+.system-layout-at-limit {
+  color: var(--fg-muted);
+}
+.shortcut-check.disabled {
+  opacity: 0.55;
+}
+.ak-agent-icon-hint,
+.system-agent-icon-hint {
+  margin-top: 6px;
+  line-height: 1.45;
+}
+.system-editor-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.system-editor-page {
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  padding: 5px 7px;
+  min-width: 0;
+}
+.system-editor-page + .system-editor-page {
+  border-top: 1px solid var(--border);
+}
 .api-test {
   border: 1px solid var(--border);
   border-radius: 6px;

@@ -20,10 +20,13 @@ pub use types::{
     KeyBinding, KeywordRule, LogConfig, MobileInputMode, MonitorConfig, NotificationChannels,
     NotificationConfig, NotificationHook, NotificationSounds, NotificationType, OpenApiConfig,
     PanelPosition, PreviewConfig, RecentEntry, SavedTheme, SensitiveString, Settings,
-    SettingsState, SoundConfig, SshAuthMethod, SshProfile, TextConfig, ThemeColors, ThemeConfig,
-    WebBookmark, WorkspaceBadgeMode, WorkspaceBookmark, CURRENT_SETTINGS_VERSION,
+    SettingsState, SoundConfig, SshAuthMethod, SshProfile, SystemKeyboardConfig, SystemToolbarMode,
+    TextConfig, ThemeColors, ThemeConfig, WebBookmark, WorkspaceBadgeMode, WorkspaceBookmark,
+    CURRENT_SETTINGS_VERSION,
 };
 
+#[cfg(test)]
+pub(crate) use handlers::preserve_current_system_settings_on_legacy_put;
 #[cfg(test)]
 pub(crate) use io::migrate_settings;
 #[cfg(test)]

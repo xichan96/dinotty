@@ -2,17 +2,18 @@ import { reactive, readonly, ref, watch } from 'vue'
 import { applyThemeToDOM, getXtermTheme } from '../themes'
 import { getApiBase, apiUrl, authFetch, hasAuthToken } from './apiBase'
 import { resolveEffectiveTheme } from './useDeviceThemeSelection'
-import ClaudeLogo from '../components/icons/ClaudeLogo.vue'
-import CodexLogo from '../components/icons/CodexLogo.vue'
-import OpencodeLogo from '../components/icons/OpencodeLogo.vue'
 import { isWindowsClient } from '../utils/clientPlatform'
+import { canonicalizeSystemKeyboard } from '../utils/systemKeyboardLayout'
 import type { KeyboardGuardMode } from '../utils/keyboardGuardMode'
 import type { KeyBinding } from './useKeybindings'
 import type { SavedTheme } from './useDeviceThemeSelection'
 export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
 export type MobileInputMode = 'builtin' | 'system'
+export type SystemToolbarMode = 'follow_ime' | 'persistent_mobile'
+export const SETTINGS_SCHEMA_VERSION = 12
 
 export interface SettingsData {
+  settings_version: number
   theme: {
     preset: string
     custom: {
@@ -40,6 +41,9 @@ export interface SettingsData {
   action_keyboard: ActionKeyboardConfig | null
   action_keyboard_user_default?: ActionKeyboardConfig | null
   toolbar_quick_keys: ActionKey[]
+  system_keyboard: SystemKeyboardConfig | null
+  system_keyboard_user_default?: SystemKeyboardConfig | null
+  system_toolbar_mode: SystemToolbarMode
   upload_dir: string
   default_base_dir?: string | null
   default_workspace_root?: string | null
@@ -224,6 +228,42 @@ export interface ActionKeyboardConfig {
   bottom?: ActionBottomCluster
 }
 
+export interface SystemKeyboardConfig {
+  upper: ActionKey[]
+  pages: ActionKey[][]
+  lower_enabled?: boolean
+  upper_pinned?: number
+  lower_pinned?: number
+}
+
+export const DEFAULT_SYSTEM_KEYBOARD: SystemKeyboardConfig = {
+  upper: [
+    { label: 'History', kind: 'action', action: 'system.history' },
+    { label: 'Bookmarks', kind: 'action', action: 'openBookmarks' },
+    { label: 'Extended', kind: 'action', action: 'system.extended' },
+    { label: 'Actions', kind: 'action', action: 'system.actions' },
+  ],
+  pages: [
+    [
+      { label: 'Esc', kind: 'send', send: '\x1b' },
+      { label: 'Tab', kind: 'send', send: '\t' },
+      { label: 'Ctrl', kind: 'send', send: '', special: 'ctrl', display: 'text' },
+      { label: 'Alt', kind: 'send', send: '', special: 'alt', display: 'text' },
+      { label: '/', kind: 'send', send: '/' },
+      { label: '|', kind: 'send', send: '|' },
+      { label: '~', kind: 'send', send: '~' },
+      { label: '-', kind: 'send', send: '-' },
+      { label: '^C', kind: 'send', send: '\x03' },
+      { label: '^I', kind: 'send', send: '\t' },
+      { label: '^S', kind: 'send', send: '\x13' },
+      { label: '^Z', kind: 'send', send: '\x1a' },
+    ],
+  ],
+  lower_enabled: true,
+  upper_pinned: 0,
+  lower_pinned: 0,
+}
+
 export const DEFAULT_ACTION_BOTTOM: ActionBottomCluster = {
   rows: [
     [
@@ -246,9 +286,9 @@ export const DEFAULT_ACTION_KEYBOARD: ActionKeyboardConfig & {
   rows: [
     [
       { label: '🔖', send: '', special: 'bookmarks' },
-      { label: 'claude', send: 'claude', auto_enter: true, icon: ClaudeLogo },
-      { label: 'codex', send: 'codex', auto_enter: true, icon: CodexLogo },
-      { label: 'opencode', send: 'opencode', auto_enter: true, icon: OpencodeLogo },
+      { label: 'claude', send: 'claude', auto_enter: true, display: 'icon' },
+      { label: 'codex', send: 'codex', auto_enter: true, display: 'icon' },
+      { label: 'opencode', send: 'opencode', auto_enter: true, display: 'icon' },
     ],
     [
       { label: 'esc', send: '\x1b', style: 'danger' },
@@ -346,6 +386,34 @@ export function cloneWithoutIcons(cfg: ActionKeyboardConfig): ActionKeyboardConf
   return clone
 }
 
+export function cloneSystemKeyboardWithoutIcons(cfg: SystemKeyboardConfig): SystemKeyboardConfig {
+  return canonicalizeSystemKeyboard({
+    upper: cfg.upper.map(cloneActionKeyWithoutIcon),
+    pages: cfg.pages.map((page) => page.map(cloneActionKeyWithoutIcon)),
+    lower_enabled: cfg.lower_enabled !== false,
+    upper_pinned: cfg.upper_pinned ?? 0,
+    lower_pinned: cfg.lower_pinned ?? 0,
+  })
+}
+
+export function effectiveSystemKeyboard(): SystemKeyboardConfig {
+  return settings.system_keyboard ?? DEFAULT_SYSTEM_KEYBOARD
+}
+
+export function resetSystemKeyboard(): void {
+  settings.system_keyboard = null
+}
+
+export function saveSystemKeyboardUserDefault(): void {
+  settings.system_keyboard_user_default = cloneSystemKeyboardWithoutIcons(effectiveSystemKeyboard())
+}
+
+export function restoreSystemKeyboardUserDefault(): void {
+  const snapshot = settings.system_keyboard_user_default
+  if (!snapshot) return
+  settings.system_keyboard = cloneSystemKeyboardWithoutIcons(snapshot)
+}
+
 export function effectiveActionKeyboard(): ActionKeyboardConfig {
   const cfg = settings.action_keyboard
   if (!cfg) return DEFAULT_ACTION_KEYBOARD
@@ -360,7 +428,6 @@ export function restoreActionKeyboardUserDefault(): void {
   const snapshot = settings.action_keyboard_user_default
   if (!snapshot) return
   settings.action_keyboard = cloneWithoutIcons(snapshot)
-  restoreActionIcons()
 }
 
 export function resetActionKeyboard(): void {
@@ -380,6 +447,7 @@ export function ensureBottom(): ActionBottomCluster {
 }
 
 export const settings = reactive<SettingsData>({
+  settings_version: SETTINGS_SCHEMA_VERSION,
   theme: { preset: 'dark', custom: null },
   custom_themes: [],
   hidden_builtins: [],
@@ -406,6 +474,9 @@ export const settings = reactive<SettingsData>({
   action_keyboard: null,
   action_keyboard_user_default: null,
   toolbar_quick_keys: [],
+  system_keyboard: null,
+  system_keyboard_user_default: null,
+  system_toolbar_mode: 'follow_ime',
   upload_dir: '',
   upload_cap_mb: 200,
   upload_file_cap_mb: 0,
@@ -546,38 +617,6 @@ export function useSettings() {
   }
 }
 
-export function restoreActionIcons() {
-  // Toolbar quick keys are plain user-defined labels/sends; do not attach default icons.
-  // Build a lookup from send → icon using DEFAULT_ACTION_KEYBOARD
-  const iconMap = new Map<string, object>()
-  for (const row of DEFAULT_ACTION_KEYBOARD.rows) {
-    for (const k of row) {
-      if (k.icon && k.send !== undefined) iconMap.set(k.send, k.icon)
-    }
-  }
-
-  const restoreKey = (k: ActionKey) => {
-    if (k.kind === 'action' || k.icon || k.send === undefined) return
-    const icon = iconMap.get(k.send)
-    if (icon) k.icon = icon
-  }
-  const restoreConfig = (cfg: ActionKeyboardConfig | null | undefined) => {
-    if (!cfg) return
-    for (const row of cfg.rows) {
-      for (const k of row) restoreKey(k)
-    }
-    if (cfg.bottom) {
-      for (const row of cfg.bottom.rows) {
-        for (const k of row) restoreKey(k)
-      }
-      if (cfg.bottom.enter) restoreKey(cfg.bottom.enter)
-    }
-  }
-
-  restoreConfig(settings.action_keyboard)
-  restoreConfig(settings.action_keyboard_user_default)
-}
-
 export async function loadSettings() {
   if (!hasAuthToken()) return
   // A refresh that overtakes an already-started save can fetch the old server
@@ -615,7 +654,14 @@ export async function loadSettings() {
       settings.action_keyboard_user_default = normalizeActionKeyboard(
         settings.action_keyboard_user_default ?? null
       )
-      restoreActionIcons()
+      if (settings.system_keyboard) {
+        settings.system_keyboard = canonicalizeSystemKeyboard(settings.system_keyboard)
+      }
+      if (settings.system_keyboard_user_default) {
+        settings.system_keyboard_user_default = canonicalizeSystemKeyboard(
+          settings.system_keyboard_user_default
+        )
+      }
       applyCurrentTheme()
       settingsLoadedState.value = true
     }
@@ -639,13 +685,24 @@ async function persistSettings() {
       return
     }
     const payload = JSON.parse(JSON.stringify(settings)) as SettingsData
+    const wirePayload = payload as unknown as Record<string, unknown>
+    payload.settings_version = SETTINGS_SCHEMA_VERSION
+    wirePayload.client_settings_version = SETTINGS_SCHEMA_VERSION
     if (payload.action_keyboard) {
       payload.action_keyboard = cloneWithoutIcons(payload.action_keyboard)
     }
     if (payload.action_keyboard_user_default) {
       payload.action_keyboard_user_default = cloneWithoutIcons(payload.action_keyboard_user_default)
     }
-    delete (payload as unknown as Record<string, unknown>).reload_after_supervise_tabs
+    if (payload.system_keyboard) {
+      payload.system_keyboard = cloneSystemKeyboardWithoutIcons(payload.system_keyboard)
+    }
+    if (payload.system_keyboard_user_default) {
+      payload.system_keyboard_user_default = cloneSystemKeyboardWithoutIcons(
+        payload.system_keyboard_user_default
+      )
+    }
+    delete wirePayload.reload_after_supervise_tabs
     const notification = payload.notification as unknown as Record<string, unknown>
     for (const key of [
       'presentation_enabled',

@@ -103,6 +103,10 @@
   box-shadow: 0 0 6px rgba(10, 132, 255, 0.5);
 }
 
+.mkb-active.mkb-locked {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 6px rgba(10, 132, 255, 0.5);
+}
+
 .mkb-btn.active {
   background: var(--accent);
   color: #fff;
@@ -588,7 +592,6 @@
   --mkb-mod-bg: color-mix(in srgb, var(--bg), white 6%);
 }
 
-.system-kb-tool-row,
 .system-kb-action-header {
   display: flex;
   align-items: center;
@@ -596,73 +599,110 @@
   min-width: 0;
 }
 
-.system-kb-tool {
+.system-kb-upper-shell,
+.system-kb-lower-shell {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+.system-kb-upper-pager,
+.system-kb-lower-pager {
+  display: grid;
+  grid-template-columns: repeat(var(--system-page-columns, 10), minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.system-kb-grid-key {
   display: flex;
-  flex: 0 0 34px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.system-kb-pinned-key .mkb-btn,
+.system-kb-ime-toggle {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+}
+
+.system-kb-grid-key .mkb-btn {
+  flex: 1 1 auto !important;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding-inline: 4px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-kb-ime-toggle {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 32px;
+  width: 100%;
+  height: 36px;
   padding: 0;
-  border: 1px solid var(--border);
+  border-width: 1px;
+  border-style: solid;
   border-radius: 7px;
   color: var(--fg);
-  background: var(--bg-input);
   -webkit-tap-highlight-color: transparent;
 }
 
-.system-kb-tool:active {
+.system-kb-ime-toggle:active {
   border-color: var(--accent);
   color: var(--fg-bright);
 }
 
-.system-kb-action-toggle {
-  flex: 0 1 auto;
-  width: auto;
-  padding: 0 9px;
-  gap: 5px;
-  font-size: 11px;
-  white-space: nowrap;
+.system-kb-page-dots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  min-height: 7px;
+  margin-top: 1px;
+  padding-inline: 4px;
 }
 
-.system-kb-action-icon {
-  flex: 0 0 20px;
+.system-kb-page-dots.upper-only {
+  display: flex;
+  justify-content: center;
 }
 
-.system-kb-dismiss {
-  margin-left: auto;
-}
-
-.system-kb-quick-row,
-.system-kb-shortcut-strip {
+.system-kb-page-dot-group {
   display: flex;
   gap: 4px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
 }
 
-.system-kb-quick-row::-webkit-scrollbar,
-.system-kb-shortcut-strip::-webkit-scrollbar {
-  display: none;
+.system-kb-page-dot-group.upper {
+  justify-content: flex-start;
 }
 
-.system-kb-quick-row .mkb-btn {
-  flex: 1 0 58px !important;
-  height: 34px;
-  font-size: 12px;
+.system-kb-page-dot-group.lower {
+  justify-content: flex-end;
 }
 
-.system-kb-shortcut-strip .mkb-btn {
-  flex: 0 0 49px !important;
-  height: 36px;
-  font-size: 12px;
+.system-kb-page-dot {
+  width: 6px;
+  min-width: 6px;
+  height: 6px;
+  min-height: 6px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--fg-muted);
+  opacity: 0.45;
 }
 
-.system-kb-shortcut-strip .mkb-arrow {
-  min-height: 36px;
-  font-size: 17px;
+.system-kb-page-dot.active {
+  opacity: 1;
+  background: var(--accent);
 }
 
 .system-kb-action-header {
@@ -681,6 +721,12 @@
   min-height: 30px;
   color: var(--accent);
   font-size: 11px;
+}
+
+.system-kb-action-header .system-kb-ime-toggle {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 30px;
 }
 
 #system-mkb-action-panel,
@@ -715,15 +761,12 @@
 }
 
 @media (max-width: 420px) {
-  .system-kb-tool-row {
+  .system-kb-upper-shell,
+  .system-kb-lower-shell {
     gap: 3px;
   }
-  .system-kb-tool {
-    flex-basis: 32px;
-    width: 32px;
-  }
-  .system-kb-action-toggle span {
-    display: none;
+  .system-kb-ime-toggle {
+    width: 100%;
   }
   #system-termius-key-panel .mkb-btn {
     min-height: 40px;

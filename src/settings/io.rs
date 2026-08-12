@@ -5,8 +5,8 @@ use super::normalize::{
     clamp_quick_send_threshold, clamp_text_config, clamp_text_on_load, normalize_action_keyboards,
 };
 use super::types::{
-    default_upload_dir, KeyboardGuardMode, Settings, WorkspaceBadgeMode, CURRENT_SETTINGS_VERSION,
-    LEGACY_UPLOAD_DIR,
+    default_upload_dir, ActionKey, KeyboardGuardMode, Settings, SystemKeyboardConfig,
+    SystemToolbarMode, WorkspaceBadgeMode, CURRENT_SETTINGS_VERSION, LEGACY_UPLOAD_DIR,
 };
 use super::{config_dir, SettingsState};
 
@@ -135,8 +135,102 @@ pub(crate) fn migrate_settings(settings: &mut Settings) -> bool {
             KeyboardGuardMode::Off
         };
     }
+    // v8: quick-keyboard and system-IME toolbars are configured independently.
+    // Clone the formerly shared list so upgrading does not make either toolbar lose keys.
+    if settings.settings_version < 8 {
+        settings.system_toolbar_quick_keys = settings.toolbar_quick_keys.clone();
+    }
+    // v9: replace the fixed system-IME toolbar with one synchronized, fully customizable layout.
+    // `None` is the factory sentinel, so an empty legacy custom row remains a resettable default.
+    if settings.settings_version < 9 {
+        settings.system_toolbar_mode = SystemToolbarMode::FollowIme;
+        if settings.system_toolbar_quick_keys.is_empty() {
+            settings.system_keyboard = None;
+        } else {
+            let mut config = factory_system_keyboard();
+            config.upper.append(&mut settings.system_toolbar_quick_keys);
+            settings.system_keyboard = Some(config);
+        }
+    }
+    // v10: pages are now a wire-compatible carrier for one complete ordered lower stream.
+    // Runtime derives whole pages from integer grid units, so legacy manual page boundaries
+    // are flattened without dropping or reordering any key.
+    if settings.settings_version < 10 {
+        if let Some(config) = settings.system_keyboard.as_mut() {
+            config.pages = vec![config.pages.drain(..).flatten().collect()];
+            config.lower_enabled = true;
+            config.upper_pinned = 0;
+            config.lower_pinned = 0;
+            for key in config.upper.iter_mut().chain(config.pages[0].iter_mut()) {
+                if let Some(grow) = key.grow {
+                    key.grow = grow.is_finite().then(|| grow.round().clamp(1.0, 10.0));
+                }
+            }
+        }
+    }
+    // v11 adds a synchronized user-default snapshot for the complete system-IME toolbar.
+    // The optional field uses its serde default, so existing layouts need no data transform.
+    // v12 adds an independent lower pinned prefix and expands both pinned limits to five.
+    // Serde defaults legacy lower counts to zero while existing upper counts remain intact.
     settings.settings_version = CURRENT_SETTINGS_VERSION;
     true
+}
+
+fn system_action(label: &str, action: &str) -> ActionKey {
+    ActionKey {
+        label: label.to_string(),
+        kind: Some("action".to_string()),
+        action: Some(action.to_string()),
+        ..ActionKey::default()
+    }
+}
+
+fn system_send(label: &str, send: &str) -> ActionKey {
+    ActionKey {
+        label: label.to_string(),
+        kind: Some("send".to_string()),
+        send: send.to_string(),
+        ..ActionKey::default()
+    }
+}
+
+pub(crate) fn factory_system_keyboard() -> SystemKeyboardConfig {
+    let mut ctrl = system_send("Ctrl", "");
+    ctrl.special = Some("ctrl".to_string());
+    ctrl.display = Some("text".to_string());
+    let mut alt = system_send("Alt", "");
+    alt.special = Some("alt".to_string());
+    alt.display = Some("text".to_string());
+
+    SystemKeyboardConfig {
+        upper: vec![
+            system_action("History", "system.history"),
+            system_action("Bookmarks", "openBookmarks"),
+            system_action("Extended", "system.extended"),
+            system_action("Actions", "system.actions"),
+        ],
+        pages: vec![
+            vec![
+                system_send("Esc", "\u{1b}"),
+                system_send("Tab", "\t"),
+                ctrl,
+                alt,
+                system_send("/", "/"),
+                system_send("|", "|"),
+            ],
+            vec![
+                system_send("~", "~"),
+                system_send("-", "-"),
+                system_send("^C", "\u{3}"),
+                system_send("^I", "\t"),
+                system_send("^S", "\u{13}"),
+                system_send("^Z", "\u{1a}"),
+            ],
+        ],
+        lower_enabled: true,
+        upper_pinned: 0,
+        lower_pinned: 0,
+    }
 }
 
 pub(crate) fn save_settings(settings: &Settings) -> Result<(), String> {

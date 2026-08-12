@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import {
   mountWithTabs,
@@ -11,7 +13,14 @@ import {
 import { settings } from '../../composables/useSettings'
 import { useUiStore } from '../../stores/uiStore'
 import { useSessionStore } from '../../stores/sessionStore'
+import { useIsMobile } from '../../composables/useIsMobile'
 import type { Tab } from '../../types/pane'
+
+afterEach(() => {
+  settings.system_toolbar_mode = 'follow_ime'
+  settings.keyboard_guard_mode = 'off'
+  useIsMobile().isMobile.value = false
+})
 
 describe('App.vue - system keyboard dismissal', () => {
   it('runs the real dismiss button chain in textarea, active-terminal, active-element order', async () => {
@@ -88,6 +97,63 @@ describe('App.vue - system keyboard dismissal', () => {
 })
 
 describe('App.vue - system keyboard state regressions', () => {
+  it('guards manual-open focus only on touch input', () => {
+    const source = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
+    const guard = source.match(
+      /if \(\s*(isTouchDevice\(\) &&[\s\S]*?effectiveMobileInputMode\.value === 'system' &&[\s\S]*?hasOpenGuard\(appSettings\.keyboard_guard_mode\)[\s\S]*?target\?\.closest\('\.terminal-pane-container'\)[\s\S]*?)\s*\) \{\s*e\.preventDefault\(\)/
+    )
+
+    expect(guard).not.toBeNull()
+    expect(guard?.[1].trimStart().startsWith('isTouchDevice() &&')).toBe(true)
+  })
+
+  it('keeps the toolbar visible after IME close only in persistent phone mode', async () => {
+    settings.mobile_input_mode = 'system'
+    settings.system_toolbar_mode = 'persistent_mobile'
+    useIsMobile().isMobile.value = true
+    const wrapper = await mountWithTabs()
+    const ui = useUiStore()
+    ui.kbVisible = true
+    await nextTick()
+
+    mocks.onSystemKeyboardClose?.()
+    await nextTick()
+
+    const toolbar = wrapper.findComponent(SystemKeyboardToolbarStub)
+    expect(toolbar.props('visible')).toBe(true)
+    expect(toolbar.props('imeOpen')).toBe(false)
+  })
+
+  it('uses the fixed toolbar control to close and reopen the phone IME', async () => {
+    settings.mobile_input_mode = 'system'
+    settings.system_toolbar_mode = 'persistent_mobile'
+    useIsMobile().isMobile.value = true
+    const wrapper = await mountWithTabs()
+    const activeTerminal = {
+      setOutputListener: vi.fn(),
+      setVirtualModifiers: vi.fn(),
+      focus: vi.fn(),
+      blur: vi.fn(),
+    }
+    await wrapper.findComponent(SplitContainerStub).vm.$emit('register', 'pane-1', activeTerminal)
+    const textarea = document.createElement('textarea')
+    textarea.className = 'xterm-helper-textarea'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    await nextTick()
+
+    const toolbar = wrapper.findComponent(SystemKeyboardToolbarStub)
+    await toolbar.vm.$emit('toggle-ime')
+    expect(toolbar.props('visible')).toBe(true)
+    expect(toolbar.props('imeOpen')).toBe(false)
+    expect(activeTerminal.blur).toHaveBeenCalledOnce()
+
+    await toolbar.vm.$emit('toggle-ime')
+    expect(activeTerminal.focus).toHaveBeenCalledOnce()
+    expect(toolbar.props('imeOpen')).toBe(true)
+    textarea.remove()
+  })
+
   it('dismisses the toolbar when VisualViewport reports a native keyboard close', async () => {
     settings.mobile_input_mode = 'system'
     const wrapper = await mountWithTabs()
@@ -216,7 +282,12 @@ describe('App.vue - system keyboard state regressions', () => {
       expect(toolbar.props('actionOpen')).toBe(false)
       expect(toolbar.props('paneId')).toBe('')
       expect(toolbar.props('getSendFn')()).toBeNull()
-      expect(terminal.setVirtualModifiers).toHaveBeenCalledWith(false, false)
+      expect(terminal.setVirtualModifiers).toHaveBeenCalledWith({
+        ctrl: 'off',
+        shift: 'off',
+        alt: 'off',
+        meta: 'off',
+      })
       expect(terminal.blur).toHaveBeenCalledOnce()
 
       await wrapper.findComponent(KbToggleButtonStub).vm.$emit('toggle')

@@ -55,6 +55,21 @@ fn action_keyboard_plain_send_omits_absent_optional_fields() {
 }
 
 #[test]
+fn action_keyboard_special_lock_and_display_round_trip_without_a_schema_field() {
+    let config = parse_action_keyboard(
+        r#"{"rows":[[{"label":"Ctrl","kind":"send","special":"ctrl:lock","display":"icon","send":""}]]}"#,
+    );
+
+    let serialized = serde_json::to_value(&config).unwrap();
+    let key = &serialized["rows"][0][0];
+    assert_eq!(key["special"], "ctrl:lock");
+    assert_eq!(key["display"], "icon");
+
+    let round_trip: ActionKeyboardConfig = serde_json::from_value(serialized).unwrap();
+    assert_eq!(round_trip, config);
+}
+
+#[test]
 fn action_keyboard_normalize_defaults_only_missing_paste_auto_enter() {
     let mut config = parse_action_keyboard(
         r#"{

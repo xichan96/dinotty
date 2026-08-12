@@ -118,6 +118,7 @@
     <div
       id="tab-content"
       @mousedown.capture="onTabContentMouseDownCapture"
+      @pointerdown.capture="onTabContentPointerDownCapture"
       @touchend="onTerminalTouch"
     >
       <div
@@ -265,15 +266,17 @@
 
     <SystemKeyboardToolbar
       v-if="effectiveMobileInputMode === 'system'"
-      :visible="kbVisible && hasActiveTerminalLeaf"
+      :visible="systemToolbarVisible"
       :pane-id="activeTerminalLeaf?.paneId ?? ''"
       :get-send-fn="getSendFn"
       :action-open="systemActionKeyboardOpen"
+      :ime-open="terminalImeFocused"
       @update:action-open="onSystemActionKeyboardChange"
       @modifier-change="onSystemModifierChange"
       @bookmarks="bookmarksRef?.open()"
       @app-action="dispatchAppAction"
       @dismiss="dismissTerminalKeyboard"
+      @toggle-ime="toggleSystemIme"
       @focus-xterm="focusSystemInput"
       @paste-text="pasteActiveTerminal"
     />
@@ -288,7 +291,7 @@
       v-show="
         (appSettings.show_virtual_keyboard || hasOpenGuard(appSettings.keyboard_guard_mode)) &&
         hasActiveTerminalLeaf &&
-        !kbVisible &&
+        !systemToolbarVisible &&
         !mobileInputGuideVisible
       "
       :visible="kbVisible"
@@ -416,6 +419,10 @@ import { setMcSender } from './composables/useMissionControlState'
 import { clearFileWorkspaceState } from './composables/useFileWorkspaceState'
 import { useSplitPane } from './composables/useSplitPane'
 import { useSuperviseTabs } from './composables/useSuperviseTabs'
+import {
+  emptyMobileTerminalModifiers,
+  type MobileTerminalModifiers,
+} from './utils/terminalInput'
 import { useSyncWebSocket } from './composables/useSyncWebSocket'
 import type { SyncClientMsg } from './types/protocol'
 import { isWindowsClient } from './utils/clientPlatform'
@@ -576,7 +583,11 @@ const hostClipboardPaste = createHostClipboardPasteController({
     return text
   },
   paste: (text, autoEnter) => {
-    getActiveTerminalRef()?.pasteFromClipboard(text, autoEnter, !systemActionKeyboardOpen.value)
+    getActiveTerminalRef()?.pasteFromClipboard(
+      text,
+      autoEnter,
+      !systemActionKeyboardOpen.value && canRestoreSystemInputFocus()
+    )
   },
   clipboardEmpty: () =>
     toast.info(t('mobileKb.clipboardEmpty'), { position: POSITION.BOTTOM_CENTER }),
@@ -610,6 +621,15 @@ const clearActiveReadContext = setActiveReadContext({
 const stopForegroundGainSubscription = onAppForegroundGain(evaluateActiveRead)
 const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = usePluginLoader()
 const { isMobile } = useIsMobile()
+const persistentSystemToolbar = computed(
+  () =>
+    effectiveMobileInputMode.value === 'system' &&
+    isMobile.value &&
+    appSettings.system_toolbar_mode === 'persistent_mobile'
+)
+const systemToolbarVisible = computed(
+  () => hasActiveTerminalLeaf.value && (kbVisible.value || persistentSystemToolbar.value)
+)
 
 // Workspace filtering
 const {
@@ -925,7 +945,7 @@ watch(
     setActivePaneId(paneId)
     const previousTerminal = previousPaneId ? (termRefs[previousPaneId] ?? null) : null
     if (previousPaneId && previousPaneId !== paneId) {
-      previousTerminal?.setVirtualModifiers(false, false)
+      previousTerminal?.setVirtualModifiers(emptyMobileTerminalModifiers())
     }
     if (!isTerminalLeaf) {
       dismissTerminalKeyboard(previousTerminal)
@@ -1178,25 +1198,39 @@ function getActiveTerminalRef() {
   return paneId ? (termRefs[paneId] ?? null) : null
 }
 
-function focusSystemInput() {
+function canRestoreSystemInputFocus() {
+  return !(
+    effectiveMobileInputMode.value === 'system' &&
+    hasOpenGuard(appSettings.keyboard_guard_mode) &&
+    !terminalImeFocused.value
+  )
+}
+
+function focusSystemInput(authorizeOpen = false) {
   if (
     effectiveMobileInputMode.value !== 'system' ||
     systemActionKeyboardOpen.value ||
-    !hasActiveTerminalLeaf.value
+    !hasActiveTerminalLeaf.value ||
+    (!authorizeOpen && !canRestoreSystemInputFocus())
   )
     return
   configureAllMobileInputTextareas('system')
   setKbTypingLock(false)
+  terminalImeFocused.value = true
   getActiveTerminalRef()?.focus()
 }
 
 function pasteActiveTerminal(text: string) {
   if (!text) return
-  getActiveTerminalRef()?.pasteFromClipboard(text, false, !systemActionKeyboardOpen.value)
+  getActiveTerminalRef()?.pasteFromClipboard(
+    text,
+    false,
+    !systemActionKeyboardOpen.value && canRestoreSystemInputFocus()
+  )
 }
 
-function onSystemModifierChange(modifiers: { ctrl: boolean; alt: boolean }) {
-  getActiveTerminalRef()?.setVirtualModifiers(modifiers.ctrl, modifiers.alt)
+function onSystemModifierChange(modifiers: MobileTerminalModifiers) {
+  getActiveTerminalRef()?.setVirtualModifiers(modifiers)
 }
 
 function onSystemActionKeyboardChange(open: boolean) {
@@ -1224,6 +1258,25 @@ function dismissTerminalKeyboard(terminal = getActiveTerminalRef()) {
   }
 }
 
+function closeSystemIme(terminal = getActiveTerminalRef()) {
+  systemActionKeyboardOpen.value = false
+  terminalImeFocused.value = false
+  if (!persistentSystemToolbar.value) kbVisible.value = false
+  terminal?.blur()
+  const activeElement = document.activeElement
+  if (
+    activeElement instanceof HTMLElement &&
+    activeElement.classList.contains('xterm-helper-textarea')
+  ) {
+    activeElement.blur()
+  }
+}
+
+function toggleSystemIme() {
+  if (terminalImeFocused.value) closeSystemIme()
+  else requestTerminalKeyboard()
+}
+
 function onSystemKeyboardClosed() {
   if (
     effectiveMobileInputMode.value !== 'system' ||
@@ -1236,7 +1289,7 @@ function onSystemKeyboardClosed() {
     activeElement instanceof HTMLElement &&
     activeElement.classList.contains('xterm-helper-textarea')
   ) {
-    dismissTerminalKeyboard()
+    closeSystemIme()
   }
 }
 
@@ -1251,7 +1304,7 @@ function requestTerminalKeyboard() {
   mobileInputGuideVisible.value = false
   systemActionKeyboardOpen.value = false
   kbVisible.value = true
-  if (effectiveMobileInputMode.value === 'system') focusSystemInput()
+  if (effectiveMobileInputMode.value === 'system') focusSystemInput(true)
 }
 
 function toggleTerminalKeyboard() {
@@ -1277,7 +1330,7 @@ function onMobileInputGuideChoose(mode: MobileInputMode) {
   }
   systemActionKeyboardOpen.value = false
   kbVisible.value = true
-  if (mode === 'system') focusSystemInput()
+  if (mode === 'system') focusSystemInput(true)
 }
 
 function onKeyboardDismiss() {
@@ -1373,11 +1426,12 @@ function onOpenSettingsRequest() {
 // (form controls / contenteditable) and only guard taps on inert terminal
 // chrome. Buttons and links are unaffected either way: preventing a mousedown's
 // default does not cancel the subsequent click.
-function onTabContentMouseDownCapture(e: MouseEvent) {
+function guardTerminalFocusEvent(e: Event) {
   const target = e.target as HTMLElement | null
   if (
+    isTouchDevice() &&
     effectiveMobileInputMode.value === 'system' &&
-    !kbVisible.value &&
+    !terminalImeFocused.value &&
     hasOpenGuard(appSettings.keyboard_guard_mode) &&
     target?.closest('.terminal-pane-container') &&
     !target.closest('input, textarea, select, [contenteditable="true"]')
@@ -1388,6 +1442,14 @@ function onTabContentMouseDownCapture(e: MouseEvent) {
   if (!isKbTypingLocked()) return
   if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
   e.preventDefault()
+}
+
+function onTabContentMouseDownCapture(e: MouseEvent) {
+  guardTerminalFocusEvent(e)
+}
+
+function onTabContentPointerDownCapture(e: PointerEvent) {
+  guardTerminalFocusEvent(e)
 }
 
 function onTerminalTouch(e: TouchEvent) {
@@ -1403,7 +1465,7 @@ function onTerminalTouch(e: TouchEvent) {
     if (scrollGestureDetected) {
       scrollGestureDetected = false
       if (kbVisible.value && !hasCollapseGuard(appSettings.keyboard_guard_mode))
-        kbVisible.value = false
+        effectiveMobileInputMode.value === 'system' ? closeSystemIme() : (kbVisible.value = false)
       return
     }
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
@@ -1412,7 +1474,7 @@ function onTerminalTouch(e: TouchEvent) {
     if (term && term.touchMoved) {
       term.touchMoved = false
       if (kbVisible.value && !hasCollapseGuard(appSettings.keyboard_guard_mode))
-        kbVisible.value = false
+        effectiveMobileInputMode.value === 'system' ? closeSystemIme() : (kbVisible.value = false)
       return
     }
     if (!hasOpenGuard(appSettings.keyboard_guard_mode)) requestTerminalKeyboard()
@@ -1425,13 +1487,11 @@ function onTerminalScroll() {
   scrollGestureTimer = window.setTimeout(() => {
     scrollGestureDetected = false
   }, 300)
+  if (hasCollapseGuard(appSettings.keyboard_guard_mode)) return
   if (effectiveMobileInputMode.value === 'system') {
-    dismissTerminalKeyboard()
+    closeSystemIme()
     return
   }
-  // With the collapse guard enabled, scrolling back through history must not
-  // dismiss the keyboard the user is typing on.
-  if (hasCollapseGuard(appSettings.keyboard_guard_mode)) return
   if (kbVisible.value) kbVisible.value = false
 }
 
@@ -1906,6 +1966,15 @@ function onDocumentFocusIn(event: FocusEvent) {
   const target = event.target as HTMLElement | null
   if (!target) return
   if (target.classList.contains('xterm-helper-textarea')) {
+    if (
+      isTouchDevice() &&
+      effectiveMobileInputMode.value === 'system' &&
+      hasOpenGuard(appSettings.keyboard_guard_mode) &&
+      !terminalImeFocused.value
+    ) {
+      target.blur()
+      return
+    }
     terminalImeFocused.value = effectiveMobileInputMode.value === 'system'
     return
   }
@@ -1918,7 +1987,7 @@ function onDocumentFocusIn(event: FocusEvent) {
     systemActionKeyboardOpen.value = false
     kbVisible.value = false
     terminalImeFocused.value = false
-    getActiveTerminalRef()?.setVirtualModifiers(false, false)
+    getActiveTerminalRef()?.setVirtualModifiers(emptyMobileTerminalModifiers())
   }
 }
 

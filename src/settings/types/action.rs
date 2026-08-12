@@ -1,6 +1,6 @@
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 
-#[derive(Deserialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct ActionKey {
     #[serde(default)]
     pub label: String,
@@ -83,4 +83,28 @@ pub struct ActionKeyboardConfig {
     pub rows: Vec<Vec<ActionKey>>,
     #[serde(default)]
     pub bottom: Option<ActionBottomCluster>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SystemKeyboardConfig {
+    #[serde(default)]
+    pub upper: Vec<ActionKey>,
+    #[serde(default)]
+    pub pages: Vec<Vec<ActionKey>>,
+    #[serde(default = "default_system_lower_enabled")]
+    pub lower_enabled: bool,
+    #[serde(default)]
+    pub upper_pinned: usize,
+    #[serde(default)]
+    pub lower_pinned: usize,
+}
+
+fn default_system_lower_enabled() -> bool {
+    true
+}
+
+impl Default for SystemKeyboardConfig {
+    fn default() -> Self {
+        Self { upper: vec![], pages: vec![], lower_enabled: true, upper_pinned: 0, lower_pinned: 0 }
+    }
 }

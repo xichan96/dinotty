@@ -8,11 +8,7 @@ vi.mock('../composables/useTransport', () => ({
   tauriInvoke: vi.fn(),
 }))
 
-import {
-  isDuplicateOnData,
-  DEDUP_WINDOW_MS,
-  TerminalInstance,
-} from '../composables/useTerminal'
+import { isDuplicateOnData, DEDUP_WINDOW_MS, TerminalInstance } from '../composables/useTerminal'
 
 // Root cause: 5ms dedup window was too wide — xterm.js macOS modifier
 // sequences (Shift+punct) span > 5ms, so the second valid onData was
@@ -51,7 +47,7 @@ describe('wheel bypass skips dedup (regression)', () => {
     instance._wheel = { isBypassActive: () => bypassActive }
     instance._lastInputData = ''
     instance._lastInputTime = 0
-    instance._mobileModifiers = { ctrl: false, alt: false }
+    instance._mobileModifiers = { ctrl: 'off', shift: 'off', alt: 'off', meta: 'off' }
     instance._emitInput = vi.fn()
     return instance
   }

@@ -3,80 +3,142 @@
     v-show="visible"
     id="system-mobile-kb"
     ref="rootRef"
-    :class="{ 'system-action-open': actionOpen }"
+    :class="{ 'system-action-open': actionOpen, 'ime-open': imeOpen }"
   >
     <template v-if="!actionOpen">
-      <div class="system-kb-tool-row">
+      <div class="system-kb-upper-shell">
+        <div
+          v-for="item in systemUpperPinnedDefs"
+          :key="item.id"
+          class="system-kb-grid-key system-kb-pinned-key"
+          :style="{ gridColumn: `span ${item.units}` }"
+        >
+          <MkbKey
+            :k="item.def"
+            :state="modState"
+            swipe-aware
+            @key-press="onKeyPress"
+            @app-action="onSystemAppAction"
+            @special="onSpecial"
+          />
+        </div>
+        <div
+          v-if="systemUpperPageable.length > 0"
+          class="system-kb-upper-pager"
+          :style="{
+            gridColumn: `span ${Math.max(1, systemStatus.upperCapacity)}`,
+            '--system-page-columns': String(Math.max(1, systemStatus.upperCapacity)),
+          }"
+          @touchstart="onPagerTouchStart('upper', $event)"
+          @touchmove.prevent="onPagerTouchMove('upper', $event)"
+          @touchend="onPagerTouchEnd('upper', $event)"
+          @touchcancel="onPagerTouchCancel('upper')"
+        >
+          <div
+            v-for="item in systemUpperPageDefs"
+            :key="item.id"
+            class="system-kb-grid-key"
+            :style="{ gridColumn: `span ${item.units}` }"
+          >
+            <MkbKey
+              :k="item.def"
+              :state="modState"
+              swipe-aware
+              @key-press="onKeyPress"
+              @app-action="onSystemAppAction"
+              @special="onSpecial"
+            />
+          </div>
+        </div>
         <button
           type="button"
-          class="system-kb-tool"
-          :title="t('systemKb.history')"
+          class="system-kb-ime-toggle"
+          :title="imeOpen ? t('mobileKb.dismissKeyboard') : t('mobileKb.showKeyboard')"
           @pointerdown.prevent
-          @click="openHistory"
+          @click="emit('toggle-ime')"
         >
-          <History :size="17" />
-        </button>
-        <button
-          type="button"
-          class="system-kb-tool"
-          :title="t('systemKb.favorites')"
-          @pointerdown.prevent
-          @click="emit('bookmarks')"
-        >
-          <Bookmark :size="17" />
-        </button>
-        <button
-          type="button"
-          class="system-kb-tool"
-          :title="t('systemKb.terminalKeys')"
-          @pointerdown.prevent
-          @click="openTermiusKeyboard"
-        >
-          <LayoutGrid class="system-kb-extended-icon" :size="18" />
-        </button>
-        <button
-          type="button"
-          class="system-kb-tool system-kb-action-toggle"
-          :title="t('systemKb.actions')"
-          @pointerdown.prevent
-          @click="openActionKeyboard"
-        >
-          <SquareTerminal class="system-kb-action-icon" :size="20" />
-          <span>{{ t('systemKb.actions') }}</span>
-        </button>
-        <button
-          type="button"
-          class="system-kb-tool system-kb-dismiss"
-          :title="t('mobileKb.dismissKeyboard')"
-          @pointerdown.prevent
-          @click="dismiss"
-        >
-          <KeyboardOff :size="18" />
+          <KeyboardOff v-if="imeOpen" :size="18" />
+          <Keyboard v-else :size="18" />
         </button>
       </div>
 
-      <div v-if="toolbarQuickKeyDefs.length" class="system-kb-quick-row">
-        <MkbKey
-          v-for="(key, index) in toolbarQuickKeyDefs"
-          :key="`${key.l}-${key.s ?? key.sp ?? index}-${index}`"
-          :k="key"
-          :state="modState"
-          @key-press="onKeyPress"
-          @app-action="onAppAction"
-          @special="onSpecial"
-        />
+      <div v-if="systemLayout.lower_enabled !== false" class="system-kb-lower-shell">
+        <div
+          v-for="item in systemLowerPinnedDefs"
+          :key="item.id"
+          class="system-kb-grid-key system-kb-pinned-key"
+          :style="{ gridColumn: `span ${item.units}` }"
+        >
+          <MkbKey
+            :k="item.def"
+            :state="modState"
+            swipe-aware
+            @key-press="onKeyPress"
+            @app-action="onSystemAppAction"
+            @special="onSpecial"
+          />
+        </div>
+        <div
+          v-if="systemLowerPageable.length > 0"
+          class="system-kb-lower-page system-kb-lower-pager"
+          :style="{
+            gridColumn: `span ${Math.max(1, systemStatus.lowerCapacity)}`,
+            '--system-page-columns': String(Math.max(1, systemStatus.lowerCapacity)),
+          }"
+          @touchstart="onPagerTouchStart('lower', $event)"
+          @touchmove.prevent="onPagerTouchMove('lower', $event)"
+          @touchend="onPagerTouchEnd('lower', $event)"
+          @touchcancel="onPagerTouchCancel('lower')"
+        >
+          <div
+            v-for="item in systemLowerPageDefs"
+            :key="item.id"
+            class="system-kb-grid-key"
+            :style="{ gridColumn: `span ${item.units}` }"
+          >
+            <MkbKey
+              :k="item.def"
+              :state="modState"
+              swipe-aware
+              @key-press="onKeyPress"
+              @app-action="onSystemAppAction"
+              @special="onSpecial"
+            />
+          </div>
+        </div>
       </div>
-
-      <div class="system-kb-shortcut-strip" aria-label="Terminal shortcuts">
-        <MkbKey
-          v-for="(key, index) in systemShortcutDefs"
-          :key="`${key.l}-${index}`"
-          :k="key"
-          :state="modState"
-          @key-press="onKeyPress"
-          @app-action="onAppAction"
-          @special="onSpecial"
-        />
+      <div
+        v-if="showSystemPageDots"
+        class="system-kb-page-dots"
+        :class="{ 'upper-only': systemLayout.lower_enabled === false }"
+        aria-label="Shortcut pages"
+      >
+        <div class="system-kb-page-dot-group upper">
+          <button
+            v-for="page in systemUpperPageCount"
+            :key="`u-${page}`"
+            v-show="systemUpperPageCount > 1"
+            type="button"
+            class="system-kb-page-dot"
+            :class="{ active: activeUpperPage === page - 1 }"
+            :aria-label="`Upper page ${page}`"
+            @pointerdown.prevent
+            @click="activeUpperPage = page - 1"
+          />
+        </div>
+        <div v-if="systemLayout.lower_enabled !== false" class="system-kb-page-dot-group lower">
+          <button
+            v-for="page in systemLowerPageCount"
+            :key="`l-${page}`"
+            v-show="systemLowerPageCount > 1"
+            type="button"
+            class="system-kb-page-dot"
+            :class="{ active: activeLowerPage === page - 1 }"
+            :aria-label="`Lower page ${page}`"
+            @pointerdown.prevent
+            @click="activeLowerPage = page - 1"
+          />
+        </div>
       </div>
     </template>
 
@@ -93,8 +155,14 @@
         <strong>{{
           expandedPanel === 'termius' ? t('systemKb.terminalKeys') : t('systemKb.actions')
         }}</strong>
-        <button type="button" @pointerdown.prevent @click="dismiss">
-          <KeyboardOff :size="18" />
+        <button
+          type="button"
+          class="system-kb-ime-toggle"
+          @pointerdown.prevent
+          @click="emit('toggle-ime')"
+        >
+          <KeyboardOff v-if="imeOpen" :size="18" />
+          <Keyboard v-else :size="18" />
         </button>
       </div>
 
@@ -166,43 +234,64 @@
       @delete="onHistoryDelete"
       @close="showHistoryPanel = false"
     />
+    <input ref="phoneFileInputRef" type="file" multiple hidden @change="onPhoneFileInputChange" />
+    <FilePickerModal
+      :visible="showFilePicker"
+      :pane-id="paneId"
+      @update:visible="showFilePicker = $event"
+      @select="onFilePickerSelect"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import {
-  Bookmark,
-  ChevronLeft,
-  History,
-  KeyboardOff,
-  LayoutGrid,
-  SquareTerminal,
-} from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { ChevronLeft, Keyboard, KeyboardOff } from 'lucide-vue-next'
 import MkbKey from './MkbKey.vue'
 import MkbRow from './MkbRow.vue'
 import HistoryPanel from './HistoryPanel.vue'
+import FilePickerModal from '../preview/FilePickerModal.vue'
 import type { AppActionOptions, KeyDef, ModState } from './mkbTypes'
 import type { SendDataFn } from '../../utils/frozenSend'
 import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
-import { useSettings } from '../../composables/useSettings'
+import { effectiveSystemKeyboard, useSettings, type ActionKey } from '../../composables/useSettings'
 import { useI18n } from '../../composables/useI18n'
 import type { SuggestionItem } from '../../composables/useHistory'
-import { applyMobileTerminalModifiers } from '../../utils/terminalInput'
+import {
+  applyMobileTerminalModifiers,
+  emptyMobileTerminalModifiers,
+  mobileTerminalModifierActive,
+  type MobileTerminalModifiers,
+} from '../../utils/terminalInput'
+import { shellEscapePath } from '../../utils/shell'
+import { useUpload } from '../../composables/useUpload'
+import { POSITION, useToast } from 'vue-toastification'
+import { actionKeyToKeyDef } from '../../utils/actionKeyDef'
+import {
+  SYSTEM_ROW_UNITS,
+  UPPER_USER_UNITS,
+  canonicalLowerKeys,
+  packSystemKeys,
+  systemKeyboardLayoutStatus,
+  systemKeyUnits,
+} from '../../utils/systemKeyboardLayout'
+import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
 
 const props = defineProps<{
   visible: boolean
   paneId: string
   getSendFn: () => SendDataFn | null
   actionOpen: boolean
+  imeOpen: boolean
 }>()
 
 const emit = defineEmits<{
   'update:actionOpen': [value: boolean]
-  'modifier-change': [modifiers: { ctrl: boolean; alt: boolean }]
+  'modifier-change': [modifiers: MobileTerminalModifiers]
   'app-action': [id: string, options: AppActionOptions]
   bookmarks: []
   dismiss: []
+  'toggle-ime': []
   'focus-xterm': []
   'paste-text': [text: string]
 }>()
@@ -211,34 +300,125 @@ const { settings } = useSettings()
 const { t } = useI18n()
 const rootRef = ref<HTMLElement>()
 const showHistoryPanel = ref(false)
+const showFilePicker = ref(false)
+const phoneFileInputRef = ref<HTMLInputElement>()
+const phoneUploading = ref(false)
+const { uploadFiles, uploadErrorStatus } = useUpload()
+const toast = useToast()
 const historyItems = ref<SuggestionItem[]>([])
 const kbMode = ref<'default' | 'action'>('action')
 const expandedPanel = ref<'termius' | 'shortcuts'>('termius')
-const modState = reactive<ModState>({ shift: false, ctrl: false, alt: false })
+const modifierModes = reactive<MobileTerminalModifiers>(emptyMobileTerminalModifiers())
+const modState = computed<ModState>(() => ({
+  ctrl: mobileTerminalModifierActive(modifierModes.ctrl),
+  shift: mobileTerminalModifierActive(modifierModes.shift),
+  alt: mobileTerminalModifierActive(modifierModes.alt),
+  meta: mobileTerminalModifierActive(modifierModes.meta),
+  locked: {
+    ctrl: modifierModes.ctrl === 'locked',
+    shift: modifierModes.shift === 'locked',
+    alt: modifierModes.alt === 'locked',
+    meta: modifierModes.meta === 'locked',
+  },
+}))
 
-const {
-  actionFirstRow,
-  actionFollowingRows,
-  actionBottom,
-  actionBottomRows,
-  actionEnter,
-  toolbarQuickKeyDefs,
-} = useKeyboardLayout({ kbMode, settings })
+const { actionFirstRow, actionFollowingRows, actionBottom, actionBottomRows, actionEnter } =
+  useKeyboardLayout({ kbMode, settings })
 
-const systemShortcutDefs: KeyDef[] = [
-  { l: 'Esc', s: '\x1b', cls: 'mkb-mod' },
-  { l: 'Tab', s: '\x09', cls: 'mkb-mod' },
-  { l: 'Ctrl', sp: 'ctrl', cls: 'mkb-mod', id: 'system-kb-ctrl' },
-  { l: 'Alt', sp: 'alt', cls: 'mkb-mod', id: 'system-kb-alt' },
-  { l: '/', s: '/' },
-  { l: '|', s: '|' },
-  { l: '~', s: '~' },
-  { l: '-', s: '-' },
-  { l: '^C', s: '\x03', cls: 'mkb-mod' },
-  { l: '^I', s: '\x09', cls: 'mkb-mod' },
-  { l: '^S', s: '\x13', cls: 'mkb-mod' },
-  { l: '^Z', s: '\x1a', cls: 'mkb-mod' },
-]
+const systemLayout = computed(() => effectiveSystemKeyboard())
+const systemStatus = computed(() => systemKeyboardLayoutStatus(systemLayout.value))
+const systemUpperPinned = computed(() =>
+  systemLayout.value.upper.slice(0, systemStatus.value.upperPinned)
+)
+const systemUpperPageable = computed(() =>
+  systemLayout.value.upper.slice(systemStatus.value.upperPinned)
+)
+const systemUpperPages = computed(() =>
+  packSystemKeys(systemUpperPageable.value, Math.max(1, systemStatus.value.upperCapacity))
+)
+const systemLower = computed(() => canonicalLowerKeys(systemLayout.value))
+const systemLowerPinned = computed(() => systemLower.value.slice(0, systemStatus.value.lowerPinned))
+const systemLowerPageable = computed(() => systemLower.value.slice(systemStatus.value.lowerPinned))
+const systemLowerPages = computed(() =>
+  packSystemKeys(systemLowerPageable.value, Math.max(1, systemStatus.value.lowerCapacity))
+)
+const activeUpperPage = ref(0)
+const activeLowerPage = ref(0)
+const systemUpperPageCount = computed(() => systemUpperPages.value.length)
+const systemLowerPageCount = computed(() => systemLowerPages.value.length)
+const showSystemPageDots = computed(
+  () =>
+    systemUpperPageCount.value > 1 ||
+    (systemLayout.value.lower_enabled !== false && systemLowerPageCount.value > 1)
+)
+
+function runtimeItem(item: { key: ActionKey; units: number }, id: string) {
+  return { id, units: item.units, def: actionKeyToKeyDef(item.key) }
+}
+
+const systemUpperPinnedDefs = computed(() =>
+  systemUpperPinned.value.map((key, index) =>
+    runtimeItem(
+      { key, units: systemKeyUnits(key, UPPER_USER_UNITS) },
+      `pinned-${index}-${key.label}`
+    )
+  )
+)
+const systemLowerPinnedDefs = computed(() =>
+  systemLowerPinned.value.map((key, index) =>
+    runtimeItem(
+      { key, units: systemKeyUnits(key, SYSTEM_ROW_UNITS) },
+      `lower-pinned-${index}-${key.label}`
+    )
+  )
+)
+const systemUpperPageDefs = computed(() =>
+  (systemUpperPages.value[activeUpperPage.value] ?? []).map((item, index) =>
+    runtimeItem(item, `upper-${activeUpperPage.value}-${index}-${item.key.label}`)
+  )
+)
+const systemLowerPageDefs = computed(() =>
+  (systemLowerPages.value[activeLowerPage.value] ?? []).map((item, index) =>
+    runtimeItem(item, `lower-${activeLowerPage.value}-${index}-${item.key.label}`)
+  )
+)
+
+watch(systemUpperPageCount, (count) => {
+  activeUpperPage.value = Math.min(activeUpperPage.value, count - 1)
+})
+watch(systemLowerPageCount, (count) => {
+  activeLowerPage.value = Math.min(activeLowerPage.value, count - 1)
+})
+
+type PagerRegion = 'upper' | 'lower'
+const pagerTouch = new Map<PagerRegion, { x: number; y: number; moved: boolean }>()
+function onPagerTouchStart(region: PagerRegion, event: TouchEvent) {
+  const touch = event.touches[0]
+  if (!touch) return
+  pagerTouch.set(region, { x: touch.clientX, y: touch.clientY, moved: false })
+}
+function onPagerTouchMove(region: PagerRegion, event: TouchEvent) {
+  const start = pagerTouch.get(region)
+  const touch = event.touches[0]
+  if (!start || !touch) return
+  if (Math.abs(touch.clientX - start.x) > 10) start.moved = true
+}
+function onPagerTouchEnd(region: PagerRegion, event: TouchEvent) {
+  const start = pagerTouch.get(region)
+  pagerTouch.delete(region)
+  if (!start) return
+  const touch = event.changedTouches[0]
+  if (!touch) return
+  const deltaX = touch.clientX - start.x
+  const deltaY = touch.clientY - start.y
+  if (Math.abs(deltaX) < 36 || Math.abs(deltaX) <= Math.abs(deltaY)) return
+  const page = region === 'upper' ? activeUpperPage : activeLowerPage
+  const count = region === 'upper' ? systemUpperPageCount.value : systemLowerPageCount.value
+  page.value = Math.min(count - 1, Math.max(0, page.value + (deltaX < 0 ? 1 : -1)))
+}
+function onPagerTouchCancel(region: PagerRegion) {
+  pagerTouch.delete(region)
+}
 
 const termiusKeyRows: KeyDef[][] = [
   [
@@ -324,38 +504,28 @@ const termiusKeyRows: KeyDef[][] = [
 ]
 
 function publishModifiers() {
-  emit('modifier-change', { ctrl: modState.ctrl, alt: modState.alt })
+  emit('modifier-change', { ...modifierModes })
 }
 
 function resetModifiers() {
-  modState.shift = false
-  modState.ctrl = false
-  modState.alt = false
+  Object.assign(modifierModes, emptyMobileTerminalModifiers())
   publishModifiers()
 }
 
 function onKeyPress(input: string) {
-  const code = input.length === 1 ? input.charCodeAt(0) : -1
-  if (input.length !== 1 || code < 32 || code === 127) {
-    resetModifiers()
-    props.getSendFn()?.(input)
-    return
-  }
-  const applied = applyMobileTerminalModifiers(input, {
-    ctrl: modState.ctrl,
-    alt: modState.alt,
-  })
-  modState.ctrl = applied.modifiers.ctrl
-  modState.alt = applied.modifiers.alt
-  modState.shift = false
+  const applied = applyMobileTerminalModifiers(input, { ...modifierModes })
+  Object.assign(modifierModes, applied.modifiers)
   publishModifiers()
   props.getSendFn()?.(applied.data)
 }
 
 function onSpecial(special: string) {
-  if (special === 'ctrl') modState.ctrl = !modState.ctrl
-  if (special === 'alt') modState.alt = !modState.alt
-  if (special === 'shift') modState.shift = !modState.shift
+  const parsed = parseKeyboardSpecial(special)
+  if (parsed?.entry.modifier) {
+    const family = parsed.entry.modifier
+    modifierModes[family] =
+      modifierModes[family] === 'off' ? (parsed.behavior === 'lock' ? 'locked' : 'once') : 'off'
+  }
   if (special === 'bookmarks') emit('bookmarks')
   if (special === 'kbswitch') closeActionKeyboard()
   publishModifiers()
@@ -363,6 +533,63 @@ function onSpecial(special: string) {
 
 function onAppAction(id: string, options: AppActionOptions) {
   emit('app-action', id, options)
+}
+
+function onSystemAppAction(id: string, options: AppActionOptions) {
+  if (id === 'system.history') {
+    void openHistory()
+    return
+  }
+  if (id === 'system.extended') {
+    openTermiusKeyboard()
+    return
+  }
+  if (id === 'system.actions') {
+    openActionKeyboard()
+    return
+  }
+  if (id === 'insertWorkspaceFile') {
+    showFilePicker.value = true
+    return
+  }
+  if (id === 'uploadMobileFile') {
+    if (!phoneUploading.value) phoneFileInputRef.value?.click()
+    return
+  }
+  onAppAction(id, options)
+}
+
+function onFilePickerSelect(path: string) {
+  props.getSendFn()?.(`${shellEscapePath(path)} `)
+  showFilePicker.value = false
+  emit('focus-xterm')
+}
+
+async function onPhoneFileInputChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  if (!files.length || phoneUploading.value) return
+  phoneUploading.value = true
+  try {
+    const data = await uploadFiles(files)
+    const paths = data.saved ?? []
+    if (paths.length) props.getSendFn()?.(`${paths.map(shellEscapePath).join(' ')} `)
+    window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
+    toast.success(t('mobileKb.uploadDone'), { position: POSITION.BOTTOM_CENTER })
+    emit('focus-xterm')
+  } catch (error) {
+    const status = uploadErrorStatus(error)
+    const key =
+      status === 413
+        ? 'mobileKb.uploadTooLarge'
+        : status === 507
+          ? 'settings.uploads.toastDiskFull'
+          : 'mobileKb.uploadFailed'
+    toast.error(t(key), { position: POSITION.BOTTOM_CENTER })
+  } finally {
+    phoneUploading.value = false
+  }
 }
 
 function openActionKeyboard() {
@@ -378,14 +605,9 @@ function openTermiusKeyboard() {
 }
 
 function closeActionKeyboard() {
-  emit('update:actionOpen', false)
-  emit('focus-xterm')
-}
-
-function dismiss() {
   resetModifiers()
   emit('update:actionOpen', false)
-  emit('dismiss')
+  emit('focus-xterm')
 }
 
 async function openHistory() {
@@ -417,18 +639,19 @@ function onModifiersConsumed(event: Event) {
   const detail = (
     event as CustomEvent<{
       paneId: string
-      modifiers: { ctrl: boolean; alt: boolean }
+      modifiers: MobileTerminalModifiers
     }>
   ).detail
   if (!detail || detail.paneId !== props.paneId) return
-  modState.ctrl = detail.modifiers.ctrl
-  modState.alt = detail.modifiers.alt
+  Object.assign(modifierModes, detail.modifiers)
 }
 
-let resizeObserver: ResizeObserver | null = null
 watch(
   () => props.visible,
-  () => requestAnimationFrame(updateHeight)
+  (visible) => {
+    if (!visible) resetModifiers()
+    requestAnimationFrame(updateHeight)
+  }
 )
 watch(
   () => props.actionOpen,
@@ -436,6 +659,7 @@ watch(
 )
 watch(() => props.paneId, resetModifiers)
 
+let resizeObserver: ResizeObserver | null = null
 onMounted(() => {
   window.addEventListener('dinotty-mobile-modifiers-consumed', onModifiersConsumed)
   if (rootRef.value) {

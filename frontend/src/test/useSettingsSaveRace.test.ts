@@ -13,6 +13,7 @@ import {
   __resetSettingsLoadStateForTest,
   loadSettings,
   saveSettings,
+  SETTINGS_SCHEMA_VERSION,
   settings,
 } from '../composables/useSettings'
 
@@ -38,7 +39,9 @@ describe('settings load/save ordering', () => {
   })
 
   it('does not let a late refresh overwrite and re-save a new Shell selection', async () => {
-    apiMocks.authFetch.mockResolvedValueOnce(response(serverShell('wsl', 'Ubuntu-22.04')))
+    apiMocks.authFetch.mockResolvedValueOnce(
+      response({ ...serverShell('wsl', 'Ubuntu-22.04'), settings_version: 99 })
+    )
     await loadSettings()
 
     let resolveRefresh: ((value: Response) => void) | undefined
@@ -66,7 +69,12 @@ describe('settings load/save ordering', () => {
 
     expect(settings.shell).toBe('auto')
     expect(settings.wsl_distro).toBeNull()
-    expect(savedPayload).toMatchObject({ shell: 'auto', wsl_distro: null })
+    expect(savedPayload).toMatchObject({
+      shell: 'auto',
+      wsl_distro: null,
+      settings_version: SETTINGS_SCHEMA_VERSION,
+      client_settings_version: SETTINGS_SCHEMA_VERSION,
+    })
   })
 
   it('serializes PUT requests so the latest Shell selection is saved last', async () => {

@@ -631,6 +631,13 @@ ZDOTDIR=  # reset so child shells behave normally
 
 [[ -f "{home}/.zshrc" ]] && source "{home}/.zshrc"
 
+# dinotty: zsh paints the leftover cell before a wrapped double-width glyph as a
+# reverse-video block (man zshzle, "Wrapped double-width characters"). Suppress it,
+# but never override a value the user set themselves.
+if [[ -z "${{zle_highlight[(r)special:*]}}" ]]; then
+  zle_highlight+=(special:none)
+fi
+
 # Ensure history is saved — fallback if user config doesn't set these
 [[ $HISTSIZE -gt 0 ]] || HISTSIZE=10000
 [[ $SAVEHIST -gt 0 ]] || SAVEHIST=10000

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TrayVisibilityDialog from '../components/ui/TrayVisibilityDialog.vue'
 import WindowCloseDialog from '../components/ui/WindowCloseDialog.vue'
@@ -6,6 +6,43 @@ import {
   TRAY_VISIBILITY_CONFIRM_KEY,
   useDesktopLifecycle,
 } from '../composables/useDesktopLifecycle'
+
+class MemoryStorage implements Storage {
+  private data = new Map<string, string>()
+
+  get length() {
+    return this.data.size
+  }
+
+  clear() {
+    this.data.clear()
+  }
+
+  getItem(key: string) {
+    return this.data.get(key) ?? null
+  }
+
+  key(index: number) {
+    return [...this.data.keys()][index] ?? null
+  }
+
+  removeItem(key: string) {
+    this.data.delete(key)
+  }
+
+  setItem(key: string, value: string) {
+    this.data.set(key, String(value))
+  }
+}
+
+beforeEach(() => {
+  const storage = new MemoryStorage()
+  Object.defineProperty(window, 'localStorage', {
+    value: storage,
+    configurable: true,
+  })
+  vi.stubGlobal('localStorage', storage)
+})
 
 afterEach(() => {
   document.body.innerHTML = ''

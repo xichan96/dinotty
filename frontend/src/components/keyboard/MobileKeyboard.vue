@@ -351,7 +351,7 @@ import { shellEscapePath, trailingPathDeleteLen } from '../../utils/shell'
 import { isTauri } from '../../composables/useTransport'
 import { formatMB, useUpload, type UploadProgress } from '../../composables/useUpload'
 import type { UploadResponse } from '../../types/uploads'
-import { POSITION, useToast } from 'vue-toastification'
+import { useToast } from 'vue-toastification'
 import { useTextareaMetrics } from '../../composables/useTextareaMetrics'
 import {
   observeSwipePanelHeightTargets,
@@ -362,6 +362,7 @@ import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
 import type { SendDataFn } from '../../utils/frozenSend'
 import { hasCollapseGuard } from '../../utils/keyboardGuardMode'
 import { isTouchDevice } from '../../utils/terminalInput'
+import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 
 const props = defineProps<{
   visible: boolean
@@ -745,9 +746,9 @@ async function onPhoneFileInputChange(ev: Event) {
     const paths = data.saved ?? []
     if (paths.length) insertTextAtCaret(paths.map(shellEscapePath).join(' '))
     window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
-    toast.success(t('mobileKb.uploadDone'), { position: POSITION.BOTTOM_CENTER })
+    toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
   } catch (err) {
-    toast.error(uploadErrorMessage(err), { position: POSITION.BOTTOM_CENTER })
+    toast.error(uploadErrorMessage(err), { position: resolveResponsiveToastPosition() })
   } finally {
     phoneUploading.value = false
     phoneUploadProgress.value = 0

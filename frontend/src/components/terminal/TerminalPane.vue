@@ -100,7 +100,8 @@ import SearchBar from './SearchBar.vue'
 import TerminalContextMenu from './TerminalContextMenu.vue'
 import SelectionHandles from './SelectionHandles.vue'
 import { shellEscapePath } from '../../utils/shell'
-import { POSITION, useToast } from 'vue-toastification'
+import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
+import { useToast } from 'vue-toastification'
 import { useI18n } from '../../composables/useI18n'
 import { useUpload } from '../../composables/useUpload'
 import { useScrollPosition, type ScrollPositionHandle } from '../../composables/useScrollPosition'
@@ -360,11 +361,11 @@ async function onMenuPaste() {
   }
 
   if (text === null) {
-    toast.error(t('mobileKb.pasteFailed'), { position: POSITION.BOTTOM_CENTER })
+    toast.error(t('mobileKb.pasteFailed'), { position: resolveResponsiveToastPosition() })
     return
   }
   if (text === '') {
-    toast.info(t('mobileKb.clipboardEmpty'), { position: POSITION.BOTTOM_CENTER })
+    toast.info(t('mobileKb.clipboardEmpty'), { position: resolveResponsiveToastPosition() })
     return
   }
   pasteFromClipboard(text, false)
@@ -1020,10 +1021,10 @@ onMounted(() => {
         const saved = data.saved ?? []
         if (saved.length) self.sendData(saved.map(shellEscapePath).join(' ') + ' ', true)
         window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
-        toast.success(t('mobileKb.uploadDone'), { position: POSITION.BOTTOM_CENTER })
+        toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
       } catch (err) {
         if (!paneAlive) return
-        toast.error(uploadErrorMessage(err), { position: POSITION.BOTTOM_CENTER })
+        toast.error(uploadErrorMessage(err), { position: resolveResponsiveToastPosition() })
       }
     }
     const insertTurn = insertQueue.then(() => doInsert()).catch(() => undefined)

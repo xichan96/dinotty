@@ -424,7 +424,7 @@ import { pickSuccessorTab } from './utils/tabSuccessor'
 import { workspaceIdFromPaneId } from './utils/pluginPaneId'
 import { initMonitorHistory } from './composables/useMonitor'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
-import { POSITION, useToast } from 'vue-toastification'
+import { useToast } from 'vue-toastification'
 import {
   useNotification,
   pushNotification,
@@ -487,6 +487,7 @@ import { readHostClipboard } from './utils/clipboard'
 import { hasCollapseGuard, hasOpenGuard } from './utils/keyboardGuardMode'
 import type { AppActionOptions } from './components/keyboard/mkbTypes'
 import { canFixShellErrorInSettings, shellErrorMessage } from './utils/shellError'
+import { resolveResponsiveToastPosition } from './utils/toastPosition'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
@@ -579,11 +580,12 @@ const hostClipboardPaste = createHostClipboardPasteController({
     getActiveTerminalRef()?.pasteFromClipboard(text, autoEnter, !systemActionKeyboardOpen.value)
   },
   clipboardEmpty: () =>
-    toast.info(t('mobileKb.clipboardEmpty'), { position: POSITION.BOTTOM_CENTER }),
-  pasteFailed: () => toast.error(t('mobileKb.pasteFailed'), { position: POSITION.BOTTOM_CENTER }),
+    toast.info(t('mobileKb.clipboardEmpty'), { position: resolveResponsiveToastPosition() }),
+  pasteFailed: () =>
+    toast.error(t('mobileKb.pasteFailed'), { position: resolveResponsiveToastPosition() }),
   confirmMultiline: (lines) =>
     toast.info(t('mobileKb.confirmMultiline', { n: lines }), {
-      position: POSITION.BOTTOM_CENTER,
+      position: resolveResponsiveToastPosition(),
     }),
 })
 const cursorPicker = useCursorPicker({

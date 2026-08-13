@@ -170,7 +170,7 @@ describe('unified keybindings', () => {
       await actionSelect.setValue('pasteTerminal')
       await nextTick()
       const autoEnter = wrapper.get<HTMLInputElement>(
-        '.ak-modal .shortcut-check input[type="checkbox"]',
+        '.ak-modal .ak-auto-enter-check input[type="checkbox"]',
       )
       expect(autoEnter.element.checked).toBe(true)
       await autoEnter.setValue(false)
@@ -211,10 +211,17 @@ describe('unified keybindings', () => {
 
       await actionSelect.setValue(id)
       await nextTick()
-      expect(wrapper.find('.ak-modal .shortcut-check input[type="checkbox"]').exists()).toBe(false)
+      expect(wrapper.find('.ak-modal .ak-auto-enter-check').exists()).toBe(false)
+      const repeat = wrapper.get<HTMLInputElement>('.ak-modal .ak-repeat-check input')
+      expect(repeat.element.checked).toBe(false)
+      await repeat.setValue(true)
 
       await wrapper.get('.ak-modal .settings-save').trigger('click')
-      expect(settings.action_keyboard.rows[0][0]).toMatchObject({ kind: 'action', action: id })
+      expect(settings.action_keyboard.rows[0][0]).toMatchObject({
+        kind: 'action',
+        action: id,
+        repeat: true,
+      })
       expect(settings.action_keyboard.rows[0][0]).not.toHaveProperty('auto_enter')
     } finally {
       settings.action_keyboard = previous
@@ -320,7 +327,10 @@ describe('unified keybindings', () => {
       keyEventMatchesBinding(keyEvent('Dead', { code: 'Backquote', metaKey: true }), binding)
     ).toBe(true)
     expect(
-      keyEventMatchesBinding(keyEvent('~', { code: 'Backquote', metaKey: true, shiftKey: true }), binding)
+      keyEventMatchesBinding(
+        keyEvent('~', { code: 'Backquote', metaKey: true, shiftKey: true }),
+        binding
+      )
     ).toBe(false)
   })
 
@@ -347,11 +357,7 @@ describe('unified keybindings', () => {
     settings.windowsAltAsCmd = false
     const dispatch = vi.fn()
 
-    dispatchAppBinding(
-      keyEvent('t', { ctrlKey: true, altKey: true }),
-      'newTab',
-      dispatch
-    )
+    dispatchAppBinding(keyEvent('t', { ctrlKey: true, altKey: true }), 'newTab', dispatch)
     dispatchAppBinding(keyEvent('t', { ctrlKey: true }), 'newTab', dispatch)
     dispatchAppBinding(keyEvent('t', { altKey: true }), 'newTab', dispatch)
 

@@ -22,10 +22,12 @@ import {
   DEDUP_WINDOW_MS,
   IME_SYM_PAIR_MS,
   applyMobileTerminalModifiers,
+  emptyMobileTerminalModifiers,
   handleTerminalShortcutKeydown,
   isDuplicateOnData,
   isShiftSymbolChar,
   isTouchDevice,
+  mobileTerminalModifierActive,
   stripImeConfirmSpace,
   type MobileTerminalModifiers,
 } from '../utils/terminalInput'
@@ -142,7 +144,7 @@ export class TerminalInstance {
   // composition - those calls interrupt the IME session and cause xterm's
   // diff-fallback to leak preedit text as raw input.
   private _composing = false
-  private _mobileModifiers: MobileTerminalModifiers = { ctrl: false, alt: false }
+  private _mobileModifiers: MobileTerminalModifiers = emptyMobileTerminalModifiers()
   private _writeQueue: string[] = []
   private _writing = false
   // Output transaction buffer shared by DEC mode 2026 (sync_begin/sync_end)
@@ -690,8 +692,8 @@ export class TerminalInstance {
   }
 
   clearVirtualModifiers(notify = true) {
-    const hadModifiers = this._mobileModifiers.ctrl || this._mobileModifiers.alt
-    this._mobileModifiers = { ctrl: false, alt: false }
+    const hadModifiers = Object.values(this._mobileModifiers).some(mobileTerminalModifierActive)
+    this._mobileModifiers = emptyMobileTerminalModifiers()
     if (notify && hadModifiers && typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('dinotty-mobile-modifiers-consumed', {

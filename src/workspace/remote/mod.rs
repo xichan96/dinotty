@@ -13,6 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::session::Session;
+use crate::workspace::upload::upload_cap_label_bytes;
 use crate::workspace::{
     detect_language, json_err, media_kind, office_kind, skip_text_preview, DirEntry, ListResponse,
     MetaResponse, PanePathQuery, ResolveResponse, WorkspaceListQuery, MAX_DOWNLOAD,
@@ -471,6 +472,7 @@ pub async fn remote_upload(
     dir: String,
     mut multipart: Multipart,
     cwd: Option<String>,
+    cap_bytes: u64,
 ) -> Response {
     tracing::info!("remote_upload: dir={:?} cwd={:?}", dir, cwd);
     let sftp = match sftp(&session).await {
@@ -553,7 +555,18 @@ pub async fn remote_upload(
         let mut stream = field;
         loop {
             match stream.chunk().await {
-                Ok(Some(chunk)) => data.extend_from_slice(&chunk),
+                Ok(Some(chunk)) => {
+                    if cap_bytes > 0 && data.len() as u64 + chunk.len() as u64 > cap_bytes {
+                        return json_err(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            &format!(
+                                "file '{base}' exceeds upload size limit of {}",
+                                upload_cap_label_bytes(cap_bytes)
+                            ),
+                        );
+                    }
+                    data.extend_from_slice(&chunk);
+                }
                 Ok(None) => break,
                 Err(e) => {
                     tracing::warn!("remote_upload: read {} failed: {}", base, e);

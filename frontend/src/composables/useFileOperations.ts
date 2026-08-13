@@ -2,11 +2,13 @@ import { ref, computed, type Ref } from 'vue'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
 import { uiConfirm } from './useConfirm'
 import { isTauri, tauriInvoke } from './useTransport'
+import { settings } from './useSettings'
 import type { DirEntry } from '../components/workspace/TreeRows'
 
 interface ParsedUploadBody {
   saved?: string[]
   errors?: string[]
+  error?: string
 }
 
 function parseUploadBody(body: string): ParsedUploadBody {
@@ -15,6 +17,14 @@ function parseUploadBody(body: string): ParsedUploadBody {
   } catch {
     return {}
   }
+}
+
+function formatBytes(bytes: number): string {
+  const MB = 1024 * 1024
+  const GB = 1024 * MB
+  if (bytes >= GB) return `${Math.round((bytes / GB) * 10) / 10} GB`
+  if (bytes >= MB) return `${Math.round((bytes / MB) * 10) / 10} MB`
+  return `${Math.round(bytes / 1024)} KB`
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -48,6 +58,7 @@ export function useFileOperations(opts: {
   cwdLabel: Ref<string>
   ensureChildren: (rel: string) => Promise<void>
   emit: (event: 'navigate', path: string) => void
+  t: (key: string, params?: Record<string, string | number>) => string
 }) {
   const fileInputRef = ref<HTMLInputElement>()
   const dragCounter = ref(0)
@@ -99,6 +110,41 @@ export function useFileOperations(opts: {
 
   async function uploadFiles(files: { file: File; path: string }[], targetDir?: string) {
     if (!files.length) return
+    const capMb = settings.upload_file_cap_mb
+    const capBytes = capMb > 0 ? capMb * 1024 * 1024 : 0
+    if (capBytes > 0) {
+      const oversized = files.filter(({ file }) => file.size > capBytes)
+      if (oversized.length) {
+        const skip = await uiConfirm(
+          opts.t('fileOps.uploadTooLargeMany', {
+            count: oversized.length,
+            size: formatBytes(capBytes),
+          }),
+          {
+            title: opts.t('fileOps.uploadTooLargeTitle'),
+            confirmText: opts.t('fileOps.uploadSkip'),
+            cancelText: opts.t('fileOps.uploadCancel'),
+          }
+        )
+        if (!skip) return
+        files = files.filter(({ file }) => file.size <= capBytes)
+        if (!files.length) return
+      }
+    }
+    const alertUploadError = (status: number, body: string) => {
+      const detail = parseUploadBody(body).error
+      if (status === 413 && detail) {
+        alert(opts.t('fileOps.uploadRejected', { detail }))
+      } else if (status === 413) {
+        alert(
+          opts.t('fileOps.uploadRejected', {
+            detail: opts.t('fileOps.uploadTooLargeDetail', { size: formatBytes(capBytes) }),
+          })
+        )
+      } else {
+        alert(`Upload failed: HTTP ${status}\n${body}`)
+      }
+    }
     await getApiBase()
     const dir =
       targetDir !== undefined
@@ -126,7 +172,7 @@ export function useFileOperations(opts: {
         })) as { status: number; body: string }
         if (resp.status >= 400) {
           console.error('[upload] server error:', resp.status, resp.body)
-          alert(`Upload failed: HTTP ${resp.status}\n${resp.body}`)
+          alertUploadError(resp.status, resp.body)
           hadErrors = true
         } else {
           const parsed = parseUploadBody(resp.body)
@@ -151,7 +197,7 @@ export function useFileOperations(opts: {
         if (!res.ok) {
           const body = await res.text().catch(() => '')
           console.error('[upload] server error:', res.status, body)
-          alert(`Upload failed: HTTP ${res.status}\n${body}`)
+          alertUploadError(res.status, body)
           hadErrors = true
         } else {
           const parsed = await res.json().catch(() => null) as ParsedUploadBody | null

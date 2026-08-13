@@ -26,9 +26,28 @@ export function applyAfterTerminalComposition(apply: () => void): boolean {
   return true
 }
 
+export type MobileTerminalModifierMode = 'off' | 'once' | 'locked'
+
 export interface MobileTerminalModifiers {
-  ctrl: boolean
-  alt: boolean
+  ctrl: MobileTerminalModifierMode
+  shift: MobileTerminalModifierMode
+  alt: MobileTerminalModifierMode
+  meta: MobileTerminalModifierMode
+}
+
+export function emptyMobileTerminalModifiers(): MobileTerminalModifiers {
+  return { ctrl: 'off', shift: 'off', alt: 'off', meta: 'off' }
+}
+
+export function mobileTerminalModifierActive(mode: MobileTerminalModifierMode): boolean {
+  return mode !== 'off'
+}
+
+function consumeMobileTerminalModifier(
+  mode: MobileTerminalModifierMode,
+  consumed: boolean
+): MobileTerminalModifierMode {
+  return consumed && mode === 'once' ? 'off' : mode
 }
 
 export function applyMobileTerminalModifiers(
@@ -36,11 +55,17 @@ export function applyMobileTerminalModifiers(
   modifiers: MobileTerminalModifiers
 ): { data: string; modifiers: MobileTerminalModifiers; consumed: boolean } {
   let data = input
-  let ctrl = modifiers.ctrl
-  let alt = modifiers.alt
-  let consumed = false
+  const ctrlActive = mobileTerminalModifierActive(modifiers.ctrl)
+  const shiftActive = mobileTerminalModifierActive(modifiers.shift)
+  const altActive = mobileTerminalModifierActive(modifiers.alt)
+  const metaActive = mobileTerminalModifierActive(modifiers.meta)
+  const consumed = input.length > 0 && (ctrlActive || shiftActive || altActive || metaActive)
 
-  if (ctrl && data.length === 1 && data.charCodeAt(0) <= 0x7f) {
+  if (shiftActive && data.length === 1 && data >= 'a' && data <= 'z') {
+    data = data.toUpperCase()
+  }
+
+  if (ctrlActive && data.length === 1 && data.charCodeAt(0) <= 0x7f) {
     const upper = data.toUpperCase()
     let code: number | null = null
     if (upper >= 'A' && upper <= 'Z') code = upper.charCodeAt(0) - 64
@@ -54,18 +79,23 @@ export function applyMobileTerminalModifiers(
 
     if (code !== null) {
       data = String.fromCharCode(code)
-      ctrl = false
-      consumed = true
     }
   }
 
-  if (alt && data) {
+  if ((altActive || metaActive) && data) {
     data = `\x1b${data}`
-    alt = false
-    consumed = true
   }
 
-  return { data, modifiers: { ctrl, alt }, consumed }
+  return {
+    data,
+    modifiers: {
+      ctrl: consumeMobileTerminalModifier(modifiers.ctrl, consumed),
+      shift: consumeMobileTerminalModifier(modifiers.shift, consumed),
+      alt: consumeMobileTerminalModifier(modifiers.alt, consumed),
+      meta: consumeMobileTerminalModifier(modifiers.meta, consumed),
+    },
+    consumed,
+  }
 }
 
 // Dedup window (ms) for WKWebView onData double-fire.

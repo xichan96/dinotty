@@ -1,14 +1,18 @@
-import { toRaw, type Ref } from 'vue'
+import type { Ref } from 'vue'
 import {
   cloneWithoutIcons,
   currentLoadGeneration,
   effectiveActionKeyboard,
   isLoadInFlight,
-  restoreActionIcons,
   type ActionKey,
   type ActionKeyboardConfig,
   type SettingsData,
 } from './useSettings'
+import {
+  createOrderedKeyRegistry,
+  quantizedGestureValue,
+  resolveLiveGestureLocation,
+} from './orderedKeyGesture'
 
 export function akDropGripThreshold(width: number): number {
   const GRIP = 16
@@ -19,7 +23,7 @@ export function akResolveDropIndex(
   pointerX: number,
   rect: { left: number; right: number; width: number },
   targetIndex: number,
-  direction: 'before' | 'after' | 'unknown',
+  direction: 'before' | 'after' | 'unknown'
 ): number {
   const threshold = akDropGripThreshold(rect.width)
   if (direction === 'after') {
@@ -43,27 +47,28 @@ interface AkGestureBase {
   footerTouched: boolean
 }
 
-type AkGesture = AkGestureBase & (
-  | {
-      kind: 'drag'
-      currentLoc: AkLoc
-      validTargetPreviewed: boolean
-    }
-  | {
-      kind: 'grow'
-      loc: AkLoc
-      startX: number
-      startGrow: number
-      changed: boolean
-    }
-  | {
-      kind: 'enter-width'
-      startX: number
-      startWidth: number
-      footerWidth: number
-      changed: boolean
-    }
-)
+type AkGesture = AkGestureBase &
+  (
+    | {
+        kind: 'drag'
+        currentLoc: AkLoc
+        validTargetPreviewed: boolean
+      }
+    | {
+        kind: 'grow'
+        loc: AkLoc
+        startX: number
+        startGrow: number
+        changed: boolean
+      }
+    | {
+        kind: 'enter-width'
+        startX: number
+        startWidth: number
+        footerWidth: number
+        changed: boolean
+      }
+  )
 
 export interface ActionKeyboardGestureOptions {
   akDraft: Ref<ActionKeyboardConfig | null>
@@ -80,21 +85,12 @@ export interface ActionKeyboardGesture {
 }
 
 export function useActionKeyboardGesture(
-  opts: ActionKeyboardGestureOptions,
+  opts: ActionKeyboardGestureOptions
 ): ActionKeyboardGesture {
   const { akDraft, settings } = opts
 
-  const akKeyIds = new WeakMap<ActionKey, string>()
-
-  function akItemKey(key: ActionKey): string {
-    const rawKey = toRaw(key)
-    let id = akKeyIds.get(rawKey)
-    if (!id) {
-      id = 'ak-' + Math.random().toString(36).slice(2)
-      akKeyIds.set(rawKey, id)
-    }
-    return id
-  }
+  const registry = createOrderedKeyRegistry('ak')
+  const akItemKey = registry.itemKey
 
   function akRowsFor(cfg: ActionKeyboardConfig, zone: AkZone): ActionKey[][] {
     return zone === 'main' ? cfg.rows : (cfg.bottom?.rows ?? [])
@@ -104,18 +100,28 @@ export function useActionKeyboardGesture(
     return akRowsFor(cfg, loc.zone)[loc.row]?.[loc.index]
   }
 
-  function akTransferItemKeys(source: ActionKeyboardConfig, draft: ActionKeyboardConfig) {
-    const transferRows = (sourceRows: ActionKey[][], draftRows: ActionKey[][]) => {
-      for (let ri = 0; ri < sourceRows.length; ri++) {
-        for (let ki = 0; ki < sourceRows[ri].length; ki++) {
-          const sourceKey = sourceRows[ri][ki]
-          const draftKey = draftRows[ri]?.[ki]
-          if (draftKey) akKeyIds.set(draftKey, akItemKey(sourceKey))
-        }
+  function akLiveLocFromTarget(fallback: AkLoc, e: PointerEvent): AkLoc {
+    return resolveLiveGestureLocation(fallback, e, '[data-ak-index]', (slot) => {
+      const zone = slot.getAttribute('data-ak-zone')
+      const row = Number(slot.getAttribute('data-ak-row'))
+      const index = Number(slot.getAttribute('data-ak-index'))
+      if (
+        (zone !== 'main' && zone !== 'bottom') ||
+        !Number.isInteger(row) ||
+        row < 0 ||
+        !Number.isInteger(index) ||
+        index < 0
+      ) {
+        return null
       }
-    }
-    transferRows(source.rows, draft.rows)
-    if (source.bottom && draft.bottom) transferRows(source.bottom.rows, draft.bottom.rows)
+      const loc: AkLoc = { zone, row, index }
+      return akKeyAt(effectiveActionKeyboard(), loc) ? loc : null
+    })
+  }
+
+  function akTransferItemKeys(source: ActionKeyboardConfig, draft: ActionKeyboardConfig) {
+    registry.transferRows(source.rows, draft.rows)
+    if (source.bottom && draft.bottom) registry.transferRows(source.bottom.rows, draft.bottom.rows)
   }
 
   let akGesture: AkGesture | null = null
@@ -179,13 +185,14 @@ export function useActionKeyboardGesture(
       const loc = akResolveElementLoc(keyElement, true)
       if (!loc) return null
       const rect = keyElement.getBoundingClientRect()
-      const direction = loc.zone === currentLoc.zone && loc.row === currentLoc.row
-        ? loc.index < currentLoc.index
-          ? 'before'
-          : loc.index > currentLoc.index
-            ? 'after'
-            : 'unknown'
-        : 'unknown'
+      const direction =
+        loc.zone === currentLoc.zone && loc.row === currentLoc.row
+          ? loc.index < currentLoc.index
+            ? 'before'
+            : loc.index > currentLoc.index
+              ? 'after'
+              : 'unknown'
+          : 'unknown'
       loc.index = akResolveDropIndex(e.clientX, rect, loc.index, direction)
       return loc
     }
@@ -226,10 +233,12 @@ export function useActionKeyboardGesture(
     if (gesture.kind === 'grow') {
       const key = akKeyAt(gesture.draft, gesture.loc)
       if (!key) return
-      const nextGrow = Math.min(
-        12,
-        Math.max(0.5, Math.round((gesture.startGrow + (e.clientX - gesture.startX) / 28) * 4) / 4),
-      )
+      const nextGrow = quantizedGestureValue(gesture.startGrow, e.clientX - gesture.startX, {
+        min: 0.5,
+        max: 12,
+        step: 0.25,
+        pixelsPerStep: 7,
+      })
       if (key.grow !== nextGrow) {
         key.grow = nextGrow
         gesture.changed = true
@@ -242,7 +251,7 @@ export function useActionKeyboardGesture(
     if (!bottom) return
     const nextWidth = Math.min(
       0.5,
-      Math.max(0.15, gesture.startWidth - (e.clientX - gesture.startX) / gesture.footerWidth),
+      Math.max(0.15, gesture.startWidth - (e.clientX - gesture.startX) / gesture.footerWidth)
     )
     if (bottom.enter_width !== nextWidth) {
       bottom.enter_width = nextWidth
@@ -265,16 +274,13 @@ export function useActionKeyboardGesture(
   function akCommitGestureDraft(gesture: AkGesture) {
     if (gesture.preserveBottomAbsence && !gesture.footerTouched) delete gesture.draft.bottom
     settings.action_keyboard = gesture.draft
-    restoreActionIcons()
   }
 
   function akFinishGesture(e: PointerEvent, cancelled: boolean) {
     const gesture = akGesture
     if (!gesture || e.pointerId !== gesture.pointerId) return
     const generationMatches = currentLoadGeneration() === gesture.generation
-    const hasCommit = gesture.kind === 'drag'
-      ? gesture.validTargetPreviewed
-      : gesture.changed
+    const hasCommit = gesture.kind === 'drag' ? gesture.validTargetPreviewed : gesture.changed
     akCleanupGesture(gesture)
     if (!cancelled && generationMatches && hasCommit) akCommitGestureDraft(gesture)
   }
@@ -292,6 +298,7 @@ export function useActionKeyboardGesture(
   }
 
   function akDragPointerDown(loc: AkLoc, e: PointerEvent) {
+    loc = akLiveLocFromTarget(loc, e)
     if (!akKeyAt(effectiveActionKeyboard(), loc)) return
     const started = akStartGestureDraft(e)
     if (!started) return
@@ -307,7 +314,7 @@ export function useActionKeyboardGesture(
   }
 
   function akResizePointerDown(ri: number, ki: number, e: PointerEvent) {
-    const loc: AkLoc = { zone: 'main', row: ri, index: ki }
+    const loc = akLiveLocFromTarget({ zone: 'main', row: ri, index: ki }, e)
     const sourceKey = akKeyAt(effectiveActionKeyboard(), loc)
     if (!sourceKey) return
     const started = akStartGestureDraft(e)
@@ -327,7 +334,7 @@ export function useActionKeyboardGesture(
   }
 
   function akBottomResizePointerDown(ri: number, ki: number, e: PointerEvent) {
-    const loc: AkLoc = { zone: 'bottom', row: ri, index: ki }
+    const loc = akLiveLocFromTarget({ zone: 'bottom', row: ri, index: ki }, e)
     const sourceKey = akKeyAt(effectiveActionKeyboard(), loc)
     if (!sourceKey) return
     const started = akStartGestureDraft(e)

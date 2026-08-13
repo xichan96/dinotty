@@ -34,6 +34,18 @@ pub(crate) fn upload_io_err(e: &std::io::Error) -> Response {
     }
 }
 
+pub(crate) fn upload_cap_label_bytes(cap_bytes: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
+    if cap_bytes >= GB {
+        format!("{} GB", cap_bytes / GB)
+    } else if cap_bytes >= MB {
+        format!("{} MB", cap_bytes / MB)
+    } else {
+        format!("{} KB", cap_bytes / 1024)
+    }
+}
+
 fn upload_marker_present(base: &Path) -> bool {
     std::fs::symlink_metadata(base.join(UPLOAD_MARKER)).is_ok_and(|m| m.file_type().is_file())
 }
@@ -287,10 +299,12 @@ pub(crate) fn unique_path(dir: &Path, base: &str) -> PathBuf {
 
 #[allow(clippy::too_many_lines)]
 pub async fn workspace_upload(
-    State(manager): State<Arc<SessionManager>>,
+    State((manager, settings_state)): State<(Arc<SessionManager>, SettingsState)>,
     Query(q): Query<UploadQuery>,
     mut multipart: Multipart,
 ) -> Response {
+    let settings = settings_state.read().await.clone();
+    let cap_bytes = settings.upload_file_cap_mb.saturating_mul(1024 * 1024);
     let is_ssh = super::util::ssh_session(&manager, &q.pane_id).is_some();
     tracing::info!(
         "workspace_upload: pane={} dir={:?} cwd={:?} ssh={}",
@@ -300,7 +314,8 @@ pub async fn workspace_upload(
         is_ssh
     );
     if let Some(session) = super::util::ssh_session(&manager, &q.pane_id) {
-        return remote::remote_upload(session, q.dir.clone(), multipart, q.cwd.clone()).await;
+        return remote::remote_upload(session, q.dir.clone(), multipart, q.cwd.clone(), cap_bytes)
+            .await;
     }
     let root = try_res!(super::util::get_root(&manager, &q.pane_id));
     let dest_dir = try_res!(normalize_join(&root, &q.dir));
@@ -373,6 +388,22 @@ pub async fn workspace_upload(
             loop {
                 match stream.chunk().await {
                     Ok(Some(chunk)) => {
+                        if cap_bytes > 0 && bytes_written + chunk.len() as u64 > cap_bytes {
+                            drop(file);
+                            let _ = std::fs::remove_file(&path);
+                            tracing::warn!(
+                                "workspace_upload: {} exceeds {} cap",
+                                rel,
+                                upload_cap_label_bytes(cap_bytes)
+                            );
+                            return json_err(
+                                StatusCode::PAYLOAD_TOO_LARGE,
+                                &format!(
+                                    "file '{rel}' exceeds upload size limit of {}",
+                                    upload_cap_label_bytes(cap_bytes)
+                                ),
+                            );
+                        }
                         if let Err(e) = file.write_all(&chunk).await {
                             drop(file);
                             let _ = std::fs::remove_file(&path);
@@ -386,7 +417,12 @@ pub async fn workspace_upload(
                         bytes_written += chunk.len() as u64;
                     }
                     Ok(None) => break,
-                    Err(e) => return json_err(StatusCode::BAD_REQUEST, &e.to_string()),
+                    Err(e) => {
+                        drop(file);
+                        let _ = std::fs::remove_file(&path);
+                        tracing::warn!("workspace_upload: read {} failed: {}", path.display(), e);
+                        return json_err(StatusCode::BAD_REQUEST, &e.to_string());
+                    }
                 }
             }
             if let Err(e) = file.flush().await {

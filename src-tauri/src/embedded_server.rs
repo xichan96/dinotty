@@ -924,7 +924,11 @@ pub fn run_server(
             .route("/api/workspace/list", get(workspace::workspace_list))
             .route("/api/workspace/meta", get(workspace::workspace_meta))
             .route("/api/workspace/raw", get(workspace::workspace_raw))
-            .route("/api/workspace/upload", post(workspace::workspace_upload))
+            .merge(
+                Router::new()
+                    .route("/api/workspace/upload", post(workspace::workspace_upload))
+                    .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)),
+            )
             .merge(
                 Router::new()
                     .route(

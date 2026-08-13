@@ -395,6 +395,7 @@ const ops = useFileOperations({
   cwdLabel,
   ensureChildren,
   emit: (event, path) => emit(event, path),
+  t,
 })
 
 const ctxMenu = useTreeContextMenu({

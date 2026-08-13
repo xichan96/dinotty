@@ -230,7 +230,6 @@ fn normalize_action_key(key: &mut ActionKey) {
     if is_valid_action {
         key.send.clear();
         key.special = None;
-        key.repeat = false;
         if key.action.as_deref() == Some("pasteTerminal") {
             key.auto_enter.get_or_insert(true);
         } else {
@@ -256,14 +255,57 @@ fn default_action_enter(label: String) -> ActionKey {
 }
 
 pub(crate) fn normalize_action_keyboards(settings: &mut Settings) -> bool {
-    let before = (settings.action_keyboard.clone(), settings.action_keyboard_user_default.clone());
+    let before = (
+        settings.action_keyboard.clone(),
+        settings.action_keyboard_user_default.clone(),
+        settings.system_keyboard.clone(),
+        settings.system_keyboard_user_default.clone(),
+    );
     if let Some(config) = settings.action_keyboard.as_mut() {
         config.normalize();
     }
     if let Some(config) = settings.action_keyboard_user_default.as_mut() {
         config.normalize();
     }
-    before != (settings.action_keyboard.clone(), settings.action_keyboard_user_default.clone())
+    if let Some(config) = settings.system_keyboard.as_mut() {
+        normalize_system_keyboard(config);
+    }
+    if let Some(config) = settings.system_keyboard_user_default.as_mut() {
+        normalize_system_keyboard(config);
+    }
+    before
+        != (
+            settings.action_keyboard.clone(),
+            settings.action_keyboard_user_default.clone(),
+            settings.system_keyboard.clone(),
+            settings.system_keyboard_user_default.clone(),
+        )
+}
+
+fn normalize_system_keyboard(config: &mut super::types::SystemKeyboardConfig) {
+    for key in &mut config.upper {
+        normalize_action_key(key);
+    }
+    for page in &mut config.pages {
+        for key in page {
+            normalize_action_key(key);
+            if let Some(grow) = key.grow {
+                key.grow = Some(grow.round().clamp(1.0, 10.0));
+            }
+        }
+    }
+    for key in &mut config.upper {
+        if let Some(grow) = key.grow {
+            key.grow = Some(grow.round().clamp(1.0, 9.0));
+        }
+    }
+    if config.pages.is_empty() {
+        config.pages.push(vec![]);
+    } else if config.pages.len() > 1 {
+        config.pages = vec![config.pages.drain(..).flatten().collect()];
+    }
+    config.upper_pinned = config.upper_pinned.min(5).min(config.upper.len());
+    config.lower_pinned = config.lower_pinned.min(5).min(config.pages.first().map_or(0, Vec::len));
 }
 
 impl ActionKeyboardConfig {

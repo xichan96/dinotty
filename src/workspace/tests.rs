@@ -17,8 +17,9 @@ use std::{
 use tempfile::TempDir;
 use tokio::sync::RwLock;
 
-use crate::session::SessionManager;
+use crate::session::{CwdState, Session, SessionBackend, SessionManager, SessionStatus, SyncState};
 use crate::settings::{default_upload_dir, Settings, SettingsState};
+use crate::vt_screen::VirtualScreen;
 
 #[test]
 fn normalize_join_rejects_parent_dir() {
@@ -250,6 +251,133 @@ async fn workspace_uploads_rolls_back_first_file_when_second_exceeds_cap() {
     assert!(!response.status().is_success());
     assert!(!tmp.path().join("first.txt").exists());
     assert!(!tmp.path().join("second.bin").exists());
+}
+
+fn workspace_session(root: PathBuf) -> Arc<Session> {
+    let (resize_tx, _resize_rx) = tokio::sync::watch::channel(None);
+    let (output_tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
+    Arc::new(Session {
+        backend: tokio::sync::Mutex::new(SessionBackend::Exited),
+        ssh_params: None,
+        screen: std::sync::Mutex::new(VirtualScreen::new(80, 24)),
+        clients: std::sync::Mutex::new(Vec::new()),
+        next_client_id: std::sync::atomic::AtomicU64::new(1),
+        tauri_client_id: std::sync::Mutex::new(None),
+        input_tx: std::sync::Mutex::new(None),
+        status: std::sync::Mutex::new(SessionStatus::Connected),
+        is_connected: std::sync::atomic::AtomicBool::new(true),
+        size: std::sync::Mutex::new((80, 24)),
+        exited: std::sync::Mutex::new(false),
+        shell_type: "sh".to_string(),
+        shell_launch_kind: crate::platform::shell::ShellLaunchKind::Native,
+        tauri_on_exit: std::sync::Mutex::new(None),
+        cwd_state: std::sync::Mutex::new(CwdState {
+            cwd: root.clone(),
+            host_cwd: Some(root),
+            sniff_buf: Vec::new(),
+        }),
+        sync: std::sync::Mutex::new(SyncState::default()),
+        #[cfg(test)]
+        sync_disable_hook: std::sync::Mutex::new(None),
+        resize_tx,
+        ssh_cmd_tx: std::sync::Mutex::new(None),
+        ssh_handle: tokio::sync::Mutex::new(None),
+        sftp_session: std::sync::Mutex::new(None),
+        remote_home: std::sync::Mutex::new(None),
+        remote_user: std::sync::Mutex::new(None),
+        output_tx,
+        output_rx: std::sync::Mutex::new(Some(output_rx)),
+        pending_results: std::sync::Mutex::new(Vec::new()),
+    })
+}
+
+fn workspace_multipart(parts: Vec<(&str, &str, Vec<u8>)>) -> Request<Body> {
+    let boundary = "dinotty-ws-boundary";
+    let mut body = Vec::new();
+    for (name, rel, data) in parts {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"path\"\r\n\r\n{rel}\r\n").as_bytes(),
+        );
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n\
+                 Content-Type: application/octet-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(&data);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+
+    Request::builder()
+        .method("POST")
+        .uri("/api/workspace/upload")
+        .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(body))
+        .unwrap()
+}
+
+async fn workspace_upload_request(
+    manager: Arc<SessionManager>,
+    settings_state: SettingsState,
+    parts: Vec<(&str, &str, Vec<u8>)>,
+) -> axum::response::Response {
+    let multipart = Multipart::from_request(workspace_multipart(parts), &()).await.unwrap();
+    workspace_upload(
+        State((manager, settings_state)),
+        axum::extract::Query(UploadQuery { pane_id: "p1".into(), dir: "".into(), cwd: None }),
+        multipart,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn workspace_upload_rejects_over_cap_without_orphan() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.clone()));
+    let settings_state =
+        Arc::new(RwLock::new(Settings { upload_file_cap_mb: 1, ..Settings::default() }));
+    let oversized = vec![b'x'; 1024 * 1024 + 1];
+
+    let response = workspace_upload_request(
+        manager,
+        settings_state,
+        vec![("too-big.bin", "too-big.bin", oversized)],
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(!tmp.path().join("too-big.bin").exists());
+}
+
+#[tokio::test]
+async fn workspace_upload_default_cap_zero_admits_large_file() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.clone()));
+    let settings_state =
+        Arc::new(RwLock::new(Settings { upload_file_cap_mb: 0, ..Settings::default() }));
+    let large = vec![b'x'; 1024 * 1024 + 1];
+
+    let response =
+        workspace_upload_request(manager, settings_state, vec![("large.bin", "large.bin", large)])
+            .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(tmp.path().join("large.bin").exists());
+}
+
+#[test]
+fn upload_cap_label_bytes_formats() {
+    assert_eq!(upload_cap_label_bytes(512 * 1024), "512 KB");
+    assert_eq!(upload_cap_label_bytes(1024 * 1024), "1 MB");
+    assert_eq!(upload_cap_label_bytes(2 * 1024 * 1024 * 1024), "2 GB");
 }
 
 #[tokio::test]

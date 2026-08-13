@@ -33,6 +33,7 @@ pub async fn put_settings(
     State(state): State<(Arc<SessionManager>, SettingsState)>,
     Json(mut new_settings): Json<Settings>,
 ) -> impl IntoResponse {
+    let client_settings_version = new_settings.client_settings_version.take();
     let _ = migrate_settings(&mut new_settings);
     new_settings.settings_version = CURRENT_SETTINGS_VERSION;
     let _ = clamp_text_config(&mut new_settings.text);
@@ -47,6 +48,11 @@ pub async fn put_settings(
     // workspace.
     {
         let existing = state.1.read().await;
+        preserve_current_system_settings_on_legacy_put(
+            client_settings_version,
+            &mut new_settings,
+            &existing,
+        );
         new_settings.active_workspace_id = existing.active_workspace_id.clone();
     }
     match save_settings(&new_settings) {
@@ -58,6 +64,20 @@ pub async fn put_settings(
             error!("save settings: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+pub(crate) fn preserve_current_system_settings_on_legacy_put(
+    client_settings_version: Option<u32>,
+    incoming: &mut Settings,
+    existing: &Settings,
+) {
+    if client_settings_version.is_none_or(|version| version < CURRENT_SETTINGS_VERSION)
+        && existing.settings_version >= CURRENT_SETTINGS_VERSION
+    {
+        incoming.system_keyboard.clone_from(&existing.system_keyboard);
+        incoming.system_keyboard_user_default.clone_from(&existing.system_keyboard_user_default);
+        incoming.system_toolbar_mode = existing.system_toolbar_mode;
     }
 }
 

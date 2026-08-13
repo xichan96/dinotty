@@ -45,7 +45,8 @@ pub(crate) use util::{
 // otherwise flag these as unused imports.
 #[cfg(test)]
 pub(crate) use upload::{
-    prepare_upload_base, suffixed_upload_name, upload_io_err, INSUFFICIENT_STORAGE,
+    prepare_upload_base, suffixed_upload_name, upload_cap_label_bytes, upload_io_err,
+    INSUFFICIENT_STORAGE,
 };
 #[cfg(test)]
 pub(crate) use util::{byte_offset_to_column, parse_rg_json, path_must_be_under};

@@ -3,6 +3,8 @@ import type { KeyDef } from '../components/keyboard/mkbTypes'
 import { Bookmark } from 'lucide-vue-next'
 import { t } from '../composables/useI18n'
 import { getAppAction } from './appActionCatalog'
+import { agentIconForLabel } from './agentShortcutIcon'
+import { parseKeyboardSpecial } from './keyboardSpecialKeys'
 
 export function normalizeCaretSend(send: string): string {
   if (send.length !== 2 || send[0] !== '^') return send
@@ -26,8 +28,7 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
 
   if (ak.kind === 'action') {
     const action = ak.action ? getAppAction(ak.action) : undefined
-    const actionOptions =
-      action?.id === 'pasteTerminal' ? { autoEnter: ak.auto_enter ?? true } : {}
+    const actionOptions = action?.id === 'pasteTerminal' ? { autoEnter: ak.auto_enter ?? true } : {}
     const def: KeyDef = action
       ? ak.display === 'text'
         ? { l: ak.label || '', act: action.id, cls, ...actionOptions }
@@ -45,6 +46,7 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
           disabled: true,
         }
     if (ak.grow != null && ak.grow > 0) def.g = ak.grow
+    def.repeat = ak.repeat
     return def
   }
 
@@ -68,11 +70,29 @@ export function actionKeyToKeyDef(ak: ActionKey, opts?: { bottomIdx?: number }):
     }
   }
 
+  const keyboardSpecial = parseKeyboardSpecial(ak.special)
+  if (keyboardSpecial) {
+    const { entry } = keyboardSpecial
+    const def: KeyDef = {
+      l: ak.display === 'text' ? ak.label || entry.label : '',
+      cls,
+      repeat: entry.modifier ? false : ak.repeat,
+      icon: ak.display === 'text' ? undefined : entry.icon,
+      aria: ak.label || entry.label,
+    }
+    if (entry.modifier) def.sp = ak.special
+    else def.s = entry.send
+    if (ak.grow != null && ak.grow > 0) def.g = ak.grow
+    return def
+  }
+
+  const agentIcon = ak.display === 'text' ? undefined : agentIconForLabel(ak.label)
   const def: KeyDef = {
-    l: ak.label || '',
+    l: agentIcon ? '' : ak.label || '',
     cls,
     repeat: ak.repeat,
-    icon: ak.icon as any,
+    icon: agentIcon as any,
+    aria: agentIcon ? ak.label : undefined,
   }
 
   const sp = ak.special && ak.special !== 'space' ? ak.special : undefined

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub const CURRENT_SETTINGS_VERSION: u32 = 7;
+pub const CURRENT_SETTINGS_VERSION: u32 = 12;
 pub(crate) const LEGACY_UPLOAD_DIR: &str = "~/.dinotty/uploads";
 
 #[derive(Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -42,6 +42,27 @@ impl<'de> Deserialize<'de> for KeyboardGuardMode {
             Some("open_only") => Self::OpenOnly,
             Some("both") => Self::Both,
             _ => Self::Off,
+        })
+    }
+}
+
+#[derive(Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemToolbarMode {
+    #[default]
+    FollowIme,
+    PersistentMobile,
+}
+
+impl<'de> Deserialize<'de> for SystemToolbarMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            Some("persistent_mobile") => Self::PersistentMobile,
+            _ => Self::FollowIme,
         })
     }
 }
@@ -75,6 +96,9 @@ pub enum MobileInputMode {
 pub struct Settings {
     #[serde(default)]
     pub settings_version: u32,
+    /// PUT-only schema capability; never echoed or persisted.
+    #[serde(default, skip_serializing)]
+    pub client_settings_version: Option<u32>,
     #[serde(default)]
     pub theme: ThemeConfig,
     #[serde(default)]
@@ -117,6 +141,15 @@ pub struct Settings {
     pub upload_file_cap_mb: u64,
     #[serde(default)]
     pub toolbar_quick_keys: Vec<ActionKey>,
+    // Legacy v8 input retained only so v9 migration can deserialize it.
+    #[serde(default, skip_serializing)]
+    pub system_toolbar_quick_keys: Vec<ActionKey>,
+    #[serde(default)]
+    pub system_keyboard: Option<SystemKeyboardConfig>,
+    #[serde(default)]
+    pub system_keyboard_user_default: Option<SystemKeyboardConfig>,
+    #[serde(default)]
+    pub system_toolbar_mode: SystemToolbarMode,
     #[serde(default)]
     pub keyboard_sound: bool,
     #[serde(default = "default_quick_send_threshold")]
@@ -326,6 +359,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             settings_version: CURRENT_SETTINGS_VERSION,
+            client_settings_version: None,
             theme: ThemeConfig::default(),
             background: BackgroundConfig::default(),
             text: TextConfig::default(),
@@ -337,6 +371,10 @@ impl Default for Settings {
             action_keyboard: None,
             action_keyboard_user_default: None,
             toolbar_quick_keys: vec![],
+            system_toolbar_quick_keys: vec![],
+            system_keyboard: None,
+            system_keyboard_user_default: None,
+            system_toolbar_mode: SystemToolbarMode::default(),
             upload_dir: default_upload_dir(),
             default_base_dir: None,
             default_workspace_root: None,

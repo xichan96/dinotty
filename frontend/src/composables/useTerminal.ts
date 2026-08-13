@@ -523,7 +523,7 @@ export class TerminalInstance {
         }
       }) as EventListener)
     }
-    if (textarea && isTauri()) {
+    if (textarea && (isTauri() || isTouchDevice())) {
       const onImeInput = (e: InputEvent) => {
         if (this._ime229Baseline != null) return
         if (e.inputType !== 'insertText') return
@@ -842,7 +842,8 @@ export class TerminalInstance {
     // also surface the same input through onData; accepting both duplicates it.
     if (this._ime229Baseline != null) return
     const tauri = isTauri()
-    let data = tauri ? stripImeConfirmSpace(rawData) : rawData
+    const rescueImeSymbols = tauri || isTouchDevice()
+    let data = rescueImeSymbols ? stripImeConfirmSpace(rawData) : rawData
     if (!data) return
     const now = performance.now()
     // Gate the WKWebView replay dedup to Tauri only. On web, browsers don't
@@ -853,7 +854,7 @@ export class TerminalInstance {
     if (tauri && isDuplicateOnData(data, this._lastInputData, this._lastInputTime, now)) return
     this._lastInputData = data
     this._lastInputTime = now
-    if (tauri && isShiftSymbolChar(data)) {
+    if (rescueImeSymbols && isShiftSymbolChar(data)) {
       if (!this._resolveSym(data, 1, now)) return
     }
     if (fromIme229 && (data.includes('\x1b') || data.includes('\x7f'))) {

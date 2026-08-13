@@ -278,4 +278,24 @@ describe('useTerminal device text integration', () => {
     expect(input.mock.calls.map(([data]) => data)).toEqual(['!'])
     term.destroy()
   })
+
+  it('rescues a touch-web punctuation input when the IME emits no 229 event', () => {
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea',
+    ) as HTMLTextAreaElement
+
+    textarea.dispatchEvent(
+      new InputEvent('input', { inputType: 'insertText', data: '！', isComposing: false }),
+    )
+    lastXterm().dataHandler!('！')
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['！'])
+    term.destroy()
+  })
 })

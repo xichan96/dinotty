@@ -275,7 +275,11 @@ import {
   systemKeyboardLayoutStatus,
   systemKeyUnits,
 } from '../../utils/systemKeyboardLayout'
-import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
+import {
+  parseKeyboardSpecial,
+  type KeyboardModifierFamily,
+  type KeyboardSpecialId,
+} from '../../utils/keyboardSpecialKeys'
 
 const props = defineProps<{
   visible: boolean
@@ -309,6 +313,9 @@ const historyItems = ref<SuggestionItem[]>([])
 const kbMode = ref<'default' | 'action'>('action')
 const expandedPanel = ref<'termius' | 'shortcuts'>('termius')
 const modifierModes = reactive<MobileTerminalModifiers>(emptyMobileTerminalModifiers())
+const activeModifierSpecial = reactive<Partial<Record<KeyboardModifierFamily, KeyboardSpecialId>>>(
+  {}
+)
 const modState = computed<ModState>(() => ({
   ctrl: mobileTerminalModifierActive(modifierModes.ctrl),
   shift: mobileTerminalModifierActive(modifierModes.shift),
@@ -320,6 +327,7 @@ const modState = computed<ModState>(() => ({
     alt: modifierModes.alt === 'locked',
     meta: modifierModes.meta === 'locked',
   },
+  activeSpecial: activeModifierSpecial,
 }))
 
 const { actionFirstRow, actionFollowingRows, actionBottom, actionBottomRows, actionEnter } =
@@ -525,6 +533,7 @@ function onSpecial(special: string) {
     const family = parsed.entry.modifier
     modifierModes[family] =
       modifierModes[family] === 'off' ? (parsed.behavior === 'lock' ? 'locked' : 'once') : 'off'
+    if (modifierModes[family] !== 'off') activeModifierSpecial[family] = parsed.id
   }
   if (special === 'bookmarks') emit('bookmarks')
   if (special === 'kbswitch') closeActionKeyboard()

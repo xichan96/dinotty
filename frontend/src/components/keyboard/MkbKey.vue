@@ -77,7 +77,9 @@ const isModifier = computed(() => Boolean(parsedSpecial.value?.entry.modifier))
 const isModActive = computed(() => {
   if (!isModifier.value) return false
   const modifier = parsedSpecial.value?.entry.modifier
-  return modifier ? props.state[modifier] : false
+  if (!modifier || !props.state[modifier]) return false
+  const owner = props.state.activeSpecial?.[modifier]
+  return !owner || owner === parsedSpecial.value?.id
 })
 const isModLocked = computed(() => {
   const modifier = parsedSpecial.value?.entry.modifier

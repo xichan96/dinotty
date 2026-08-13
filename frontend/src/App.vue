@@ -4,7 +4,13 @@
   <div v-else-if="!authenticated" class="auth-probe-screen">
     <RefreshCw :size="20" class="auth-probe-spinner" />
   </div>
-  <div v-else id="app-root">
+  <div
+    v-else
+    id="app-root"
+    @mousedown.capture="onAppMouseReplayCapture"
+    @click.capture="onAppMouseReplayCapture"
+    @touchstart.capture="onAppTouchStartCapture"
+  >
     <TabBar
       ref="tabBarRef"
       :tabs="visibleTabList"
@@ -119,7 +125,9 @@
       id="tab-content"
       @mousedown.capture="onTabContentMouseDownCapture"
       @pointerdown.capture="onTabContentPointerDownCapture"
+      @touchstart.capture="onTabContentTouchStartCapture"
       @touchend="onTerminalTouch"
+      @touchcancel.capture="onTabContentTouchCancelCapture"
     >
       <div
         v-for="tab in tabs"
@@ -522,6 +530,12 @@ const previewMenuOpen = ref(false)
 let linkJustActivated = false
 let scrollGestureDetected = false
 let scrollGestureTimer = 0
+const TERMINAL_LONG_PRESS_MS = 500
+const TERMINAL_MOUSE_REPLAY_MS = 500
+let terminalTouchOpenPending = false
+let terminalTouchOpenStartedAt = 0
+let terminalTouchMouseReplayUntil = 0
+let terminalTouchFocusBlockUntil = 0
 // Sticky typing mode: true while the mobile keyboard's text input is focused.
 const kbTyping = ref(false)
 const terminalImeFocused = ref(false)
@@ -1398,6 +1412,15 @@ function onTerminalRunCode(e: Event) {
 }
 
 function onLinkActivate() {
+  if (
+    effectiveMobileInputMode.value === 'system' &&
+    terminalTouchMouseReplayUntil > 0
+  ) {
+    const withinReplayWindow = performance.now() < terminalTouchMouseReplayUntil
+    terminalTouchMouseReplayUntil = 0
+    if (withinReplayWindow) closeSystemIme()
+    return
+  }
   linkJustActivated = true
 }
 
@@ -1430,6 +1453,21 @@ function onOpenSettingsRequest() {
 // default does not cancel the subsequent click.
 function guardTerminalFocusEvent(e: Event) {
   const target = e.target as HTMLElement | null
+  // Rejected touches can still synthesize a mousedown. Stop it before xterm's
+  // bubble listener focuses the helper textarea; normal pointerdown is untouched.
+  if (
+    e.type === 'mousedown' &&
+    isTouchDevice() &&
+    effectiveMobileInputMode.value === 'system' &&
+    !terminalImeFocused.value &&
+    performance.now() < terminalTouchFocusBlockUntil &&
+    target?.closest('.terminal-pane-container') &&
+    !target.closest('input, textarea, select, [contenteditable="true"]')
+  ) {
+    e.preventDefault()
+    e.stopPropagation()
+    return
+  }
   if (
     isTouchDevice() &&
     effectiveMobileInputMode.value === 'system' &&
@@ -1454,10 +1492,57 @@ function onTabContentPointerDownCapture(e: PointerEvent) {
   guardTerminalFocusEvent(e)
 }
 
+function onAppMouseReplayCapture(e: MouseEvent) {
+  if (performance.now() >= terminalTouchMouseReplayUntil) {
+    terminalTouchMouseReplayUntil = 0
+    return
+  }
+  const target = e.target as HTMLElement | null
+  if (!target?.closest('#system-mobile-kb')) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.type === 'click') terminalTouchMouseReplayUntil = 0
+}
+
+function onAppTouchStartCapture(e: TouchEvent) {
+  const target = e.target as HTMLElement | null
+  if (target?.closest('#system-mobile-kb')) terminalTouchMouseReplayUntil = 0
+}
+
+function armTerminalTouchOpen(e: Event) {
+  const target = e.target as HTMLElement | null
+  if (
+    isTouchDevice() &&
+    effectiveMobileInputMode.value === 'system' &&
+    !terminalImeFocused.value &&
+    target?.closest('.terminal-pane-container') &&
+    !target.closest('input, textarea, select, [contenteditable="true"]')
+  ) {
+    terminalTouchFocusBlockUntil = 0
+    terminalTouchOpenPending = true
+    terminalTouchOpenStartedAt = performance.now()
+  }
+}
+
+function onTabContentTouchStartCapture(e: TouchEvent) {
+  armTerminalTouchOpen(e)
+}
+
+function onTabContentTouchCancelCapture() {
+  terminalTouchOpenPending = false
+  terminalTouchFocusBlockUntil = performance.now() + TERMINAL_MOUSE_REPLAY_MS
+}
+
 function onTerminalTouch(e: TouchEvent) {
   if (!isTouchDevice()) return
+  const openPending = terminalTouchOpenPending
+  const endedAt = performance.now()
+  const heldFor = endedAt - terminalTouchOpenStartedAt
+  terminalTouchOpenPending = false
   const target = e.target as HTMLElement
   if (target.closest('.terminal-pane-container')) {
+    if (effectiveMobileInputMode.value === 'system' && openPending)
+      terminalTouchFocusBlockUntil = endedAt + TERMINAL_MOUSE_REPLAY_MS
     // Don't show keyboard when tapping a link (file path or URL)
     if (linkJustActivated) {
       linkJustActivated = false
@@ -1479,7 +1564,18 @@ function onTerminalTouch(e: TouchEvent) {
         effectiveMobileInputMode.value === 'system' ? closeSystemIme() : (kbVisible.value = false)
       return
     }
-    if (!hasOpenGuard(appSettings.keyboard_guard_mode)) requestTerminalKeyboard()
+    if (
+      effectiveMobileInputMode.value === 'system' &&
+      (!openPending || heldFor >= TERMINAL_LONG_PRESS_MS)
+    )
+      return
+    if (!hasOpenGuard(appSettings.keyboard_guard_mode)) {
+      if (effectiveMobileInputMode.value === 'system') {
+        terminalTouchFocusBlockUntil = 0
+        terminalTouchMouseReplayUntil = endedAt + TERMINAL_MOUSE_REPLAY_MS
+      }
+      requestTerminalKeyboard()
+    }
   }
 }
 
@@ -1971,7 +2067,9 @@ function onDocumentFocusIn(event: FocusEvent) {
     if (
       isTouchDevice() &&
       effectiveMobileInputMode.value === 'system' &&
-      hasOpenGuard(appSettings.keyboard_guard_mode) &&
+      (hasOpenGuard(appSettings.keyboard_guard_mode) ||
+        terminalTouchOpenPending ||
+        performance.now() < terminalTouchFocusBlockUntil) &&
       !terminalImeFocused.value
     ) {
       target.blur()

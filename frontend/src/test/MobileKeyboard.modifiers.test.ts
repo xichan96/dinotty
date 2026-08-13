@@ -96,4 +96,38 @@ describe('MobileKeyboard modifier buttons', () => {
     await shiftHold.trigger('mousedown')
     expect(shiftHold.classes()).not.toContain('mkb-active')
   })
+
+  it('highlights the chosen Cmd/Win alias without activating its sibling', async () => {
+    settings.action_keyboard = {
+      rows: [
+        [
+          { label: 'Cmd', kind: 'send', special: 'cmd:lock', display: 'text' },
+          { label: 'Win', kind: 'send', special: 'win:lock', display: 'text' },
+        ],
+      ],
+      bottom: { rows: [], enter: { label: 'Enter', kind: 'send', send: '\r' } },
+    }
+    wrapper = mount(MobileKeyboard, {
+      props: { visible: true, paneId: 'p1', getSendFn: () => vi.fn() },
+      global: {
+        stubs: {
+          SuggestionBar: true,
+          HistoryPanel: true,
+          FilePickerModal: true,
+        },
+      },
+    })
+    const buttons = wrapper.findAll('#mkb-action-panel .mkb-btn')
+    const cmd = buttons.find((button) => button.text() === 'Cmd')!
+    const win = buttons.find((button) => button.text() === 'Win')!
+
+    await cmd.trigger('mousedown')
+    expect(cmd.classes()).toContain('mkb-active')
+    expect(win.classes()).not.toContain('mkb-active')
+
+    await cmd.trigger('mousedown')
+    await win.trigger('mousedown')
+    expect(cmd.classes()).not.toContain('mkb-active')
+    expect(win.classes()).toContain('mkb-active')
+  })
 })

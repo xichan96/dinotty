@@ -97,6 +97,30 @@ describe('App.vue - system keyboard dismissal', () => {
 })
 
 describe('App.vue - system keyboard state regressions', () => {
+  async function mountUnguardedTouchTerminal() {
+    mocks.touchDevice = true
+    settings.mobile_input_mode = 'system'
+    settings.system_toolbar_mode = 'persistent_mobile'
+    settings.keyboard_guard_mode = 'off'
+    useIsMobile().isMobile.value = true
+    const wrapper = await mountWithTabs()
+    const activeTerminal = {
+      setOutputListener: vi.fn(),
+      setVirtualModifiers: vi.fn(),
+      getTerminal: vi.fn(() => ({ touchMoved: false })),
+      focus: vi.fn(),
+      blur: vi.fn(),
+    }
+    await wrapper.findComponent(SplitContainerStub).vm.$emit('register', 'pane-1', activeTerminal)
+    const terminalSurface = document.createElement('div')
+    terminalSurface.className = 'terminal-pane-container'
+    const helper = document.createElement('textarea')
+    helper.className = 'xterm-helper-textarea'
+    document.body.appendChild(helper)
+    wrapper.get('#tab-content').element.appendChild(terminalSurface)
+    return { wrapper, activeTerminal, terminalSurface, helper }
+  }
+
   it('guards manual-open focus only on touch input', () => {
     const source = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
     const guard = source.match(
@@ -152,6 +176,116 @@ describe('App.vue - system keyboard state regressions', () => {
     expect(activeTerminal.focus).toHaveBeenCalledOnce()
     expect(toolbar.props('imeOpen')).toBe(true)
     textarea.remove()
+  })
+
+  it('serializes an unguarded terminal touch until touchend', async () => {
+    const { wrapper, activeTerminal, terminalSurface, helper } =
+      await mountUnguardedTouchTerminal()
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    helper.focus()
+    await nextTick()
+    expect(document.activeElement).not.toBe(helper)
+    expect(activeTerminal.focus).not.toHaveBeenCalled()
+
+    const touchEnd = new TouchEvent('touchend', { bubbles: true, cancelable: true })
+    terminalSurface.dispatchEvent(touchEnd)
+    await nextTick()
+    expect(touchEnd.defaultPrevented).toBe(false)
+    expect(activeTerminal.focus).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('imeOpen')).toBe(true)
+    helper.remove()
+  })
+
+  it('keeps rejected terminal gestures from opening the system IME', async () => {
+    const { wrapper, activeTerminal, terminalSurface, helper } =
+      await mountUnguardedTouchTerminal()
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    helper.focus()
+    document.dispatchEvent(new Event('terminal-scroll'))
+    terminalSurface.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(activeTerminal.focus).not.toHaveBeenCalled()
+    expect(document.activeElement).not.toBe(helper)
+    expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('imeOpen')).toBe(false)
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    terminalSurface.dispatchEvent(new TouchEvent('touchcancel', { bubbles: true }))
+    await nextTick()
+    expect(activeTerminal.focus).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('imeOpen')).toBe(false)
+    helper.remove()
+  })
+
+  it('blocks only the compatibility mousedown after a long press', async () => {
+    const { wrapper, activeTerminal, terminalSurface, helper } =
+      await mountUnguardedTouchTerminal()
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100)
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    now.mockReturnValue(600)
+    terminalSurface.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(activeTerminal.focus).not.toHaveBeenCalled()
+
+    const pointerDown = new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
+    terminalSurface.dispatchEvent(pointerDown)
+    expect(pointerDown.defaultPrevented).toBe(false)
+
+    const xtermFocus = vi.fn(() => helper.focus())
+    terminalSurface.addEventListener('mousedown', xtermFocus)
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    terminalSurface.dispatchEvent(mouseDown)
+    await nextTick()
+    expect(xtermFocus).not.toHaveBeenCalled()
+    expect(mouseDown.defaultPrevented).toBe(true)
+    expect(document.activeElement).not.toBe(helper)
+    expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('imeOpen')).toBe(false)
+    helper.remove()
+  })
+
+  it('blocks mouse replay only on the newly shown toolbar', async () => {
+    const { wrapper, terminalSurface, helper } = await mountUnguardedTouchTerminal()
+    const toolbar = document.createElement('div')
+    toolbar.id = 'system-mobile-kb'
+    const toolbarButton = document.createElement('button')
+    toolbar.appendChild(toolbarButton)
+    wrapper.get('#app-root').element.appendChild(toolbar)
+    const onClick = vi.fn()
+    toolbarButton.addEventListener('click', onClick)
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    terminalSurface.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }))
+    await nextTick()
+
+    const replay = new MouseEvent('click', { bubbles: true, cancelable: true })
+    toolbarButton.dispatchEvent(replay)
+    expect(replay.defaultPrevented).toBe(true)
+    expect(onClick).not.toHaveBeenCalled()
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    terminalSurface.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }))
+    toolbarButton.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    const realFollowUp = new MouseEvent('click', { bubbles: true, cancelable: true })
+    toolbarButton.dispatchEvent(realFollowUp)
+    expect(realFollowUp.defaultPrevented).toBe(false)
+    expect(onClick).toHaveBeenCalledOnce()
+    helper.remove()
+  })
+
+  it('does not open the system IME after terminal link activation', async () => {
+    const { wrapper, activeTerminal, terminalSurface, helper } =
+      await mountUnguardedTouchTerminal()
+
+    terminalSurface.dispatchEvent(new TouchEvent('touchstart', { bubbles: true }))
+    await wrapper.findComponent(SplitContainerStub).vm.$emit('link-activate')
+    const touchEnd = new TouchEvent('touchend', { bubbles: true, cancelable: true })
+    terminalSurface.dispatchEvent(touchEnd)
+    await nextTick()
+    expect(activeTerminal.focus).not.toHaveBeenCalled()
+    expect(touchEnd.defaultPrevented).toBe(false)
+    helper.remove()
   })
 
   it('dismisses the toolbar when VisualViewport reports a native keyboard close', async () => {

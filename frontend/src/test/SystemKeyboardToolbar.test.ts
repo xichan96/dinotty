@@ -330,12 +330,46 @@ describe('SystemKeyboardToolbar', () => {
     wrapper.unmount()
   })
 
+  it('highlights only the selected alias for a shared modifier family', async () => {
+    settings.system_keyboard = {
+      upper: [],
+      pages: [
+        [
+          { label: 'Cmd', kind: 'send', special: 'cmd:lock', display: 'text' },
+          { label: 'Win', kind: 'send', special: 'win:lock', display: 'text' },
+          { label: 'Alt', kind: 'send', special: 'alt:lock', display: 'text' },
+          { label: 'Opt', kind: 'send', special: 'opt:lock', display: 'text' },
+        ],
+      ],
+      lower_enabled: true,
+      upper_pinned: 0,
+    }
+    const wrapper = mountToolbar()
+    const [cmd, win, alt, opt] = wrapper.findAll('.system-kb-lower-page .mkb-btn')
+
+    await cmd.trigger('mousedown')
+    expect(cmd.classes()).toContain('mkb-active')
+    expect(win.classes()).not.toContain('mkb-active')
+
+    await cmd.trigger('mousedown')
+    await win.trigger('mousedown')
+    expect(cmd.classes()).not.toContain('mkb-active')
+    expect(win.classes()).toContain('mkb-active')
+
+    await alt.trigger('mousedown')
+    expect(alt.classes()).toContain('mkb-active')
+    expect(opt.classes()).not.toContain('mkb-active')
+    wrapper.unmount()
+  })
+
   it('uses an unsuffixed modifier once and releases it after the next key', async () => {
     settings.system_keyboard = {
       upper: [],
       pages: [
         [
           { label: 'Legacy Ctrl', kind: 'send', special: 'ctrl', display: 'text' },
+          { label: 'Cmd once', kind: 'send', special: 'cmd', display: 'text' },
+          { label: 'Win sibling', kind: 'send', special: 'win', display: 'text' },
           { label: 'c', kind: 'send', send: 'c' },
         ],
       ],
@@ -345,7 +379,7 @@ describe('SystemKeyboardToolbar', () => {
     const send = vi.fn()
     const wrapper = mountToolbar(false, send)
 
-    const [ctrl, c] = wrapper.findAll('.system-kb-lower-page .mkb-btn')
+    const [ctrl, cmd, win, c] = wrapper.findAll('.system-kb-lower-page .mkb-btn')
     await ctrl.trigger('mousedown')
     expect(ctrl.classes()).toContain('mkb-active')
     expect(ctrl.classes()).not.toContain('mkb-locked')
@@ -358,6 +392,13 @@ describe('SystemKeyboardToolbar', () => {
     expect(wrapper.emitted('modifier-change')).toContainEqual([
       { ctrl: 'off', shift: 'off', alt: 'off', meta: 'off' },
     ])
+
+    await cmd.trigger('mousedown')
+    expect(cmd.classes()).toContain('mkb-active')
+    expect(win.classes()).not.toContain('mkb-active')
+    await c.trigger('mousedown')
+    expect(cmd.classes()).not.toContain('mkb-active')
+    expect(win.classes()).not.toContain('mkb-active')
     wrapper.unmount()
   })
 

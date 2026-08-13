@@ -42,6 +42,7 @@ export const localStorageMock = {
 const mocks = vi.hoisted(() => {
   let notificationRequestIdCounter = 0
   return {
+    touchDevice: false,
     closePane: vi.fn<(paneId: string) => Promise<boolean>>(),
     splitPane: vi.fn(),
     insertNonTerminalPane: vi.fn<() => Promise<void>>(async () => {}),
@@ -119,7 +120,7 @@ vi.mock('../../composables/useTerminal', () => ({
   },
   configureAllMobileInputTextareas: () => {},
   isKbTypingLocked: () => false,
-  isTouchDevice: () => false,
+  isTouchDevice: () => mocks.touchDevice,
   setActivePaneId: () => {},
   setKbTypingLock: () => {},
 }))
@@ -499,6 +500,7 @@ afterEach(() => {
   mocks.onSystemKeyboardClose = undefined
   mocks.mintNotificationRequestId.mockClear()
   mocks.resetNotificationRequestIds()
+  mocks.touchDevice = false
   settings.mobile_input_mode = null
 })
 

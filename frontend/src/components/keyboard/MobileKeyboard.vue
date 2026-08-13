@@ -368,8 +368,12 @@ import {
   mobileTerminalModifierActive,
   type MobileTerminalModifiers,
 } from '../../utils/terminalInput'
-import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
-import { resolveResponsiveToastPosition } from '../../utils/toastPosition' 
+import {
+  parseKeyboardSpecial,
+  type KeyboardModifierFamily,
+  type KeyboardSpecialId,
+} from '../../utils/keyboardSpecialKeys'
+import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 
 const props = defineProps<{
   visible: boolean
@@ -457,6 +461,9 @@ const {
 })
 
 const modifierModes = reactive<MobileTerminalModifiers>(emptyMobileTerminalModifiers())
+const activeModifierSpecial = reactive<Partial<Record<KeyboardModifierFamily, KeyboardSpecialId>>>(
+  {}
+)
 const modState = computed<ModState>(() => ({
   ctrl: mobileTerminalModifierActive(modifierModes.ctrl),
   shift: mobileTerminalModifierActive(modifierModes.shift),
@@ -468,6 +475,7 @@ const modState = computed<ModState>(() => ({
     alt: modifierModes.alt === 'locked',
     meta: modifierModes.meta === 'locked',
   },
+  activeSpecial: activeModifierSpecial,
 }))
 
 const {
@@ -641,6 +649,7 @@ function onSpecial(sp: string) {
     const family = parsed.entry.modifier
     modifierModes[family] =
       modifierModes[family] === 'off' ? (parsed.behavior === 'lock' ? 'locked' : 'once') : 'off'
+    if (modifierModes[family] !== 'off') activeModifierSpecial[family] = parsed.id
   }
   if (sp === 'kbswitch') {
     switchMode(kbMode.value === 'action' ? 'default' : 'action')

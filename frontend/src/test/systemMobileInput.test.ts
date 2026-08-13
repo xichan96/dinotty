@@ -3,7 +3,9 @@ import {
   applyAfterTerminalComposition,
   applyMobileTerminalModifiers,
   configureMobileInputTextarea,
+  normalizeTerminalTextareaSelection,
   setKbTypingLock,
+  terminalTextareaEdit,
 } from '../composables/useTerminal'
 
 afterEach(() => {
@@ -50,6 +52,63 @@ describe('system mobile input', () => {
     textarea.dispatchEvent(new CompositionEvent('compositionend'))
     expect(apply).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    [
+      { value: '', selectionStart: 0, selectionEnd: 0 },
+      { value: '()', selectionStart: 1, selectionEnd: 1 },
+      '()\x1b[D',
+      null,
+    ],
+    [
+      { value: '()', selectionStart: 1, selectionEnd: 1 },
+      { value: '())', selectionStart: 2, selectionEnd: 2 },
+      '\x1b[C)',
+      ')',
+    ],
+    [
+      { value: 'abXYcd', selectionStart: 4, selectionEnd: 4 },
+      { value: 'abZcd', selectionStart: 3, selectionEnd: 3 },
+      '\x7f\x7fZ',
+      null,
+    ],
+    [
+      { value: '😀', selectionStart: 2, selectionEnd: 2 },
+      { value: '😀()', selectionStart: 3, selectionEnd: 3 },
+      '()\x1b[D',
+      null,
+    ],
+  ])('derives a caret-aware terminal edit from %j to %j', (before, after, expected, data) => {
+    expect(
+      terminalTextareaEdit(before, normalizeTerminalTextareaSelection(before, after, data))
+    ).toBe(expected)
+  })
+
+  it.each([
+    ['(abc)', '(abc))', 4, 5, ')', '\x1b[C)'],
+    ['[abc]', '[abc]]', 4, 5, ']', '\x1b[C]'],
+    ['（中文）', '（中文））', 3, 4, '）', '\x1b[C）'],
+    ['“中文”', '“中文””', 3, 4, '”', '\x1b[C”'],
+  ])(
+    'places a standalone closer after prior auto-pair content: %s -> %s',
+    (beforeValue, afterValue, beforeCaret, afterCaret, data, expected) => {
+      const before = {
+        value: beforeValue,
+        selectionStart: beforeCaret,
+        selectionEnd: beforeCaret,
+      }
+      expect(
+        terminalTextareaEdit(
+          before,
+          normalizeTerminalTextareaSelection(
+            before,
+            { value: afterValue, selectionStart: afterCaret, selectionEnd: afterCaret },
+            data
+          )
+        )
+      ).toBe(expected)
+    }
+  )
 
   it('keeps a held Ctrl active across multiple combinations until the button releases it', () => {
     const held = { ctrl: 'locked', shift: 'off', alt: 'off', meta: 'off' } as const

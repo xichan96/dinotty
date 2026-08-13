@@ -110,6 +110,75 @@ export const DEDUP_WINDOW_MS = 2
 
 export const IME_SYM_PAIR_MS = 400
 
+export interface TerminalTextareaSnapshot {
+  value: string
+  selectionStart: number
+  selectionEnd: number
+}
+
+function codePointOffset(value: string, utf16Offset: number): number {
+  return Array.from(value.slice(0, Math.max(0, utf16Offset))).length
+}
+
+function moveTerminalCursor(from: number, to: number, applicationCursor: boolean): string {
+  if (from === to) return ''
+  const final = to < from ? 'D' : 'C'
+  return `\x1b${applicationCursor ? 'O' : '['}${final}`.repeat(Math.abs(to - from))
+}
+
+export function normalizeTerminalTextareaSelection(
+  before: TerminalTextareaSnapshot,
+  after: TerminalTextareaSnapshot,
+  inputData: string | null
+): TerminalTextareaSnapshot {
+  if (!inputData || after.selectionStart !== after.selectionEnd) return after
+  const start = after.selectionEnd
+  const end = start + inputData.length
+  return after.value.slice(start, end) === inputData &&
+    after.value.slice(0, start) + after.value.slice(end) === before.value
+    ? { ...after, selectionStart: end, selectionEnd: end }
+    : after
+}
+
+export function terminalTextareaEdit(
+  before: TerminalTextareaSnapshot,
+  after: TerminalTextareaSnapshot,
+  applicationCursor = false
+): string {
+  const cursorBefore = codePointOffset(before.value, before.selectionEnd)
+  const desiredCursor = codePointOffset(after.value, after.selectionEnd)
+  if (before.value === after.value) {
+    return moveTerminalCursor(cursorBefore, desiredCursor, applicationCursor)
+  }
+
+  const oldText = Array.from(before.value)
+  const newText = Array.from(after.value)
+  let prefix = 0
+  while (
+    prefix < oldText.length &&
+    prefix < newText.length &&
+    oldText[prefix] === newText[prefix]
+  ) {
+    prefix++
+  }
+  let suffix = 0
+  while (
+    suffix < oldText.length - prefix &&
+    suffix < newText.length - prefix &&
+    oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]
+  ) {
+    suffix++
+  }
+
+  const oldEditEnd = oldText.length - suffix
+  const inserted = newText.slice(prefix, newText.length - suffix).join('')
+  const cursorAfterEdit = prefix + Array.from(inserted).length
+
+  return `${moveTerminalCursor(cursorBefore, oldEditEnd, applicationCursor)}${'\x7f'.repeat(
+    oldEditEnd - prefix
+  )}${inserted}${moveTerminalCursor(cursorAfterEdit, desiredCursor, applicationCursor)}`
+}
+
 /**
  * Determine whether an incoming onData payload should be dropped because
  * it is a WKWebView multi-focus replay of the previous event. Exported

@@ -5,11 +5,20 @@ import {
   configureMobileInputTextarea,
   normalizeTerminalTextareaSelection,
   setKbTypingLock,
+  setSystemImeAuthorized,
   terminalTextareaEdit,
 } from '../composables/useTerminal'
+import { settings } from '../composables/useSettings'
+
+const originalMaxTouchPoints = Object.getOwnPropertyDescriptor(navigator, 'maxTouchPoints')
 
 afterEach(() => {
   setKbTypingLock(false)
+  setSystemImeAuthorized(false)
+  settings.keyboard_guard_mode = 'off'
+  if (originalMaxTouchPoints)
+    Object.defineProperty(navigator, 'maxTouchPoints', originalMaxTouchPoints)
+  else Reflect.deleteProperty(navigator, 'maxTouchPoints')
   document.body.replaceChildren()
 })
 
@@ -35,6 +44,50 @@ describe('system mobile input', () => {
     configureMobileInputTextarea(textarea, 'system')
 
     expect(textarea.disabled).toBe(true)
+  })
+
+  it.each(['open_only', 'both'] as const)(
+    'keeps terminal focus available while %s suppresses the touch software keyboard',
+    (guardMode) => {
+      Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+      settings.keyboard_guard_mode = guardMode
+      const textarea = document.createElement('textarea')
+
+      configureMobileInputTextarea(textarea, 'system')
+
+      expect(textarea.inputMode).toBe('none')
+      expect(textarea.getAttribute('virtualkeyboardpolicy')).toBe('manual')
+      expect(textarea.disabled).toBe(false)
+
+      setSystemImeAuthorized(true)
+      configureMobileInputTextarea(textarea, 'system')
+      expect(textarea.inputMode).toBe('text')
+      expect(textarea.getAttribute('virtualkeyboardpolicy')).toBe('auto')
+    }
+  )
+
+  it.each(['off', 'collapse_only'] as const)(
+    'keeps touch system input unchanged under %s protection',
+    (guardMode) => {
+      Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+      settings.keyboard_guard_mode = guardMode
+      const textarea = document.createElement('textarea')
+
+      configureMobileInputTextarea(textarea, 'system')
+
+      expect(textarea.inputMode).toBe('text')
+      expect(textarea.getAttribute('virtualkeyboardpolicy')).toBe('auto')
+    }
+  )
+
+  it('does not suppress a non-touch system input under manual-open protection', () => {
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
+    settings.keyboard_guard_mode = 'both'
+    const textarea = document.createElement('textarea')
+
+    configureMobileInputTextarea(textarea, 'system')
+
+    expect(textarea.inputMode).toBe('text')
   })
 
   it('defers a mode application until the active xterm composition ends', () => {

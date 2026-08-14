@@ -61,6 +61,7 @@ const mocks = vi.hoisted(() => {
     apiActivateWorkspace: vi.fn<(id: string) => Promise<void>>(async () => {}),
     apiDeactivateWorkspace: vi.fn<() => Promise<void>>(async () => {}),
     onSystemKeyboardClose: undefined as undefined | (() => void),
+    setSystemImeAuthorized: vi.fn(),
     apiCreateTab: vi.fn(async () => ({
       tab_id: 't-new',
       pane_id: 'p-new',
@@ -123,6 +124,7 @@ vi.mock('../../composables/useTerminal', () => ({
   isTouchDevice: () => mocks.touchDevice,
   setActivePaneId: () => {},
   setKbTypingLock: () => {},
+  setSystemImeAuthorized: (open: boolean) => mocks.setSystemImeAuthorized(open),
 }))
 vi.mock('../../composables/useViewportResize', async () => {
   const { ref } = await vi.importActual<typeof import('vue')>('vue')
@@ -498,6 +500,7 @@ afterEach(() => {
   mocks.apiDeactivateWorkspace.mockReset()
   mocks.apiDeactivateWorkspace.mockResolvedValue(undefined)
   mocks.onSystemKeyboardClose = undefined
+  mocks.setSystemImeAuthorized.mockReset()
   mocks.mintNotificationRequestId.mockClear()
   mocks.resetNotificationRequestIds()
   mocks.touchDevice = false

@@ -1153,7 +1153,11 @@
       </div>
     </CollapsibleSection>
 
-    <CollapsibleSection :title="t('settings.advancedText')" level="group">
+    <CollapsibleSection
+      class="system-keyboard-advanced-gap"
+      :title="t('settings.advancedText')"
+      level="group"
+    >
       <div class="settings-row">
         <label>{{ t('settings.keyboard.quickSendThreshold') }}</label>
         <input
@@ -2154,6 +2158,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.system-keyboard-advanced-gap {
+  margin-top: 16px;
+}
 .system-editor-head {
   margin-top: 14px;
   margin-bottom: 6px;

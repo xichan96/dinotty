@@ -86,6 +86,18 @@ describe('KeyboardTab system IME editor', () => {
     )
   })
 
+  it('separates the system preset actions from the following Advanced section', () => {
+    wrapper = mount(KeyboardTab)
+
+    expect(wrapper.find('.system-keyboard-advanced-gap').exists()).toBe(true)
+
+    const source = readFileSync(
+      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      'utf8'
+    )
+    expect(source).toMatch(/\.system-keyboard-advanced-gap\s*\{[^}]*margin-top:\s*16px;/s)
+  })
+
   it('uses the whole key body as the edit target and marks the fixed IME key by color', async () => {
     wrapper = mount(KeyboardTab)
 

@@ -407,6 +407,7 @@ import {
   configureAllMobileInputTextareas,
   setActivePaneId,
   setKbTypingLock,
+  setSystemImeAuthorized,
 } from './composables/useTerminal'
 import { useI18n } from './composables/useI18n'
 import { keyEventMatchesBinding, useKeybindings } from './composables/useKeybindings'
@@ -875,6 +876,19 @@ watch(
   { immediate: true }
 )
 
+// Manual-open protection controls only the touch software IME. Keep xterm's
+// textarea focusable for hardware input, but expose inputMode=text only after
+// the explicit keyboard action authorizes it. Synchronous updates preserve the
+// browser user-gesture stack required to open mobile keyboards.
+watch(
+  [terminalImeFocused, () => appSettings.keyboard_guard_mode],
+  ([open]) => {
+    setSystemImeAuthorized(open)
+    if (effectiveMobileInputMode.value === 'system') configureAllMobileInputTextareas('system')
+  },
+  { immediate: true, flush: 'sync' }
+)
+
 watch(
   () => appSettings.mobile_input_mode,
   (mode, previousMode) => {
@@ -1216,6 +1230,7 @@ function getActiveTerminalRef() {
 
 function canRestoreSystemInputFocus() {
   return !(
+    isTouchDevice() &&
     effectiveMobileInputMode.value === 'system' &&
     hasOpenGuard(appSettings.keyboard_guard_mode) &&
     !terminalImeFocused.value
@@ -1230,9 +1245,8 @@ function focusSystemInput(authorizeOpen = false) {
     (!authorizeOpen && !canRestoreSystemInputFocus())
   )
     return
-  configureAllMobileInputTextareas('system')
-  setKbTypingLock(false)
   terminalImeFocused.value = true
+  setKbTypingLock(false)
   getActiveTerminalRef()?.focus()
 }
 
@@ -2064,17 +2078,25 @@ function onDocumentFocusIn(event: FocusEvent) {
   const target = event.target as HTMLElement | null
   if (!target) return
   if (target.classList.contains('xterm-helper-textarea')) {
+    // Reject only a touch gesture already classified as scroll/long-press/cancelled.
+    // Manual-open protection uses inputMode=none instead of blur so hardware input
+    // keeps working while the touch software keyboard remains closed.
     if (
       isTouchDevice() &&
       effectiveMobileInputMode.value === 'system' &&
-      (hasOpenGuard(appSettings.keyboard_guard_mode) ||
-        terminalTouchOpenPending ||
-        performance.now() < terminalTouchFocusBlockUntil) &&
+      (terminalTouchOpenPending || performance.now() < terminalTouchFocusBlockUntil) &&
       !terminalImeFocused.value
     ) {
       target.blur()
       return
     }
+    if (
+      isTouchDevice() &&
+      effectiveMobileInputMode.value === 'system' &&
+      hasOpenGuard(appSettings.keyboard_guard_mode) &&
+      !terminalImeFocused.value
+    )
+      return
     terminalImeFocused.value = effectiveMobileInputMode.value === 'system'
     return
   }

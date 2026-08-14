@@ -178,6 +178,38 @@ describe('App.vue - system keyboard state regressions', () => {
     textarea.remove()
   })
 
+  it.each(['open_only', 'both'] as const)(
+    'keeps terminal input focused without authorizing the IME under %s protection',
+    async (guardMode) => {
+      mocks.touchDevice = true
+      settings.mobile_input_mode = 'system'
+      settings.system_toolbar_mode = 'persistent_mobile'
+      settings.keyboard_guard_mode = guardMode
+      useIsMobile().isMobile.value = true
+      const wrapper = await mountWithTabs()
+
+      const helper = document.createElement('textarea')
+      helper.className = 'xterm-helper-textarea'
+      helper.inputMode = 'none'
+      document.body.appendChild(helper)
+      helper.focus()
+      await nextTick()
+
+      expect(document.activeElement).toBe(helper)
+      const toolbar = wrapper.findComponent(SystemKeyboardToolbarStub)
+      expect(toolbar.props('imeOpen')).toBe(false)
+      expect(mocks.setSystemImeAuthorized).toHaveBeenLastCalledWith(false)
+
+      const activeTerminal = { setOutputListener: vi.fn(), focus: vi.fn() }
+      await wrapper.findComponent(SplitContainerStub).vm.$emit('register', 'pane-1', activeTerminal)
+      await toolbar.vm.$emit('toggle-ime')
+      expect(mocks.setSystemImeAuthorized).toHaveBeenLastCalledWith(true)
+      expect(activeTerminal.focus).toHaveBeenCalledOnce()
+      expect(toolbar.props('imeOpen')).toBe(true)
+      helper.remove()
+    }
+  )
+
   it('serializes an unguarded terminal touch until touchend', async () => {
     const { wrapper, activeTerminal, terminalSurface, helper } =
       await mountUnguardedTouchTerminal()

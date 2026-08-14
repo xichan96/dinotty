@@ -38,6 +38,7 @@ import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { createTerminalOverlay } from './useTerminalOverlay'
 import { t } from './useI18n'
+import { hasOpenGuard } from '../utils/keyboardGuardMode'
 
 // Re-export pure helpers so existing callers (App.vue, useTabLifecycle,
 // useSplitPane, tests) don't need to update their import paths.
@@ -79,6 +80,12 @@ function resolveTerminalFontFamily(configuredFamily: string, cssFallback: string
 // fact. The query covers hidden split panes too.
 // Deliberately sweep on every call so late-created or re-enabled helpers are reconciled.
 let _kbTypingLock = false
+let _systemImeAuthorized = false
+
+export function setSystemImeAuthorized(open: boolean) {
+  _systemImeAuthorized = open
+}
+
 export function setKbTypingLock(active: boolean) {
   _kbTypingLock = active
   document.querySelectorAll('.xterm-helper-textarea').forEach((el) => {
@@ -97,7 +104,10 @@ export function configureMobileInputTextarea(
   textarea: HTMLTextAreaElement,
   mode: MobileInputMode | null | undefined = settings.mobile_input_mode
 ) {
-  if (mode === 'system') {
+  const allowSoftwareKeyboard =
+    mode === 'system' &&
+    (!isTouchDevice() || !hasOpenGuard(settings.keyboard_guard_mode) || _systemImeAuthorized)
+  if (allowSoftwareKeyboard) {
     textarea.inputMode = 'text'
     textarea.setAttribute('virtualkeyboardpolicy', 'auto')
     textarea.enterKeyHint = 'enter'

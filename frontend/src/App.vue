@@ -758,6 +758,7 @@ const { isLandscape, dispose: disposeViewport } = useViewportResize({
   activePaneId,
   tabs,
   termRefs,
+  builtinTextareaFocused: kbTyping,
   onSystemKeyboardClose: onSystemKeyboardClosed,
 })
 

@@ -865,7 +865,6 @@ function onViewportChange() {
   if (!window.visualViewport) return
   const vh = window.visualViewport.height
   if (vh > naturalVH) naturalVH = vh
-  const off = window.innerHeight - (window.visualViewport.offsetTop + vh)
   const wasSysKbOpen = sysKbOpen
   sysKbOpen = naturalVH - vh > 120
   if (sysKbOpen && !wasSysKbOpen) sysKbArmed = textInputFocused.value
@@ -876,12 +875,10 @@ function onViewportChange() {
     } else if (sysKbOpen && textInputFocused.value) {
       // System keyboard open with our input focused: show bar, hide panels via v-show
       barRef.value.style.display = ''
-      barRef.value.style.bottom = `${Math.max(0, off)}px`
     } else if (sysKbOpen) {
       barRef.value.style.display = 'none'
     } else {
       barRef.value.style.display = ''
-      barRef.value.style.bottom = `${Math.max(0, off)}px`
     }
   }
   if (textInputFocused.value) resizeTextInput()

@@ -4,7 +4,7 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--sys-kb-height, 0px);
   z-index: 500;
   background: var(--bg-surface);
   border-top: 1px solid var(--border);

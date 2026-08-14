@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { defineComponent, h, ref } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useViewportResize, type ViewportResizeState } from '../composables/useViewportResize'
 import type { Tab } from '../types/pane'
+import { isIPhoneClient } from '../utils/clientPlatform'
 
 class FakeVisualViewport extends EventTarget {
   height = 800
@@ -17,6 +20,8 @@ describe('useViewportResize system keyboard lifecycle', () => {
   let originalInnerHeight: PropertyDescriptor | undefined
   let originalInnerWidth: PropertyDescriptor | undefined
   let originalVisibilityState: PropertyDescriptor | undefined
+  let originalUserAgent: PropertyDescriptor | undefined
+  let builtinTextareaFocused = ref(false)
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -26,6 +31,8 @@ describe('useViewportResize system keyboard lifecycle', () => {
     originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight')
     originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
     originalVisibilityState = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    originalUserAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent')
+    builtinTextareaFocused = ref(false)
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
       value: viewport,
@@ -43,6 +50,7 @@ describe('useViewportResize system keyboard lifecycle', () => {
     restoreProperty(window, 'innerHeight', originalInnerHeight)
     restoreProperty(window, 'innerWidth', originalInnerWidth)
     restoreProperty(document, 'visibilityState', originalVisibilityState)
+    restoreProperty(navigator, 'userAgent', originalUserAgent)
     vi.useRealTimers()
   })
 
@@ -52,7 +60,7 @@ describe('useViewportResize system keyboard lifecycle', () => {
   }
 
   function restoreProperty(
-    target: Window | Document,
+    target: Window | Document | Navigator,
     key: string,
     descriptor: PropertyDescriptor | undefined
   ) {
@@ -69,6 +77,7 @@ describe('useViewportResize system keyboard lifecycle', () => {
           tabs: ref<Tab[]>([]),
           termRefs: {},
           terminalImeFocused: ref(true),
+          builtinTextareaFocused,
           onSystemKeyboardClose,
         })
         return () => h('div')
@@ -76,6 +85,36 @@ describe('useViewportResize system keyboard lifecycle', () => {
     })
     wrapper = mount(Host)
     return onSystemKeyboardClose
+  }
+
+  function mountViewportWithTerminal() {
+    const fit = vi.fn()
+    const terminalTab = {
+      type: 'terminal',
+      paneId: 'tab-1',
+      activePaneId: 'pane-1',
+      layout: {
+        type: 'leaf',
+        kind: 'terminal',
+        paneId: 'pane-1',
+        title: 'Terminal',
+      },
+    } as Tab
+    const Host = defineComponent({
+      setup() {
+        state = useViewportResize({
+          kbVisible: ref(true),
+          activePaneId: ref('tab-1'),
+          tabs: ref<Tab[]>([terminalTab]),
+          termRefs: { 'pane-1': { fit } },
+          terminalImeFocused: ref(false),
+          builtinTextareaFocused,
+        })
+        return () => h('div')
+      },
+    })
+    wrapper = mount(Host)
+    return fit
   }
 
   function openKeyboard(height = 500) {
@@ -178,5 +217,140 @@ describe('useViewportResize system keyboard lifecycle', () => {
     window.dispatchEvent(new Event('focus'))
 
     expect(onSystemKeyboardClose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the published keyboard inset stable across a transient visual-viewport pan', () => {
+    mountViewport()
+    viewport.height = 500
+    viewport.offsetTop = 0
+    state.onViewportResize()
+    expect(state.systemKeyboardHeight.value).toBe(300)
+
+    viewport.offsetTop = 35
+    state.onViewportResize()
+
+    expect(state.systemKeyboardHeight.value).toBe(300)
+    expect(document.documentElement.style.getPropertyValue('--sys-kb-height')).toBe('300px')
+  })
+
+  it('releases an iPhone builtin-input pan on the first safe paint', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
+    })
+    builtinTextareaFocused.value = true
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    let nextPaint: FrameRequestCallback | undefined
+    const requestFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        nextPaint = callback
+        return 1
+      })
+    mountViewport()
+    openKeyboard()
+    viewport.offsetTop = 35
+    expect(isIPhoneClient()).toBe(true)
+    expect(builtinTextareaFocused.value).toBe(true)
+    expect(state.systemKeyboardOpen.value).toBe(true)
+
+    state.onViewportResize()
+    expect(nextPaint).toBeTypeOf('function')
+    nextPaint?.(16)
+
+    expect(scrollTo).toHaveBeenCalledOnce()
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+    requestFrame.mockRestore()
+    scrollTo.mockRestore()
+  })
+
+  it('does not release a pan owned by an unrelated native input', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
+    })
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    mountViewport()
+    openKeyboard()
+    viewport.offsetTop = 35
+
+    state.onViewportResize()
+    await vi.runOnlyPendingTimersAsync()
+
+    expect(scrollTo).not.toHaveBeenCalled()
+    scrollTo.mockRestore()
+  })
+
+  it('caps pan releases per open episode and rearms after keyboard close', () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
+    })
+    builtinTextareaFocused.value = true
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    const paints: FrameRequestCallback[] = []
+    const requestFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback) => {
+        paints.push(callback)
+        return paints.length
+      })
+    mountViewport()
+    openKeyboard()
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      viewport.offsetTop = 35
+      state.onViewportResize()
+      paints.shift()?.(attempt * 16)
+    }
+    expect(scrollTo).toHaveBeenCalledTimes(3)
+
+    viewport.offsetTop = 0
+    viewport.height = 800
+    state.onViewportResize()
+    viewport.height = 500
+    state.onViewportResize()
+    viewport.offsetTop = 35
+    state.onViewportResize()
+    paints.shift()?.(80)
+
+    expect(scrollTo).toHaveBeenCalledTimes(4)
+    requestFrame.mockRestore()
+    scrollTo.mockRestore()
+  })
+
+  it('leaves iPhone terminal refits to the ResizeObserver during IME opening', async () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
+    })
+    const fit = mountViewportWithTerminal()
+    viewport.height = 500
+
+    state.onViewportResize()
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(fit).not.toHaveBeenCalled()
+  })
+
+  it('retains the existing viewport refit on non-iPhone clients', async () => {
+    const fit = mountViewportWithTerminal()
+    viewport.height = 500
+
+    state.onViewportResize()
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(fit).toHaveBeenCalledOnce()
+  })
+
+  it('gives the shared inset sole ownership of focused builtin-keyboard positioning', () => {
+    const css = readFileSync(join(process.cwd(), 'src/styles/mobile-keyboard.css'), 'utf8')
+    const component = readFileSync(
+      join(process.cwd(), 'src/components/keyboard/MobileKeyboard.vue'),
+      'utf8'
+    )
+
+    expect(css).toMatch(/#mobile-kb\s*\{[^}]*bottom:\s*var\(--sys-kb-height,\s*0px\)/s)
+    expect(component).not.toContain('barRef.value.style.bottom =')
   })
 })

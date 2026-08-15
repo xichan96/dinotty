@@ -158,6 +158,10 @@ export class TerminalInstance {
   private _ime229Baseline: TerminalTextareaSnapshot | null = null
   private _ime229InputData: string | null = null
   private _ime229Timer: ReturnType<typeof setTimeout> | null = null
+  // The same textarea snapshot/diff owner handles keyCode 229 and mobile
+  // dictation tail replacements, but their event lifecycles must not overlap.
+  private _ime229Owner: 'key' | 'tail-replacement' | null = null
+  private _imeTailReplacement: { data: string; value: string; sawRaw: boolean } | null = null
   // IME composition state. Tracked via compositionstart/compositionend on the
   // xterm textarea so focusActive() can avoid .focus()/.blur()/.fit() during
   // composition - those calls interrupt the IME session and cause xterm's
@@ -328,7 +332,11 @@ export class TerminalInstance {
         !this._composing &&
         (e.keyCode === 229 || e.key === 'Process')
       const ownsTextarea229 =
-        isTextarea229 || (acceptsTextarea229 && this._ime229Baseline != null && e.type === 'keyup')
+        isTextarea229 ||
+        (acceptsTextarea229 &&
+          this._ime229Owner === 'key' &&
+          this._ime229Baseline != null &&
+          e.type === 'keyup')
       if (ownsTextarea229) {
         if (e.type === 'keydown' && !this._composing) this._startIme229()
         else if (e.type === 'keyup') this._flushIme229(false)
@@ -507,6 +515,29 @@ export class TerminalInstance {
       let _trackedTextareaValue = ''
       textarea.addEventListener('input', ((e: Event) => {
         const ie = e as InputEvent
+        const tailReplacement = this._imeTailReplacement
+        if (tailReplacement) {
+          const matches =
+            !ie.isComposing &&
+            ie.inputType === 'insertText' &&
+            ie.data === tailReplacement.data &&
+            textarea.value === tailReplacement.value
+          this._imeTailReplacement = null
+          if (tailReplacement.sawRaw && matches) {
+            this._ime229InputData = ie.data
+            this._armIme229Fallback()
+            return
+          }
+          if (tailReplacement.sawRaw) {
+            // The DOM is the authoritative result. Reconcile from the original
+            // chain baseline so a later prediction mismatch cannot discard the
+            // earlier raw candidates that were already suppressed.
+            this._ime229InputData = ie.data
+            this._flushIme229(true)
+            return
+          }
+          this._clearIme229()
+        }
         if (this._ime229Baseline != null && !ie.isComposing) {
           this._ime229InputData = ie.data
           this._armIme229Fallback()
@@ -517,6 +548,42 @@ export class TerminalInstance {
       }) as EventListener)
       textarea.addEventListener('beforeinput', ((e: Event) => {
         const ie = e as InputEvent
+        // iOS dictation revises its current hypothesis by selecting a textarea
+        // tail and emitting the whole replacement as insertText. xterm treats
+        // that data as a fresh append, so arm our existing snapshot/diff path
+        // before xterm's input listener sees it. All unmatched events continue
+        // through the existing replacement-text handling below.
+        if (
+          isTouchDevice() &&
+          !isTauri() &&
+          settings.mobile_input_mode === 'system' &&
+          !this._composing &&
+          !ie.isComposing &&
+          !this.xterm?.options.screenReaderMode &&
+          ie.inputType === 'insertText' &&
+          typeof ie.data === 'string' &&
+          ie.data
+        ) {
+          const start = textarea.selectionStart
+          const end = textarea.selectionEnd
+          if (
+            start != null &&
+            end != null &&
+            start !== end &&
+            end === textarea.value.length &&
+            this._ime229Owner !== 'key'
+          ) {
+            if (this._ime229Baseline == null) this._startIme229('tail-replacement')
+            if (this._ime229Owner === 'tail-replacement') {
+              this._imeTailReplacement = {
+                data: ie.data,
+                value: `${textarea.value.slice(0, start)}${ie.data}`,
+                sawRaw: false,
+              }
+              return
+            }
+          }
+        }
         if (this._composing) return
         // Only intercept insertReplacementText (macOS text replacement);
         // insertText is normal typing and must not send backspaces.
@@ -774,8 +841,9 @@ export class TerminalInstance {
     }
   }
 
-  private _startIme229() {
+  private _startIme229(owner: 'key' | 'tail-replacement' = 'key') {
     if (!this._inputTextarea || this._ime229Baseline != null) return
+    this._ime229Owner = owner
     this._ime229Baseline = {
       value: this._inputTextarea.value,
       selectionStart: this._inputTextarea.selectionStart,
@@ -826,6 +894,8 @@ export class TerminalInstance {
     this._ime229Timer = null
     this._ime229Baseline = null
     this._ime229InputData = null
+    this._ime229Owner = null
+    this._imeTailReplacement = null
   }
 
   private _resolveSym(data: string, src: 0 | 1, now: number): boolean {
@@ -846,6 +916,16 @@ export class TerminalInstance {
     // key-replay dedup below must not eat them.
     if (this._wheel?.isBypassActive()) {
       this._emitInput(rawData)
+      return
+    }
+    const tailReplacement = this._imeTailReplacement
+    if (
+      !fromIme229 &&
+      this._ime229Owner === 'tail-replacement' &&
+      tailReplacement &&
+      rawData === tailReplacement.data
+    ) {
+      tailReplacement.sawRaw = true
       return
     }
     // The non-composition 229 cycle owns the final textarea diff. xterm can

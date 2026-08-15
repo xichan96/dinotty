@@ -95,6 +95,39 @@ function lastXterm() {
   return mocks.instances[mocks.instances.length - 1]
 }
 
+function dispatchTextareaInsert(
+  textarea: HTMLTextAreaElement,
+  before: string,
+  selectionStart: number,
+  data: string,
+  after: string,
+  emitRaw = true
+) {
+  textarea.value = before
+  textarea.setSelectionRange(selectionStart, before.length)
+  textarea.dispatchEvent(
+    new InputEvent('beforeinput', {
+      bubbles: true,
+      composed: true,
+      data,
+      inputType: 'insertText',
+      isComposing: false,
+    })
+  )
+  textarea.value = after
+  textarea.setSelectionRange(after.length, after.length)
+  if (emitRaw) lastXterm().dataHandler!(data)
+  textarea.dispatchEvent(
+    new InputEvent('input', {
+      bubbles: true,
+      composed: true,
+      data,
+      inputType: 'insertText',
+      isComposing: false,
+    })
+  )
+}
+
 describe('useTerminal device text integration', () => {
   beforeEach(() => {
     mocks.instances.length = 0
@@ -296,6 +329,173 @@ describe('useTerminal device text integration', () => {
     lastXterm().dataHandler!('！')
 
     expect(input.mock.calls.map(([data]) => data)).toEqual(['！'])
+    term.destroy()
+  })
+
+  it('reconciles iOS dictation tail replacements instead of appending interim transcripts', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '', 0, '我', '我')
+    dispatchTextareaInsert(textarea, '我', 0, '我说一句', '我说一句')
+    dispatchTextareaInsert(textarea, '我说一句', 0, '我说一句话', '我说一句话')
+    dispatchTextareaInsert(
+      textarea,
+      '我说一句话',
+      0,
+      '我说一句话，你来理解我',
+      '我说一句话，你来理解我'
+    )
+    dispatchTextareaInsert(
+      textarea,
+      '我说一句话，你来理解我',
+      0,
+      '我说一句话，你来理解我的意思',
+      '我说一句话，你来理解我的意思'
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['我', '说一句话，你来理解我的意思'])
+
+    dispatchTextareaInsert(
+      textarea,
+      '我说一句话，你来理解我的意思',
+      12,
+      '意图',
+      '我说一句话，你来理解我的意图'
+    )
+    await vi.advanceTimersByTimeAsync(80)
+    expect(input.mock.calls.map(([data]) => data)).toEqual([
+      '我',
+      '说一句话，你来理解我的意思',
+      '\x7f图',
+    ])
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it('reconciles the full observed dictation chain when a later DOM edit does not match', () => {
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '', 0, '我', '我')
+    dispatchTextareaInsert(textarea, '我', 0, '我说一句', '我说一句')
+    dispatchTextareaInsert(textarea, '我说一句', 0, '我说一句话', '我说一句呢')
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['我', '说一句呢'])
+    expect((term as any)._ime229Baseline).toBeNull()
+    term.destroy()
+  })
+
+  it('does not let an unrelated keyup flush a dictation-owned snapshot', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '', 0, '我', '我')
+    dispatchTextareaInsert(textarea, '我', 0, '我说一句', '我说一句')
+    expect(lastXterm().keyHandler!(new KeyboardEvent('keyup', { key: 'Shift' }))).toBe(true)
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['我'])
+
+    await vi.advanceTimersByTimeAsync(80)
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['我', '说一句'])
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it('does not synthesize a dictation edit unless xterm emitted the matching raw input', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '旧候选', 0, '新候选', '新候选', false)
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input).not.toHaveBeenCalled()
+    expect((term as any)._ime229Baseline).toBeNull()
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it.each([
+    ['builtin input', 'builtin', false, false],
+    ['screen reader mode', 'system', true, false],
+    ['Tauri touch input', 'system', false, true],
+  ] as const)(
+    'leaves dictation-like tail input on xterm in %s',
+    (_case, mode, screenReaderMode, tauri) => {
+      mocks.isTauri.mockReturnValue(tauri)
+      Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+      settings.mobile_input_mode = mode
+      const term = attach('p1')
+      const input = vi.fn()
+      term.onInput = input
+      term.xterm!.options.screenReaderMode = screenReaderMode
+      const textarea = (term as any)._wrapper.querySelector(
+        '.xterm-helper-textarea'
+      ) as HTMLTextAreaElement
+
+      dispatchTextareaInsert(textarea, '旧候选', 0, '新候选', '新候选')
+
+      expect(input.mock.calls.map(([data]) => data)).toEqual(['新候选'])
+      expect((term as any)._ime229Baseline).toBeNull()
+      term.destroy()
+    }
+  )
+
+  it('preserves the desktop replacement-text workaround on Tauri touch input', () => {
+    mocks.isTauri.mockReturnValue(true)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const sendData = vi.spyOn(term, 'sendData')
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+    textarea.value = 'ni'
+    textarea.dispatchEvent(
+      new InputEvent('input', { inputType: 'insertText', data: 'ni', isComposing: false })
+    )
+
+    textarea.dispatchEvent(
+      new InputEvent('beforeinput', {
+        inputType: 'insertReplacementText',
+        data: '你',
+        isComposing: false,
+      })
+    )
+
+    expect(sendData).toHaveBeenCalledOnce()
+    expect(sendData).toHaveBeenCalledWith('\x7f\x7f')
     term.destroy()
   })
 })

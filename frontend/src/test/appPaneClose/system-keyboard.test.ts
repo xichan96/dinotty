@@ -312,6 +312,36 @@ describe('App.vue - system keyboard state regressions', () => {
   })
 
   it.each(['open_only', 'both'] as const)(
+    'keeps touch Web terminal selection events native under %s protection',
+    async (guardMode) => {
+      mocks.touchDevice = true
+      settings.mobile_input_mode = 'system'
+      settings.system_toolbar_mode = 'persistent_mobile'
+      settings.keyboard_guard_mode = guardMode
+      useIsMobile().isMobile.value = true
+      const wrapper = await mountWithTabs()
+      const terminalSurface = document.createElement('div')
+      terminalSurface.className = 'terminal-pane-container'
+      const terminalScreen = document.createElement('div')
+      terminalScreen.className = 'xterm-screen'
+      terminalSurface.appendChild(terminalScreen)
+      wrapper.get('#tab-content').element.appendChild(terminalSurface)
+
+      const pointerDown = new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
+      terminalScreen.dispatchEvent(pointerDown)
+      const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      terminalScreen.dispatchEvent(mouseDown)
+
+      expect(pointerDown.defaultPrevented).toBe(false)
+      expect(mouseDown.defaultPrevented).toBe(false)
+      expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('ctx').nativeImeOpen.value).toBe(
+        false
+      )
+      expect(mocks.setSystemImeAuthorized).not.toHaveBeenCalledWith(true)
+    }
+  )
+
+  it.each(['open_only', 'both'] as const)(
     'keeps terminal input focused without authorizing the IME under %s protection',
     async (guardMode) => {
       mocks.touchDevice = true

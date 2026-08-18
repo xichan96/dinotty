@@ -1599,17 +1599,9 @@ function guardTerminalFocusEvent(e: Event) {
     e.stopPropagation()
     return
   }
-  if (
-    isTouchDevice() &&
-    effectiveMobileInputMode.value === 'system' &&
-    !terminalImeFocused.value &&
-    hasOpenGuard(appSettings.keyboard_guard_mode) &&
-    target?.closest('.terminal-pane-container') &&
-    !target.closest('input, textarea, select, [contenteditable="true"]')
-  ) {
-    e.preventDefault()
-    return
-  }
+  // Manual-open protection belongs to the xterm helper textarea's
+  // inputMode / virtualkeyboardpolicy. Cancelling terminal pointer defaults
+  // here would also cancel the browser selection anchor.
   if (!isKbTypingLocked()) return
   if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
   e.preventDefault()

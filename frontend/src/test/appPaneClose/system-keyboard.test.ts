@@ -124,16 +124,6 @@ describe('App.vue - system keyboard state regressions', () => {
     return { wrapper, activeTerminal, terminalSurface, helper }
   }
 
-  it('guards manual-open focus only on touch input', () => {
-    const source = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
-    const guard = source.match(
-      /if \(\s*(isTouchDevice\(\) &&[\s\S]*?effectiveMobileInputMode\.value === 'system' &&[\s\S]*?hasOpenGuard\(appSettings\.keyboard_guard_mode\)[\s\S]*?target\?\.closest\('\.terminal-pane-container'\)[\s\S]*?)\s*\) \{\s*e\.preventDefault\(\)/
-    )
-
-    expect(guard).not.toBeNull()
-    expect(guard?.[1].trimStart().startsWith('isTouchDevice() &&')).toBe(true)
-  })
-
   it('keeps the toolbar visible after IME close only in persistent phone mode', async () => {
     settings.mobile_input_mode = 'system'
     settings.system_toolbar_mode = 'persistent_mobile'

@@ -211,6 +211,14 @@
       @cancel="confirmCancel"
     />
 
+    <AlertModal
+      :visible="alertState.visible"
+      :title="alertState.title"
+      :message="alertState.message"
+      :confirm-text="alertState.confirmText"
+      @confirm="alertResolve"
+    />
+
     <PromptModal
       :visible="promptState.visible"
       :title="promptState.title"
@@ -373,9 +381,11 @@ import KbDebugOverlay from './components/keyboard/KbDebugOverlay.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
+import AlertModal from './components/ui/AlertModal.vue'
 import WindowCloseDialog from './components/ui/WindowCloseDialog.vue'
 import TrayVisibilityDialog from './components/ui/TrayVisibilityDialog.vue'
 import { confirmState, uiConfirm, confirmResolve, confirmCancel } from './composables/useConfirm'
+import { alertState, alertResolve } from './composables/useAlert'
 import PromptModal from './components/ui/PromptModal.vue'
 import MultiSelectPicker from './components/ui/MultiSelectPicker.vue'
 import SaveTemplateDialog from './components/ui/SaveTemplateDialog.vue'

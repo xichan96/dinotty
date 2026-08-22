@@ -247,6 +247,8 @@ import {
   Square,
   Save,
   LayoutTemplate,
+  ClipboardCopy,
+  Copy,
 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
@@ -258,10 +260,14 @@ import WorkspaceBadge from '../WorkspaceBadge.vue'
 import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 import { useTabDrag } from '../../composables/useTabDrag'
+import { copyToClipboard } from '../../utils/clipboard'
+import { useToast } from 'vue-toastification'
+import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 
 const { t } = useI18n()
 const { getBinding, formatBinding } = useKeybindings()
 const settingsStore = useSettingsStore()
+const toast = useToast()
 const kbdNewTab = formatBinding(getBinding('newTab')).join('')
 const kbdSplitH = formatBinding(getBinding('splitHorizontal')).join('')
 const kbdSplitV = formatBinding(getBinding('splitVertical')).join('')
@@ -274,6 +280,10 @@ export interface TabInfo {
   index: number
   type: 'terminal' | 'plugin'
   shellType?: string // "ssh" for SSH tabs
+  /** True when the tab has exactly one pane (tab_id === pane_id ambiguous). */
+  singlePane?: boolean
+  /** Pane id when `singlePane`, so users can copy either tab id or pane id. */
+  singlePaneId?: string
   workspace?: {
     id: string
     abbr?: string
@@ -551,6 +561,28 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
       disabled: tab.type !== 'terminal',
       action: () => emit('save-as-template', tab.paneId),
     },
+    {
+      label: t('overview.copyTabId'),
+      icon: ClipboardCopy,
+      action: () => {
+        void copyToClipboard(tab.paneId)
+        toast.success(t('overview.tabIdCopied'), { position: resolveResponsiveToastPosition() })
+      },
+    },
+    ...(tab.singlePane && tab.singlePaneId
+      ? [
+          {
+            label: t('overview.copyPaneId'),
+            icon: Copy,
+            action: () => {
+              void copyToClipboard(tab.singlePaneId!)
+              toast.success(t('overview.paneIdCopied'), {
+                position: resolveResponsiveToastPosition(),
+              })
+            },
+          },
+        ]
+      : []),
     {
       label: t('overview.closeTab'),
       icon: Square,

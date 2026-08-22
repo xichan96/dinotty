@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   getApiBase: vi.fn(async () => 'http://127.0.0.1:7681'),
   apiUrl: vi.fn((p: string) => p),
   uiConfirm: vi.fn(async () => true),
-  alert: vi.fn(),
+  uiAlert: vi.fn(),
 }))
 
 vi.mock('../composables/apiBase', () => ({
@@ -30,6 +30,10 @@ vi.mock('../composables/useConfirm', () => ({
   uiConfirm: mocks.uiConfirm,
 }))
 
+vi.mock('../composables/useAlert', () => ({
+  uiAlert: mocks.uiAlert,
+}))
+
 import { useFileOperations } from '../composables/useFileOperations'
 
 const t = (key: string, params?: Record<string, string | number>) => {
@@ -40,6 +44,8 @@ const t = (key: string, params?: Record<string, string | number>) => {
     'fileOps.uploadCancel': 'Cancel',
     'fileOps.uploadRejected': 'Upload rejected: {detail}',
     'fileOps.uploadTooLargeDetail': 'a file exceeds the size limit of {size}',
+    'fileOps.uploadFailedTitle': 'Upload failed',
+    'fileOps.downloadFailedTitle': 'Download failed',
   }
   let msg = table[key] ?? key
   if (params) {
@@ -81,8 +87,7 @@ beforeEach(() => {
   })
   mocks.uiConfirm.mockReset()
   mocks.uiConfirm.mockResolvedValue(true)
-  mocks.alert.mockReset()
-  vi.spyOn(window, 'alert').mockImplementation(mocks.alert)
+  mocks.uiAlert.mockReset()
 })
 
 describe('useFileOperations upload size limit', () => {
@@ -120,8 +125,8 @@ describe('useFileOperations upload size limit', () => {
 
     await ops.uploadFiles(makeFiles())
 
-    expect(mocks.alert).toHaveBeenCalledTimes(1)
-    expect(mocks.alert.mock.calls[0][0]).toBe(
+    expect(mocks.uiAlert).toHaveBeenCalledTimes(1)
+    expect(mocks.uiAlert.mock.calls[0][0]).toBe(
       "Upload rejected: file 'big.bin' exceeds upload size limit of 1 MB"
     )
   })
@@ -135,6 +140,6 @@ describe('useFileOperations upload size limit', () => {
 
     await ops.uploadFiles(makeFiles())
 
-    expect(mocks.alert.mock.calls[0][0]).toBe('Upload failed:\nwrite small.txt: disk error')
+    expect(mocks.uiAlert.mock.calls[0][0]).toBe('Upload failed:\nwrite small.txt: disk error')
   })
 })

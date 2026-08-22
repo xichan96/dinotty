@@ -12,7 +12,7 @@
           <span class="tcm-label">{{ t('terminal.ctxOpenLink') }}</span>
         </button>
         <div v-if="linkType" class="tcm-sep" />
-        <button class="tcm-item" role="menuitem" @click="onCopy" :disabled="!canCopy">
+        <button class="tcm-item" role="menuitem" :disabled="!canCopy" @click="onCopy">
           <Copy :size="12" class="tcm-icon" />
           <span class="tcm-label">{{ t('terminal.ctxCopy') }}</span>
           <span class="tcm-hint">{{ isMac ? '⌘C' : 'Ctrl+C' }}</span>
@@ -23,7 +23,7 @@
           <span class="tcm-hint">{{ isMac ? '⌘V' : 'Ctrl+V' }}</span>
         </button>
         <div class="tcm-sep" />
-        <button class="tcm-item" role="menuitem" @click="onBookmark" :disabled="!hasSelection">
+        <button class="tcm-item" role="menuitem" :disabled="!hasSelection" @click="onBookmark">
           <Bookmark :size="12" class="tcm-icon" />
           <span class="tcm-label">{{ t('terminal.ctxBookmark') }}</span>
           <span class="tcm-hint">{{ isMac ? '⌘⇧B' : 'Ctrl+Shift+B' }}</span>
@@ -56,6 +56,11 @@
             <span class="tcm-label">{{ t('terminal.ctxNewLocalTerminal') }}</span>
           </button>
         </template>
+        <div class="tcm-sep" />
+        <button class="tcm-item" role="menuitem" @click="onCopyPaneId">
+          <ClipboardCopy :size="12" class="tcm-icon" />
+          <span class="tcm-label">{{ t('terminal.ctxCopyPaneId') }}</span>
+        </button>
       </div>
     </div>
 
@@ -96,8 +101,8 @@
           </button>
           <button
             class="tcm-btn tcm-btn-primary"
-            @click="saveBookmark"
             :disabled="!bookmarkCommand.trim()"
+            @click="saveBookmark"
           >
             {{ t('terminal.ctxSave') }}
           </button>
@@ -111,6 +116,7 @@
 import { ref, computed, nextTick } from 'vue'
 import {
   Copy,
+  ClipboardCopy,
   ClipboardPaste,
   Bookmark,
   TextSelect,
@@ -126,6 +132,8 @@ import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 import { copyToClipboard } from '../../utils/clipboard'
 import { randomId } from '../../utils/id'
+import { useToast } from 'vue-toastification'
+import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 
 const props = defineProps<{
   visible: boolean
@@ -134,6 +142,7 @@ const props = defineProps<{
   selectedText: string
   linkType?: 'file' | 'link'
   linkTarget?: string
+  paneId: string
   isSsh?: boolean
 }>()
 
@@ -155,6 +164,7 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
 const { t } = useI18n()
 const { settings, saveSettings } = useSettings()
 const { getBinding, formatBinding } = useKeybindings()
+const toast = useToast()
 
 function shortcutHint(id: string): string {
   return formatBinding(getBinding(id)).join('')
@@ -171,7 +181,7 @@ const canCopy = computed(() => hasSelection.value || !!props.linkTarget)
 
 const menuStyle = computed(() => {
   const MENU_WIDTH = 200
-  const BASE_HEIGHT = 290
+  const BASE_HEIGHT = 335
   const LINK_ITEM_HEIGHT = 36
   const SSH_ITEM_HEIGHT = 36 + 9 // button + separator
   const SEP_HEIGHT = 9
@@ -198,6 +208,12 @@ function onCopy() {
   if (!text) return
   copyToClipboard(text)
   emit('copy')
+  close()
+}
+
+function onCopyPaneId() {
+  void copyToClipboard(props.paneId)
+  toast.success(t('overview.paneIdCopied'), { position: resolveResponsiveToastPosition() })
   close()
 }
 

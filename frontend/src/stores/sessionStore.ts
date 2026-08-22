@@ -51,6 +51,9 @@ export const useSessionStore = defineStore('session', () => {
           t.type === 'terminal' ? findLeaf(t.layout, t.activePaneId)?.shell_type : undefined,
       }
       if (t.type === 'terminal') {
+        const leaves = getAllLeaves(t.layout)
+        info.singlePane = leaves.length === 1
+        info.singlePaneId = leaves.length === 1 ? leaves[0].paneId : undefined
         const ws =
           matchWorkspace(t.cwd ?? '', t.connectionId, t.workspaceId) ?? defaultWorkspace.value
         info.workspace = visibleWorkspaceBadge(ws)

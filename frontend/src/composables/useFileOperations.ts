@@ -1,6 +1,7 @@
 import { ref, computed, type Ref } from 'vue'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
 import { uiConfirm } from './useConfirm'
+import { uiAlert } from './useAlert'
 import { isTauri, tauriInvoke } from './useTransport'
 import { settings } from './useSettings'
 import type { DirEntry } from '../components/workspace/TreeRows'
@@ -133,17 +134,15 @@ export function useFileOperations(opts: {
     }
     const alertUploadError = (status: number, body: string) => {
       const detail = parseUploadBody(body).error
-      if (status === 413 && detail) {
-        alert(opts.t('fileOps.uploadRejected', { detail }))
-      } else if (status === 413) {
-        alert(
-          opts.t('fileOps.uploadRejected', {
-            detail: opts.t('fileOps.uploadTooLargeDetail', { size: formatBytes(capBytes) }),
-          })
-        )
-      } else {
-        alert(`Upload failed: HTTP ${status}\n${body}`)
-      }
+      const message =
+        status === 413 && detail
+          ? opts.t('fileOps.uploadRejected', { detail })
+          : status === 413
+            ? opts.t('fileOps.uploadRejected', {
+                detail: opts.t('fileOps.uploadTooLargeDetail', { size: formatBytes(capBytes) }),
+              })
+            : `Upload failed: HTTP ${status}\n${body}`
+      void uiAlert(message, { title: opts.t('fileOps.uploadFailedTitle') })
     }
     await getApiBase()
     const dir =
@@ -178,7 +177,9 @@ export function useFileOperations(opts: {
           const parsed = parseUploadBody(resp.body)
           if (parsed.errors?.length) {
             console.error('[upload] server errors:', parsed.errors)
-            alert(`Upload failed:\n${parsed.errors.join('\n')}`)
+            void uiAlert(`Upload failed:\n${parsed.errors.join('\n')}`, {
+              title: opts.t('fileOps.uploadFailedTitle'),
+            })
             hadErrors = true
           }
         }
@@ -203,14 +204,16 @@ export function useFileOperations(opts: {
           const parsed = (await res.json().catch(() => null)) as ParsedUploadBody | null
           if (parsed?.errors?.length) {
             console.error('[upload] server errors:', parsed.errors)
-            alert(`Upload failed:\n${parsed.errors.join('\n')}`)
+            void uiAlert(`Upload failed:\n${parsed.errors.join('\n')}`, {
+              title: opts.t('fileOps.uploadFailedTitle'),
+            })
             hadErrors = true
           }
         }
       }
     } catch (e) {
       console.error('[upload] request failed:', e)
-      alert(`Upload failed: ${e}`)
+      void uiAlert(`Upload failed: ${e}`, { title: opts.t('fileOps.uploadFailedTitle') })
       hadErrors = true
     }
     if (hadErrors) return
@@ -313,7 +316,7 @@ export function useFileOperations(opts: {
         await tauriInvoke('tauri_download', { url, filename: name, headers })
       } catch (e) {
         console.error('[download] tauri_download failed:', url, e)
-        alert(`Download failed: ${e}`)
+        void uiAlert(`Download failed: ${e}`, { title: opts.t('fileOps.downloadFailedTitle') })
       }
       return
     }
@@ -321,7 +324,9 @@ export function useFileOperations(opts: {
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       console.error('[download] server error:', res.status, url, body)
-      alert(`Download failed: HTTP ${res.status}\n${body}`)
+      void uiAlert(`Download failed: HTTP ${res.status}\n${body}`, {
+        title: opts.t('fileOps.downloadFailedTitle'),
+      })
       return
     }
     const blob = await res.blob()

@@ -1,127 +1,120 @@
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="cw-backdrop" @click.self="$emit('close')">
-      <div class="cw-modal">
-        <div class="cw-header">
-          <span class="cw-title">{{ dialogTitle }}</span>
-          <button class="cw-close" @click="$emit('close')">&times;</button>
-        </div>
-        <div class="cw-body">
-          <!-- Mode toggle (only when creating) -->
-          <template v-if="!isEdit">
-            <div class="cw-mode-toggle">
-              <button
-                :class="['cw-mode-btn', { active: mode === 'local' }]"
-                @click="mode = 'local'"
-              >
-                {{ t('workspace.modeLocal') }}
-              </button>
-              <button
-                :class="['cw-mode-btn', { active: mode === 'remote' }]"
-                @click="mode = 'remote'"
-              >
-                {{ t('workspace.modeRemote') }}
-              </button>
-            </div>
-          </template>
-
-          <!-- SSH connection selector (remote mode) -->
-          <template v-if="mode === 'remote' && !isDefaultWorkspace">
-            <label class="cw-label">{{ t('workspace.connection') }}</label>
-            <select v-model="selectedConnectionId" class="cw-input cw-select">
-              <option value="" disabled>{{ t('workspace.connectionNone') }}</option>
-              <option v-for="profile in sshProfiles" :key="profile.id" :value="profile.id">
-                {{ profile.name || profile.username + '@' + profile.host }}
-              </option>
-            </select>
-
-            <label class="cw-label">{{ t('workspace.remotePath') }}</label>
-            <input
-              v-model="remotePath"
-              class="cw-input"
-              placeholder="/home/user/project"
-              @keydown.enter="onSubmit"
-            />
-          </template>
-
-          <!-- Local path (local mode or edit) -->
-          <template v-if="mode === 'local'">
-            <label class="cw-label">{{ t('workspace.path') }}</label>
-            <div class="cw-path-row">
-              <input
-                ref="pathInput"
-                v-model="path"
-                class="cw-input"
-                :disabled="isEdit && !isDefaultWorkspace"
-                placeholder="/Users/me/projects/my-app"
-                @keydown.enter="onSubmit"
-              />
-              <button v-if="!isEdit || isDefaultWorkspace" class="cw-browse-btn" @click="toggleBrowser">
-                <FolderOpen :size="14" />
-              </button>
-            </div>
-          </template>
-
-          <label class="cw-label">{{ t('workspace.name') }} <span class="cw-optional">({{ t('workspace.path').toLowerCase() }})</span></label>
-          <input
-            v-model="name"
-            class="cw-input"
-            :placeholder="t('workspace.name')"
-            @keydown.enter="onSubmit"
-          />
-
-          <label class="cw-label"
-            >{{ t('workspace.abbr') }}
-            <span class="cw-optional">{{ t('workspace.abbrHint') }}</span></label
-          >
-          <input
-            v-model="abbr"
-            class="cw-input"
-            :placeholder="monogramPlaceholder"
-            maxlength="3"
-            @keydown.enter="onSubmit"
-          />
-
-          <label class="cw-label">{{ t('workspace.color') }}</label>
-          <div class="cw-color-row">
-            <button
-              v-for="preset in WORKSPACE_COLORS"
-              :key="preset"
-              type="button"
-              :class="['cw-color-swatch', { selected: color === preset }]"
-              :style="{ backgroundColor: preset }"
-              :aria-label="preset"
-              @click="color = preset"
-            />
-            <input
-              v-model="color"
-              class="cw-input cw-color-input"
-              placeholder="#RRGGBB"
-              maxlength="7"
-              @keydown.enter="onSubmit"
-            />
-            <button type="button" class="cw-default-btn" @click="color = ''">
-              {{ t('workspace.colorDefault') }}
-            </button>
-          </div>
-          <label v-if="isDefaultWorkspace" class="cw-checkbox-row">
-            <input v-model="allowTabBadge" type="checkbox" />
-            <span>
-              <span class="cw-checkbox-label">{{ t('workspace.allowTabBadge') }}</span>
-              <span class="cw-checkbox-hint">{{ t('workspace.allowTabBadgeHint') }}</span>
-            </span>
-          </label>
-          <p v-if="error" class="cw-error">{{ error }}</p>
-        </div>
-        <div class="cw-footer">
-          <button class="cw-btn cancel" @click="$emit('close')">{{ t('confirm.closeWindowCancel') }}</button>
-          <button class="cw-btn primary" :disabled="!canSubmit" @click="onSubmit">
-            {{ isEdit ? t('settings.token.save') : t('workspace.add') }}
+  <BaseDialog :visible="visible" :title="dialogTitle" size="sm" @close="$emit('close')">
+    <div class="cw-body">
+      <!-- Mode toggle (only when creating) -->
+      <template v-if="!isEdit">
+        <div class="cw-mode-toggle">
+          <button :class="['cw-mode-btn', { active: mode === 'local' }]" @click="mode = 'local'">
+            {{ t('workspace.modeLocal') }}
+          </button>
+          <button :class="['cw-mode-btn', { active: mode === 'remote' }]" @click="mode = 'remote'">
+            {{ t('workspace.modeRemote') }}
           </button>
         </div>
-      </div>
-    </div>
+      </template>
 
+      <!-- SSH connection selector (remote mode) -->
+      <template v-if="mode === 'remote' && !isDefaultWorkspace">
+        <label class="cw-label">{{ t('workspace.connection') }}</label>
+        <select v-model="selectedConnectionId" class="cw-input cw-select">
+          <option value="" disabled>{{ t('workspace.connectionNone') }}</option>
+          <option v-for="profile in sshProfiles" :key="profile.id" :value="profile.id">
+            {{ profile.name || profile.username + '@' + profile.host }}
+          </option>
+        </select>
+
+        <label class="cw-label">{{ t('workspace.remotePath') }}</label>
+        <input
+          v-model="remotePath"
+          class="cw-input"
+          placeholder="/home/user/project"
+          @keydown.enter="onSubmit"
+        />
+      </template>
+
+      <!-- Local path (local mode or edit) -->
+      <template v-if="mode === 'local'">
+        <label class="cw-label">{{ t('workspace.path') }}</label>
+        <div class="cw-path-row">
+          <input
+            ref="pathInput"
+            v-model="path"
+            class="cw-input"
+            :disabled="isEdit && !isDefaultWorkspace"
+            placeholder="/Users/me/projects/my-app"
+            @keydown.enter="onSubmit"
+          />
+          <button v-if="!isEdit || isDefaultWorkspace" class="cw-browse-btn" @click="toggleBrowser">
+            <FolderOpen :size="14" />
+          </button>
+        </div>
+      </template>
+
+      <label class="cw-label"
+        >{{ t('workspace.name') }}
+        <span class="cw-optional">({{ t('workspace.path').toLowerCase() }})</span></label
+      >
+      <input
+        v-model="name"
+        class="cw-input"
+        :placeholder="t('workspace.name')"
+        @keydown.enter="onSubmit"
+      />
+
+      <label class="cw-label"
+        >{{ t('workspace.abbr') }}
+        <span class="cw-optional">{{ t('workspace.abbrHint') }}</span></label
+      >
+      <input
+        v-model="abbr"
+        class="cw-input"
+        :placeholder="monogramPlaceholder"
+        maxlength="3"
+        @keydown.enter="onSubmit"
+      />
+
+      <label class="cw-label">{{ t('workspace.color') }}</label>
+      <div class="cw-color-row">
+        <button
+          v-for="preset in WORKSPACE_COLORS"
+          :key="preset"
+          type="button"
+          :class="['cw-color-swatch', { selected: color === preset }]"
+          :style="{ backgroundColor: preset }"
+          :aria-label="preset"
+          @click="color = preset"
+        />
+        <input
+          v-model="color"
+          class="cw-input cw-color-input"
+          placeholder="#RRGGBB"
+          maxlength="7"
+          @keydown.enter="onSubmit"
+        />
+        <button type="button" class="cw-default-btn" @click="color = ''">
+          {{ t('workspace.colorDefault') }}
+        </button>
+      </div>
+      <label v-if="isDefaultWorkspace" class="cw-checkbox-row">
+        <input v-model="allowTabBadge" type="checkbox" />
+        <span>
+          <span class="cw-checkbox-label">{{ t('workspace.allowTabBadge') }}</span>
+          <span class="cw-checkbox-hint">{{ t('workspace.allowTabBadgeHint') }}</span>
+        </span>
+      </label>
+      <p v-if="error" class="cw-error">{{ error }}</p>
+    </div>
+    <template #footer>
+      <button class="dialog-btn" @click="$emit('close')">
+        {{ t('confirm.closeWindowCancel') }}
+      </button>
+      <button class="dialog-btn dialog-btn--primary" :disabled="!canSubmit" @click="onSubmit">
+        {{ isEdit ? t('settings.token.save') : t('workspace.add') }}
+      </button>
+    </template>
+  </BaseDialog>
+
+  <Teleport to="body">
     <FilePickerModal
       v-if="!isEdit || isDefaultWorkspace"
       :visible="showPicker"
@@ -148,6 +141,7 @@ import { isTauri, tauriInvoke } from '../../composables/useTransport'
 import type { Workspace } from '../../types/workspace'
 import { autoMonogram, WORKSPACE_COLORS } from '../../utils/workspaceIcon'
 import FilePickerModal from '../preview/FilePickerModal.vue'
+import BaseDialog from './BaseDialog.vue'
 
 const { t } = useI18n()
 const { createWorkspace, updateWorkspace } = useWorkspaces()
@@ -184,10 +178,9 @@ const error = ref('')
 const pathInput = ref<HTMLInputElement | null>(null)
 const showPicker = ref(false)
 const monogramPlaceholder = computed(() => autoMonogram(name.value || ''))
-const pickerRoot = computed(() =>
-  (isDefaultWorkspace.value ? path.value.trim() : '')
-  || settings.default_base_dir?.trim()
-  || '/'
+const pickerRoot = computed(
+  () =>
+    (isDefaultWorkspace.value ? path.value.trim() : '') || settings.default_base_dir?.trim() || '/'
 )
 
 const canSubmit = computed(() => {
@@ -203,16 +196,16 @@ watch(
     if (v) {
       if (props.workspace) {
         path.value = isDefaultWorkspace.value
-          ? settings.default_workspace_root ?? ''
+          ? (settings.default_workspace_root ?? '')
           : props.workspace.path
         name.value = isDefaultWorkspace.value
-          ? settings.default_workspace_name ?? ''
+          ? (settings.default_workspace_name ?? '')
           : props.workspace.name
         abbr.value = isDefaultWorkspace.value
-          ? settings.default_workspace_abbr ?? ''
-          : props.workspace.abbr ?? ''
+          ? (settings.default_workspace_abbr ?? '')
+          : (props.workspace.abbr ?? '')
         color.value = isDefaultWorkspace.value
-          ? settings.default_workspace_color ?? undefined
+          ? (settings.default_workspace_color ?? undefined)
           : props.workspace.color
         allowTabBadge.value = isDefaultWorkspace.value
           ? settings.default_workspace_tab_badge !== false
@@ -233,13 +226,15 @@ watch(
       error.value = ''
       nextTick(() => pathInput.value?.focus())
     }
-  },
+  }
 )
 
 async function toggleBrowser() {
   if (isTauri()) {
     try {
-      const selected = await tauriInvoke('pick_workspace_dir', { base: pickerRoot.value }) as string | null
+      const selected = (await tauriInvoke('pick_workspace_dir', { base: pickerRoot.value })) as
+        | string
+        | null
       if (selected) onPickerSelect(selected)
     } catch (e: any) {
       error.value = e?.message || 'Failed'
@@ -327,53 +322,7 @@ async function onSubmit() {
 </script>
 
 <style scoped>
-.cw-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.cw-modal {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  width: 90vw;
-  max-width: 400px;
-  overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-.cw-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 0;
-}
-.cw-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-bright);
-}
-.cw-close {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  color: var(--fg-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.cw-close:hover {
-  background: var(--bg-hover);
-}
 .cw-body {
-  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -489,7 +438,7 @@ async function onSubmit() {
 }
 .cw-error {
   font-size: 12px;
-  color: var(--color-red, #ef4444);
+  color: var(--color-red);
   margin: 2px 0 0;
 }
 .cw-mode-toggle {
@@ -508,11 +457,13 @@ async function onSubmit() {
   color: var(--fg-muted);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .cw-mode-btn.active {
-  background: var(--accent, #007acc);
-  color: #fff;
+  background: var(--accent);
+  color: var(--fg-inverse);
 }
 .cw-mode-btn:not(.active):hover {
   background: var(--bg-hover);
@@ -520,35 +471,5 @@ async function onSubmit() {
 .cw-select {
   appearance: auto;
   cursor: pointer;
-}
-.cw-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px 14px;
-}
-.cw-btn {
-  padding: 6px 16px;
-  border-radius: 5px;
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-  color: var(--fg-muted);
-  background: none;
-}
-.cw-btn.cancel:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-.cw-btn.primary {
-  background: var(--accent);
-  color: #fff;
-}
-.cw-btn.primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.cw-btn.primary:hover:not(:disabled) {
-  opacity: 0.9;
 }
 </style>

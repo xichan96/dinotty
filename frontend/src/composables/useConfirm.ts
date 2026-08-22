@@ -4,6 +4,7 @@ type ConfirmOptions = {
   title?: string
   confirmText?: string
   cancelText?: string
+  danger?: boolean
 }
 
 export const confirmState = reactive<{
@@ -12,6 +13,7 @@ export const confirmState = reactive<{
   message: string
   confirmText: string
   cancelText: string
+  danger: boolean
   resolve: ((ok: boolean) => void) | null
 }>({
   visible: false,
@@ -19,6 +21,7 @@ export const confirmState = reactive<{
   message: '',
   confirmText: 'OK',
   cancelText: 'Cancel',
+  danger: true,
   resolve: null,
 })
 
@@ -36,6 +39,7 @@ export function uiConfirm(message: string, opts: ConfirmOptions = {}): Promise<b
   confirmState.message = message
   confirmState.confirmText = opts.confirmText ?? 'OK'
   confirmState.cancelText = opts.cancelText ?? 'Cancel'
+  confirmState.danger = opts.danger ?? true
   confirmState.visible = true
 
   return new Promise<boolean>((resolve) => {

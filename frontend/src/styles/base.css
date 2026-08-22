@@ -74,6 +74,12 @@
   --scrollbar-thumb: #4a4a4a;
   --scrollbar-thumb-hover: #5a5a5a;
 
+  /* Dialogs */
+  --z-dialog: 2100;
+  --dialog-backdrop: rgba(0, 0, 0, 0.5);
+  --dialog-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --fg-inverse: #ffffff;
+
   /* Misc */
   --radius: 4px;
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;

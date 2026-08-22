@@ -1,63 +1,65 @@
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="ms-backdrop" @mousedown.self="onCancel">
-      <div class="ms-modal">
-        <div class="ms-header">
-          <span class="ms-title">{{ title }}</span>
-          <span class="ms-count">{{ selectedCountLabel }}</span>
-        </div>
-        <div class="ms-input-wrap">
-          <Search :size="14" />
-          <input
-            ref="inputRef"
-            v-model="query"
-            type="text"
-            class="ms-input"
-            :placeholder="t('palette.search')"
-            autocomplete="off"
-            spellcheck="false"
-            @keydown="onInputKey"
-          />
-        </div>
-        <div class="ms-list">
-          <div v-if="filtered.length === 0" class="ms-empty">{{ t('multiSelect.empty') }}</div>
-          <div
-            v-for="(item, i) in filtered"
-            :key="item.id"
-            class="ms-item"
-            :class="{ selected: i === cursor, checked: selectedSet.has(item.id), disabled: overMax(item.id) }"
-            @mousedown.prevent="toggle(item, i)"
-            @mouseenter="cursor = i"
-          >
-            <span class="ms-check" :class="{ checked: selectedSet.has(item.id) }">
-              <Check v-if="selectedSet.has(item.id)" :size="12" />
-            </span>
-            <div class="ms-item-body">
-              <div class="ms-item-label">{{ item.label }}</div>
-              <div v-if="item.detail" class="ms-item-detail">{{ item.detail }}</div>
-            </div>
-          </div>
-        </div>
-        <div class="ms-footer">
-          <span v-if="overMaxWarning" class="ms-warn">{{ overMaxWarning }}</span>
-          <div class="ms-actions">
-            <button class="ms-btn cancel" @click="onCancel">{{ t('multiSelect.cancel') }}</button>
-            <button
-              class="ms-btn primary"
-              :disabled="selectedSet.size === 0 || !!overMaxWarning"
-              @click="onConfirm"
-            >{{ t('multiSelect.confirm') }}</button>
-          </div>
+  <BaseDialog :visible="visible" :title="title" width="560px" @close="onCancel">
+    <template #header-extra>
+      <span class="ms-count">{{ selectedCountLabel }}</span>
+    </template>
+
+    <div class="ms-input-wrap">
+      <Search :size="14" />
+      <input
+        ref="inputRef"
+        v-model="query"
+        type="text"
+        class="ms-input"
+        :placeholder="t('palette.search')"
+        autocomplete="off"
+        spellcheck="false"
+        @keydown="onInputKey"
+      />
+    </div>
+    <div class="ms-list">
+      <div v-if="filtered.length === 0" class="ms-empty">{{ t('multiSelect.empty') }}</div>
+      <div
+        v-for="(item, i) in filtered"
+        :key="item.id"
+        class="ms-item"
+        :class="{
+          selected: i === cursor,
+          checked: selectedSet.has(item.id),
+          disabled: overMax(item.id),
+        }"
+        @mousedown.prevent="toggle(item, i)"
+        @mouseenter="cursor = i"
+      >
+        <span class="ms-check" :class="{ checked: selectedSet.has(item.id) }">
+          <Check v-if="selectedSet.has(item.id)" :size="12" />
+        </span>
+        <div class="ms-item-body">
+          <div class="ms-item-label">{{ item.label }}</div>
+          <div v-if="item.detail" class="ms-item-detail">{{ item.detail }}</div>
         </div>
       </div>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <span v-if="overMaxWarning" class="ms-warn">{{ overMaxWarning }}</span>
+      <button class="dialog-btn" @click="onCancel">{{ t('multiSelect.cancel') }}</button>
+      <button
+        class="dialog-btn dialog-btn--primary"
+        :disabled="selectedSet.size === 0 || !!overMaxWarning"
+        @click="onConfirm"
+      >
+        {{ t('multiSelect.confirm') }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { Search, Check } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
+import BaseDialog from './BaseDialog.vue'
 
 interface PickerItem {
   id: string
@@ -90,8 +92,7 @@ const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return props.items
   return props.items.filter(
-    (it) =>
-      it.label.toLowerCase().includes(q) || (it.detail?.toLowerCase().includes(q) ?? false)
+    (it) => it.label.toLowerCase().includes(q) || (it.detail?.toLowerCase().includes(q) ?? false)
   )
 })
 
@@ -135,11 +136,6 @@ function toggle(item: PickerItem, index: number) {
 
 function onInputKey(e: KeyboardEvent) {
   if (e.isComposing) return
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    onCancel()
-    return
-  }
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     cursor.value = Math.min(cursor.value + 1, filtered.value.length - 1)
@@ -173,44 +169,6 @@ function onCancel() {
 </script>
 
 <style scoped>
-.ms-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 2100;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: calc(15vh + env(safe-area-inset-top, 0px));
-}
-
-.ms-modal {
-  width: 560px;
-  max-height: 480px;
-  background: var(--palette-bg);
-  border: 1px solid var(--palette-border);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  backdrop-filter: blur(8px);
-}
-
-.ms-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px 10px;
-  border-bottom: 1px solid var(--palette-border);
-}
-
-.ms-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-bright);
-}
-
 .ms-count {
   font-size: 11px;
   color: var(--fg-muted);
@@ -220,8 +178,9 @@ function onCancel() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--palette-border);
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
 }
 
 .ms-input-wrap svg {
@@ -245,6 +204,7 @@ function onCancel() {
 
 .ms-list {
   flex: 1;
+  min-height: 120px;
   overflow-y: auto;
   padding: 4px 0;
   scrollbar-width: thin;
@@ -255,16 +215,16 @@ function onCancel() {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 14px;
+  padding: 6px 8px;
   cursor: pointer;
-  border-radius: 4px;
-  margin: 1px 4px;
+  border-radius: var(--radius);
+  margin: 1px 2px;
   transition: background 0.1s;
 }
 
 .ms-item:hover,
 .ms-item.selected {
-  background: var(--palette-select);
+  background: var(--bg-hover);
 }
 
 .ms-item.disabled {
@@ -321,54 +281,9 @@ function onCancel() {
   font-size: 13px;
 }
 
-.ms-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--palette-border);
-}
-
 .ms-warn {
   font-size: 11px;
   color: var(--color-yellow);
-}
-
-.ms-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.ms-btn {
-  padding: 5px 14px;
-  border-radius: var(--radius);
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  background: none;
-  color: var(--fg-muted);
-  transition: background 0.15s, color 0.15s;
-}
-
-.ms-btn.cancel:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-
-.ms-btn.primary {
-  color: var(--fg-bright);
-  border-color: var(--border);
-}
-
-.ms-btn.primary:hover:not(:disabled) {
-  background: var(--palette-select);
-  border-color: var(--border-hover);
-}
-
-.ms-btn.primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  margin-right: auto;
 }
 </style>

@@ -1,0 +1,73 @@
+/* Shared dialog button + message styles (global, used via BaseDialog slots) */
+.dialog-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--fg-muted);
+  background: none;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.dialog-btn:hover,
+.dialog-btn.focused {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.dialog-btn.focused {
+  outline: 1px solid var(--fg-muted);
+  outline-offset: -1px;
+}
+
+.dialog-btn.dialog-btn--primary {
+  background: var(--accent);
+  color: var(--fg-inverse);
+}
+
+.dialog-btn.dialog-btn--primary:hover,
+.dialog-btn.dialog-btn--primary.focused {
+  background: var(--accent-hover);
+  color: var(--fg-inverse);
+}
+
+.dialog-btn.dialog-btn--primary.focused {
+  outline-color: var(--fg-inverse);
+}
+
+.dialog-btn.dialog-btn--primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dialog-btn.dialog-btn--danger {
+  background: var(--color-red);
+  color: var(--fg-inverse);
+}
+
+.dialog-btn.dialog-btn--danger:hover,
+.dialog-btn.dialog-btn--danger.focused {
+  background: var(--color-red);
+  color: var(--fg-inverse);
+  opacity: 0.9;
+}
+
+.dialog-btn.dialog-btn--danger.focused {
+  outline-color: var(--color-red);
+}
+
+.dialog-btn.dialog-btn--danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dialog-message {
+  font-size: 13px;
+  color: var(--fg);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}

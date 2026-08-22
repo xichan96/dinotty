@@ -206,6 +206,7 @@
       :message="confirmState.message"
       :confirm-text="confirmState.confirmText"
       :cancel-text="confirmState.cancelText"
+      :danger="confirmState.danger"
       @confirm="confirmResolve"
       @cancel="confirmCancel"
     />

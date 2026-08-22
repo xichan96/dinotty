@@ -124,16 +124,6 @@ describe('App.vue - system keyboard state regressions', () => {
     return { wrapper, activeTerminal, terminalSurface, helper }
   }
 
-  it('guards manual-open focus only on touch input', () => {
-    const source = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
-    const guard = source.match(
-      /if \(\s*(isTouchDevice\(\) &&[\s\S]*?effectiveMobileInputMode\.value === 'system' &&[\s\S]*?hasOpenGuard\(appSettings\.keyboard_guard_mode\)[\s\S]*?target\?\.closest\('\.terminal-pane-container'\)[\s\S]*?)\s*\) \{\s*e\.preventDefault\(\)/
-    )
-
-    expect(guard).not.toBeNull()
-    expect(guard?.[1].trimStart().startsWith('isTouchDevice() &&')).toBe(true)
-  })
-
   it('keeps the toolbar visible after IME close only in persistent phone mode', async () => {
     settings.mobile_input_mode = 'system'
     settings.system_toolbar_mode = 'persistent_mobile'
@@ -310,6 +300,36 @@ describe('App.vue - system keyboard state regressions', () => {
     expect(toolbar.props('ctx').nativeImeOpen.value).toBe(true)
     textarea.remove()
   })
+
+  it.each(['open_only', 'both'] as const)(
+    'keeps touch Web terminal selection events native under %s protection',
+    async (guardMode) => {
+      mocks.touchDevice = true
+      settings.mobile_input_mode = 'system'
+      settings.system_toolbar_mode = 'persistent_mobile'
+      settings.keyboard_guard_mode = guardMode
+      useIsMobile().isMobile.value = true
+      const wrapper = await mountWithTabs()
+      const terminalSurface = document.createElement('div')
+      terminalSurface.className = 'terminal-pane-container'
+      const terminalScreen = document.createElement('div')
+      terminalScreen.className = 'xterm-screen'
+      terminalSurface.appendChild(terminalScreen)
+      wrapper.get('#tab-content').element.appendChild(terminalSurface)
+
+      const pointerDown = new PointerEvent('pointerdown', { bubbles: true, cancelable: true })
+      terminalScreen.dispatchEvent(pointerDown)
+      const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+      terminalScreen.dispatchEvent(mouseDown)
+
+      expect(pointerDown.defaultPrevented).toBe(false)
+      expect(mouseDown.defaultPrevented).toBe(false)
+      expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('ctx').nativeImeOpen.value).toBe(
+        false
+      )
+      expect(mocks.setSystemImeAuthorized).not.toHaveBeenCalledWith(true)
+    }
+  )
 
   it.each(['open_only', 'both'] as const)(
     'keeps terminal input focused without authorizing the IME under %s protection',

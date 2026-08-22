@@ -266,7 +266,7 @@ async fn proxy_internal(
 
     let (method, headers, body_bytes) = match extract_request(req).await {
         Ok(v) => v,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
 
     let is_event_stream = headers
@@ -331,15 +331,17 @@ p{{color:#888;font-size:14px}}a{{color:#89b4fa;text-decoration:none}}a:hover{{te
 
 async fn extract_request(
     req: Request,
-) -> Result<(axum::http::Method, axum::http::HeaderMap, Bytes), Response> {
+) -> Result<(axum::http::Method, axum::http::HeaderMap, Bytes), Box<Response>> {
     let method = req.method().clone();
     let headers = req.headers().clone();
     let body_bytes =
         axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await.map_err(|_| {
-            Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(Body::from("Request body too large"))
-                .unwrap()
+            Box::new(
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from("Request body too large"))
+                    .unwrap(),
+            )
         })?;
     Ok((method, headers, body_bytes))
 }

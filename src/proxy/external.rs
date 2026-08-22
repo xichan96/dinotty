@@ -33,31 +33,37 @@ fn is_private_ip(ip: IpAddr) -> bool {
     }
 }
 
-async fn check_host_not_private(parsed: &reqwest::Url, msg: &str) -> Result<(), Response> {
+async fn check_host_not_private(parsed: &reqwest::Url, msg: &str) -> Result<(), Box<Response>> {
     let Some(host) = parsed.host_str() else {
         return Ok(());
     };
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_ip(ip) {
-            return Err(Response::builder()
-                .status(StatusCode::FORBIDDEN)
-                .body(Body::from(msg.to_string()))
-                .unwrap());
+            return Err(Box::new(
+                Response::builder()
+                    .status(StatusCode::FORBIDDEN)
+                    .body(Body::from(msg.to_string()))
+                    .unwrap(),
+            ));
         }
     } else {
         let port = parsed.port_or_known_default().unwrap_or(80);
         let addrs = tokio::net::lookup_host((host, port)).await.map_err(|_| {
-            Response::builder()
-                .status(StatusCode::BAD_GATEWAY)
-                .body(Body::from("DNS resolution failed"))
-                .unwrap()
+            Box::new(
+                Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .body(Body::from("DNS resolution failed"))
+                    .unwrap(),
+            )
         })?;
         for addr in addrs {
             if is_private_ip(addr.ip()) {
-                return Err(Response::builder()
-                    .status(StatusCode::FORBIDDEN)
-                    .body(Body::from(msg.to_string()))
-                    .unwrap());
+                return Err(Box::new(
+                    Response::builder()
+                        .status(StatusCode::FORBIDDEN)
+                        .body(Body::from(msg.to_string()))
+                        .unwrap(),
+                ));
             }
         }
     }
@@ -98,12 +104,12 @@ pub async fn external_proxy_handler(
     if let Err(r) =
         check_host_not_private(&parsed, "Access to private/internal addresses is not allowed").await
     {
-        return r;
+        return *r;
     }
 
     let (method, headers, body_bytes) = match extract_request(req).await {
         Ok(v) => v,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
 
     let mut proxy_req = HTTP_CLIENT_FOLLOW_REDIRECTS.request(
@@ -160,7 +166,7 @@ pub async fn external_proxy_handler(
         check_host_not_private(&final_url, "Redirect to private/internal address is not allowed")
             .await
     {
-        return r;
+        return *r;
     }
 
     let inject_base = "";

@@ -1,9 +1,5 @@
 <template>
-  <div
-    v-if="isSplit(node)"
-    class="tln-split"
-    :style="splitStyle"
-  >
+  <div v-if="isSplit(node)" class="tln-split" :style="splitStyle">
     <div
       v-for="(child, i) in node.children"
       :key="childKey(child, i)"
@@ -92,7 +88,7 @@ function childKey(child: PaneLayout, index: number): string | number {
 
 function childStyle(
   node: SplitPane,
-  index: number,
+  index: number
 ): {
   flex: string
   minWidth: string

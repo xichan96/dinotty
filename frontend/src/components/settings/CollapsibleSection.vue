@@ -1,9 +1,6 @@
 <template>
   <div :class="['collapse-wrapper', `collapse-${level}`]">
-    <div
-      :class="['collapse-title', `collapse-title--${level}`]"
-      @click="open = !open"
-    >
+    <div :class="['collapse-title', `collapse-title--${level}`]" @click="open = !open">
       <ChevronRight :size="14" class="collapse-chevron" :class="{ open }" />
       {{ title }}
     </div>
@@ -19,14 +16,17 @@
 import { ref } from 'vue'
 import { ChevronRight } from 'lucide-vue-next'
 
-const props = withDefaults(defineProps<{
-  title: string
-  level?: 'group' | 'section'
-  defaultOpen?: boolean
-}>(), {
-  level: 'group',
-  defaultOpen: false,
-})
+const props = withDefaults(
+  defineProps<{
+    title: string
+    level?: 'group' | 'section'
+    defaultOpen?: boolean
+  }>(),
+  {
+    level: 'group',
+    defaultOpen: false,
+  }
+)
 
 const open = ref(props.defaultOpen)
 </script>
@@ -81,7 +81,9 @@ const open = ref(props.defaultOpen)
 .collapse-chevron {
   flex-shrink: 0;
   color: var(--fg-muted);
-  transition: transform 0.25s ease, color 0.15s;
+  transition:
+    transform 0.25s ease,
+    color 0.15s;
 }
 .collapse-chevron.open {
   transform: rotate(90deg);

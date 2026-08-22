@@ -264,7 +264,10 @@ export interface SshProfileConnectRequest {
   workspace_id?: string
 }
 
-export async function apiCreateSshQuickTab(req: SshConnectRequest, signal?: AbortSignal): Promise<CreateTabResult> {
+export async function apiCreateSshQuickTab(
+  req: SshConnectRequest,
+  signal?: AbortSignal
+): Promise<CreateTabResult> {
   const res = await authFetch(apiUrl('/api/tabs/ssh/quick'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

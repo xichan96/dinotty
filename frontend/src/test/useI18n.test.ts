@@ -161,9 +161,7 @@ describe('useI18n - QKB1 strings', () => {
       'Clipboard has 4 lines — tap again to paste'
     )
     settings.locale = 'zh'
-    expect(useI18n().t('mobileKb.confirmMultiline', { n: 4 })).toBe(
-      '剪贴板含 4 行，再点一次粘贴'
-    )
+    expect(useI18n().t('mobileKb.confirmMultiline', { n: 4 })).toBe('剪贴板含 4 行，再点一次粘贴')
   })
 })
 

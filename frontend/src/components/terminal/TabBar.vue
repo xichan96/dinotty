@@ -3,14 +3,14 @@
     <!-- Mobile compact mode -->
     <template v-if="isMobile">
       <button class="mc-trigger" @click="$emit('open-overview')">
-      <WorkspaceBadge
-        v-if="showWsMonogram && activeWorkspaceColor"
-        :abbr="activeWorkspaceAbbr"
-        :color="activeWorkspaceColor"
-        :size="16"
-        card-bg-var="--tab-bg"
-      />
-      <LayoutDashboard v-else :size="16" />
+        <WorkspaceBadge
+          v-if="showWsMonogram && activeWorkspaceColor"
+          :abbr="activeWorkspaceAbbr"
+          :color="activeWorkspaceColor"
+          :size="16"
+          card-bg-var="--tab-bg"
+        />
+        <LayoutDashboard v-else :size="16" />
       </button>
       <span class="current-tab-index">{{ currentTabIndex }}</span>
       <span
@@ -31,7 +31,7 @@
     </template>
     <!-- Desktop mode: full tab list -->
     <template v-else>
-    <button class="mc-trigger desktop-mc" @click="$emit('open-overview')">
+      <button class="mc-trigger desktop-mc" @click="$emit('open-overview')">
         <WorkspaceBadge
           v-if="showWsMonogram && activeWorkspaceColor"
           :abbr="activeWorkspaceAbbr"
@@ -40,77 +40,73 @@
           card-bg-var="--tab-bg"
         />
         <LayoutDashboard v-else :size="16" />
-    </button>
-    <div
-      id="tabs-list"
-      ref="tabsListRef"
-      :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd }"
-    >
+      </button>
       <div
-        v-for="tab in tabs"
-        :key="tab.paneId"
-        class="tab"
-        :class="{ active: tab.paneId === activePaneId, 'drag-over': dragOverId === tab.paneId }"
-        :data-pane-id="tab.paneId"
-        :data-tab-id="tab.paneId"
-        @mousedown.prevent="onTabMouseDown($event, tab.paneId)"
-        @touchstart="onTabTouchStart($event, tab.paneId)"
-        @click="onTabClick($event, tab.paneId)"
-        @touchend.prevent="onTabTouchEnd($event, tab.paneId)"
-        @contextmenu.prevent="openTabCtx($event, tab)"
+        id="tabs-list"
+        ref="tabsListRef"
+        :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd }"
       >
-        <span class="tab-index">{{ tab.index }}</span>
-        <span
-          v-if="showWsBadge && tab.workspace"
-          class="tab-ws-badge"
-          :title="tab.workspace.name"
+        <div
+          v-for="tab in tabs"
+          :key="tab.paneId"
+          class="tab"
+          :class="{ active: tab.paneId === activePaneId, 'drag-over': dragOverId === tab.paneId }"
+          :data-pane-id="tab.paneId"
+          :data-tab-id="tab.paneId"
+          @mousedown.prevent="onTabMouseDown($event, tab.paneId)"
+          @touchstart="onTabTouchStart($event, tab.paneId)"
+          @click="onTabClick($event, tab.paneId)"
+          @touchend.prevent="onTabTouchEnd($event, tab.paneId)"
+          @contextmenu.prevent="openTabCtx($event, tab)"
         >
+          <span class="tab-index">{{ tab.index }}</span>
           <span
-            class="tab-ws-dot"
-            :style="{ background: tab.workspace.color ?? 'var(--accent, #8a8a8a)' }"
-          ></span>
-          <span v-if="tab.workspace.remote" class="tab-ws-remote">
-            <Server :size="9" />
+            v-if="showWsBadge && tab.workspace"
+            class="tab-ws-badge"
+            :title="tab.workspace.name"
+          >
+            <span
+              class="tab-ws-dot"
+              :style="{ background: tab.workspace.color ?? 'var(--accent, #8a8a8a)' }"
+            ></span>
+            <span v-if="tab.workspace.remote" class="tab-ws-remote">
+              <Server :size="9" />
+            </span>
+            <span v-if="tab.workspace.abbr" class="tab-ws-abbr">{{ tab.workspace.abbr }}</span>
           </span>
-          <span v-if="tab.workspace.abbr" class="tab-ws-abbr">{{ tab.workspace.abbr }}</span>
-        </span>
-        <Puzzle v-if="tab.type === 'plugin'" :size="12" class="tab-plugin-icon" />
-        <Server v-else-if="tab.shellType === 'ssh'" :size="12" class="tab-ssh-icon" />
-        <input
-          v-if="editingPaneId === tab.paneId"
-          ref="editInputRef"
-          class="tab-title-input"
-          :value="editValue"
-          @input="editValue = ($event.target as HTMLInputElement).value"
-          @blur="finishEdit(tab.paneId)"
-          @keydown.enter="finishEdit(tab.paneId)"
-          @keydown.escape.stop="cancelEdit"
-          @mousedown.stop
-          @click.stop
-        />
-        <span
-          v-else
-          class="tab-title"
-          @dblclick="startEdit(tab)"
-        >{{ tab.title }}</span>
-        <span
-          v-if="indicators[tab.paneId]"
-          class="tab-notif-dot"
-          :class="'dot-' + indicators[tab.paneId]"
-        ></span>
-        <button
-          v-if="editingPaneId !== tab.paneId"
-          class="tab-close"
-          @click.stop="$emit('close', tab.paneId)"
-          @touchend.stop.prevent="$emit('close', tab.paneId)"
-        >
-          <X :size="10" />
-        </button>
+          <Puzzle v-if="tab.type === 'plugin'" :size="12" class="tab-plugin-icon" />
+          <Server v-else-if="tab.shellType === 'ssh'" :size="12" class="tab-ssh-icon" />
+          <input
+            v-if="editingPaneId === tab.paneId"
+            ref="editInputRef"
+            class="tab-title-input"
+            :value="editValue"
+            @input="editValue = ($event.target as HTMLInputElement).value"
+            @blur="finishEdit(tab.paneId)"
+            @keydown.enter="finishEdit(tab.paneId)"
+            @keydown.escape.stop="cancelEdit"
+            @mousedown.stop
+            @click.stop
+          />
+          <span v-else class="tab-title" @dblclick="startEdit(tab)">{{ tab.title }}</span>
+          <span
+            v-if="indicators[tab.paneId]"
+            class="tab-notif-dot"
+            :class="'dot-' + indicators[tab.paneId]"
+          ></span>
+          <button
+            v-if="editingPaneId !== tab.paneId"
+            class="tab-close"
+            @click.stop="$emit('close', tab.paneId)"
+            @touchend.stop.prevent="$emit('close', tab.paneId)"
+          >
+            <X :size="10" />
+          </button>
+        </div>
       </div>
-    </div>
     </template>
     <slot name="left" />
-    <div class="new-tab-split" ref="newMenuWrapRef">
+    <div ref="newMenuWrapRef" class="new-tab-split">
       <button
         id="tab-new-btn"
         :title="`${t('keybinding.newTab')} (${kbdNewTab})`"
@@ -119,7 +115,11 @@
       >
         <Terminal :size="16" />
       </button>
-      <div v-if="newMenuOpen" class="new-menu-dropdown" :class="{ 'align-right': newMenuAlignRight }">
+      <div
+        v-if="newMenuOpen"
+        class="new-menu-dropdown"
+        :class="{ 'align-right': newMenuAlignRight }"
+      >
         <div
           class="new-menu-item"
           @click="emitAction('new-tab')"
@@ -182,7 +182,11 @@
         </div>
       </div>
     </div>
-    <div v-if="plugins.length > 0 && toolbarPlugins.length > 0" class="tab-bar-plugin-wrap" ref="pluginWrapRef">
+    <div
+      v-if="plugins.length > 0 && toolbarPlugins.length > 0"
+      ref="pluginWrapRef"
+      class="tab-bar-plugin-wrap"
+    >
       <button
         type="button"
         class="tab-bar-icon-btn"
@@ -203,14 +207,8 @@
               v-for="p in group.items"
               :key="p.id"
               class="plugin-dropdown-item"
-              @click="
-                $emit('open-plugin', p.id);
-                pluginMenuOpen = false;
-              "
-              @touchend.prevent="
-                $emit('open-plugin', p.id);
-                pluginMenuOpen = false;
-              "
+              @click="openPlugin(p.id)"
+              @touchend.prevent="openPlugin(p.id)"
             >
               <span class="plugin-dropdown-name">{{ p.name }}</span>
               <span v-if="p.description" class="plugin-dropdown-desc">{{ p.description }}</span>
@@ -339,7 +337,8 @@ const toolbarPlugins = computed(() => {
 const toolbarPluginGroups = computed(() => {
   const groups = new Map<string, PluginInfo[]>()
   for (const p of toolbarPlugins.value) {
-    const cat = p.category && PLUGIN_CATEGORY_ORDER.includes(p.category as any) ? p.category : 'other'
+    const cat =
+      p.category && PLUGIN_CATEGORY_ORDER.includes(p.category as any) ? p.category : 'other'
     if (!groups.has(cat)) groups.set(cat, [])
     groups.get(cat)!.push(p)
   }
@@ -358,16 +357,13 @@ const currentWorkspace = computed(() => {
 const emit = defineEmits<{
   activate: [paneId: string]
   close: [paneId: string]
-  action: [
-    type:
-      | 'new-tab'
-      | 'split-h'
-      | 'split-v'
-      | 'broadcast'
-      | 'ssh-connect',
-  ]
+  action: [type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' | 'ssh-connect']
   reorder: [fromId: string, toId: string]
-  'merge-tab-into-pane': [srcTabId: string, targetPaneId: string, direction: 'left' | 'right' | 'top' | 'bottom']
+  'merge-tab-into-pane': [
+    srcTabId: string,
+    targetPaneId: string,
+    direction: 'left' | 'right' | 'top' | 'bottom',
+  ]
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
   'open-overview': []
@@ -429,7 +425,7 @@ watch(
     tabsList?.addEventListener('wheel', onTabsWheel, { passive: false })
     nextTick(updateFades)
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 onMounted(() => {
@@ -437,8 +433,9 @@ onMounted(() => {
 })
 
 function findTabElement(paneId: string): HTMLElement | undefined {
-  return Array.from(tabsListRef.value?.querySelectorAll<HTMLElement>('.tab[data-pane-id]') ?? [])
-    .find((tab) => tab.dataset.paneId === paneId)
+  return Array.from(
+    tabsListRef.value?.querySelectorAll<HTMLElement>('.tab[data-pane-id]') ?? []
+  ).find((tab) => tab.dataset.paneId === paneId)
 }
 
 function hasTab(paneId: string): boolean {
@@ -494,10 +491,13 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
         title: label,
         confirmText: t('overview.closeTabsConfirm'),
         cancelText: t('filePreview.cancel'),
-      },
+      }
     )
     if (!ok) return
-    emit('close-tabs', targets.map((x) => x.paneId))
+    emit(
+      'close-tabs',
+      targets.map((x) => x.paneId)
+    )
   }
 
   function currentSideTabs(side: 'left' | 'right'): TabInfo[] | null {
@@ -519,10 +519,11 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
       label: closeWorkspaceLabel,
       icon: Layers,
       disabled: workspaceTabs.length === 0,
-      action: () => confirmCloseTabs(
-        closeWorkspaceLabel,
-        props.tabs.filter((t) => t.type !== 'plugin'),
-      ),
+      action: () =>
+        confirmCloseTabs(
+          closeWorkspaceLabel,
+          props.tabs.filter((t) => t.type !== 'plugin')
+        ),
     },
     {
       label: closeLeftLabel,
@@ -579,14 +580,7 @@ const newMenuOpen = ref(false)
 const newMenuAlignRight = ref(false)
 const newMenuWrapRef = ref<HTMLElement>()
 
-function emitAction(
-  type:
-    | 'new-tab'
-    | 'split-h'
-    | 'split-v'
-    | 'broadcast'
-    | 'ssh-connect'
-) {
+function emitAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' | 'ssh-connect') {
   emit('action', type)
   newMenuOpen.value = false
 }
@@ -598,6 +592,11 @@ function onDocTouchStart(e: TouchEvent) {
   if (newMenuWrapRef.value && !newMenuWrapRef.value.contains(e.target as Node)) {
     newMenuOpen.value = false
   }
+}
+
+function openPlugin(pluginId: string) {
+  emit('open-plugin', pluginId)
+  pluginMenuOpen.value = false
 }
 
 function onDocMenuMouseDown(e: MouseEvent) {

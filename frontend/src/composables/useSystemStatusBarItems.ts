@@ -27,7 +27,7 @@ function fmtRate(bps: number): string {
 
 export function createSystemStatusBarItems(
   monitorSettings: ComputedRef<MonitorSettings>,
-  onMetricClick: (key: MetricKey, event: MouseEvent) => void,
+  onMetricClick: (key: MetricKey, event: MouseEvent) => void
 ): StatusBarItem[] {
   return [
     {
@@ -55,9 +55,7 @@ export function createSystemStatusBarItems(
       visible: () => monitorSettings.value.memory,
       render: () => {
         const d = monitorData.value
-        const label = d
-          ? `${fmtBytes(d.memory.used)}/${fmtBytes(d.memory.total)}`
-          : '-'
+        const label = d ? `${fmtBytes(d.memory.used)}/${fmtBytes(d.memory.total)}` : '-'
         return h('span', { class: 'metric-content' }, [
           h(MemoryStick, { size: 14 }),
           h('span', { class: 'metric-value' }, label),
@@ -74,9 +72,7 @@ export function createSystemStatusBarItems(
       render: () => {
         const d = monitorData.value
         const mainDisk = d?.disk[0]
-        const label = mainDisk
-          ? `${fmtBytes(mainDisk.used)}/${fmtBytes(mainDisk.total)}`
-          : '-'
+        const label = mainDisk ? `${fmtBytes(mainDisk.used)}/${fmtBytes(mainDisk.total)}` : '-'
         return h('span', { class: 'metric-content' }, [
           h(HardDrive, { size: 14 }),
           h('span', { class: 'metric-value' }, label),
@@ -108,8 +104,7 @@ export function createSystemStatusBarItems(
       tooltip: 'GPU 显存',
       onClick: (e) => onMetricClick('gpu', e),
       visible: () =>
-        (monitorSettings.value.gpu ?? false) &&
-        (monitorData.value?.gpu?.length ?? 0) > 0,
+        (monitorSettings.value.gpu ?? false) && (monitorData.value?.gpu?.length ?? 0) > 0,
       render: () => {
         const d = monitorData.value
         if (!d || !d.gpu?.length) return null

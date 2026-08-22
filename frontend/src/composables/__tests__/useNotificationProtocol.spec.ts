@@ -40,7 +40,9 @@ const syncMock = vi.hoisted(() => ({
 vi.mock('../useSyncWebSocket', () => ({
   onNotification: () => () => {},
   getClientId: () => syncMock.clientId,
-  sendMarkRead: (payload: any) => { syncMock.sentPayloads.push(payload) },
+  sendMarkRead: (payload: any) => {
+    syncMock.sentPayloads.push(payload)
+  },
 }))
 
 import { settings } from '../useSettings'
@@ -251,11 +253,13 @@ describe('useNotification protocol dispatcher', () => {
       'survives reload',
     ])
 
-    __dispatchServerMessageForTest(snapshot(
-      '2',
-      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'info' }],
-      [{ notifId: 'notif-1', read: false }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot(
+        '2',
+        [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'info' }],
+        [{ notifId: 'notif-1', read: false }]
+      )
+    )
     expect(notif.unreadAttentionCount.value).toBe(2)
     expect(notif.notifications.value).toHaveLength(2)
   })
@@ -272,17 +276,22 @@ describe('useNotification protocol dispatcher', () => {
 
   it('defers restored-card dismissal until the first snapshot resolves its epoch', () => {
     const notif = current()
-    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, JSON.stringify([{
-      id: 'restored-pane',
-      type: 'warning',
-      paneId: 'pane-a',
-      title: null,
-      body: 'restored',
-      timestamp: 100,
-      source: 'terminal',
-      eventSeq: '1',
-      epoch: 'epoch-a',
-    }]))
+    sessionStorage.setItem(
+      NOTIFICATION_SESSION_HISTORY_KEY,
+      JSON.stringify([
+        {
+          id: 'restored-pane',
+          type: 'warning',
+          paneId: 'pane-a',
+          title: null,
+          body: 'restored',
+          timestamp: 100,
+          source: 'terminal',
+          eventSeq: '1',
+          epoch: 'epoch-a',
+        },
+      ])
+    )
     __restoreNotificationSessionHistoryForTest()
 
     notif.dismissOne('restored-pane')
@@ -290,10 +299,11 @@ describe('useNotification protocol dispatcher', () => {
     expect(notif.notifications.value).toHaveLength(1)
     expect(syncMock.sentPayloads).toEqual([])
 
-    __dispatchServerMessageForTest(snapshot(
-      '1',
-      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot('1', [
+        { paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' },
+      ])
+    )
 
     expect(notif.notifications.value).toEqual([])
     expect(syncMock.sentPayloads).toHaveLength(1)
@@ -305,17 +315,33 @@ describe('useNotification protocol dispatcher', () => {
 
   it('defers restored-card clear actions until the first snapshot can mark their targets read', () => {
     const notif = current()
-    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, JSON.stringify([
-      {
-        id: 'restored-pane', type: 'info', paneId: 'pane-a', title: null,
-        body: 'pane', timestamp: 100, source: 'terminal', eventSeq: '1', epoch: 'epoch-a',
-      },
-      {
-        id: 'restored-notif', type: 'success', title: null,
-        body: 'plugin', timestamp: 101, source: 'plugin', eventSeq: '2',
-        notifId: 'notif-a', epoch: 'epoch-a',
-      },
-    ]))
+    sessionStorage.setItem(
+      NOTIFICATION_SESSION_HISTORY_KEY,
+      JSON.stringify([
+        {
+          id: 'restored-pane',
+          type: 'info',
+          paneId: 'pane-a',
+          title: null,
+          body: 'pane',
+          timestamp: 100,
+          source: 'terminal',
+          eventSeq: '1',
+          epoch: 'epoch-a',
+        },
+        {
+          id: 'restored-notif',
+          type: 'success',
+          title: null,
+          body: 'plugin',
+          timestamp: 101,
+          source: 'plugin',
+          eventSeq: '2',
+          notifId: 'notif-a',
+          epoch: 'epoch-a',
+        },
+      ])
+    )
     __restoreNotificationSessionHistoryForTest()
 
     notif.clearForPaneIds(['pane-a'], 'tab_activate')
@@ -324,11 +350,13 @@ describe('useNotification protocol dispatcher', () => {
     expect(notif.notifications.value).toHaveLength(2)
     expect(syncMock.sentPayloads).toEqual([])
 
-    __dispatchServerMessageForTest(snapshot(
-      '1',
-      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'info' }],
-      [{ notifId: 'notif-a', read: false }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot(
+        '1',
+        [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'info' }],
+        [{ notifId: 'notif-a', read: false }]
+      )
+    )
 
     expect(notif.notifications.value).toEqual([])
     expect(syncMock.sentPayloads.map(({ reason }) => reason)).toEqual(['tab_activate', 'clear_all'])
@@ -337,32 +365,39 @@ describe('useNotification protocol dispatcher', () => {
 
   it('keeps restored-card actions deferred when a delta arrives before the first snapshot', () => {
     const notif = current()
-    sessionStorage.setItem(NOTIFICATION_SESSION_HISTORY_KEY, JSON.stringify([{
-      id: 'restored-pane',
-      type: 'warning',
-      paneId: 'pane-a',
-      title: null,
-      body: 'restored',
-      timestamp: 100,
-      source: 'terminal',
-      eventSeq: '1',
-      epoch: 'epoch-a',
-    }]))
+    sessionStorage.setItem(
+      NOTIFICATION_SESSION_HISTORY_KEY,
+      JSON.stringify([
+        {
+          id: 'restored-pane',
+          type: 'warning',
+          paneId: 'pane-a',
+          title: null,
+          body: 'restored',
+          timestamp: 100,
+          source: 'terminal',
+          eventSeq: '1',
+          epoch: 'epoch-a',
+        },
+      ])
+    )
     __restoreNotificationSessionHistoryForTest()
 
     notif.clearAll()
-    __dispatchServerMessageForTest(delta(
-      '1',
-      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' }],
-    ))
+    __dispatchServerMessageForTest(
+      delta('1', [
+        { paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' },
+      ])
+    )
 
     expect(notif.notifications.value).toHaveLength(1)
     expect(syncMock.sentPayloads).toEqual([])
 
-    __dispatchServerMessageForTest(snapshot(
-      '2',
-      [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot('2', [
+        { paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '0', severity: 'warning' },
+      ])
+    )
 
     expect(notif.notifications.value).toEqual([])
     expect(syncMock.sentPayloads).toHaveLength(1)
@@ -399,9 +434,7 @@ describe('useNotification protocol dispatcher', () => {
     expect(notif.firstUnreadAtByPane['pane-a']).toBe(100)
 
     __dispatchServerMessageForTest(
-      delta('2', [
-        { paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '1', severity: null },
-      ])
+      delta('2', [{ paneId: 'pane-a', latestEventSeq: '1', readThroughSeq: '1', severity: null }])
     )
     expect(notif.firstUnreadAtByPane['pane-a']).toBe(100)
 
@@ -592,9 +625,7 @@ describe('useNotification protocol dispatcher', () => {
     notif.markPanesRead([{ paneId: 'pane-a' }], 'focus')
 
     __dispatchServerMessageForTest(
-      delta('2', [
-        { paneId: 'pane-a', latestEventSeq: '3', readThroughSeq: '3', severity: null },
-      ])
+      delta('2', [{ paneId: 'pane-a', latestEventSeq: '3', readThroughSeq: '3', severity: null }])
     )
     await vi.advanceTimersByTimeAsync(20_000)
 

@@ -25,9 +25,7 @@ foreground = cdd6f4
 cursor-color = f5e0dc
 `
 
-const ANSI = Array.from({ length: 16 }, (_, index) =>
-  `#${index.toString(16).padStart(6, '0')}`,
-)
+const ANSI = Array.from({ length: 16 }, (_, index) => `#${index.toString(16).padStart(6, '0')}`)
 
 const COLORS = {
   foreground: '#cccccc',
@@ -52,15 +50,24 @@ describe('parseThemeFile', () => {
     expect(result.colors.ansi[1]).toBe('#f38ba8')
     expect(result.colors.ansi).toHaveLength(16)
     expect(Object.values(result.colors).flat()).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^#[0-9a-f]{6}$/)]),
+      expect.arrayContaining([expect.stringMatching(/^#[0-9a-f]{6}$/)])
     )
-    expect([result.colors.foreground, result.colors.background, result.colors.cursor, ...result.colors.ansi])
-      .toSatisfy((colors: string[]) => colors.every((color) => /^#[0-9a-f]{6}$/.test(color)))
+    expect([
+      result.colors.foreground,
+      result.colors.background,
+      result.colors.cursor,
+      ...result.colors.ansi,
+    ]).toSatisfy((colors: string[]) => colors.every((color) => /^#[0-9a-f]{6}$/.test(color)))
   })
 
   it('imports and normalizes flat JSON', () => {
     const result = parseThemeFile(
-      JSON.stringify({ foreground: '#FFFFFF', background: '#000000', cursor: '#ff00ff', ansi: ANSI }),
+      JSON.stringify({
+        foreground: '#FFFFFF',
+        background: '#000000',
+        cursor: '#ff00ff',
+        ansi: ANSI,
+      })
     )
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.colors.foreground).toBe('#ffffff')
@@ -68,7 +75,9 @@ describe('parseThemeFile', () => {
 
   it('imports nested JSON colors', () => {
     const result = parseThemeFile(
-      JSON.stringify({ colors: { foreground: '#FFFFFF', background: '#000000', cursor: '#ff00ff', ansi: ANSI } }),
+      JSON.stringify({
+        colors: { foreground: '#FFFFFF', background: '#000000', cursor: '#ff00ff', ansi: ANSI },
+      })
     )
     expect(result.ok).toBe(true)
   })

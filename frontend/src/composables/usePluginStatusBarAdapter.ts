@@ -49,7 +49,7 @@ function resolveIcon(name?: string): Component {
  */
 export function pluginSeriesToStatusBarItem(
   s: RegisteredSeries,
-  onClick: (event: MouseEvent) => void,
+  onClick: (event: MouseEvent) => void
 ): StatusBarItem {
   const icon = resolveIcon(s.statusIcon ?? DEFAULT_ICON)
   return {

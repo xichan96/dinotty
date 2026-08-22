@@ -68,7 +68,7 @@ const productionNotificationPresentationEffects = { playSound }
 const notificationPresentationEffects = { ...productionNotificationPresentationEffects }
 
 export function __setPresentationEffectsForTest(
-  overrides: Partial<typeof notificationPresentationEffects>,
+  overrides: Partial<typeof notificationPresentationEffects>
 ) {
   Object.assign(notificationPresentationEffects, overrides)
 }

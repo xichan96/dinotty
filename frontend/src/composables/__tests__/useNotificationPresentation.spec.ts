@@ -19,12 +19,18 @@ import {
 function memoryStorage(): Storage {
   const values = new Map<string, string>()
   return {
-    get length() { return values.size },
+    get length() {
+      return values.size
+    },
     clear: () => values.clear(),
     getItem: (key) => values.get(key) ?? null,
     key: (index) => [...values.keys()][index] ?? null,
-    removeItem: (key) => { values.delete(key) },
-    setItem: (key, value) => { values.set(key, String(value)) },
+    removeItem: (key) => {
+      values.delete(key)
+    },
+    setItem: (key, value) => {
+      values.set(key, String(value))
+    },
   }
 }
 
@@ -40,7 +46,7 @@ function gate(
     activeTabPaneIds: string[]
     foreground: boolean
     now: Date
-  }> = {},
+  }> = {}
 ) {
   return presentationGate(
     { paneId: overrides.paneId ?? 'pane-a', severity: 'info' },
@@ -50,7 +56,7 @@ function gate(
       activeTabPaneIds: overrides.activeTabPaneIds ?? [],
       isAppForeground: overrides.foreground ?? false,
       now: () => overrides.now ?? new Date(2026, 6, 16, 12, 0),
-    },
+    }
   )
 }
 
@@ -86,59 +92,63 @@ describe('presentationGate output vector', () => {
               for (const ignoreCurrentTab of [false, true]) {
                 for (const activeTabMember of [false, true]) {
                   for (const quiet of [false, true]) {
-                const settings = cloneSettings()
-                settings.presentation_enabled = presentationEnabled
-                settings.channels = {
-                  sound: !!(channelMask & 1),
-                  vibration: !!(channelMask & 2),
-                  popup: !!(channelMask & 4),
-                  panel: !!(channelMask & 8),
-                  tab_indicator: !!(channelMask & 16),
-                }
-                settings.dnd_level = dndLevel
-                settings.ignore_current_tab = ignoreCurrentTab
-                settings.quiet_hours = quiet
-                  ? { start: '11:00', end: '13:00' }
-                  : { start: '22:00', end: '22:00' }
+                    const settings = cloneSettings()
+                    settings.presentation_enabled = presentationEnabled
+                    settings.channels = {
+                      sound: !!(channelMask & 1),
+                      vibration: !!(channelMask & 2),
+                      popup: !!(channelMask & 4),
+                      panel: !!(channelMask & 8),
+                      tab_indicator: !!(channelMask & 16),
+                    }
+                    settings.dnd_level = dndLevel
+                    settings.ignore_current_tab = ignoreCurrentTab
+                    settings.quiet_hours = quiet
+                      ? { start: '11:00', end: '13:00' }
+                      : { start: '22:00', end: '22:00' }
 
-                const expected = presentationEnabled ? {
-                  storeHistory: true,
-                  showTabIndicator: settings.channels.tab_indicator,
-                  showPopup: settings.channels.popup,
-                  playSound: settings.channels.sound,
-                  vibrate: settings.channels.vibration,
-                } : {
-                  storeHistory: false,
-                  showTabIndicator: false,
-                  showPopup: false,
-                  playSound: false,
-                  vibrate: false,
-                }
-                if (dndLevel === 'dot_sound') {
-                  expected.showPopup = false
-                  expected.vibrate = false
-                } else if (dndLevel === 'silent') {
-                  expected.showPopup = false
-                  expected.playSound = false
-                  expected.vibrate = false
-                }
-                if (focusedPane && foreground) {
-                  expected.showPopup = false
-                  expected.playSound = false
-                  expected.vibrate = false
-                }
-                if (ignoreCurrentTab && activeTabMember) expected.showPopup = false
-                if (quiet) {
-                  expected.showPopup = false
-                  expected.playSound = false
-                  expected.vibrate = false
-                }
+                    const expected = presentationEnabled
+                      ? {
+                          storeHistory: true,
+                          showTabIndicator: settings.channels.tab_indicator,
+                          showPopup: settings.channels.popup,
+                          playSound: settings.channels.sound,
+                          vibrate: settings.channels.vibration,
+                        }
+                      : {
+                          storeHistory: false,
+                          showTabIndicator: false,
+                          showPopup: false,
+                          playSound: false,
+                          vibrate: false,
+                        }
+                    if (dndLevel === 'dot_sound') {
+                      expected.showPopup = false
+                      expected.vibrate = false
+                    } else if (dndLevel === 'silent') {
+                      expected.showPopup = false
+                      expected.playSound = false
+                      expected.vibrate = false
+                    }
+                    if (focusedPane && foreground) {
+                      expected.showPopup = false
+                      expected.playSound = false
+                      expected.vibrate = false
+                    }
+                    if (ignoreCurrentTab && activeTabMember) expected.showPopup = false
+                    if (quiet) {
+                      expected.showPopup = false
+                      expected.playSound = false
+                      expected.vibrate = false
+                    }
 
-                expect(gate(settings, {
-                  focusedPaneId: focusedPane ? 'pane-a' : 'pane-b',
-                  activeTabPaneIds: activeTabMember ? ['pane-a'] : [],
-                  foreground,
-                })).toEqual(expected)
+                    expect(
+                      gate(settings, {
+                        focusedPaneId: focusedPane ? 'pane-a' : 'pane-b',
+                        activeTabPaneIds: activeTabMember ? ['pane-a'] : [],
+                        foreground,
+                      })
+                    ).toEqual(expected)
                   }
                 }
               }
@@ -162,19 +172,23 @@ describe('presentationGate output vector', () => {
           tab_indicator: !!(mask & 16),
         }
         const output = gate(settings)
-        expect(output).toEqual(enabled ? {
-          storeHistory: true,
-          showTabIndicator: settings.channels.tab_indicator,
-          showPopup: settings.channels.popup,
-          playSound: settings.channels.sound,
-          vibrate: settings.channels.vibration,
-        } : {
-          storeHistory: false,
-          showTabIndicator: false,
-          showPopup: false,
-          playSound: false,
-          vibrate: false,
-        })
+        expect(output).toEqual(
+          enabled
+            ? {
+                storeHistory: true,
+                showTabIndicator: settings.channels.tab_indicator,
+                showPopup: settings.channels.popup,
+                playSound: settings.channels.sound,
+                vibrate: settings.channels.vibration,
+              }
+            : {
+                storeHistory: false,
+                showTabIndicator: false,
+                showPopup: false,
+                playSound: false,
+                vibrate: false,
+              }
+        )
       }
     }
   })
@@ -182,16 +196,13 @@ describe('presentationGate output vector', () => {
   it.each([
     [false, true],
     [true, false],
-  ])(
-    'keeps popup=%s independent from panel=%s while history stays enabled',
-    (popup, panel) => {
-      const settings = cloneSettings()
-      settings.channels.popup = popup
-      settings.channels.panel = panel
+  ])('keeps popup=%s independent from panel=%s while history stays enabled', (popup, panel) => {
+    const settings = cloneSettings()
+    settings.channels.popup = popup
+    settings.channels.panel = panel
 
-      expect(gate(settings)).toMatchObject({ showPopup: popup, storeHistory: true })
-    },
-  )
+    expect(gate(settings)).toMatchObject({ showPopup: popup, storeHistory: true })
+  })
 
   it.each([
     ['normal', { showPopup: true, playSound: true, vibrate: true }],
@@ -205,7 +216,10 @@ describe('presentationGate output vector', () => {
 
   it('silences popup/sound/vibration for the focused foreground leaf only', () => {
     const output = gate(cloneSettings(), {
-      paneId: 'leaf-a', focusedPaneId: 'leaf-a', activeTabPaneIds: ['leaf-a'], foreground: true,
+      paneId: 'leaf-a',
+      focusedPaneId: 'leaf-a',
+      activeTabPaneIds: ['leaf-a'],
+      foreground: true,
     })
     expect(output).toEqual({
       storeHistory: true,
@@ -220,7 +234,9 @@ describe('presentationGate output vector', () => {
     const settings = cloneSettings()
     settings.ignore_current_tab = true
     const output = gate(settings, {
-      paneId: 'leaf-b', focusedPaneId: 'leaf-a', activeTabPaneIds: ['tab-a', 'leaf-a', 'leaf-b'],
+      paneId: 'leaf-b',
+      focusedPaneId: 'leaf-a',
+      activeTabPaneIds: ['tab-a', 'leaf-a', 'leaf-b'],
       foreground: true,
     })
     expect(output).toMatchObject({ showPopup: false, playSound: true, vibrate: true })
@@ -270,7 +286,13 @@ describe('presentation coalesce scheduler', () => {
     let historyCards = 0
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 300,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: true, vibrate: true }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: true,
+        vibrate: true,
+      }),
       fire: (_event, output) => {
         if (output.showPopup) popup()
         if (output.playSound) sound()
@@ -293,8 +315,16 @@ describe('presentation coalesce scheduler', () => {
     const fired: PresentationEvent[] = []
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: true, vibrate: true }),
-      fire: (event) => { fired.push(event) },
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: true,
+        vibrate: true,
+      }),
+      fire: (event) => {
+        fired.push(event)
+      },
     })
     scheduler.enqueue({ paneId: 'p', eventSeq: '1', severity: 'warning' })
     scheduler.enqueue({ paneId: 'p', eventSeq: '2', severity: 'error' })
@@ -308,8 +338,16 @@ describe('presentation coalesce scheduler', () => {
     const fired: PresentationEvent[] = []
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: true, vibrate: true }),
-      fire: (event) => { fired.push(event) },
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: true,
+        vibrate: true,
+      }),
+      fire: (event) => {
+        fired.push(event)
+      },
     })
     scheduler.enqueue({ paneId: 'p', eventSeq: '5', severity: 'urgent' })
     scheduler.cancelPane('p', '5')
@@ -327,7 +365,13 @@ describe('presentation coalesce scheduler', () => {
     const fired = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: true, vibrate: true }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: true,
+        vibrate: true,
+      }),
       fire: fired,
     })
     scheduler.cancelPane('pane-a', '5')
@@ -341,7 +385,13 @@ describe('presentation coalesce scheduler', () => {
     const dismiss = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
       fire: () => dismiss,
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '7', severity: 'info' })
@@ -356,7 +406,13 @@ describe('presentation coalesce scheduler', () => {
     const dismiss = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
       fire: () => dismiss,
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '7', severity: 'info' })
@@ -374,8 +430,14 @@ describe('presentation coalesce scheduler', () => {
     const dismissPane = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
-      fire: (event) => event.notifId ? dismissNotif : dismissPane,
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
+      fire: (event) => (event.notifId ? dismissNotif : dismissPane),
     })
     scheduler.enqueue({ notifId: 'notif-a', severity: 'info' })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '3', severity: 'info' })
@@ -393,8 +455,14 @@ describe('presentation coalesce scheduler', () => {
     const secondDismiss = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
-      fire: (event) => event.eventSeq === '1' ? firstDismiss : secondDismiss,
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
+      fire: (event) => (event.eventSeq === '1' ? firstDismiss : secondDismiss),
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '1', severity: 'info' })
     vi.advanceTimersByTime(100)
@@ -412,8 +480,14 @@ describe('presentation coalesce scheduler', () => {
     const higherDismiss = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
-      fire: (event) => event.eventSeq === '1' ? lowerDismiss : higherDismiss,
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
+      fire: (event) => (event.eventSeq === '1' ? lowerDismiss : higherDismiss),
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '1', severity: 'info' })
     vi.advanceTimersByTime(100)
@@ -433,7 +507,13 @@ describe('presentation coalesce scheduler', () => {
     let retire: (() => void) | undefined
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
       fire: (_event, _output, retireEntry) => {
         retire = retireEntry
         return dismiss
@@ -455,7 +535,13 @@ describe('presentation coalesce scheduler', () => {
     const retirements: Array<() => void> = []
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
       fire: (event, _output, retire) => {
         retirements.push(retire)
         return event.eventSeq === '1' ? firstDismiss : secondDismiss
@@ -478,8 +564,14 @@ describe('presentation coalesce scheduler', () => {
     const dismissNotif = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
-      fire: (event) => event.paneId ? dismissPane : dismissNotif,
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
+      fire: (event) => (event.paneId ? dismissPane : dismissNotif),
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '1', severity: 'info' })
     scheduler.enqueue({ notifId: 'notif-a', severity: 'info' })
@@ -497,11 +589,17 @@ describe('presentation coalesce scheduler', () => {
     const fired: unknown[] = []
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: (event) => presentationGate(event, {
-        settings, focusedPaneId: null, activeTabPaneIds: [], isAppForeground: false,
-        now: () => new Date(2026, 6, 16, 12, 0),
-      }),
-      fire: (_event, output) => { fired.push(output) },
+      evaluate: (event) =>
+        presentationGate(event, {
+          settings,
+          focusedPaneId: null,
+          activeTabPaneIds: [],
+          isAppForeground: false,
+          now: () => new Date(2026, 6, 16, 12, 0),
+        }),
+      fire: (_event, output) => {
+        fired.push(output)
+      },
     })
     scheduler.enqueue({ paneId: 'p', eventSeq: '1', severity: 'info' })
     settings.dnd_level = 'silent'
@@ -515,13 +613,14 @@ describe('presentation coalesce scheduler', () => {
     const fired = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: (event) => presentationGate(event, {
-        settings,
-        focusedPaneId,
-        activeTabPaneIds: [],
-        isAppForeground: true,
-        now: () => new Date(2026, 6, 16, 12, 0),
-      }),
+      evaluate: (event) =>
+        presentationGate(event, {
+          settings,
+          focusedPaneId,
+          activeTabPaneIds: [],
+          isAppForeground: true,
+          now: () => new Date(2026, 6, 16, 12, 0),
+        }),
       fire: fired,
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '1', severity: 'info' })
@@ -534,8 +633,16 @@ describe('presentation coalesce scheduler', () => {
     const fired: PresentationEvent[] = []
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
-      fire: (event) => { fired.push(event) },
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
+      fire: (event) => {
+        fired.push(event)
+      },
     })
     scheduler.enqueue({ paneId: 'pane-less-1', eventSeq: '1', severity: 'warning' })
     scheduler.enqueue({ notifId: 'notif-a', severity: 'error' })
@@ -548,7 +655,13 @@ describe('presentation coalesce scheduler', () => {
     const fired = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => 100,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: true, vibrate: true }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: true,
+        vibrate: true,
+      }),
       fire: fired,
     })
     scheduler.enqueue({ paneId: 'pane-a', eventSeq: '5', severity: 'info' })
@@ -567,7 +680,13 @@ describe('presentation coalesce scheduler', () => {
     const fired = vi.fn()
     const scheduler = createPresentationScheduler<PresentationEvent>({
       getWindowMs: () => coalesceWindow,
-      evaluate: () => ({ storeHistory: true, showTabIndicator: true, showPopup: true, playSound: false, vibrate: false }),
+      evaluate: () => ({
+        storeHistory: true,
+        showTabIndicator: true,
+        showPopup: true,
+        playSound: false,
+        vibrate: false,
+      }),
       fire: fired,
     })
     scheduler.enqueue({ paneId: 'p', eventSeq: '1', severity: 'info' })
@@ -583,9 +702,15 @@ describe('presentation coalesce scheduler', () => {
 describe('guarded local presentation store', () => {
   it('keeps functioning in memory when localStorage throws', () => {
     vi.stubGlobal('localStorage', {
-      getItem: () => { throw new Error('private mode') },
-      setItem: () => { throw new Error('private mode') },
-      removeItem: () => { throw new Error('private mode') },
+      getItem: () => {
+        throw new Error('private mode')
+      },
+      setItem: () => {
+        throw new Error('private mode')
+      },
+      removeItem: () => {
+        throw new Error('private mode')
+      },
     })
     __resetNotificationPresentationForTest()
     const store = useNotificationPresentation()
@@ -612,13 +737,17 @@ describe('guarded local presentation store', () => {
     localStorage.setItem(NOTIFICATION_PRESENTATION_MIGRATION_KEY, '1')
     localStorage.setItem(
       NOTIFICATION_PRESENTATION_STORAGE_KEY,
-      JSON.stringify({ version: 1, settings: stored }),
+      JSON.stringify({ version: 1, settings: stored })
     )
 
     const loaded = useNotificationPresentation().settings
 
     expect(loaded.channels).toEqual({
-      sound: false, vibration: false, popup: true, panel: false, tab_indicator: false,
+      sound: false,
+      vibration: false,
+      popup: true,
+      panel: false,
+      tab_indicator: false,
     })
     expect(loaded.dnd_level).toBe('silent')
   })
@@ -629,7 +758,7 @@ describe('guarded local presentation store', () => {
     localStorage.setItem(NOTIFICATION_PRESENTATION_MIGRATION_KEY, '1')
     localStorage.setItem(
       NOTIFICATION_PRESENTATION_STORAGE_KEY,
-      JSON.stringify({ version: 1, settings: stored }),
+      JSON.stringify({ version: 1, settings: stored })
     )
     const removeSpy = vi.spyOn(localStorage, 'removeItem')
 
@@ -642,7 +771,9 @@ describe('guarded local presentation store', () => {
     const values = new Map<string, string>()
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => { values.delete(key) },
+      removeItem: (key: string) => {
+        values.delete(key)
+      },
       setItem: (key: string, value: string) => {
         if (key === NOTIFICATION_PRESENTATION_MIGRATION_KEY) throw new Error('quota')
         values.set(key, value)
@@ -662,10 +793,13 @@ describe('guarded local presentation store', () => {
     }
     let store = useNotificationPresentation()
     expect(store.settings.channels).toEqual({
-      sound: false, vibration: true, popup: false, panel: false, tab_indicator: true,
+      sound: false,
+      vibration: true,
+      popup: false,
+      panel: false,
+      tab_indicator: true,
     })
     expect(localStorage.getItem(NOTIFICATION_PRESENTATION_MIGRATION_KEY)).toBe('1')
-
     ;(serverSettings as any).notification = {
       ...(serverSettings.notification as any),
       channels: { sound: true, vibration: false, panel: true, tab_indicator: false },
@@ -674,7 +808,11 @@ describe('guarded local presentation store', () => {
     __resetNotificationPresentationForTest()
     store = useNotificationPresentation()
     expect(store.settings.channels).toEqual({
-      sound: false, vibration: true, popup: false, panel: false, tab_indicator: true,
+      sound: false,
+      vibration: true,
+      popup: false,
+      panel: false,
+      tab_indicator: true,
     })
   })
 
@@ -696,7 +834,7 @@ describe('guarded local presentation store', () => {
       }
 
       expect(useNotificationPresentation().settings.channels.popup).toBe(expectedPopup)
-    },
+    }
   )
 
   it('waits for successful settings load before seeding real server values', () => {
@@ -706,14 +844,20 @@ describe('guarded local presentation store', () => {
     expect(store.settings.channels.sound).toBe(true)
     expect(localStorage.getItem(NOTIFICATION_PRESENTATION_STORAGE_KEY)).toBeNull()
     expect(localStorage.getItem(NOTIFICATION_PRESENTATION_MIGRATION_KEY)).toBeNull()
-
     ;(serverSettings.notification as any).channels = {
-      sound: false, vibration: false, panel: true, tab_indicator: false,
+      sound: false,
+      vibration: false,
+      panel: true,
+      tab_indicator: false,
     }
     __setSettingsLoadedForTest(true)
 
     expect(store.settings.channels).toEqual({
-      sound: false, vibration: false, popup: true, panel: true, tab_indicator: false,
+      sound: false,
+      vibration: false,
+      popup: true,
+      panel: true,
+      tab_indicator: false,
     })
     expect(localStorage.getItem(NOTIFICATION_PRESENTATION_MIGRATION_KEY)).toBe('1')
   })
@@ -722,7 +866,9 @@ describe('guarded local presentation store', () => {
     const values = new Map<string, string>()
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => values.get(key) ?? null,
-      removeItem: (key: string) => { values.delete(key) },
+      removeItem: (key: string) => {
+        values.delete(key)
+      },
       setItem: (key: string, value: string) => {
         if (key === NOTIFICATION_PRESENTATION_MIGRATION_KEY) throw new Error('quota')
         values.set(key, value)

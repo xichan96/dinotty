@@ -6,7 +6,7 @@ const PROBE_SIZE = 72
 
 export function computeAvailability(
   name: string,
-  measure: (fontStack: string, sample: string) => number,
+  measure: (fontStack: string, sample: string) => number
 ): boolean {
   if (name === '' || isGenericKeyword(name)) return true
   try {

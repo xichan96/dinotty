@@ -45,8 +45,8 @@
           <label>{{ t('settings.virtualKeyboard.show') }}</label>
           <label class="toggle">
             <input
-              type="checkbox"
               v-model="settings.show_virtual_keyboard"
+              type="checkbox"
               @change="saveSettings()"
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -77,7 +77,7 @@
         <div class="access-url-row">
           <div class="access-url-display">
             <span class="access-url-text">{{ accessUrl }}</span>
-            <button class="access-url-copy" @click="copyAccessUrl()" :title="t('settings.copyUrl')">
+            <button class="access-url-copy" :title="t('settings.copyUrl')" @click="copyAccessUrl()">
               {{ copied ? '✓' : '⧉' }}
             </button>
           </div>
@@ -102,22 +102,22 @@
           />
           <button
             class="icon-btn"
-            @click="tokenVisible = !tokenVisible"
             :title="tokenVisible ? t('settings.token.hide') : t('settings.token.show')"
+            @click="tokenVisible = !tokenVisible"
           >
             <EyeOff v-if="tokenVisible" :size="14" /><Eye v-else :size="14" />
           </button>
           <template v-if="!tokenEditing">
-            <button class="icon-btn" @click="copyToken()" :title="t('settings.token.copy')">
+            <button class="icon-btn" :title="t('settings.token.copy')" @click="copyToken()">
               <Check v-if="tokenCopied" :size="14" /><Copy v-else :size="14" />
             </button>
-            <button class="icon-btn" @click="startEditToken()" :title="t('settings.token.edit')">
+            <button class="icon-btn" :title="t('settings.token.edit')" @click="startEditToken()">
               <Pencil :size="14" />
             </button>
             <button
               class="icon-btn danger"
-              @click="regenerateToken()"
               :title="t('settings.token.regenerate')"
+              @click="regenerateToken()"
             >
               <RefreshCw :size="14" />
             </button>
@@ -125,13 +125,13 @@
           <template v-else>
             <button
               class="icon-btn"
-              @click="saveToken()"
               :disabled="customToken.trim().length < 8 || tokenSaving"
               :title="t('settings.token.save')"
+              @click="saveToken()"
             >
               <Save :size="14" />
             </button>
-            <button class="icon-btn" @click="cancelEditToken()" :title="t('settings.token.cancel')">
+            <button class="icon-btn" :title="t('settings.token.cancel')" @click="cancelEditToken()">
               <X :size="14" />
             </button>
           </template>
@@ -174,10 +174,10 @@
               @update:model-value="onLoginMethodChange"
             />
           </div>
-          <p class="settings-hint" v-if="!hasCodeSubscriber">
+          <p v-if="!hasCodeSubscriber" class="settings-hint">
             {{ t('security.loginMethodNoSubscriberHint') }}
           </p>
-          <p class="settings-hint" v-else>
+          <p v-else class="settings-hint">
             {{ t('security.loginMethodHint') }}
           </p>
 
@@ -185,7 +185,7 @@
             <p class="confirm-title">{{ t('security.loginMethodConfirmTitle') }}</p>
             <p class="confirm-body">{{ t('security.loginMethodConfirmBody') }}</p>
             <label class="confirm-checkbox">
-              <input type="checkbox" v-model="confirmAcknowledged" />
+              <input v-model="confirmAcknowledged" type="checkbox" />
               <span>{{ t('security.loginMethodConfirmAck') }}</span>
             </label>
             <div class="confirm-actions">
@@ -215,23 +215,23 @@
             <div class="settings-row">
               <label>{{ t('security.lockoutMaxFailures') }}</label>
               <input
-                type="number"
                 v-model.number="settings.auth.lockout_max_failures"
-                @change="saveSettings()"
+                type="number"
                 min="1"
                 max="100"
                 class="settings-input-number"
+                @change="saveSettings()"
               />
             </div>
             <div class="settings-row">
               <label>{{ t('security.lockoutSecs') }}</label>
               <input
-                type="number"
                 v-model.number="settings.auth.lockout_secs"
-                @change="saveSettings()"
+                type="number"
                 min="10"
                 max="3600"
                 class="settings-input-number"
+                @change="saveSettings()"
               />
             </div>
           </template>
@@ -240,23 +240,23 @@
             <div class="settings-row">
               <label>{{ t('security.globalLockoutMaxFailures') }}</label>
               <input
-                type="number"
                 v-model.number="settings.auth.global_lockout_max_failures"
-                @change="saveSettings()"
+                type="number"
                 min="1"
                 max="1000"
                 class="settings-input-number"
+                @change="saveSettings()"
               />
             </div>
             <div class="settings-row">
               <label>{{ t('security.globalLockoutSecs') }}</label>
               <input
-                type="number"
                 v-model.number="settings.auth.global_lockout_secs"
-                @change="saveSettings()"
+                type="number"
                 min="10"
                 max="86400"
                 class="settings-input-number"
+                @change="saveSettings()"
               />
             </div>
           </template>
@@ -267,9 +267,9 @@
           <textarea
             class="config-textarea"
             :value="settings.auth.allowed_origins.join('\n')"
-            @input="onAllowedOriginsInput"
             :placeholder="t('security.allowedOriginsPlaceholder')"
             rows="3"
+            @input="onAllowedOriginsInput"
           ></textarea>
           <p class="settings-hint">{{ t('security.allowedOriginsHint') }}</p>
 
@@ -279,9 +279,9 @@
           <textarea
             class="config-textarea"
             :value="settings.auth.trusted_proxies.join('\n')"
-            @input="onTrustedProxiesInput"
             :placeholder="t('security.trustedProxiesPlaceholder')"
             rows="3"
+            @input="onTrustedProxiesInput"
           ></textarea>
           <p class="settings-hint">{{ t('security.trustedProxiesHint') }}</p>
 
@@ -289,8 +289,8 @@
             <label>{{ t('security.previewAllowExternal') }}</label>
             <label class="toggle">
               <input
-                type="checkbox"
                 v-model="settings.preview.allow_external"
+                type="checkbox"
                 @change="saveSettings()"
               />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -354,8 +354,8 @@
               v-if="isTauri()"
               class="icon-btn"
               type="button"
-              @click="pickUploadDir()"
               :disabled="!!uploadBusy"
+              @click="pickUploadDir()"
             >
               <FolderOpen :size="14" />
               {{ t('settings.uploads.pickDir') }}
@@ -400,13 +400,13 @@
           <button
             class="icon-btn"
             data-testid="restore-upload-default"
-            @click="restoreDefaultUploadDir()"
             :disabled="!!uploadBusy"
+            @click="restoreDefaultUploadDir()"
           >
             <RefreshCw :size="14" />
             {{ t('settings.uploads.restoreDefault') }}
           </button>
-          <button class="icon-btn danger" @click="clearUploads()" :disabled="!!uploadBusy">
+          <button class="icon-btn danger" :disabled="!!uploadBusy" @click="clearUploads()">
             {{
               uploadBusy === 'clear' ? t('settings.uploads.clearing') : t('settings.uploads.clear')
             }}
@@ -414,8 +414,8 @@
           <button
             v-if="uploadStatus.foreign"
             class="icon-btn"
-            @click="adoptUploads()"
             :disabled="!!uploadBusy"
+            @click="adoptUploads()"
           >
             {{
               uploadBusy === 'adopt' ? t('settings.uploads.adopting') : t('settings.uploads.adopt')
@@ -487,7 +487,7 @@
         <div class="settings-row">
           <label>{{ t('settings.monitor.enabled') }}</label>
           <label class="toggle">
-            <input type="checkbox" v-model="settings.monitor.enabled" @change="saveSettings()" />
+            <input v-model="settings.monitor.enabled" type="checkbox" @change="saveSettings()" />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
         </div>
@@ -499,10 +499,10 @@
           <label>{{ t('settings.confirmBeforeCloseTab') }}</label>
           <label class="toggle">
             <input
-              type="checkbox"
               v-model="settings.confirm_before_close_tab"
-              @change="saveSettings()"
+              type="checkbox"
               data-setting="confirm-before-close-tab"
+              @change="saveSettings()"
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -514,10 +514,10 @@
           <label>{{ t('settings.restoreSessionOnStartup') }}</label>
           <label class="toggle">
             <input
-              type="checkbox"
               v-model="settings.restore_session_on_startup"
-              @change="saveSettings()"
+              type="checkbox"
               data-setting="restore-session-on-startup"
+              @change="saveSettings()"
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -529,10 +529,10 @@
           <label>{{ t('settings.spaceConfirmsDialogs') }}</label>
           <label class="toggle">
             <input
-              type="checkbox"
               v-model="settings.space_confirms_dialogs"
-              @change="saveSettings()"
+              type="checkbox"
               data-setting="space-confirms-dialogs"
+              @change="saveSettings()"
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -548,7 +548,7 @@
         <div class="settings-row">
           <label>{{ t('settings.log.enabled') }}</label>
           <label class="toggle">
-            <input type="checkbox" v-model="settings.log.enabled" @change="saveSettings()" />
+            <input v-model="settings.log.enabled" type="checkbox" @change="saveSettings()" />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
         </div>
@@ -620,6 +620,7 @@ import { useUploadManagement } from '../../composables/useUploadManagement'
 import { useTokenManagement } from '../../composables/useTokenManagement'
 import { useAccessUrl } from '../../composables/useAccessUrl'
 import { useAutostart } from '../../composables/useAutostart'
+import { uiConfirm } from '../../composables/useConfirm'
 import { onAppForegroundGain } from '../../composables/useAppForeground'
 
 const emit = defineEmits<{ 'token-changed': [] }>()
@@ -651,12 +652,12 @@ const displayAutostartWarnings = computed(() =>
   )
 )
 
-function confirmPortableAutostart() {
+async function confirmPortableAutostart() {
   const messageKey =
     autostart.status.value?.packageKind === 'linuxAppImage'
       ? 'autostart.portableConfirm.appImage'
       : 'autostart.portableConfirm.windows'
-  return window.confirm(t(messageKey))
+  return uiConfirm(t(messageKey), { danger: false })
 }
 
 function enableAutostart() {

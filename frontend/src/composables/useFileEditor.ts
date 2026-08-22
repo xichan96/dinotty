@@ -55,7 +55,8 @@ function resolveImagePath(relPath: string, filePath: string): string {
 /** Rewrite relative <img src> in rendered HTML to /api/workspace/raw URLs */
 function rewriteImageSrcs(html: string, filePath: string, paneId: string): string {
   return html.replace(/<img\b([^>]*?)\ssrc=(["'])(.+?)\2/gi, (_match, prefix, quote, src) => {
-    if (/^(https?:\/\/|\/api\/workspace\/raw)/.test(src)) return `<img${prefix} src=${quote}${src}${quote}`
+    if (/^(https?:\/\/|\/api\/workspace\/raw)/.test(src))
+      return `<img${prefix} src=${quote}${src}${quote}`
     const resolved = resolveImagePath(src, filePath)
     const q = new URLSearchParams({ pane_id: paneId, path: resolved })
     if (isTauri()) {

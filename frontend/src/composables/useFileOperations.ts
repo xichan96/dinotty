@@ -200,7 +200,7 @@ export function useFileOperations(opts: {
           alertUploadError(res.status, body)
           hadErrors = true
         } else {
-          const parsed = await res.json().catch(() => null) as ParsedUploadBody | null
+          const parsed = (await res.json().catch(() => null)) as ParsedUploadBody | null
           if (parsed?.errors?.length) {
             console.error('[upload] server errors:', parsed.errors)
             alert(`Upload failed:\n${parsed.errors.join('\n')}`)
@@ -347,11 +347,15 @@ export function useFileOperations(opts: {
     opts.inlineCreate.value = null
     const wasDir = opts.selectedIsDir.value
     const msg = wasDir ? t('filePreview.confirmDeleteFolder') : t('filePreview.confirmDeleteFile')
-    if (!skipConfirm && !(await uiConfirm(msg, {
-      title: t('filePreview.delete'),
-      confirmText: t('filePreview.delete'),
-      cancelText: t('filePreview.cancel'),
-    }))) return false
+    if (
+      !skipConfirm &&
+      !(await uiConfirm(msg, {
+        title: t('filePreview.delete'),
+        confirmText: t('filePreview.delete'),
+        cancelText: t('filePreview.cancel'),
+      }))
+    )
+      return false
     await getApiBase()
     const q = new URLSearchParams({ pane_id: opts.paneId(), path: rel })
     if (opts.cwdLabel.value) q.set('cwd', opts.cwdLabel.value)

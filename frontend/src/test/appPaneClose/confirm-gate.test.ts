@@ -387,7 +387,6 @@ describe('App.vue - onClosePane routes through confirmation gate', () => {
   })
 })
 
-
 describe('App.vue - Cmd+W routes through confirmation gate in split-pane mode', () => {
   beforeEach(() => {
     settings.confirm_before_close_tab = true
@@ -594,4 +593,3 @@ describe('App.vue - Cmd+W routes through confirmation gate in split-pane mode', 
     expect(confirmDialog.attributes('data-visible')).toBe('false')
   })
 })
-

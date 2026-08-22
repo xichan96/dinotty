@@ -113,7 +113,8 @@ describe('useFileOperations upload size limit', () => {
     mocks.authFetch.mockResolvedValue({
       ok: false,
       status: 413,
-      text: async () => JSON.stringify({ error: "file 'big.bin' exceeds upload size limit of 1 MB" }),
+      text: async () =>
+        JSON.stringify({ error: "file 'big.bin' exceeds upload size limit of 1 MB" }),
     })
     const ops = useFileOperations(makeOps())
 

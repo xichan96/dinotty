@@ -76,13 +76,13 @@ export function useAutostart() {
 
   async function setEnabled(
     enabled: boolean,
-    confirmPortableAutostart: () => boolean = () => true
+    confirmPortableAutostart: () => boolean | Promise<boolean> = () => true
   ): Promise<boolean> {
     if (requesting.value || !status.value) return false
     if (
       enabled &&
       status.value.warnings.includes('pathMoveBreaksRegistration') &&
-      !confirmPortableAutostart()
+      !(await confirmPortableAutostart())
     ) {
       return false
     }

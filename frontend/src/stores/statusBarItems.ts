@@ -72,11 +72,11 @@ export const useStatusBarItemsStore = defineStore('statusBarItems', () => {
   }
 
   const leftItems = computed(() =>
-    sortItems(items.value.filter((i) => i.position === 'left' && isVisible(i))),
+    sortItems(items.value.filter((i) => i.position === 'left' && isVisible(i)))
   )
 
   const rightItems = computed(() =>
-    sortItems(items.value.filter((i) => i.position === 'right' && isVisible(i))),
+    sortItems(items.value.filter((i) => i.position === 'right' && isVisible(i)))
   )
 
   return {

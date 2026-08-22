@@ -46,10 +46,8 @@ export interface PresentationGateContext {
 
 const VERSION = 1
 const SURFACE = isTauri() ? 'tauri' : 'web'
-export const NOTIFICATION_PRESENTATION_STORAGE_KEY =
-  `dinotty_notification_presentation_${SURFACE}_v${VERSION}`
-export const NOTIFICATION_PRESENTATION_MIGRATION_KEY =
-  `${NOTIFICATION_PRESENTATION_STORAGE_KEY}_migrated`
+export const NOTIFICATION_PRESENTATION_STORAGE_KEY = `dinotty_notification_presentation_${SURFACE}_v${VERSION}`
+export const NOTIFICATION_PRESENTATION_MIGRATION_KEY = `${NOTIFICATION_PRESENTATION_STORAGE_KEY}_migrated`
 
 const DEFAULT_SOUNDS: Record<NotificationType, SoundConfig> = {
   info: { source: 'builtin', value: 'ding', volume: 0.7 },
@@ -125,11 +123,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isSoundConfig(value: unknown): value is SoundConfig {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     (value.source === 'builtin' || value.source === 'custom') &&
     typeof value.value === 'string' &&
-    typeof value.volume === 'number' && Number.isFinite(value.volume) &&
-    value.volume >= 0 && value.volume <= 1
+    typeof value.volume === 'number' &&
+    Number.isFinite(value.volume) &&
+    value.volume >= 0 &&
+    value.volume <= 1
+  )
 }
 
 function isTime(value: unknown): value is string {
@@ -139,26 +141,40 @@ function isTime(value: unknown): value is string {
 }
 
 function normalizeSettings(value: unknown): NotificationPresentationSettings | null {
-  if (!isRecord(value) || !isRecord(value.channels) || !isRecord(value.sounds) ||
-      !isRecord(value.quiet_hours)) return null
+  if (
+    !isRecord(value) ||
+    !isRecord(value.channels) ||
+    !isRecord(value.sounds) ||
+    !isRecord(value.quiet_hours)
+  )
+    return null
   let popup = true
   if (Object.prototype.hasOwnProperty.call(value.channels, 'popup')) {
     if (typeof value.channels.popup !== 'boolean') return null
     popup = value.channels.popup
   }
-  if (typeof value.presentation_enabled !== 'boolean' ||
-      typeof value.channels.sound !== 'boolean' ||
-      typeof value.channels.vibration !== 'boolean' ||
-      typeof value.channels.panel !== 'boolean' ||
-      typeof value.channels.tab_indicator !== 'boolean' ||
-      !['normal', 'dot_sound', 'silent'].includes(String(value.dnd_level)) ||
-      typeof value.ignore_current_tab !== 'boolean' ||
-      !isTime(value.quiet_hours.start) || !isTime(value.quiet_hours.end) ||
-      typeof value.coalesce_window_ms !== 'number' ||
-      !Number.isFinite(value.coalesce_window_ms) || value.coalesce_window_ms < 0) return null
+  if (
+    typeof value.presentation_enabled !== 'boolean' ||
+    typeof value.channels.sound !== 'boolean' ||
+    typeof value.channels.vibration !== 'boolean' ||
+    typeof value.channels.panel !== 'boolean' ||
+    typeof value.channels.tab_indicator !== 'boolean' ||
+    !['normal', 'dot_sound', 'silent'].includes(String(value.dnd_level)) ||
+    typeof value.ignore_current_tab !== 'boolean' ||
+    !isTime(value.quiet_hours.start) ||
+    !isTime(value.quiet_hours.end) ||
+    typeof value.coalesce_window_ms !== 'number' ||
+    !Number.isFinite(value.coalesce_window_ms) ||
+    value.coalesce_window_ms < 0
+  )
+    return null
   const sounds = value.sounds as Record<string, unknown>
-  if (!(['info', 'success', 'warning', 'error', 'urgent'] as const)
-    .every((severity) => isSoundConfig(sounds[severity]))) return null
+  if (
+    !(['info', 'success', 'warning', 'error', 'urgent'] as const).every((severity) =>
+      isSoundConfig(sounds[severity])
+    )
+  )
+    return null
   return {
     ...value,
     channels: { ...value.channels, popup },
@@ -174,10 +190,13 @@ function assignSettings(value: NotificationPresentationSettings) {
 
 function persist() {
   if (loading || !persistenceEnabled) return
-  if (!storageSet(
-    NOTIFICATION_PRESENTATION_STORAGE_KEY,
-    JSON.stringify({ version: VERSION, settings: presentationSettings }),
-  )) persistenceEnabled = false
+  if (
+    !storageSet(
+      NOTIFICATION_PRESENTATION_STORAGE_KEY,
+      JSON.stringify({ version: VERSION, settings: presentationSettings })
+    )
+  )
+    persistenceEnabled = false
 }
 
 function migrateFromLoadedServerSettings(): boolean {
@@ -192,18 +211,24 @@ function migrateFromLoadedServerSettings(): boolean {
   if (!markerWritten) {
     persistenceEnabled = false
     isEphemeral.value = true
-    try { storageRemove(NOTIFICATION_PRESENTATION_STORAGE_KEY) } catch {}
+    try {
+      storageRemove(NOTIFICATION_PRESENTATION_STORAGE_KEY)
+    } catch {}
     return true
   }
   const localWritten = storageSet(
     NOTIFICATION_PRESENTATION_STORAGE_KEY,
-    JSON.stringify({ version: VERSION, settings: presentationSettings }),
+    JSON.stringify({ version: VERSION, settings: presentationSettings })
   )
   persistenceEnabled = localWritten
   if (!localWritten) {
     isEphemeral.value = true
-    try { storageRemove(NOTIFICATION_PRESENTATION_STORAGE_KEY) } catch {}
-    try { storageRemove(NOTIFICATION_PRESENTATION_MIGRATION_KEY) } catch {}
+    try {
+      storageRemove(NOTIFICATION_PRESENTATION_STORAGE_KEY)
+    } catch {}
+    try {
+      storageRemove(NOTIFICATION_PRESENTATION_MIGRATION_KEY)
+    } catch {}
   }
   return true
 }
@@ -218,22 +243,33 @@ function legacyMigrationSeed(): NotificationPresentationSettings {
     for (const key of ['sound', 'vibration', 'panel', 'tab_indicator'] as const) {
       if (typeof legacy.channels[key] === 'boolean') seed.channels[key] = legacy.channels[key]
     }
-    seed.channels.popup = typeof legacy.channels.popup === 'boolean'
-      ? legacy.channels.popup
-      : typeof legacy.channels.panel === 'boolean'
-        ? legacy.channels.panel
-        : true
+    seed.channels.popup =
+      typeof legacy.channels.popup === 'boolean'
+        ? legacy.channels.popup
+        : typeof legacy.channels.panel === 'boolean'
+          ? legacy.channels.panel
+          : true
   }
   if (isRecord(legacy.sounds)) {
     for (const severity of ['info', 'success', 'warning', 'error', 'urgent'] as const) {
-      if (isSoundConfig(legacy.sounds[severity])) seed.sounds[severity] = { ...legacy.sounds[severity] }
+      if (isSoundConfig(legacy.sounds[severity]))
+        seed.sounds[severity] = { ...legacy.sounds[severity] }
     }
   }
-  if (legacy.dnd_level === 'normal' || legacy.dnd_level === 'dot_sound' || legacy.dnd_level === 'silent') {
+  if (
+    legacy.dnd_level === 'normal' ||
+    legacy.dnd_level === 'dot_sound' ||
+    legacy.dnd_level === 'silent'
+  ) {
     seed.dnd_level = legacy.dnd_level
   }
-  if (typeof legacy.ignore_current_tab === 'boolean') seed.ignore_current_tab = legacy.ignore_current_tab
-  if (isRecord(legacy.quiet_hours) && isTime(legacy.quiet_hours.start) && isTime(legacy.quiet_hours.end)) {
+  if (typeof legacy.ignore_current_tab === 'boolean')
+    seed.ignore_current_tab = legacy.ignore_current_tab
+  if (
+    isRecord(legacy.quiet_hours) &&
+    isTime(legacy.quiet_hours.start) &&
+    isTime(legacy.quiet_hours.end)
+  ) {
     seed.quiet_hours = { start: legacy.quiet_hours.start, end: legacy.quiet_hours.end }
   }
   if (typeof legacy.coalesce_window_ms === 'number' && Number.isFinite(legacy.coalesce_window_ms)) {
@@ -245,8 +281,13 @@ function legacyMigrationSeed(): NotificationPresentationSettings {
 function hideLegacyServerPresentationFields() {
   const notification = serverSettings.notification as unknown as Record<string, unknown>
   for (const key of [
-    'presentation_enabled', 'channels', 'sounds', 'dnd_level', 'ignore_current_tab',
-    'quiet_hours', 'coalesce_window_ms',
+    'presentation_enabled',
+    'channels',
+    'sounds',
+    'dnd_level',
+    'ignore_current_tab',
+    'quiet_hours',
+    'coalesce_window_ms',
   ]) {
     if (!Object.prototype.hasOwnProperty.call(notification, key)) continue
     const descriptor = Object.getOwnPropertyDescriptor(notification, key)
@@ -274,9 +315,8 @@ function load() {
   if (raw !== null && raw !== undefined) {
     try {
       const parsed: unknown = JSON.parse(raw)
-      const normalized = isRecord(parsed) && parsed.version === VERSION
-        ? normalizeSettings(parsed.settings)
-        : null
+      const normalized =
+        isRecord(parsed) && parsed.version === VERSION ? normalizeSettings(parsed.settings) : null
       if (normalized) {
         assignSettings(normalized)
         validLocal = true
@@ -307,13 +347,13 @@ function load() {
       const marker = storageGet(NOTIFICATION_PRESENTATION_MIGRATION_KEY)
       if (marker === null) migrateFromLoadedServerSettings()
     },
-    { flush: 'sync' },
+    { flush: 'sync' }
   )
   hideLegacyServerPresentationFields()
   stopServerStripWatch = watch(
     () => serverSettings.notification,
     hideLegacyServerPresentationFields,
-    { flush: 'sync' },
+    { flush: 'sync' }
   )
 }
 
@@ -363,7 +403,7 @@ export function isInQuietHours(quietHours: { start: string; end: string }, now: 
 
 export function presentationGate(
   event: PresentationEvent,
-  ctx: PresentationGateContext,
+  ctx: PresentationGateContext
 ): PresentationOutput {
   const { settings } = ctx
   const output: PresentationOutput = settings.presentation_enabled
@@ -414,18 +454,12 @@ interface PendingPresentation<T extends PresentationEvent> {
   timer: ReturnType<typeof setTimeout>
 }
 
-type PresentationKey =
-  | { kind: 'pane'; id: string }
-  | { kind: 'notif'; id: string }
+type PresentationKey = { kind: 'pane'; id: string } | { kind: 'notif'; id: string }
 
 export interface PresentationSchedulerOptions<T extends PresentationEvent> {
   getWindowMs: () => number
   evaluate: (event: T) => PresentationOutput
-  fire: (
-    event: T,
-    output: PresentationOutput,
-    retire: () => void,
-  ) => (() => void) | void
+  fire: (event: T, output: PresentationOutput, retire: () => void) => (() => void) | void
   setTimer?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void
 }
@@ -437,19 +471,24 @@ interface LivePresentation {
 }
 
 const severityRanks: Record<NotificationType, number> = {
-  info: 0, success: 1, warning: 2, error: 3, urgent: 4,
+  info: 0,
+  success: 1,
+  warning: 2,
+  error: 3,
+  urgent: 4,
 }
 
 export function createPresentationScheduler<T extends PresentationEvent>(
-  options: PresentationSchedulerOptions<T>,
+  options: PresentationSchedulerOptions<T>
 ) {
   const pendingPanes = new Map<string, PendingPresentation<T>>()
   const pendingNotifs = new Map<string, PendingPresentation<T>>()
   const livePresentations = new Map<string, LivePresentation[]>()
   const readWatermarks = new Map<string, bigint>()
-  const setTimer = options.setTimer ?? ((callback: () => void, delay: number) =>
-    setTimeout(callback, delay))
-  const clearTimer = options.clearTimer ?? ((timer: ReturnType<typeof setTimeout>) => clearTimeout(timer))
+  const setTimer =
+    options.setTimer ?? ((callback: () => void, delay: number) => setTimeout(callback, delay))
+  const clearTimer =
+    options.clearTimer ?? ((timer: ReturnType<typeof setTimeout>) => clearTimeout(timer))
   let order = 0
 
   function keyFor(event: T): PresentationKey | null {
@@ -477,7 +516,7 @@ export function createPresentationScheduler<T extends PresentationEvent>(
 
   function dismissLive(
     key: PresentationKey,
-    matches: (entry: LivePresentation) => boolean = () => true,
+    matches: (entry: LivePresentation) => boolean = () => true
   ) {
     const liveKey = namespacedKey(key)
     const entries = livePresentations.get(liveKey)
@@ -494,7 +533,8 @@ export function createPresentationScheduler<T extends PresentationEvent>(
       const rank = severityRanks[candidate.event.severity]
       const bestRank = severityRanks[best.event.severity]
       return rank > bestRank || (rank === bestRank && candidate.order > best.order)
-        ? candidate : best
+        ? candidate
+        : best
     }).event
   }
 
@@ -565,18 +605,25 @@ export function createPresentationScheduler<T extends PresentationEvent>(
     if (entry) {
       clearTimer(entry.timer)
       const watermark = readWatermarks.get(paneId)
-      const survivors = cancelAllForPane || watermark === undefined
-        ? []
-        : entry.events.filter(({ event }) => !event.eventSeq || BigInt(event.eventSeq) > watermark)
+      const survivors =
+        cancelAllForPane || watermark === undefined
+          ? []
+          : entry.events.filter(
+              ({ event }) => !event.eventSeq || BigInt(event.eventSeq) > watermark
+            )
       pendingPanes.delete(paneId)
       if (survivors.length > 0) {
         const timer = setTimer(() => flush(key), Math.max(0, options.getWindowMs()))
         pendingPanes.set(paneId, { events: survivors, timer })
       }
     }
-    dismissLive(key, (live) => cancelAllForPane
-      || !live.representativeSeq
-      || BigInt(live.representativeSeq) <= BigInt(throughEventSeq!))
+    dismissLive(
+      key,
+      (live) =>
+        cancelAllForPane ||
+        !live.representativeSeq ||
+        BigInt(live.representativeSeq) <= BigInt(throughEventSeq!)
+    )
   }
 
   function removePane(paneId: string) {

@@ -76,7 +76,11 @@ export function useSplitPane(opts: {
   /** Split the active pane in the given direction.
    *  Returns the new pane id, or null if there is no active terminal tab
    *  or the split failed. */
-  async function splitPane(direction: 'horizontal' | 'vertical', forceLocal?: boolean, cwd?: string): Promise<string | null> {
+  async function splitPane(
+    direction: 'horizontal' | 'vertical',
+    forceLocal?: boolean,
+    cwd?: string
+  ): Promise<string | null> {
     const tab = getActiveTerminal()
     if (!tab) return null
     if (getAllLeaves(tab.layout).length >= 6) {
@@ -178,8 +182,7 @@ export function useSplitPane(opts: {
   ) {
     const tab = getActiveTerminal()
     if (!tab) return
-    const apiDirection =
-      direction === 'horizontal' ? 'right' : 'bottom'
+    const apiDirection = direction === 'horizontal' ? 'right' : 'bottom'
     try {
       let result
       if (kind === 'plugin') {
@@ -234,9 +237,9 @@ export function useSplitPane(opts: {
         direction,
       })
       // Update destination tab local layout
-      const dst = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === dstTabId
-      ) as TerminalTab | undefined
+      const dst = tabs.value.find((t) => t.type === 'terminal' && t.paneId === dstTabId) as
+        | TerminalTab
+        | undefined
       if (dst) {
         dst.layout = ensureSplitRoot(result.layout)
         // Reconcile paneMru so the newly-merged leaves are tracked and the
@@ -277,17 +280,17 @@ export function useSplitPane(opts: {
         direction,
       })
       // Update source tab local layout
-      const src = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === srcTabId
-      ) as TerminalTab | undefined
+      const src = tabs.value.find((t) => t.type === 'terminal' && t.paneId === srcTabId) as
+        | TerminalTab
+        | undefined
       if (src && result.source_layout) {
         src.layout = ensureSplitRoot(result.source_layout)
         src.paneMru = removePaneFromMru(src.paneMru, paneId).paneMru
       }
       // Update destination tab local layout
-      const dst = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === dstTabId
-      ) as TerminalTab | undefined
+      const dst = tabs.value.find((t) => t.type === 'terminal' && t.paneId === dstTabId) as
+        | TerminalTab
+        | undefined
       if (dst) {
         dst.layout = ensureSplitRoot(result.layout)
         dst.paneMru = reconcilePaneMru(
@@ -314,17 +317,17 @@ export function useSplitPane(opts: {
     // web metadata - producing an empty "Terminal" tab when the source was a
     // non-terminal pane and the REST response wins the race against the
     // TabCreated broadcast (which would otherwise restore the layout).
-    const srcBefore = tabs.value.find(
-      (t) => t.type === 'terminal' && t.paneId === srcTabId
-    ) as TerminalTab | undefined
+    const srcBefore = tabs.value.find((t) => t.type === 'terminal' && t.paneId === srcTabId) as
+      | TerminalTab
+      | undefined
     const sourceLeaf = srcBefore ? findLeaf(srcBefore.layout, paneId) : null
 
     try {
       const result = await apiExtractPane(srcTabId, paneId)
       // Update source tab local layout
-      const src = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === srcTabId
-      ) as TerminalTab | undefined
+      const src = tabs.value.find((t) => t.type === 'terminal' && t.paneId === srcTabId) as
+        | TerminalTab
+        | undefined
       let inheritedCwd: string | undefined
       let inheritedConnectionId: string | undefined
       let inheritedWorkspaceId: string | undefined

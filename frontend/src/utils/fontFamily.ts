@@ -1,4 +1,10 @@
-export const ANCHOR_FAMILIES = ['Menlo', 'Consolas', 'Courier New', 'DejaVu Sans Mono', 'monospace'] as const
+export const ANCHOR_FAMILIES = [
+  'Menlo',
+  'Consolas',
+  'Courier New',
+  'DejaVu Sans Mono',
+  'monospace',
+] as const
 
 const GENERIC_KEYWORDS = new Set(['monospace', 'serif', 'sans-serif'])
 

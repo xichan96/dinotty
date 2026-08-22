@@ -14,7 +14,15 @@
           :disabled="sendingCode || codeResendIn > 0"
           @click="onSendCode"
         >
-          {{ sendingCode ? t('login.sendingCode') : codeResendIn > 0 ? t('login.resendIn', { seconds: codeResendIn }) : (codeSent ? t('login.resendCode') : t('login.sendCode')) }}
+          {{
+            sendingCode
+              ? t('login.sendingCode')
+              : codeResendIn > 0
+                ? t('login.resendIn', { seconds: codeResendIn })
+                : codeSent
+                  ? t('login.resendCode')
+                  : t('login.sendCode')
+          }}
         </button>
         <input
           v-model="code"
@@ -29,7 +37,11 @@
           @focus="error = ''"
           @input="code = code.replace(/\D/g, '').slice(0, 6)"
         />
-        <button type="submit" class="login-btn" :disabled="loading || retryIn > 0 || code.length !== 6">
+        <button
+          type="submit"
+          class="login-btn"
+          :disabled="loading || retryIn > 0 || code.length !== 6"
+        >
           {{ loading ? t('login.verifyingCode') : t('login.verifyCode') }}
         </button>
       </form>

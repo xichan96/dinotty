@@ -1,9 +1,5 @@
 import type { Terminal as XTerm } from '@xterm/xterm'
-import {
-  computeWheelPlan,
-  type TrackingWheelState,
-  type WheelPlanInput,
-} from './computeWheelPlan'
+import { computeWheelPlan, type TrackingWheelState, type WheelPlanInput } from './computeWheelPlan'
 import { settings } from './useSettings'
 
 export interface WheelHost {
@@ -38,9 +34,7 @@ export function createTerminalWheel(host: WheelHost): TerminalWheel {
   function getWheelRowHeight(): number {
     const xt = host.getXterm()
     try {
-      const h = Number(
-        (xt as any)?._core?._renderService?.dimensions?.css?.cell?.height
-      )
+      const h = Number((xt as any)?._core?._renderService?.dimensions?.css?.cell?.height)
       if (Number.isFinite(h) && h > 0) return h
     } catch {
       // fall through to the one-time warning below
@@ -58,10 +52,7 @@ export function createTerminalWheel(host: WheelHost): TerminalWheel {
     const xt = host.getXterm()
     try {
       const core = (xt as any)?._core
-      const svc =
-        core?.coreMouseService ??
-        core?.mouseService ??
-        core?.services?.coreMouseService
+      const svc = core?.coreMouseService ?? core?.mouseService ?? core?.services?.coreMouseService
       const activeProtocol = svc?.activeProtocol ?? svc?._activeProtocol
       if (typeof activeProtocol !== 'string') return undefined
       const events = svc?._protocols?.[activeProtocol]?.events
@@ -71,12 +62,7 @@ export function createTerminalWheel(host: WheelHost): TerminalWheel {
     }
   }
 
-  function sendWheelEvent(
-    deltaY: number,
-    clientX: number,
-    clientY: number,
-    deltaMode = 0
-  ) {
+  function sendWheelEvent(deltaY: number, clientX: number, clientY: number, deltaMode = 0) {
     const xt = host.getXterm()
     if (!xt || deltaY === 0) return
     const xtermEl = xt.element
@@ -112,10 +98,7 @@ export function createTerminalWheel(host: WheelHost): TerminalWheel {
       // xterm.js 5.5.0 hardcodes alt-screen wheel-to-arrow conversion with no
       // option (upstream issue #5194); keep this after _wheelBypass so touchScroll's
       // synthetic full-screen scrolling can still use that native conversion.
-      if (
-        cur.buffer.active.type === 'alternate' &&
-        isWheelReportedByApp() === false
-      ) {
+      if (cur.buffer.active.type === 'alternate' && isWheelReportedByApp() === false) {
         e.preventDefault()
         e.stopPropagation()
         return false
@@ -172,12 +155,7 @@ export function createTerminalWheel(host: WheelHost): TerminalWheel {
         velocity,
         isMouseTracking,
       }
-      const plan = computeWheelPlan(
-        input,
-        sensitivity,
-        acceleration,
-        trackingWheelState
-      )
+      const plan = computeWheelPlan(input, sensitivity, acceleration, trackingWheelState)
       if (plan.action === 'native') {
         trackingWheelState = null
         return true

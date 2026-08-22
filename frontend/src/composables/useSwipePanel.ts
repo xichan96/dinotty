@@ -53,7 +53,9 @@ export function useSwipePanel(opts: SwipePanelOptions): SwipePanelState {
 
   const swipeTrackStyle = computed(() => {
     const baseOffset = kbMode.value === 'default' ? 0 : -50
-    const dragPct = swiping.value ? (swipeDeltaX.value / (barRef.value?.offsetWidth || 375)) * 50 : 0
+    const dragPct = swiping.value
+      ? (swipeDeltaX.value / (barRef.value?.offsetWidth || 375)) * 50
+      : 0
     return {
       transform: `translateX(${baseOffset + dragPct}%)`,
       transition: swipeTransition.value ? 'transform 0.25s ease-out' : 'none',

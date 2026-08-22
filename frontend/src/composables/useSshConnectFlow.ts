@@ -51,8 +51,9 @@ export function useSshConnectFlow(opts: SshConnectFlowOptions): SshConnectFlowSt
   }
 
   async function onSshConnect(result: SshConnectResult) {
-    const resolvedConnectionId = result.connection_id
-      ?? workspaces.value.find((w) => w.id === activeWorkspaceId.value)?.connection_id
+    const resolvedConnectionId =
+      result.connection_id ??
+      workspaces.value.find((w) => w.id === activeWorkspaceId.value)?.connection_id
     const resolvedWorkspaceId = result.workspace_id ?? activeWorkspaceId.value ?? undefined
 
     const existing = tabs.value.find((t) => t.paneId === result.tab_id)

@@ -1,6 +1,6 @@
 <template>
   <span v-if="monogramEnabled" class="ws-badge" :style="badgeStyle">{{ abbr }}</span>
-  <component v-else :is="icon" :size="size" :stroke-width="2" class="ws-icon" />
+  <component :is="icon" v-else :size="size" :stroke-width="2" class="ws-icon" />
 </template>
 
 <script setup lang="ts">
@@ -48,15 +48,15 @@ function observeCardBg(name: string) {
 
 const props = withDefaults(
   defineProps<{
-  remote?: boolean
-  size?: number
+    remote?: boolean
+    size?: number
     abbr?: string
     color?: string
     cardBgVar?: string
   }>(),
   {
-  remote: false,
-  size: 18,
+    remote: false,
+    size: 18,
     abbr: '',
     color: '',
     cardBgVar: '--bg-surface',

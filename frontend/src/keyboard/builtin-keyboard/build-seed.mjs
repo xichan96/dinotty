@@ -1,11 +1,4 @@
-import {
-  copyFileSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 
 // Assemble the seed artifact from the vite lib-build output:
@@ -26,12 +19,12 @@ for (const entry of readdirSync(outDir)) {
 
 const globalCss = readFileSync(
   fileURLToPath(new URL('../../styles/mobile-keyboard.css', import.meta.url)),
-  'utf8',
+  'utf8'
 )
 const scopedCss = readFileSync(`${outDir}/scoped.css`, 'utf8')
 writeFileSync(
   `${outDir}/styles.css`,
-  `${globalCss}\n/* scoped SFC styles (this build's data-v hashes) */\n${scopedCss}`,
+  `${globalCss}\n/* scoped SFC styles (this build's data-v hashes) */\n${scopedCss}`
 )
 
 // scoped.css is an intermediate build product; the shipped styles file is styles.css.

@@ -14,12 +14,24 @@ const KEY = 'dinotty_device_text_overrides_v1'
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>()
-  get length() { return this.data.size }
-  clear() { this.data.clear() }
-  getItem(key: string) { return this.data.get(key) ?? null }
-  key(index: number) { return [...this.data.keys()][index] ?? null }
-  removeItem(key: string) { this.data.delete(key) }
-  setItem(key: string, value: string) { this.data.set(key, String(value)) }
+  get length() {
+    return this.data.size
+  }
+  clear() {
+    this.data.clear()
+  }
+  getItem(key: string) {
+    return this.data.get(key) ?? null
+  }
+  key(index: number) {
+    return [...this.data.keys()][index] ?? null
+  }
+  removeItem(key: string) {
+    this.data.delete(key)
+  }
+  setItem(key: string, value: string) {
+    this.data.set(key, String(value))
+  }
 }
 
 describe('useDeviceTextSettings', () => {
@@ -65,16 +77,19 @@ describe('useDeviceTextSettings', () => {
   })
 
   it('clamps valid numeric fields and ignores invalid siblings and unknown keys', () => {
-    localStorage.setItem(KEY, JSON.stringify({
-      version: 1,
-      overrides: {
-        font_size: 500,
-        font_family: ['bad'],
-        line_height: '1.5',
-        letter_spacing: 2,
-        unknown: 123,
-      },
-    }))
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: {
+          font_size: 500,
+          font_family: ['bad'],
+          line_height: '1.5',
+          letter_spacing: 2,
+          unknown: 123,
+        },
+      })
+    )
     reloadOverrides()
     expect(getEffectiveText()).toMatchObject({
       font_size: FONT_SIZE_MAX,

@@ -324,9 +324,9 @@ describe('App.vue - system keyboard state regressions', () => {
 
       expect(pointerDown.defaultPrevented).toBe(false)
       expect(mouseDown.defaultPrevented).toBe(false)
-      expect(wrapper.findComponent(SystemKeyboardToolbarStub).props('ctx').nativeImeOpen.value).toBe(
-        false
-      )
+      expect(
+        wrapper.findComponent(SystemKeyboardToolbarStub).props('ctx').nativeImeOpen.value
+      ).toBe(false)
       expect(mocks.setSystemImeAuthorized).not.toHaveBeenCalledWith(true)
     }
   )

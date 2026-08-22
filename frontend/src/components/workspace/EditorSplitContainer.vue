@@ -11,15 +11,13 @@
     :style="{ flex: `${leaf.ratio} 1 0%` }"
     @focus="(id: string) => emit('focus', id)"
     @close="(id: string) => emit('close', id)"
-    @file-drop="(leafId: string, rel: string, pos: DropPosition) => emit('file-drop', leafId, rel, pos)"
+    @file-drop="
+      (leafId: string, rel: string, pos: DropPosition) => emit('file-drop', leafId, rel, pos)
+    "
   />
 
   <!-- Split node: flex container with children and dividers -->
-  <div
-    v-else-if="split"
-    ref="containerRef"
-    :class="['editor-split-container', split.direction]"
-  >
+  <div v-else-if="split" ref="containerRef" :class="['editor-split-container', split.direction]">
     <template
       v-for="(child, idx) in split.children"
       :key="child.type === 'editor-leaf' ? child.id : child.id"
@@ -32,7 +30,9 @@
         :style="getChildStyle(idx)"
         @focus="(id: string) => emit('focus', id)"
         @close="(id: string) => emit('close', id)"
-        @file-drop="(leafId: string, rel: string, pos: DropPosition) => emit('file-drop', leafId, rel, pos)"
+        @file-drop="
+          (leafId: string, rel: string, pos: DropPosition) => emit('file-drop', leafId, rel, pos)
+        "
       />
       <SplitDivider
         v-if="idx < split.children.length - 1"

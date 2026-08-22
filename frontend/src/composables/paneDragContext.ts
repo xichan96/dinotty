@@ -1,9 +1,7 @@
 import { reactive, readonly } from 'vue'
 
 /** Drop zone taxonomy for unified pane/tab drag-and-drop. */
-export type DropZone =
-  | 'left' | 'right' | 'top' | 'bottom' | 'center'
-  | 'tab-label' | 'tab-blank'
+export type DropZone = 'left' | 'right' | 'top' | 'bottom' | 'center' | 'tab-label' | 'tab-blank'
 
 /** Kind of drop target a candidate represents. */
 export type DropTargetKind = 'pane' | 'tab-label' | 'tab-blank'
@@ -42,11 +40,7 @@ export function usePaneDrag() {
   return {
     state: readonly(state),
 
-    startDrag(payload: {
-      sourcePaneId: string
-      sourceTabId: string
-      wholeTab?: boolean
-    }) {
+    startDrag(payload: { sourcePaneId: string; sourceTabId: string; wholeTab?: boolean }) {
       state.isDragging = true
       state.sourcePaneId = payload.sourcePaneId
       state.sourceTabId = payload.sourceTabId

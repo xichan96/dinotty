@@ -31,10 +31,7 @@ const IDLE_FRAME_LIMIT = 8
 
 function samePosition(a: NumericScrollPosition, b: NumericScrollPosition): boolean {
   return (
-    a.viewportY === b.viewportY &&
-    a.baseY === b.baseY &&
-    a.length === b.length &&
-    a.rows === b.rows
+    a.viewportY === b.viewportY && a.baseY === b.baseY && a.length === b.length && a.rows === b.rows
   )
 }
 

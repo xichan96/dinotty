@@ -123,7 +123,7 @@ export function useSuperviseTabs() {
         () => {
           settle()
           return false
-        },
+        }
       )
       .finally(() => {
         if (timeoutId !== null) {

@@ -13,9 +13,7 @@ export interface SavedTheme {
   name: string
   colors: ThemeColors
 }
-export type Selection =
-  | { kind: 'builtin'; name: string }
-  | { kind: 'custom'; uuid: string }
+export type Selection = { kind: 'builtin'; name: string } | { kind: 'custom'; uuid: string }
 export interface ResolvedTheme {
   colors: Record<string, string>
   source: Selection | 'server-default'
@@ -23,10 +21,22 @@ export interface ResolvedTheme {
 
 const STORAGE_KEY = 'dinotty_device_theme_v1'
 const ANSI_KEYS = [
-  '--color-black','--color-red','--color-green','--color-yellow','--color-blue',
-  '--color-magenta','--color-cyan','--color-white','--color-bright-black','--color-bright-red',
-  '--color-bright-green','--color-bright-yellow','--color-bright-blue','--color-bright-magenta',
-  '--color-bright-cyan','--color-bright-white',
+  '--color-black',
+  '--color-red',
+  '--color-green',
+  '--color-yellow',
+  '--color-blue',
+  '--color-magenta',
+  '--color-cyan',
+  '--color-white',
+  '--color-bright-black',
+  '--color-bright-red',
+  '--color-bright-green',
+  '--color-bright-yellow',
+  '--color-bright-blue',
+  '--color-bright-magenta',
+  '--color-bright-cyan',
+  '--color-bright-white',
 ] as const
 
 const selectionState = reactive<{ selection: Selection | null }>({ selection: null })
@@ -34,13 +44,19 @@ let loaded = false
 
 function removeStored() {
   if (typeof window === 'undefined') return
-  try { window.localStorage.removeItem(STORAGE_KEY) } catch {}
+  try {
+    window.localStorage.removeItem(STORAGE_KEY)
+  } catch {}
 }
 function persistSelection() {
   if (typeof window === 'undefined') return
   try {
     if (selectionState.selection === null) window.localStorage.removeItem(STORAGE_KEY)
-    else window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, selection: selectionState.selection }))
+    else
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ version: 1, selection: selectionState.selection })
+      )
   } catch {
     // R6/A6: storage unavailable or quota exceeded; do not keep a device-inconsistent selection.
     selectionState.selection = null
@@ -57,17 +73,40 @@ function loadStored() {
   selectionState.selection = null
   if (typeof window === 'undefined') return
   let raw: string | null
-  try { raw = window.localStorage.getItem(STORAGE_KEY) } catch { return }
+  try {
+    raw = window.localStorage.getItem(STORAGE_KEY)
+  } catch {
+    return
+  }
   if (raw === null) return
   let parsed: unknown
-  try { parsed = JSON.parse(raw) } catch { removeStored(); return }
-  if (typeof parsed !== 'object' || parsed === null || (parsed as { version?: unknown }).version !== 1) { removeStored(); return }
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    removeStored()
+    return
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    (parsed as { version?: unknown }).version !== 1
+  ) {
+    removeStored()
+    return
+  }
   const sel = (parsed as { selection?: unknown }).selection
-  if (sel === null) { selectionState.selection = null; return }
+  if (sel === null) {
+    selectionState.selection = null
+    return
+  }
   if (isValidSelection(sel)) selectionState.selection = sel
   else removeStored()
 }
-function ensureLoaded() { if (loaded) return; loaded = true; loadStored() }
+function ensureLoaded() {
+  if (loaded) return
+  loaded = true
+  loadStored()
+}
 ensureLoaded()
 
 export function buildCustomThemeColors(saved: SavedTheme): Record<string, string> {
@@ -76,17 +115,28 @@ export function buildCustomThemeColors(saved: SavedTheme): Record<string, string
     '--fg': saved.colors.foreground,
     '--cursor': saved.colors.cursor,
   }
-  saved.colors.ansi.forEach((c, i) => { if (ANSI_KEYS[i] && c) base[ANSI_KEYS[i]] = c })
+  saved.colors.ansi.forEach((c, i) => {
+    if (ANSI_KEYS[i] && c) base[ANSI_KEYS[i]] = c
+  })
   return fillDefaults({ name: 'custom', label: saved.name, colors: base }).colors
 }
 
-function serverDefaultColors(preset: string, legacyCustom: SettingsData['theme']['custom']): Record<string, string> {
+function serverDefaultColors(
+  preset: string,
+  legacyCustom: SettingsData['theme']['custom']
+): Record<string, string> {
   const colors: Record<string, string> = { ...getThemeByName(preset).colors }
   if (legacyCustom) {
     if (legacyCustom.foreground) colors['--fg'] = legacyCustom.foreground
     if (legacyCustom.background) colors['--bg'] = legacyCustom.background
-    if (legacyCustom.cursor) { colors['--fg-muted'] = legacyCustom.cursor; colors['--cursor'] = legacyCustom.cursor }
-    if (legacyCustom.ansi) legacyCustom.ansi.forEach((c, i) => { if (c && ANSI_KEYS[i]) colors[ANSI_KEYS[i]] = c })
+    if (legacyCustom.cursor) {
+      colors['--fg-muted'] = legacyCustom.cursor
+      colors['--cursor'] = legacyCustom.cursor
+    }
+    if (legacyCustom.ansi)
+      legacyCustom.ansi.forEach((c, i) => {
+        if (c && ANSI_KEYS[i]) colors[ANSI_KEYS[i]] = c
+      })
   }
   return colors
 }
@@ -132,7 +182,13 @@ let watchStarted = false
 function ensureWatch() {
   if (watchStarted) return
   watchStarted = true
-  watch(effectiveTheme, (t) => { listeners.forEach((fn) => fn(t)) }, { flush: 'sync' })
+  watch(
+    effectiveTheme,
+    (t) => {
+      listeners.forEach((fn) => fn(t))
+    },
+    { flush: 'sync' }
+  )
 }
 
 export function onEffectiveThemeChange(fn: (t: ResolvedTheme) => void) {
@@ -151,9 +207,14 @@ export function getThemeSelection(): Selection | null {
   ensureLoaded()
   return selectionState.selection
 }
-export function clearThemeSelection() { setThemeSelection(null) }
+export function clearThemeSelection() {
+  setThemeSelection(null)
+}
 
-export function reloadThemeSelection() { loaded = true; loadStored() }
+export function reloadThemeSelection() {
+  loaded = true
+  loadStored()
+}
 
 export function useDeviceThemeSelection() {
   ensureWatch()

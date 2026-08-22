@@ -13,7 +13,7 @@ export function computeDropdownPlacement(
   bounds: RectLike,
   preferredHeight: number,
   gap = 4,
-  margin = 8,
+  margin = 8
 ): DropdownPlacement {
   const spaceBelow = bounds.bottom - trigger.bottom - gap - margin
   const spaceAbove = trigger.top - bounds.top - gap - margin

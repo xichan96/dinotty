@@ -111,7 +111,7 @@ export const usePluginMonitorStore = defineStore('pluginMonitor', () => {
 
   function isVisible(
     s: RegisteredSeries,
-    userConfig: Record<string, boolean> | undefined,
+    userConfig: Record<string, boolean> | undefined
   ): boolean {
     if (s.autoHidden) return false
     if (s.visible && !s.visible()) return false

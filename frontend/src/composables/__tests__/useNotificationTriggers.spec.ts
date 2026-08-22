@@ -32,7 +32,9 @@ const syncMock = vi.hoisted(() => ({
 vi.mock('../useSyncWebSocket', () => ({
   onNotification: () => () => {},
   getClientId: () => syncMock.clientId,
-  sendMarkRead: (payload: any) => { syncMock.sentPayloads.push(payload) },
+  sendMarkRead: (payload: any) => {
+    syncMock.sentPayloads.push(payload)
+  },
 }))
 
 import { settings } from '../useSettings'
@@ -68,22 +70,25 @@ function pane(paneId: string, latestEventSeq: string, readThroughSeq = '0') {
 function snapshot(
   revision: string,
   panes = [] as ReturnType<typeof pane>[],
-  notifs = [] as Array<{ notifId: string; read: boolean | null; removed?: true }>,
+  notifs = [] as Array<{ notifId: string; read: boolean | null; removed?: true }>
 ) {
   return { type: 'snapshot', epoch: 'epoch-a', revision, panes, notifs }
 }
 
 function delta(
   revision: string,
-  panes = [] as Array<ReturnType<typeof pane> | {
-    paneId: string
-    latestEventSeq: null
-    readThroughSeq: null
-    firstUnreadAt: null
-    severity: null
-    removed: true
-  }>,
-  notifs = [] as Array<{ notifId: string; read: boolean | null; removed?: true }>,
+  panes = [] as Array<
+    | ReturnType<typeof pane>
+    | {
+        paneId: string
+        latestEventSeq: null
+        readThroughSeq: null
+        firstUnreadAt: null
+        severity: null
+        removed: true
+      }
+  >,
+  notifs = [] as Array<{ notifId: string; read: boolean | null; removed?: true }>
 ) {
   return { type: 'state_delta', epoch: 'epoch-a', revision, panes, notifs }
 }
@@ -502,53 +507,53 @@ describe('unhandled history pruning', () => {
 
   it('retains current-epoch pane and notif cards when authoritative entries disappear', () => {
     const notif = useNotification()
-    __dispatchServerMessageForTest(snapshot(
-      '1',
-      [pane('pane-a', '2')],
-      [{ notifId: 'notif-a', read: false }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot('1', [pane('pane-a', '2')], [{ notifId: 'notif-a', read: false }])
+    )
     __dispatchServerMessageForTest(raised({ eventSeq: '2' }))
     __dispatchServerMessageForTest(raised({ pane_id: '', notifId: 'notif-a' }))
 
-    __dispatchServerMessageForTest(delta(
-      '2',
-      [{
-        paneId: 'pane-a', latestEventSeq: null, readThroughSeq: null,
-        firstUnreadAt: null, severity: null, removed: true,
-      }],
-      [{ notifId: 'notif-a', read: null, removed: true }],
-    ))
+    __dispatchServerMessageForTest(
+      delta(
+        '2',
+        [
+          {
+            paneId: 'pane-a',
+            latestEventSeq: null,
+            readThroughSeq: null,
+            firstUnreadAt: null,
+            severity: null,
+            removed: true,
+          },
+        ],
+        [{ notifId: 'notif-a', read: null, removed: true }]
+      )
+    )
 
     expect(notif.historyCount.value).toBe(2)
   })
 
   it('prunes cards proven read by a reconnect snapshot', () => {
     const notif = useNotification()
-    __dispatchServerMessageForTest(snapshot(
-      '1',
-      [pane('pane-a', '7')],
-      [{ notifId: 'notif-a', read: false }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot('1', [pane('pane-a', '7')], [{ notifId: 'notif-a', read: false }])
+    )
     __dispatchServerMessageForTest(raised({ eventSeq: '7' }))
     __dispatchServerMessageForTest(raised({ pane_id: '', notifId: 'notif-a' }))
     expect(notif.historyCount.value).toBe(2)
 
-    __dispatchServerMessageForTest(snapshot(
-      '2',
-      [pane('pane-a', '7', '7')],
-      [{ notifId: 'notif-a', read: true }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot('2', [pane('pane-a', '7', '7')], [{ notifId: 'notif-a', read: true }])
+    )
 
     expect(notif.historyCount.value).toBe(0)
   })
 
   it('retains current-epoch cards absent from a same-epoch snapshot', () => {
     const notif = useNotification()
-    __dispatchServerMessageForTest(snapshot(
-      '1',
-      [pane('pane-a', '7')],
-      [{ notifId: 'notif-a', read: false }],
-    ))
+    __dispatchServerMessageForTest(
+      snapshot('1', [pane('pane-a', '7')], [{ notifId: 'notif-a', read: false }])
+    )
     __dispatchServerMessageForTest(raised({ eventSeq: '7' }))
     __dispatchServerMessageForTest(raised({ pane_id: '', notifId: 'notif-a' }))
     expect(notif.historyCount.value).toBe(2)
@@ -729,7 +734,7 @@ describe('raised presentation pipeline', () => {
     vi.advanceTimersByTime(0)
     const content = toast.mock.calls[0][0] as any
     const goToButton = content.children.find(
-      (child: any) => child?.children === 'notification.goTo',
+      (child: any) => child?.children === 'notification.goTo'
     )
 
     goToButton.props.onClick()
@@ -881,10 +886,18 @@ describe('raised presentation pipeline', () => {
     useNotification()
     __dispatchServerMessageForTest(snapshot('1'))
     __dispatchServerMessageForTest(raised({ eventSeq: '9' }))
-    __dispatchServerMessageForTest(delta('2', [{
-      paneId: 'pane-a', latestEventSeq: null, readThroughSeq: null,
-      firstUnreadAt: null, severity: null, removed: true,
-    }]))
+    __dispatchServerMessageForTest(
+      delta('2', [
+        {
+          paneId: 'pane-a',
+          latestEventSeq: null,
+          readThroughSeq: null,
+          firstUnreadAt: null,
+          severity: null,
+          removed: true,
+        },
+      ])
+    )
     vi.advanceTimersByTime(50)
     expect(toast).not.toHaveBeenCalled()
 
@@ -929,7 +942,7 @@ describe('raised presentation pipeline', () => {
       vi.advanceTimersByTime(50)
       expect(toast).not.toHaveBeenCalled()
       expect(__pendingPresentationCountForTest()).toBe(0)
-    },
+    }
   )
 
   it('a pane mark_read_result arrival cancels that pane scheduler slot', () => {
@@ -961,7 +974,9 @@ describe('raised presentation pipeline', () => {
     __dispatchServerMessageForTest(raised({ pane_id: '', notifId: 'notif-read' }))
     __dispatchServerMessageForTest(delta('2', [], [{ notifId: 'notif-read', read: true }]))
     __dispatchServerMessageForTest(raised({ pane_id: '', notifId: 'notif-removed' }))
-    __dispatchServerMessageForTest(delta('3', [], [{ notifId: 'notif-removed', read: null, removed: true }]))
+    __dispatchServerMessageForTest(
+      delta('3', [], [{ notifId: 'notif-removed', read: null, removed: true }])
+    )
     vi.advanceTimersByTime(50)
     expect(toast).not.toHaveBeenCalled()
   })

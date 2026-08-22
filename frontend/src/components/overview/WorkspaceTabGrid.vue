@@ -39,10 +39,7 @@
         <div class="mc-card-header">
           <span class="mc-card-index">{{ card.index }}</span>
           <span class="mc-card-title">{{ card.title }}</span>
-          <button
-            class="mc-card-close"
-            @click.stop="$emit('close-tab', card.paneId)"
-          >
+          <button class="mc-card-close" @click.stop="$emit('close-tab', card.paneId)">
             <X :size="14" />
           </button>
         </div>
@@ -110,9 +107,7 @@ const workspaceName = computed(() => {
 })
 const workspacePath = computed(() => props.workspace?.path)
 const emptyHint = computed(() =>
-  props.workspace
-    ? `${t('workspace.firstUse')}`
-    : t('workspace.ungrouped'),
+  props.workspace ? `${t('workspace.firstUse')}` : t('workspace.ungrouped')
 )
 
 // Swipe gesture

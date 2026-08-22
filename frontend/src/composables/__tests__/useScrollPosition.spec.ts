@@ -29,14 +29,16 @@ function createEmitter<T>() {
   }
 }
 
-function createFakeXTerm(options: {
-  rows?: number
-  viewportY?: number
-  baseY?: number
-  length?: number
-  type?: BufferType
-  element?: HTMLElement
-} = {}) {
+function createFakeXTerm(
+  options: {
+    rows?: number
+    viewportY?: number
+    baseY?: number
+    length?: number
+    type?: BufferType
+    element?: HTMLElement
+  } = {}
+) {
   const active: FakeActiveBuffer = {
     viewportY: options.viewportY ?? 0,
     baseY: options.baseY ?? 0,
@@ -204,7 +206,9 @@ describe('useScrollPosition', () => {
     const handle = useScrollPosition(fake.xterm)
 
     expect(addEventListener).toHaveBeenCalledWith('wheel', expect.any(Function), { passive: true })
-    expect(addEventListener).toHaveBeenCalledWith('touchmove', expect.any(Function), { passive: true })
+    expect(addEventListener).toHaveBeenCalledWith('touchmove', expect.any(Function), {
+      passive: true,
+    })
     expect(addEventListener).toHaveBeenCalledWith('scroll', expect.any(Function), {
       capture: true,
       passive: true,

@@ -43,7 +43,7 @@ describe('computeAvailability', () => {
     expect(
       computeAvailability('Menlo', () => {
         throw new Error('measurement failed')
-      }),
+      })
     ).toBe(true)
   })
 })

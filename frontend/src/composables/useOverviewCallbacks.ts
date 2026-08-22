@@ -19,7 +19,12 @@ export interface OverviewCallbacksOptions {
   activateWorkspace: (workspaceId: string | null) => Promise<boolean>
   closeTab: (paneId: string) => Promise<void>
   requestCloseTab: (paneId: string) => Promise<void> | void
-  newTab: (cwd?: string, argv?: string[], title?: string, workspaceId?: string | null) => Promise<string | void>
+  newTab: (
+    cwd?: string,
+    argv?: string[],
+    title?: string,
+    workspaceId?: string | null
+  ) => Promise<string | void>
   persist: () => void
   commitLocalActivePane: (paneId: string) => void
   focusActive: () => void
@@ -118,15 +123,14 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
     try {
       const targetWorkspaceId = toActiveWorkspaceId(workspaceId)
       if (
-        workspaceId !== undefined
-        && targetWorkspaceId !== activeWorkspaceId.value
-        && !(await activateWorkspace(targetWorkspaceId))
-      ) return
+        workspaceId !== undefined &&
+        targetWorkspaceId !== activeWorkspaceId.value &&
+        !(await activateWorkspace(targetWorkspaceId))
+      )
+        return
       const result = await apiCreateSshTab(connectionId, initialCwd, workspaceId)
       const resolvedWorkspaceId = result.workspace_id ?? workspaceId
-      const existing = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === result.tab_id,
-      )
+      const existing = tabs.value.find((t) => t.type === 'terminal' && t.paneId === result.tab_id)
       if (existing) {
         if (existing.type === 'terminal' && resolvedWorkspaceId) {
           existing.workspaceId = resolvedWorkspaceId

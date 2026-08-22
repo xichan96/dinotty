@@ -39,10 +39,12 @@ function terminalTab(tabId: string, paneId: string): Tab {
   }
 }
 
-function setup(options: {
-  activeWorkspaceId?: string | null
-  matchWorkspace?: () => Workspace | null
-} = {}) {
+function setup(
+  options: {
+    activeWorkspaceId?: string | null
+    matchWorkspace?: () => Workspace | null
+  } = {}
+) {
   const tabs = ref<Tab[]>([
     terminalTab('tab-closing', 'pane-closing'),
     terminalTab('tab-remaining', 'pane-remaining'),
@@ -76,7 +78,15 @@ function setup(options: {
     sendSync: vi.fn(),
     showCreateTerminalError: vi.fn(),
   })
-  return { lifecycle, tabs, termRefs, termRef, clearForPaneIds, activeWorkspaceId, activateWorkspace }
+  return {
+    lifecycle,
+    tabs,
+    termRefs,
+    termRef,
+    clearForPaneIds,
+    activeWorkspaceId,
+    activateWorkspace,
+  }
 }
 
 describe('useTabLifecycle close consistency', () => {

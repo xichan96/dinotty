@@ -23,7 +23,11 @@ beforeEach(() => {
   }
   vi.stubGlobal('localStorage', mock)
   try {
-    Object.defineProperty(window, 'localStorage', { value: mock, configurable: true, writable: true })
+    Object.defineProperty(window, 'localStorage', {
+      value: mock,
+      configurable: true,
+      writable: true,
+    })
   } catch {
     // window.localStorage may be a non-configurable getter — vi.stubGlobal above still covers it.
   }

@@ -11,7 +11,8 @@ export const WORKSPACE_COLORS = [
   '#C678DD',
 ] as const
 
-const WIDE_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[！-｠￠-￦]/u
+const WIDE_RE =
+  /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[！-｠￠-￦]/u
 
 export function fnv1a32(s: string): number {
   const bytes = new TextEncoder().encode(s)
@@ -38,7 +39,7 @@ export function stripMeaningless(s: string): string {
 export function capMonogram(str: string): string {
   type SegmenterConstructor = new (
     locales?: string | string[],
-    options?: { granularity: 'grapheme' },
+    options?: { granularity: 'grapheme' }
   ) => { segment(input: string): Iterable<{ segment: string }> }
   const Segmenter = (Intl as unknown as { Segmenter: SegmenterConstructor }).Segmenter
   const segmenter = new Segmenter(undefined, { granularity: 'grapheme' })
@@ -85,9 +86,10 @@ export function contrastRatio(a: string, b: string): number {
 export function outlineColor(hex: string, cardBgHex: string): string {
   if (contrastRatio(hex, cardBgHex) >= 3) return hex
 
-  const target = contrastRatio('#000000', cardBgHex) >= contrastRatio('#FFFFFF', cardBgHex)
-    ? '#000000'
-    : '#FFFFFF'
+  const target =
+    contrastRatio('#000000', cardBgHex) >= contrastRatio('#FFFFFF', cardBgHex)
+      ? '#000000'
+      : '#FFFFFF'
   for (let step = 1; step <= 9; step += 1) {
     const candidate = mix(hex, target, step / 10).toUpperCase()
     if (contrastRatio(candidate, cardBgHex) >= 3) return candidate

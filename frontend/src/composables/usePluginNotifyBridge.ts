@@ -23,16 +23,11 @@ const PLUGIN_NOTIFY_RETRY_DELAYS_MS = [1000, 2000, 4000] as const
 const BRIDGE_MAX_CONCURRENT = 3
 const BRIDGE_QUEUE_CAP = 64
 
-export function usePluginNotifyBridge(
-  opts: PluginNotifyBridgeOptions
-): PluginNotifyBridge {
+export function usePluginNotifyBridge(opts: PluginNotifyBridgeOptions): PluginNotifyBridge {
   const { pushNotification } = opts
 
   const queue: PluginNotifyBridgeJob[] = []
-  const retryTimers = new Map<
-    ReturnType<typeof setTimeout>,
-    (shouldContinue: boolean) => void
-  >()
+  const retryTimers = new Map<ReturnType<typeof setTimeout>, (shouldContinue: boolean) => void>()
   const abortControllers = new Set<AbortController>()
   let activeJobs = 0
   let disposed = false
@@ -78,7 +73,8 @@ export function usePluginNotifyBridge(
           const accepted =
             responseBody?.status === 'accepted' ||
             (typeof responseBody?.eventSeq === 'string' &&
-              (typeof responseBody?.notifId === 'string' || typeof responseBody?.paneId === 'string'))
+              (typeof responseBody?.notifId === 'string' ||
+                typeof responseBody?.paneId === 'string'))
           if (accepted || responseBody?.status === 'suppressed') return
           console.error('[notification] plugin notify returned an unexpected 200 response')
           return
@@ -121,11 +117,7 @@ export function usePluginNotifyBridge(
   }
 
   function pumpQueue() {
-    while (
-      !disposed &&
-      activeJobs < BRIDGE_MAX_CONCURRENT &&
-      queue.length > 0
-    ) {
+    while (!disposed && activeJobs < BRIDGE_MAX_CONCURRENT && queue.length > 0) {
       const job = queue.shift()!
       activeJobs++
       void runJob(job).finally(() => {

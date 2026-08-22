@@ -7,7 +7,7 @@
           <div class="fp-breadcrumb">
             <span class="fp-crumb-home" @click="navigateTo('')">{{ cwdLabel || '/' }}</span>
           </div>
-          <button class="fp-close-btn" @click="close">✕</button>
+          <button class="fp-close-btn" @click="close"><X :size="18" /></button>
         </div>
         <div class="fp-body tree-host">
           <div v-if="!childCache['']" class="fp-loading">Loading...</div>
@@ -41,6 +41,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import { TreeRows, absJoinWorkspaceRoot } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 
@@ -195,7 +196,7 @@ watch(
   max-width: 480px;
   max-height: 60vh;
   background: var(--bg-surface);
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;

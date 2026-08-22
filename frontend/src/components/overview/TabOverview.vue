@@ -22,33 +22,36 @@
           @mouseenter="focusedIndex = i"
           @contextmenu.prevent="openCardCtx($event, card)"
         >
-        <div class="mc-card-header">
-          <span class="mc-card-index">{{ card.index }}</span>
-          <span class="mc-card-title">{{ card.title }}</span>
-          <span
-            v-if="indicators[card.paneId]"
-            class="mc-notif-dot"
-            :class="'dot-' + indicators[card.paneId]"
-          ></span>
-          <button
-            class="mc-card-close"
-            :aria-label="`Close ${card.title}`"
-            @click.stop="$emit('close-tab', card.paneId)"
-          >
-            <X :size="14" />
-          </button>
-        </div>
-        <div class="mc-card-preview">
-          <img v-if="card.previewImage" :src="card.previewImage" />
-          <SplitPreviewNode v-else-if="isSplitPreview(card.htmlContent)" :node="card.htmlContent" />
-          <pre v-else-if="card.htmlContent" class="mc-card-text" v-html="card.htmlContent"></pre>
-          <pre v-else-if="card.textContent" class="mc-card-text">{{ card.textContent }}</pre>
-          <div v-else-if="card.type === 'plugin'" class="mc-plugin-placeholder">
-            <Puzzle :size="32" />
-            <span class="mc-plugin-label">{{ card.title }}</span>
+          <div class="mc-card-header">
+            <span class="mc-card-index">{{ card.index }}</span>
+            <span class="mc-card-title">{{ card.title }}</span>
+            <span
+              v-if="indicators[card.paneId]"
+              class="mc-notif-dot"
+              :class="'dot-' + indicators[card.paneId]"
+            ></span>
+            <button
+              class="mc-card-close"
+              :aria-label="`Close ${card.title}`"
+              @click.stop="$emit('close-tab', card.paneId)"
+            >
+              <X :size="14" />
+            </button>
           </div>
-          <pre v-else class="mc-card-text"></pre>
-        </div>
+          <div class="mc-card-preview">
+            <img v-if="card.previewImage" :src="card.previewImage" />
+            <SplitPreviewNode
+              v-else-if="isSplitPreview(card.htmlContent)"
+              :node="card.htmlContent"
+            />
+            <pre v-else-if="card.htmlContent" class="mc-card-text" v-html="card.htmlContent"></pre>
+            <pre v-else-if="card.textContent" class="mc-card-text">{{ card.textContent }}</pre>
+            <div v-else-if="card.type === 'plugin'" class="mc-plugin-placeholder">
+              <Puzzle :size="32" />
+              <span class="mc-plugin-label">{{ card.title }}</span>
+            </div>
+            <pre v-else class="mc-card-text"></pre>
+          </div>
         </Motion>
         <Motion
           :ref="(el: any) => setCardRef(cards.length, el)"
@@ -118,7 +121,10 @@
           </div>
           <div class="mc-card-preview">
             <img v-if="card.previewImage" :src="card.previewImage" />
-            <SplitPreviewNode v-else-if="isSplitPreview(card.htmlContent)" :node="card.htmlContent" />
+            <SplitPreviewNode
+              v-else-if="isSplitPreview(card.htmlContent)"
+              :node="card.htmlContent"
+            />
             <pre v-else-if="card.htmlContent" class="mc-card-text" v-html="card.htmlContent"></pre>
             <pre v-else-if="card.textContent" class="mc-card-text">{{ card.textContent }}</pre>
             <div v-else-if="card.type === 'plugin'" class="mc-plugin-placeholder">
@@ -194,11 +200,11 @@ const props = withDefaults(
     switchDirection?: 'left' | 'right'
     indicators?: Record<string, string>
   }>(),
-  { embedded: false, switchDirection: 'right', indicators: () => ({}) },
+  { embedded: false, switchDirection: 'right', indicators: () => ({}) }
 )
 
 // Key for AnimatePresence — changes when workspace switches, not when individual tabs change
-const cardsKey = computed(() => props.cards.map(c => c.paneId).join(','))
+const cardsKey = computed(() => props.cards.map((c) => c.paneId).join(','))
 
 const emit = defineEmits<{
   close: []
@@ -233,10 +239,13 @@ function openCardCtx(e: MouseEvent, card: TabCard) {
         title: label,
         confirmText: t('overview.closeTabsConfirm'),
         cancelText: t('filePreview.cancel'),
-      },
+      }
     )
     if (!ok) return
-    emit('close-tabs', targets.map((c) => c.paneId))
+    emit(
+      'close-tabs',
+      targets.map((c) => c.paneId)
+    )
   }
 
   function currentSideTabs(side: 'left' | 'right'): TabCard[] | null {
@@ -266,10 +275,11 @@ function openCardCtx(e: MouseEvent, card: TabCard) {
       label: closeWorkspaceLabel,
       icon: Layers,
       disabled: workspaceTabs.length === 0,
-      action: () => confirmCloseTabs(
-        closeWorkspaceLabel,
-        props.cards.filter((c) => c.type !== 'plugin'),
-      ),
+      action: () =>
+        confirmCloseTabs(
+          closeWorkspaceLabel,
+          props.cards.filter((c) => c.type !== 'plugin')
+        ),
     },
     {
       label: closeLeftLabel,
@@ -332,7 +342,7 @@ watch(
     } else {
       closing.value = true
     }
-  },
+  }
 )
 
 // Keep the focused card scrolled into view whenever the backend-driven

@@ -328,7 +328,6 @@
       :visible="!!confirmUninstall"
       :title="t('settings.plugins.uninstall')"
       :message="t('settings.plugins.confirmUninstall')"
-      :target="confirmUninstall || undefined"
       :confirm-text="t('settings.plugins.uninstall')"
       :cancel-text="t('terminal.cancel')"
       @confirm="doUninstall"

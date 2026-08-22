@@ -2,7 +2,13 @@ import { nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { SyncServerMsg, SyncClientMsg, SyncEvent, SyncMarkRead } from '../types/protocol'
 import type { Tab, TerminalTab } from '../types/pane'
-import { getAllLeaves, findLeaf, migrateTab, migratePreviewToLeaf, ensureSplitRoot } from '../types/pane'
+import {
+  getAllLeaves,
+  findLeaf,
+  migrateTab,
+  migratePreviewToLeaf,
+  ensureSplitRoot,
+} from '../types/pane'
 import {
   initializePaneMru,
   reconcilePaneMru,
@@ -11,11 +17,7 @@ import {
 } from '../types/paneMru'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
-import {
-  getApiBase,
-  wsUrlWithToken,
-  hasAuthToken,
-} from './apiBase'
+import { getApiBase, wsUrlWithToken, hasAuthToken } from './apiBase'
 import { isTauri } from './useTransport'
 import { handlePluginChanged } from './usePluginLoader'
 import { toActiveWorkspaceId, useWorkspaces } from './useWorkspaces'
@@ -106,7 +108,13 @@ export function useSyncWebSocket(opts: {
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
   const { syncConnected } = storeToRefs(ui)
-  const { workspaces, activeWorkspaceId, activateWorkspace, cancelPendingWorkspaceActivation, matchWorkspace } = useWorkspaces()
+  const {
+    workspaces,
+    activeWorkspaceId,
+    activateWorkspace,
+    cancelPendingWorkspaceActivation,
+    matchWorkspace,
+  } = useWorkspaces()
   const mcState = useMissionControlState()
 
   function workspaceIdOfTab(tab: Tab): string | null {
@@ -156,9 +164,13 @@ export function useSyncWebSocket(opts: {
   }
 
   // SSH keyboard-interactive auth callback
-  let onSshAuthPrompt: ((paneId: string, prompts: Array<{ prompt: string; echo: boolean }>) => void) | null = null
+  let onSshAuthPrompt:
+    | ((paneId: string, prompts: Array<{ prompt: string; echo: boolean }>) => void)
+    | null = null
 
-  function setSshAuthPromptHandler(handler: (paneId: string, prompts: Array<{ prompt: string; echo: boolean }>) => void) {
+  function setSshAuthPromptHandler(
+    handler: (paneId: string, prompts: Array<{ prompt: string; echo: boolean }>) => void
+  ) {
     onSshAuthPrompt = handler
   }
 
@@ -383,9 +395,9 @@ export function useSyncWebSocket(opts: {
           }
           let workspaceRepaired = false
           if (
-            msg.workspace_id
-            && existing.type === 'terminal'
-            && existing.workspaceId !== msg.workspace_id
+            msg.workspace_id &&
+            existing.type === 'terminal' &&
+            existing.workspaceId !== msg.workspace_id
           ) {
             existing.workspaceId = msg.workspace_id
             workspaceRepaired = true
@@ -507,7 +519,7 @@ export function useSyncWebSocket(opts: {
       } else if (msg.type === 'tab_renamed') {
         const targetTab = tabs.value.find((t) => t.paneId === msg.tab_id)
         if (targetTab) {
-          (targetTab as TerminalTab).customTitle = msg.title
+          ;(targetTab as TerminalTab).customTitle = msg.title
         }
       } else if (msg.type === 'mission_control_toggled') {
         // Backend flipped MC open/close. Update local mirror only - never
@@ -567,10 +579,7 @@ export function useSyncWebSocket(opts: {
             targetTab.layout = ensureSplitRoot(msg.layout)
           }
           for (const removedPaneId of removedPaneIds) {
-            targetTab.paneMru = removePaneFromMru(
-              targetTab.paneMru,
-              removedPaneId
-            ).paneMru
+            targetTab.paneMru = removePaneFromMru(targetTab.paneMru, removedPaneId).paneMru
           }
           targetTab.paneMru = reconcilePaneMru(
             targetTab.paneMru,

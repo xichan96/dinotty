@@ -1,11 +1,7 @@
 <template>
   <div v-if="monitorSettings.enabled || warning.message.value" class="status-bar">
     <div v-if="leftItems.length" class="status-bar-left">
-      <StatusBarItemRenderer
-        v-for="item in leftItems"
-        :key="item.id"
-        :item="item"
-      />
+      <StatusBarItemRenderer v-for="item in leftItems" :key="item.id" :item="item" />
     </div>
     <div
       ref="rightEl"
@@ -14,11 +10,7 @@
       @wheel="onWheel"
       @scroll="updateOverflow"
     >
-      <StatusBarItemRenderer
-        v-for="item in allRightItems"
-        :key="item.id"
-        :item="item"
-      />
+      <StatusBarItemRenderer v-for="item in allRightItems" :key="item.id" :item="item" />
     </div>
     <span v-if="warning.message.value" class="pane-warning">{{ warning.message.value }}</span>
 
@@ -47,7 +39,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, defineAsyncComponent, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import {
+  computed,
+  ref,
+  defineAsyncComponent,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+  nextTick,
+} from 'vue'
 import { monitorData } from '../../composables/useMonitor'
 import {
   cpuHistory,
@@ -85,7 +85,7 @@ const monitorSettings = computed(
       memory: true,
       disk: false,
       network: true,
-    },
+    }
 )
 
 const leftItems = computed(() => store.leftItems)
@@ -129,7 +129,7 @@ const activeSeries = computed(() => {
 const pluginStatusBarItems = computed(() =>
   pluginMonitor.series
     .filter((s) => s.statusText && pluginMonitor.isVisible(s, settings.monitor.plugin_series))
-    .map((s) => pluginSeriesToStatusBarItem(s, (e) => togglePluginPopover(s.id, e))),
+    .map((s) => pluginSeriesToStatusBarItem(s, (e) => togglePluginPopover(s.id, e)))
 )
 
 // Merge system items with plugin-adapted items; system items keep their priorities,
@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 
 watch(
   () => allRightItems.value.length,
-  () => nextTick(updateOverflow),
+  () => nextTick(updateOverflow)
 )
 </script>
 
@@ -227,27 +227,12 @@ watch(
   display: none;
 }
 .status-bar-right.has-overflow-left:not(.has-overflow-right) {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 12px,
-    #000 100%
-  );
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 100%);
   mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 100%);
 }
 .status-bar-right.has-overflow-right:not(.has-overflow-left) {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    #000 0,
-    #000 calc(100% - 12px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    #000 0,
-    #000 calc(100% - 12px),
-    transparent 100%
-  );
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 12px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 12px), transparent 100%);
 }
 .status-bar-right:not(.has-overflow-left):not(.has-overflow-right) {
   -webkit-mask-image: none;

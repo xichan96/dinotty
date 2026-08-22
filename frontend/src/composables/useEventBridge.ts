@@ -22,7 +22,11 @@ onEvent((e) => {
   }
 })
 
-function reportPluginSubscription(pluginId: string, eventName: string, kind: 'subscribe' | 'unsubscribe') {
+function reportPluginSubscription(
+  pluginId: string,
+  eventName: string,
+  kind: 'subscribe' | 'unsubscribe'
+) {
   void authFetch(apiUrl(`/api/plugins/${encodeURIComponent(pluginId)}/events/${kind}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -36,7 +40,7 @@ function reportPluginSubscription(pluginId: string, eventName: string, kind: 'su
 export function subscribe<T = unknown>(
   eventName: string,
   handler: EventHandler<T>,
-  opts?: { pluginId?: string },
+  opts?: { pluginId?: string }
 ): () => void {
   const entry: HandlerEntry = { handler: handler as EventHandler, pluginId: opts?.pluginId }
   let set = handlers.get(eventName)
@@ -70,7 +74,7 @@ export function hasSubscriber(eventName: string): boolean {
 export function emit(
   eventName: string,
   data: unknown,
-  opts?: { source_pane_id?: string; plugin_id?: string; target_plugin_id?: string },
+  opts?: { source_pane_id?: string; plugin_id?: string; target_plugin_id?: string }
 ): void {
   void authFetch(apiUrl('/api/events/emit'), {
     method: 'POST',

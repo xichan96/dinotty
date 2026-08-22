@@ -1,5 +1,9 @@
 <template>
-  <div v-if="drag.state.isDragging && previewStyle" class="drop-preview" :style="previewStyle"></div>
+  <div
+    v-if="drag.state.isDragging && previewStyle"
+    class="drop-preview"
+    :style="previewStyle"
+  ></div>
 </template>
 
 <script setup lang="ts">

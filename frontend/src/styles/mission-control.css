@@ -31,7 +31,9 @@
   padding: 8px;
   scrollbar-width: none;
 }
-.mc-grid::-webkit-scrollbar { display: none; }
+.mc-grid::-webkit-scrollbar {
+  display: none;
+}
 
 .mc-card {
   background: var(--bg-hover);
@@ -39,7 +41,9 @@
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
@@ -103,8 +107,13 @@
   animation: mc-pulse-dot 1.5s infinite;
 }
 @keyframes mc-pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .mc-card-close {
@@ -243,7 +252,9 @@
   background: transparent;
   color: var(--text-muted, #888);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 .mc-close-btn:hover {
   background: var(--bg-hover);
@@ -266,7 +277,9 @@
   padding: 6px 0;
   scrollbar-width: none;
 }
-.mc-ws-list-scroll::-webkit-scrollbar { display: none; }
+.mc-ws-list-scroll::-webkit-scrollbar {
+  display: none;
+}
 
 .mc-ws-list-item {
   display: flex;
@@ -285,7 +298,9 @@
   width: 100%;
   text-align: left;
   -webkit-tap-highlight-color: transparent;
-  transition: background 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
 }
 .mc-ws-list-item:hover {
   background: var(--bg-hover);
@@ -340,7 +355,9 @@
   color: var(--text-muted, #888);
   cursor: grab;
   opacity: 0.6;
-  transition: opacity 0.12s, color 0.12s;
+  transition:
+    opacity 0.12s,
+    color 0.12s;
 }
 
 .mc-ws-drag-handle:hover {

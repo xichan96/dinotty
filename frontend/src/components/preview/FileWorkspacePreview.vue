@@ -12,18 +12,18 @@
     ></div>
     <div class="file-workspace-panel">
       <div class="file-workspace-toolbar">
-        <button type="button" :disabled="!nav.canGoBack.value" @click="doGoBack" title="Back">
+        <button type="button" :disabled="!nav.canGoBack.value" title="Back" @click="doGoBack">
           ←
         </button>
         <button
           type="button"
           :disabled="!nav.canGoForward.value"
-          @click="doGoForward"
           title="Forward"
+          @click="doGoForward"
         >
           →
         </button>
-        <button type="button" @click="reloadAll" title="Refresh">↻</button>
+        <button type="button" title="Refresh" @click="reloadAll">↻</button>
         <div class="file-workspace-cwd-wrap">
           <span
             class="file-workspace-cwd"
@@ -42,7 +42,7 @@
             @close="recentDropdownOpen = false"
           />
         </div>
-        <button v-if="!inLeaf" type="button" @click="close" title="Close">✕</button>
+        <button v-if="!inLeaf" type="button" title="Close" @click="close">✕</button>
       </div>
       <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
       <div
@@ -79,7 +79,9 @@
               :inline-create="inlineCreateForTree"
               :inline-placeholder="inlineInputPlaceholder"
               :git-status="gitStatusMap"
+              :on-dir-drag-enter="ops.setHoveredDir"
               @toggle="onToggle"
+              :on-dir-drag-leave="ops.clearHoveredDir"
               @select-file="trySelectFile"
               @select-dir="trySelectDir"
               @inline-create-commit="onInlineCreateCommit"
@@ -89,8 +91,6 @@
               @move-entry="ctxMenu.onMoveEntry"
               @swipe-action="onSwipeAction"
               @upload-to-dir="onUploadToDir"
-              :on-dir-drag-enter="ops.setHoveredDir"
-              :on-dir-drag-leave="ops.clearHoveredDir"
             />
           </div>
         </div>
@@ -232,11 +232,6 @@
     :visible="!!ctxMenu.moveConfirm.value"
     :title="t('filePreview.moveTitle')"
     :message="t('filePreview.moveConfirmMsg')"
-    :target="
-      ctxMenu.moveConfirm.value
-        ? ctxMenu.moveConfirm.value.destDir || t('filePreview.moveToRoot')
-        : ''
-    "
     :confirm-text="t('filePreview.moveTitle')"
     :cancel-text="t('filePreview.cancel')"
     @confirm="ctxMenu.onMoveConfirm"
@@ -251,11 +246,7 @@
     @confirm="ctxMenu.executeDelete"
     @cancel="ctxMenu.cancelDelete"
   />
-  <SelectionToolbar
-    :selected-text="''"
-    :anchor-rect="null"
-    @dismiss="() => {}"
-  />
+  <SelectionToolbar :selected-text="''" :anchor-rect="null" @dismiss="() => {}" />
 </template>
 
 <script setup lang="ts">
@@ -351,7 +342,9 @@ watch(
 )
 watch(
   () => editorSplit.activeEditorLeafId.value,
-  () => { setActiveLeaf(editorSplit.activeEditorLeafId.value ?? null) },
+  () => {
+    setActiveLeaf(editorSplit.activeEditorLeafId.value ?? null)
+  },
   { immediate: true }
 )
 
@@ -458,38 +451,32 @@ const fileWatch = useFileWatch({
   fetchList,
 })
 
-const {
-  reloadAll,
-  expandFirstLevelDirs,
-  captureState,
-  applyState,
-  boot,
-  openFromTerminal,
-} = useFileWorkspaceBoot({
-  paneId: toRef(props, 'paneId'),
-  sourcePaneId: toRef(props, 'sourcePaneId'),
-  visible: toRef(props, 'visible'),
-  shellType: toRef(props, 'shellType'),
-  initialPath: toRef(props, 'initialPath'),
-  childCache,
-  expanded,
-  cwdLabel,
-  previewErr,
-  meta,
-  selectedRel,
-  selectedIsDir,
-  inlineCreate,
-  contextMenu: ctxMenu.contextMenu,
-  editorLayout: editorSplit.editorLayout,
-  activeEditorLeafId: editorSplit.activeEditorLeafId,
-  activeLeaf: editorSplit.activeLeaf,
-  ensureChildren,
-  onSelectFile,
-  onSelectDir,
-  connectTreeWatchSocket: fileWatch.connectTreeWatchSocket,
-  disconnectTreeWatchSocket: fileWatch.disconnectTreeWatchSocket,
-  fetchGitStatus,
-})
+const { reloadAll, expandFirstLevelDirs, captureState, applyState, boot, openFromTerminal } =
+  useFileWorkspaceBoot({
+    paneId: toRef(props, 'paneId'),
+    sourcePaneId: toRef(props, 'sourcePaneId'),
+    visible: toRef(props, 'visible'),
+    shellType: toRef(props, 'shellType'),
+    initialPath: toRef(props, 'initialPath'),
+    childCache,
+    expanded,
+    cwdLabel,
+    previewErr,
+    meta,
+    selectedRel,
+    selectedIsDir,
+    inlineCreate,
+    contextMenu: ctxMenu.contextMenu,
+    editorLayout: editorSplit.editorLayout,
+    activeEditorLeafId: editorSplit.activeEditorLeafId,
+    activeLeaf: editorSplit.activeLeaf,
+    ensureChildren,
+    onSelectFile,
+    onSelectDir,
+    connectTreeWatchSocket: fileWatch.connectTreeWatchSocket,
+    disconnectTreeWatchSocket: fileWatch.disconnectTreeWatchSocket,
+    fetchGitStatus,
+  })
 
 // --- Computed ---
 const cwdShort = computed(() => {
@@ -552,7 +539,9 @@ function onEditorFileDrop(leafId: string, rel: string, position: DropPosition) {
 function isInternalTreeMove(ev: DragEvent): boolean {
   const t = ev.dataTransfer?.types
   if (!t) return false
-  return t.includes ? t.includes('application/x-tree-move') : (t as any).contains('application/x-tree-move')
+  return t.includes
+    ? t.includes('application/x-tree-move')
+    : (t as any).contains('application/x-tree-move')
 }
 
 function onWorkspaceDragEnter(ev: DragEvent) {

@@ -59,7 +59,7 @@ export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherSt
       })
 
       const existingTab = tabs.value.find(
-        (t) => t.type === 'terminal' && t.paneId === result.tab_id,
+        (t) => t.type === 'terminal' && t.paneId === result.tab_id
       ) as TerminalTab | undefined
       if (existingTab) {
         const wsIdVal = wsId || undefined

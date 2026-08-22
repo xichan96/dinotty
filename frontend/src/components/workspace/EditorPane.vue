@@ -121,7 +121,9 @@ function getDropPosition(ev: DragEvent): DropPosition {
 function isTreeMoveDrag(ev: DragEvent): boolean {
   const t = ev.dataTransfer?.types
   if (!t) return false
-  return t.includes ? t.includes('application/x-tree-move') : (t as any).contains('application/x-tree-move')
+  return t.includes
+    ? t.includes('application/x-tree-move')
+    : (t as any).contains('application/x-tree-move')
 }
 
 function onPaneDragOver(ev: DragEvent) {

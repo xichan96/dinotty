@@ -8,10 +8,22 @@ import {
 } from '../composables/useDeviceThemeSelection'
 
 const ANSI_KEYS = [
-  '--color-black', '--color-red', '--color-green', '--color-yellow', '--color-blue',
-  '--color-magenta', '--color-cyan', '--color-white', '--color-bright-black', '--color-bright-red',
-  '--color-bright-green', '--color-bright-yellow', '--color-bright-blue', '--color-bright-magenta',
-  '--color-bright-cyan', '--color-bright-white',
+  '--color-black',
+  '--color-red',
+  '--color-green',
+  '--color-yellow',
+  '--color-blue',
+  '--color-magenta',
+  '--color-cyan',
+  '--color-white',
+  '--color-bright-black',
+  '--color-bright-red',
+  '--color-bright-green',
+  '--color-bright-yellow',
+  '--color-bright-blue',
+  '--color-bright-magenta',
+  '--color-bright-cyan',
+  '--color-bright-white',
 ] as const
 
 function sampleTheme(): SavedTheme {
@@ -83,7 +95,9 @@ describe('device theme resolution', () => {
   })
 
   it('falls back when the selected custom theme does not exist', () => {
-    expect(resolve({ selection: { kind: 'custom', uuid: 'missing' } }).source).toBe('server-default')
+    expect(resolve({ selection: { kind: 'custom', uuid: 'missing' } }).source).toBe(
+      'server-default'
+    )
   })
 
   it('maps cursor and all ANSI colors in order', () => {

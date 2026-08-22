@@ -15,7 +15,7 @@
         :pane-label="n.paneId ? paneLabels[n.paneId] : undefined"
         :source="n.source"
         @dismiss="dismissOne(n.id)"
-        @goto="n.paneId && ($emit('goto-pane', n.paneId), panelVisible = false)"
+        @goto="n.paneId && ($emit('goto-pane', n.paneId), (panelVisible = false))"
       />
       <div v-if="notifications.length === 0" class="panel-empty">{{ t('notification.empty') }}</div>
     </div>

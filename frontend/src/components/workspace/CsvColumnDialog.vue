@@ -15,11 +15,7 @@
     <Columns3 :size="16" aria-hidden="true" />
   </button>
 
-  <div
-    v-if="columnDialogOpen"
-    class="csv-preview-dialog-backdrop"
-    @click.self="cancelColumnDialog"
-  >
+  <div v-if="columnDialogOpen" class="csv-preview-dialog-backdrop" @click.self="cancelColumnDialog">
     <section
       id="csv-preview-columns-dialog"
       ref="columnDialogElement"

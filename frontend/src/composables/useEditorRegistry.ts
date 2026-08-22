@@ -4,10 +4,7 @@ const editors = new Map<string, monaco.editor.IStandaloneCodeEditor>()
 const pending = new Map<string, Array<(e: monaco.editor.IStandaloneCodeEditor) => void>>()
 let activeLeaf: string | null = null
 
-export function registerEditor(
-  leafId: string,
-  editor: monaco.editor.IStandaloneCodeEditor,
-): void {
+export function registerEditor(leafId: string, editor: monaco.editor.IStandaloneCodeEditor): void {
   editors.set(leafId, editor)
   const waiters = pending.get(leafId)
   if (waiters) {
@@ -22,9 +19,7 @@ export function unregisterEditor(leafId: string): void {
   if (activeLeaf === leafId) activeLeaf = null
 }
 
-export function getEditor(
-  leafId: string,
-): monaco.editor.IStandaloneCodeEditor | null {
+export function getEditor(leafId: string): monaco.editor.IStandaloneCodeEditor | null {
   return editors.get(leafId) ?? null
 }
 
@@ -36,9 +31,7 @@ export function getActiveLeaf(): string | null {
   return activeLeaf
 }
 
-export function whenEditorReady(
-  leafId: string,
-): Promise<monaco.editor.IStandaloneCodeEditor> {
+export function whenEditorReady(leafId: string): Promise<monaco.editor.IStandaloneCodeEditor> {
   const existing = editors.get(leafId)
   if (existing) return Promise.resolve(existing)
   return new Promise((resolve) => {

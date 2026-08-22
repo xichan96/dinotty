@@ -146,7 +146,12 @@ describe('SshHostsPanel keyboard navigation', () => {
     keydown(input, 'Enter')
     await flushPromises()
 
-    expect(tabApiMocks.apiCreateSshTab).toHaveBeenCalledWith('p2', undefined, undefined, expect.any(AbortSignal))
+    expect(tabApiMocks.apiCreateSshTab).toHaveBeenCalledWith(
+      'p2',
+      undefined,
+      undefined,
+      expect.any(AbortSignal)
+    )
     wrapper.unmount()
   })
 

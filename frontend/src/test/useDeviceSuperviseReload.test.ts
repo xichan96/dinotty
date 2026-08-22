@@ -29,12 +29,24 @@ const KEY = 'dinotty_device_supervise_reload_v1'
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>()
-  get length() { return this.data.size }
-  clear() { this.data.clear() }
-  getItem(key: string) { return this.data.get(key) ?? null }
-  key(index: number) { return [...this.data.keys()][index] ?? null }
-  removeItem(key: string) { this.data.delete(key) }
-  setItem(key: string, value: string) { this.data.set(key, String(value)) }
+  get length() {
+    return this.data.size
+  }
+  clear() {
+    this.data.clear()
+  }
+  getItem(key: string) {
+    return this.data.get(key) ?? null
+  }
+  key(index: number) {
+    return [...this.data.keys()][index] ?? null
+  }
+  removeItem(key: string) {
+    this.data.delete(key)
+  }
+  setItem(key: string, value: string) {
+    this.data.set(key, String(value))
+  }
 }
 
 describe('useDeviceSuperviseReload', () => {
@@ -48,12 +60,15 @@ describe('useDeviceSuperviseReload', () => {
     settings.reload_after_supervise_tabs = false
     __resetSettingsLoadStateForTest()
     apiMocks.authFetch.mockReset()
-    apiMocks.authFetch.mockImplementation(async (_url, init?: RequestInit) => new Response(
-      init?.method === 'PUT'
-        ? '{}'
-        : JSON.stringify({ reload_after_supervise_tabs: settings.reload_after_supervise_tabs }),
-      { status: 200 },
-    ))
+    apiMocks.authFetch.mockImplementation(
+      async (_url, init?: RequestInit) =>
+        new Response(
+          init?.method === 'PUT'
+            ? '{}'
+            : JSON.stringify({ reload_after_supervise_tabs: settings.reload_after_supervise_tabs }),
+          { status: 200 }
+        )
+    )
     await loadSettings()
     apiMocks.authFetch.mockClear()
     reloadOverrides()
@@ -86,9 +101,11 @@ describe('useDeviceSuperviseReload', () => {
       version: 1,
       overrides: { reload_after_supervise_tabs: true },
     })
-    expect(apiMocks.authFetch.mock.calls.some(
-      ([url, init]) => url === '/api/settings' && init?.method === 'PUT',
-    )).toBe(false)
+    expect(
+      apiMocks.authFetch.mock.calls.some(
+        ([url, init]) => url === '/api/settings' && init?.method === 'PUT'
+      )
+    ).toBe(false)
     wrapper.unmount()
   })
 
@@ -139,7 +156,7 @@ describe('useDeviceSuperviseReload', () => {
     await saveSettings()
 
     const put = apiMocks.authFetch.mock.calls.find(
-      ([url, init]) => url === '/api/settings' && init?.method === 'PUT',
+      ([url, init]) => url === '/api/settings' && init?.method === 'PUT'
     )
     expect(put).toBeDefined()
     const payload = JSON.parse(String(put![1]?.body))

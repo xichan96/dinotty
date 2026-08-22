@@ -101,11 +101,7 @@ describe('useOverviewCallbacks workspace activation', () => {
     await callbacks.onOverviewNewTabSsh('connection-1', '/srv/app', 'workspace-ssh')
 
     expect(activateWorkspace).toHaveBeenCalledWith('workspace-ssh')
-    expect(mocks.apiCreateSshTab).toHaveBeenCalledWith(
-      'connection-1',
-      '/srv/app',
-      'workspace-ssh'
-    )
+    expect(mocks.apiCreateSshTab).toHaveBeenCalledWith('connection-1', '/srv/app', 'workspace-ssh')
     expect(tabs.value).toHaveLength(1)
     expect(tabs.value[0]).toMatchObject({
       connectionId: 'connection-1',

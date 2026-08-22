@@ -240,7 +240,7 @@ describe('ConfirmModal keyboard support', () => {
   it('does not intercept Space on buttons or editable elements inside the modal', () => {
     settings.space_confirms_dialogs = true
     const wrapper = mountModal()
-    const root = document.querySelector<HTMLElement>('.confirm-modal')!
+    const root = document.querySelector<HTMLElement>('.dialog')!
     const editable = document.createElement('div')
     editable.setAttribute('contenteditable', 'true')
     editable.tabIndex = 0

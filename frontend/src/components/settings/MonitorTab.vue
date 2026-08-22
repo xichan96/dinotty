@@ -8,7 +8,7 @@
       <div class="chart-header">
         <h3>{{ t('settings.monitor.cpuChart') }}</h3>
         <label class="toggle">
-          <input type="checkbox" v-model="settings.monitor.cpu" @change="saveSettings()" />
+          <input v-model="settings.monitor.cpu" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
@@ -21,7 +21,7 @@
       <div class="chart-header">
         <h3>{{ t('settings.monitor.memChart') }}</h3>
         <label class="toggle">
-          <input type="checkbox" v-model="settings.monitor.memory" @change="saveSettings()" />
+          <input v-model="settings.monitor.memory" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
@@ -34,7 +34,7 @@
       <div class="chart-header">
         <h3>{{ t('settings.monitor.diskLabel') }}</h3>
         <label class="toggle">
-          <input type="checkbox" v-model="settings.monitor.disk" @change="saveSettings()" />
+          <input v-model="settings.monitor.disk" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
@@ -53,7 +53,7 @@
       <div class="chart-header">
         <h3>{{ t('settings.monitor.netChart') }}</h3>
         <label class="toggle">
-          <input type="checkbox" v-model="settings.monitor.network" @change="saveSettings()" />
+          <input v-model="settings.monitor.network" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
@@ -66,7 +66,7 @@
       <div class="chart-header">
         <h3>{{ t('settings.monitor.gpuChart') }}</h3>
         <label class="toggle">
-          <input type="checkbox" v-model="settings.monitor.gpu" @change="saveSettings()" />
+          <input v-model="settings.monitor.gpu" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
@@ -238,7 +238,7 @@ const gpuMemChartData = computed(() => ({
 // ─── Plugin-contributed series ──────────────────────────────────────────────
 
 const visiblePluginSeries = computed(() =>
-  pluginMonitor.series.filter((s) => pluginMonitor.isConfigurable(s)),
+  pluginMonitor.series.filter((s) => pluginMonitor.isConfigurable(s))
 )
 
 function pluginSeriesVisible(s: RegisteredSeries): boolean {

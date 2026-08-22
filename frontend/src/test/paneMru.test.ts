@@ -35,11 +35,7 @@ describe('pane MRU', () => {
   })
 
   it('reconciles duplicates, stale IDs, and missing layout IDs', () => {
-    expect(reconcilePaneMru(['b', 'b', 'gone'], ['a', 'b', 'c'], 'b')).toEqual([
-      'b',
-      'a',
-      'c',
-    ])
+    expect(reconcilePaneMru(['b', 'b', 'gone'], ['a', 'b', 'c'], 'b')).toEqual(['b', 'a', 'c'])
   })
 
   it('rebuilds an empty queue with the active pane first', () => {

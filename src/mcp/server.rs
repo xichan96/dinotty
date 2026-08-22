@@ -208,7 +208,7 @@ async fn handle_tools_call(
 
     let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
 
-    match server.tools.call_tool(&name, arguments).await {
+    match server.tools.call_tool(&name, arguments, token_info).await {
         Ok(result) => JsonRpcResponse::success(
             id,
             serde_json::json!({

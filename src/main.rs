@@ -546,6 +546,7 @@ async fn main() {
                         token::SessionsAuthState {
                             global_token: auth_token.clone(),
                             tokens: state.tokens.clone(),
+                            sessions: state.sessions.clone(),
                         },
                         token::sessions_token_middleware,
                     )),

@@ -803,6 +803,9 @@ mod tests;
 mod session_stub_tests;
 
 #[cfg(test)]
+pub(crate) mod test_support;
+
+#[cfg(test)]
 mod cwd_tests;
 
 #[cfg(test)]

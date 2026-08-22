@@ -86,6 +86,34 @@ impl TokenInfo {
             None => true, // no scope restriction = allowed
         }
     }
+
+    /// Path variant of [`Self::check_scope`] for workspace capabilities.
+    /// Each scope entry is a directory (`~` expanded, canonicalized); `path`
+    /// must be inside (or equal to) one of them. Unresolvable entries are
+    /// skipped. `path` is expected to be already canonicalized by the caller.
+    #[must_use]
+    pub fn check_path_scope(&self, cap: &str, path: &std::path::Path) -> bool {
+        if self.is_global {
+            return true;
+        }
+        if !self.capabilities.contains(cap) {
+            return false;
+        }
+        match self.scopes.get(cap) {
+            None => true, // no scope restriction = allowed
+            Some(scopes) => scopes.iter().any(|s| {
+                let expanded = if let Some(rest) = s.strip_prefix("~/") {
+                    dirs::home_dir().map(|h| h.join(rest)).unwrap_or_else(|| PathBuf::from(s))
+                } else {
+                    PathBuf::from(s)
+                };
+                match expanded.canonicalize() {
+                    Ok(dir) => path.starts_with(&dir),
+                    Err(_) => false,
+                }
+            }),
+        }
+    }
 }
 
 pub const ALL_CAPABILITIES: &[&str] = &[
@@ -342,15 +370,17 @@ impl TokenManager {
 pub struct SessionsAuthState {
     pub global_token: Arc<tokio::sync::RwLock<String>>,
     pub tokens: TokenState,
+    pub sessions: std::sync::Arc<crate::auth::session::SessionStore>,
 }
 
 /// Middleware that validates tokens and injects `TokenInfo` into request extensions.
 /// Dual-track: accepts agent Bearer (with capability), global Bearer (full caps),
-/// `?token=` query param (browser WS compatibility), or no Bearer for HTTP requests
-/// (defers to outer `auth_middleware` for session cookie; injects global).
+/// `?token=` query param (browser WS compatibility), or a valid session cookie.
 ///
-/// WS upgrade requests bypass outer `auth_middleware` (exempt list), so they MUST
-/// carry a Bearer header or `?token=` query param - otherwise 401.
+/// These routes are exempt from the outer `auth_middleware` (which would reject
+/// agent tokens), so the cookie check cannot be delegated - it happens here.
+/// WS upgrade requests additionally MUST carry a Bearer header or `?token=`
+/// query param - otherwise 401.
 pub async fn sessions_token_middleware(
     State(auth): State<SessionsAuthState>,
     mut request: axum::extract::Request,
@@ -394,10 +424,18 @@ pub async fn sessions_token_middleware(
             )
                 .into_response();
         }
-        // HTTP request: outer auth_middleware has already validated the session
-        // cookie. Inject TokenInfo::global() so handler capability checks pass.
-        request.extensions_mut().insert(TokenInfo::global());
-        return next.run(request).await;
+        // HTTP request without token: validate the session cookie directly.
+        // These routes are exempt from the outer `auth_middleware`, so the
+        // cookie check cannot be delegated to it.
+        if crate::auth::has_valid_session_cookie(&request, &auth.sessions) {
+            request.extensions_mut().insert(TokenInfo::global());
+            return next.run(request).await;
+        }
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "Missing or invalid credentials"}})),
+        )
+            .into_response();
     };
 
     // Check global token first
@@ -656,5 +694,57 @@ mod tests {
         info.scopes.insert("terminal:write".into(), vec!["pane-1".into()]);
         assert!(info.check_scope("terminal:write", "pane-1"));
         assert!(!info.check_scope("terminal:write", "pane-2"));
+    }
+
+    fn path_info(scope_dirs: Vec<String>) -> TokenInfo {
+        let mut scopes: HashMap<String, Vec<String>> = HashMap::new();
+        if !scope_dirs.is_empty() {
+            scopes.insert("workspace:read".into(), scope_dirs);
+        }
+        TokenInfo {
+            token_id: "test".into(),
+            is_global: false,
+            capabilities: ["workspace:read"].iter().map(|s| s.to_string()).collect(),
+            scopes,
+        }
+    }
+
+    #[test]
+    fn test_path_scope_check() {
+        let tmp = std::env::temp_dir().canonicalize().unwrap();
+        let scoped = tmp.join("dinotty-path-scope-test");
+        std::fs::create_dir_all(scoped.join("sub")).unwrap();
+        let scoped = scoped.canonicalize().unwrap();
+
+        // No scope restriction = allowed anywhere under sandbox
+        let info = path_info(vec![]);
+        assert!(info.check_path_scope("workspace:read", &tmp));
+
+        // Scoped dir itself and children allowed; siblings denied
+        let info = path_info(vec![scoped.to_string_lossy().into_owned()]);
+        assert!(info.check_path_scope("workspace:read", &scoped));
+        assert!(info.check_path_scope("workspace:read", &scoped.join("sub").join("f.txt")));
+        assert!(!info.check_path_scope("workspace:read", &tmp));
+
+        // Component-wise prefix: /tmp/x does not cover /tmp/x2
+        let info = path_info(vec![scoped.to_string_lossy().into_owned()]);
+        let sibling = scoped.with_file_name(format!(
+            "{}2",
+            scoped.file_name().unwrap().to_string_lossy()
+        ));
+        assert!(!info.check_path_scope("workspace:read", &sibling));
+
+        // `~` expansion
+        let home = dirs::home_dir().unwrap().canonicalize().unwrap();
+        let info = path_info(vec!["~/".into()]);
+        assert!(info.check_path_scope("workspace:read", &home));
+        assert!(!info.check_path_scope("workspace:read", &tmp.join("definitely-not-home")));
+
+        // Nonexistent scope entries are skipped
+        let info = path_info(vec!["/nonexistent/dinotty-scope-dir".into()]);
+        assert!(!info.check_path_scope("workspace:read", &tmp));
+
+        // Global token always allowed
+        assert!(TokenInfo::global().check_path_scope("workspace:read", &tmp));
     }
 }

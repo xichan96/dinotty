@@ -86,6 +86,8 @@ Agent Token 需要相应 capability：
 | `file_*` 工具 | `workspace:read` / `workspace:write` |
 | `git_*` 工具 | `workspace:read` |
 
+Agent Token 的 scope 同样生效（详见 [Token 系统](/zh/internals/token-system)）：`terminal:read` / `terminal:write` 的 scope 限制可访问的 pane（`terminal_list` 会过滤 scope 外的 pane），`workspace:read` / `workspace:write` 的 scope 限制可访问的目录（按目录前缀匹配）。`git_status` 作用于进程工作目录，不受 workspace scope 限制。
+
 ---
 
 ## 工具列表
@@ -100,10 +102,13 @@ Agent Token 需要相应 capability：
   "arguments": {
     "command": "ls -la",
     "cwd": "/tmp",
+    "pane_id": "active",
     "timeout": 30000
   }
 }
 ```
+
+`pane_id` 可选，默认 `active`（当前激活 pane，无激活时取第一个）。
 
 **返回：** JSON 字符串，包含 `exit_code`、`stdout`、`duration_ms`、`method`
 

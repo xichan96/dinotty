@@ -86,6 +86,8 @@ Agent Tokens require the matching capability:
 | `file_*` tools | `workspace:read` / `workspace:write` |
 | `git_*` tools | `workspace:read` |
 
+Agent Token scopes are also enforced (see the [Token System](/zh/internals/token-system) doc, Chinese): `terminal:read` / `terminal:write` scopes restrict the accessible panes (`terminal_list` filters out panes outside the scope), and `workspace:read` / `workspace:write` scopes restrict the accessible directories (directory-prefix matching). `git_status` operates on the process working directory and is not restricted by workspace scopes.
+
 ---
 
 ## Tools
@@ -100,10 +102,13 @@ Execute a shell command and wait for completion.
   "arguments": {
     "command": "ls -la",
     "cwd": "/tmp",
+    "pane_id": "active",
     "timeout": 30000
   }
 }
 ```
+
+`pane_id` is optional, defaulting to `active` (the currently active pane, or the first pane when none is active).
 
 **Returns:** JSON string containing `exit_code`, `stdout`, `duration_ms`, `method`
 

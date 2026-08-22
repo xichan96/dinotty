@@ -2,7 +2,7 @@
 //!
 //! Spawns the server binary on a random loopback port, creates two terminal
 //! panes, then mints a token scoped to one pane and verifies that the Agent
-//! API (send/read/run) denies out-of-scope panes with SCOPE_DENIED while
+//! API (send/read/run) denies out-of-scope panes with `SCOPE_DENIED` while
 //! allowing the scoped pane. Uses a throwaway `DINOTTY_CONFIG_SUFFIX` so the
 //! server never touches the user's real `~/.dinotty` data.
 

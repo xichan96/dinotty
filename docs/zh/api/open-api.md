@@ -496,7 +496,7 @@ Windows 下 `command` 字段会发送到当前 pane 的实际 shell；PowerShell
 |------|------|
 | 400 | 参数无效（cols/rows=0、无 active pane） |
 | 401 | 未认证 |
-| 403 | `open_api.enabled = false` 或 token 缺少 capability |
+| 403 | `open_api.enabled = false`、token 缺少 capability、或 `SCOPE_DENIED`（目标 pane 不在 token 的 terminal scope 内，见 [Token 系统](/zh/internals/token-system)） |
 | 404 | Pane 不存在 |
 | 429 | 并发 `run` 超限 |
 | 500 | PTY 写入 / resize 失败 |

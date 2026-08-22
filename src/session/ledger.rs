@@ -57,6 +57,9 @@ mod platform {
         Unknown(io::Error),
     }
 
+    const LOCK_RETRIES: usize = 8;
+    const LOCK_RETRY_DELAY: Duration = Duration::from_millis(2);
+
     struct LedgerLock {
         _file: File,
     }
@@ -75,13 +78,22 @@ mod platform {
                 .write(true)
                 .open(&lock_path)
                 .map_err(|error| format!("open ledger lock {}: {error}", lock_path.display()))?;
-            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-            if result == 0 {
-                Ok(Self { _file: file })
-            } else {
+            // macOS/APFS can transiently report EAGAIN on flock(LOCK_NB) without
+            // real contention. Retry briefly so callers only skip when another
+            // process genuinely holds the lock.
+            let mut attempts = 0;
+            loop {
+                attempts += 1;
+                if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                    return Ok(Self { _file: file });
+                }
                 let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::WouldBlock && attempts < LOCK_RETRIES {
+                    std::thread::sleep(LOCK_RETRY_DELAY);
+                    continue;
+                }
                 warn!(path = %path.display(), %error, "PID ledger lock contended; skipping operation");
-                Err(format!("lock PID ledger: {error}"))
+                return Err(format!("lock PID ledger: {error}"));
             }
         }
     }

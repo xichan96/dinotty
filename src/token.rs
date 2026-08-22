@@ -103,7 +103,7 @@ impl TokenInfo {
             None => true, // no scope restriction = allowed
             Some(scopes) => scopes.iter().any(|s| {
                 let expanded = if let Some(rest) = s.strip_prefix("~/") {
-                    dirs::home_dir().map(|h| h.join(rest)).unwrap_or_else(|| PathBuf::from(s))
+                    dirs::home_dir().map_or_else(|| PathBuf::from(s), |h| h.join(rest))
                 } else {
                     PathBuf::from(s)
                 };

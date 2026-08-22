@@ -302,8 +302,8 @@ fn is_agent_managed_path(path: &str) -> bool {
     let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     match segments.as_slice() {
         ["api", "sessions", _, action] => matches!(*action, "run" | "send" | "read"),
-        ["api", "tokens"] | ["api", "tokens", _] => true,
-        ["mcp", "sse"] | ["mcp", "message"] => true,
+        ["api", "tokens", ..] => true,
+        ["mcp", action] => matches!(*action, "sse" | "message"),
         _ => false,
     }
 }

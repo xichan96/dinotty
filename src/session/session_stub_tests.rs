@@ -3,7 +3,6 @@
 use super::test_support::stub_session;
 use super::*;
 use crate::notification::NotificationBroadcast;
-use std::sync::atomic::AtomicU64;
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
 

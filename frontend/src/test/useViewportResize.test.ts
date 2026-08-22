@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useViewportResize, type ViewportResizeState } from '../composables/useViewportResize'
 import type { Tab } from '../types/pane'
-import { isIPhoneClient } from '../utils/clientPlatform'
 
 class FakeVisualViewport extends EventTarget {
   height = 800
@@ -21,7 +20,6 @@ describe('useViewportResize system keyboard lifecycle', () => {
   let originalInnerWidth: PropertyDescriptor | undefined
   let originalVisibilityState: PropertyDescriptor | undefined
   let originalUserAgent: PropertyDescriptor | undefined
-  let builtinTextareaFocused = ref(false)
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -32,7 +30,6 @@ describe('useViewportResize system keyboard lifecycle', () => {
     originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
     originalVisibilityState = Object.getOwnPropertyDescriptor(document, 'visibilityState')
     originalUserAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent')
-    builtinTextareaFocused = ref(false)
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
       value: viewport,
@@ -68,7 +65,7 @@ describe('useViewportResize system keyboard lifecycle', () => {
     else Reflect.deleteProperty(target, key)
   }
 
-  function mountViewport(onSystemKeyboardClose = vi.fn()) {
+  function mountViewport(onSystemKeyboardClose = vi.fn(), terminalImeFocused = ref(false)) {
     const Host = defineComponent({
       setup() {
         state = useViewportResize({
@@ -76,7 +73,7 @@ describe('useViewportResize system keyboard lifecycle', () => {
           activePaneId: ref(null),
           tabs: ref<Tab[]>([]),
           termRefs: {},
-          builtinTextareaFocused,
+          terminalImeFocused,
           onSystemKeyboardClose,
         })
         return () => h('div')
@@ -106,7 +103,6 @@ describe('useViewportResize system keyboard lifecycle', () => {
           activePaneId: ref('tab-1'),
           tabs: ref<Tab[]>([terminalTab]),
           termRefs: { 'pane-1': { fit } },
-          builtinTextareaFocused,
         })
         return () => h('div')
       },
@@ -213,7 +209,11 @@ describe('useViewportResize system keyboard lifecycle', () => {
     expect(onSystemKeyboardClose).toHaveBeenCalledOnce()
   })
 
-  it('keeps the published keyboard inset stable across a transient visual-viewport pan', () => {
+  it('tracks the keyboard inset with the caret pan while the IME is open', () => {
+    // v0.22.0 contract: --sys-kb-height is pan-compensated. #258 made it
+    // pan-invariant; combined with the removed inline bottom it left the
+    // builtin bar stranded. The inset follows the visual viewport's live
+    // bottom edge again.
     mountViewport()
     viewport.height = 500
     viewport.offsetTop = 0
@@ -223,111 +223,56 @@ describe('useViewportResize system keyboard lifecycle', () => {
     viewport.offsetTop = 35
     state.onViewportResize()
 
-    expect(state.systemKeyboardHeight.value).toBe(300)
-    expect(document.documentElement.style.getPropertyValue('--sys-kb-height')).toBe('300px')
+    expect(state.systemKeyboardHeight.value).toBe(265)
+    expect(document.documentElement.style.getPropertyValue('--sys-kb-height')).toBe('265px')
   })
 
-  it('releases an iPhone builtin-input pan on the first safe paint', async () => {
-    Object.defineProperty(navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
-    })
-    builtinTextareaFocused.value = true
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
-    let nextPaint: FrameRequestCallback | undefined
-    const requestFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
-      .mockImplementation((callback) => {
-        nextPaint = callback
-        return 1
-      })
-    mountViewport()
+  it('lifts the fixed toolbar to the keyboard edge only while the terminal IME is focused', async () => {
+    const imeFocused = ref(true)
+    mountViewport(vi.fn(), imeFocused)
     openKeyboard()
-    viewport.offsetTop = 35
-    expect(isIPhoneClient()).toBe(true)
-    expect(builtinTextareaFocused.value).toBe(true)
-    expect(state.systemKeyboardOpen.value).toBe(true)
+    await nextTick()
 
-    state.onViewportResize()
-    expect(nextPaint).toBeTypeOf('function')
-    nextPaint?.(16)
+    expect(state.toolbarBottom.value).toBe(300)
+    expect(document.documentElement.style.getPropertyValue('--system-toolbar-bottom')).toBe('300px')
 
-    expect(scrollTo).toHaveBeenCalledOnce()
-    expect(scrollTo).toHaveBeenCalledWith(0, 0)
-    requestFrame.mockRestore()
-    scrollTo.mockRestore()
+    imeFocused.value = false
+    await nextTick()
+    expect(document.documentElement.style.getPropertyValue('--system-toolbar-bottom')).toBe('0px')
   })
 
-  it('does not release a pan owned by an unrelated native input', async () => {
-    Object.defineProperty(navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
-    })
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
-    mountViewport()
+  it('keeps the fixed toolbar at the layout viewport bottom in layout-resize browsers', () => {
+    // When innerHeight shrinks with the keyboard, off = 0 and the toolbar
+    // bottom stays 0: the fixed bar already rides the shrunken layout
+    // viewport, and the in-flow chain (100dvh + --sys-kb-height) is the one
+    // that breaks on devices where dvh does not track the keyboard.
+    const imeFocused = ref(true)
+    mountViewport(vi.fn(), imeFocused)
+    setWindowSize(400, 500)
     openKeyboard()
-    viewport.offsetTop = 35
 
-    state.onViewportResize()
-    await vi.runOnlyPendingTimersAsync()
-
-    expect(scrollTo).not.toHaveBeenCalled()
-    scrollTo.mockRestore()
+    expect(state.systemKeyboardHeight.value).toBe(0)
+    expect(state.toolbarBottom.value).toBe(0)
+    expect(document.documentElement.style.getPropertyValue('--system-toolbar-bottom')).toBe('0px')
   })
 
-  it('caps pan releases per open episode and rearms after keyboard close', () => {
-    Object.defineProperty(navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
-    })
-    builtinTextareaFocused.value = true
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
-    const paints: FrameRequestCallback[] = []
-    const requestFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
-      .mockImplementation((callback) => {
-        paints.push(callback)
-        return paints.length
-      })
-    mountViewport()
+  it('releases the toolbar bottom on keyboard close and reset', () => {
+    const imeFocused = ref(true)
+    mountViewport(vi.fn(), imeFocused)
     openKeyboard()
+    expect(state.toolbarBottom.value).toBe(300)
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      viewport.offsetTop = 35
-      state.onViewportResize()
-      paints.shift()?.(attempt * 16)
-    }
-    expect(scrollTo).toHaveBeenCalledTimes(3)
-
-    viewport.offsetTop = 0
     viewport.height = 800
     state.onViewportResize()
-    viewport.height = 500
-    state.onViewportResize()
-    viewport.offsetTop = 35
-    state.onViewportResize()
-    paints.shift()?.(80)
+    expect(document.documentElement.style.getPropertyValue('--system-toolbar-bottom')).toBe('0px')
 
-    expect(scrollTo).toHaveBeenCalledTimes(4)
-    requestFrame.mockRestore()
-    scrollTo.mockRestore()
+    openKeyboard()
+    window.dispatchEvent(new Event('blur'))
+    expect(state.systemKeyboardOpen.value).toBe(false)
+    expect(document.documentElement.style.getPropertyValue('--system-toolbar-bottom')).toBe('0px')
   })
 
-  it('leaves iPhone terminal refits to the ResizeObserver during IME opening', async () => {
-    Object.defineProperty(navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone) CriOS/140.0 Mobile',
-    })
-    const fit = mountViewportWithTerminal()
-    viewport.height = 500
-
-    state.onViewportResize()
-    await vi.advanceTimersByTimeAsync(200)
-
-    expect(fit).not.toHaveBeenCalled()
-  })
-
-  it('retains the existing viewport refit on non-iPhone clients', async () => {
+  it('retains the delayed viewport refit of terminal tabs', async () => {
     const fit = mountViewportWithTerminal()
     viewport.height = 500
 
@@ -337,14 +282,19 @@ describe('useViewportResize system keyboard lifecycle', () => {
     expect(fit).toHaveBeenCalledOnce()
   })
 
-  it('gives the shared inset sole ownership of focused builtin-keyboard positioning', () => {
+  it('anchors the focused builtin keyboard with a pan-compensated inline bottom', () => {
     const css = readFileSync(join(process.cwd(), 'src/styles/mobile-keyboard.css'), 'utf8')
     const component = readFileSync(
       join(process.cwd(), 'src/components/keyboard/MobileKeyboard.vue'),
       'utf8'
     )
 
-    expect(css).toMatch(/#mobile-kb\s*\{[^}]*bottom:\s*var\(--sys-kb-height,\s*0px\)/s)
-    expect(component).not.toContain('barRef.value.style.bottom =')
+    // The static rule only provides the pre-event default; the live position must
+    // come from the viewport handler so WebKit's caret pan cannot strand the
+    // input behind the system keyboard on iPhone (#258 regression).
+    expect(css).toMatch(/#mobile-kb\s*\{[^}]*bottom:\s*0\s*;/s)
+    expect(css).not.toMatch(/#mobile-kb\s*\{[^}]*bottom:\s*var\(--sys-kb-height/s)
+    expect(component).toContain('barRef.value.style.bottom =')
+    expect(component).toContain('info.baseline - (info.offsetTop + vh)')
   })
 })

@@ -9,6 +9,14 @@ export function isTouchDevice(): boolean {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0
 }
 
+// Safari on macOS exposes `ontouchstart` even without touch hardware, so
+// `isTouchDevice()` is true on desktop WebKit. Gates that must stay OFF on
+// desktop (the IME 229 snapshot machinery, which breaks desktop IME commits)
+// need this hardware-level check instead.
+export function hasTouchHardware(): boolean {
+  return navigator.maxTouchPoints > 0
+}
+
 export function applyAfterTerminalComposition(apply: () => void): boolean {
   const focused =
     typeof document !== 'undefined' &&

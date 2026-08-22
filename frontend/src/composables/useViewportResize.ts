@@ -1,16 +1,13 @@
-import { ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import type { Tab } from '../types/pane'
 import { getAllLeaves } from '../types/pane'
-import { isIPhoneClient } from '../utils/clientPlatform'
-
-const MAX_PAN_RESETS = 3
 
 export interface ViewportResizeOptions {
   kbVisible: Ref<boolean>
   activePaneId: Ref<string | null>
   tabs: Ref<Tab[]>
   termRefs: Record<string, { fit: () => void }>
-  builtinTextareaFocused: Ref<boolean>
+  terminalImeFocused?: Ref<boolean>
   onSystemKeyboardClose?: () => void
 }
 
@@ -19,6 +16,8 @@ export interface ViewportResizeState {
   imeOccluding: Ref<boolean>
   systemKeyboardOpen: Ref<boolean>
   systemKeyboardHeight: Ref<number>
+  terminalImeFocused: Ref<boolean>
+  toolbarBottom: Ref<number>
   onViewportResize: () => void
   onOrientationChange: () => void
   reset: () => void
@@ -33,11 +32,15 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   const imeOccluding = ref(false)
   const systemKeyboardOpen = ref(false)
   const systemKeyboardHeight = ref(0)
+  const terminalImeFocused = opts.terminalImeFocused ?? ref(false)
+  // The fixed system toolbar rides the keyboard edge: it only needs the
+  // keyboard inset while the terminal's own IME focus is active.
+  const toolbarBottom = computed(() =>
+    terminalImeFocused.value && systemKeyboardOpen.value ? systemKeyboardHeight.value : 0
+  )
   let viewportRefitTimer = 0
   let orientationRevalidateFrame = 0
-  let earlyPanReleaseFrame = 0
   let naturalVH = 0
-  let panResetAttempts = 0
   let lastSampledKeyboardOpen = false
   let awaitingPostOrientationBaseline = false
   let postOrientationOccludedVH = 0
@@ -46,7 +49,6 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   function sampleViewport(allowBaselineReset = false) {
     const viewport = window.visualViewport
     if (!viewport) {
-      panResetAttempts = 0
       imeOccluding.value = false
       systemKeyboardOpen.value = false
       systemKeyboardHeight.value = 0
@@ -54,10 +56,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     }
 
     const vh = viewport.height
-    // offsetTop is WebKit's temporary caret pan, not keyboard occlusion. Keeping
-    // the inset pan-invariant prevents the keyboard bar from painting short and
-    // then jumping down after the visual viewport returns to zero.
-    const off = Math.max(0, window.innerHeight - vh)
+    const off = Math.max(0, window.innerHeight - (viewport.offsetTop + vh))
     let preserveKeyboardWithoutBaseline = false
     // Layout-resize browsers report off=0 even with the IME open. After a
     // rotation, retain the known-open state until the viewport expands again.
@@ -93,43 +92,16 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     lastSampledKeyboardOpen = sysKbOpen
     document.documentElement.style.setProperty('--sys-kb-height', `${keyboardHeight}px`)
     document.documentElement.style.setProperty(
+      '--system-toolbar-bottom',
+      `${toolbarBottom.value}px`
+    )
+    document.documentElement.style.setProperty(
       '--kb-open',
       sysKbOpen || kbVisible.value ? '1' : '0'
     )
     if (keyboardClosed) {
-      panResetAttempts = 0
       opts.onSystemKeyboardClose?.()
     }
-  }
-
-  function scheduleBuiltinPanRelease() {
-    cancelAnimationFrame(earlyPanReleaseFrame)
-    earlyPanReleaseFrame = 0
-    const viewport = window.visualViewport
-    if (
-      !viewport ||
-      !isIPhoneClient() ||
-      !opts.builtinTextareaFocused.value ||
-      !systemKeyboardOpen.value ||
-      viewport.offsetTop <= 0 ||
-      panResetAttempts >= MAX_PAN_RESETS
-    )
-      return
-    earlyPanReleaseFrame = requestAnimationFrame(() => {
-      earlyPanReleaseFrame = 0
-      const current = window.visualViewport
-      if (disposed || !current) return
-      sampleViewport()
-      if (
-        !opts.builtinTextareaFocused.value ||
-        !systemKeyboardOpen.value ||
-        current.offsetTop <= 0 ||
-        panResetAttempts >= MAX_PAN_RESETS
-      )
-        return
-      panResetAttempts += 1
-      window.scrollTo(0, 0)
-    })
   }
 
   function onViewportResize() {
@@ -139,12 +111,8 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     }
     if (!window.visualViewport) return
     sampleViewport()
-    scheduleBuiltinPanRelease()
 
     clearTimeout(viewportRefitTimer)
-    // The terminal ResizeObserver already owns the iPhone frame resize. A
-    // second delayed fit repaints the upper frame during the IME animation.
-    if (isIPhoneClient()) return
     viewportRefitTimer = window.setTimeout(() => {
       if (!activePaneId.value) return
       const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
@@ -161,14 +129,12 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
 
   function clearViewportState(discardBaseline = false) {
     clearTimeout(viewportRefitTimer)
-    cancelAnimationFrame(earlyPanReleaseFrame)
-    earlyPanReleaseFrame = 0
     if (discardBaseline) naturalVH = 0
-    panResetAttempts = 0
     imeOccluding.value = false
     systemKeyboardOpen.value = false
     systemKeyboardHeight.value = 0
     document.documentElement.style.setProperty('--sys-kb-height', '0px')
+    document.documentElement.style.setProperty('--system-toolbar-bottom', '0px')
     document.documentElement.style.setProperty('--kb-open', kbVisible.value ? '1' : '0')
   }
 
@@ -185,7 +151,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     // Reset a stale baseline only from a confirmed-unoccluded sample. If this
     // is the first sample after rotation and it is still occluded, sampleViewport
     // derives the new orientation's baseline from the layout viewport instead.
-    const off = Math.max(0, window.innerHeight - viewport.height)
+    const off = Math.max(0, window.innerHeight - (viewport.offsetTop + viewport.height))
     const preservedDelta = Math.max(0, naturalVH - viewport.height)
     const confirmedUnoccluded =
       off === 0 &&
@@ -212,6 +178,10 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     document.documentElement.style.setProperty('--kb-open', v ? '1' : '0')
   })
 
+  watch(toolbarBottom, (value) => {
+    document.documentElement.style.setProperty('--system-toolbar-bottom', `${value}px`)
+  })
+
   onMounted(() => {
     window.addEventListener('resize', onOrientationChange)
     window.addEventListener('blur', reset)
@@ -232,9 +202,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     disposed = true
     clearTimeout(viewportRefitTimer)
     cancelAnimationFrame(orientationRevalidateFrame)
-    cancelAnimationFrame(earlyPanReleaseFrame)
     naturalVH = 0
-    panResetAttempts = 0
     lastSampledKeyboardOpen = false
     awaitingPostOrientationBaseline = false
     postOrientationOccludedVH = 0
@@ -251,6 +219,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
       window.visualViewport.removeEventListener('scroll', onViewportResize)
     }
     document.documentElement.style.removeProperty('--sys-kb-height')
+    document.documentElement.style.removeProperty('--system-toolbar-bottom')
     document.documentElement.style.setProperty('--kb-open', '0')
   }
 
@@ -261,6 +230,8 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     imeOccluding,
     systemKeyboardOpen,
     systemKeyboardHeight,
+    terminalImeFocused,
+    toolbarBottom,
     onViewportResize,
     onOrientationChange,
     reset,

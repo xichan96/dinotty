@@ -275,6 +275,7 @@
 
     <SystemKeyboardToolbar
       v-if="effectiveMobileInputMode === 'system'"
+      ref="systemToolbarRef"
       :ctx="keyboardCtx"
       :visible="systemToolbarVisible"
       :action-open="systemActionKeyboardOpen"
@@ -286,6 +287,8 @@
       @choose="onMobileInputGuideChoose"
       @close="mobileInputGuideVisible = false"
     />
+
+    <KbDebugOverlay v-if="kbDebugEnabled" />
 
     <KbToggleButton
       v-show="
@@ -365,6 +368,7 @@ import type { KeyboardHostEventMap } from '../../plugin-api/index'
 import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import MobileInputGuide from './components/keyboard/MobileInputGuide.vue'
 import SystemKeyboardToolbar from './components/keyboard/SystemKeyboardToolbar.vue'
+import KbDebugOverlay from './components/keyboard/KbDebugOverlay.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
@@ -539,6 +543,11 @@ const kbTyping = ref(false)
 const terminalImeFocused = ref(false)
 const mobileInputGuideVisible = ref(false)
 const systemActionKeyboardOpen = ref(false)
+// TEMPORARY (#kbdebug): on-screen keyboard-positioning diagnostics overlay.
+const kbDebugEnabled = ref(false)
+function syncKbDebugFlag() {
+  kbDebugEnabled.value = /kbdebug/i.test(location.search + location.hash)
+}
 // Provider registry resolves which keyboard is active (keyboard-plugin-design.md §4.1).
 // Host providers map back onto the legacy enum so downstream behavior is unchanged.
 initHostKeyboardProviders()
@@ -659,13 +668,9 @@ const keyboardCtx = createKeyboardContext({
   onHostEvent: onKeyboardHostEvent,
 })
 
-// ── Keyboard reservation band (Phase 2: provider.desiredHeight -> --mkb-height) ──
+// ── Keyboard host refs (bound by the render chain below) ──────────────────
 const keyboardHostRef = ref<ComponentPublicInstance | null>(null)
-useKeyboardBand({
-  visible: keyboardVisible,
-  desiredHeight: computed(() => activeKeyboardProvider.value?.desiredHeight),
-  hostRef: keyboardHostRef,
-})
+const systemToolbarRef = ref<ComponentPublicInstance | null>(null)
 
 // ── Template refs (purely UI concerns) ─────────────────────────
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
@@ -760,6 +765,25 @@ const persistentSystemToolbar = computed(
 const systemToolbarVisible = computed(
   () => hasActiveTerminalLeaf.value && (kbVisible.value || persistentSystemToolbar.value)
 )
+
+// ── Keyboard reservation band (Phase 2: provider.desiredHeight -> --mkb-height) ──
+// One band owns --mkb-height at all times. In system mode the frozen toolbar is
+// host-rendered (no provider component), so the band measures it directly via
+// 'auto' instead of reading provider.desiredHeight; a second band instance
+// would race writes and zero out the builtin keyboard's reservation.
+useKeyboardBand({
+  visible: computed(() =>
+    effectiveMobileInputMode.value === 'system' ? systemToolbarVisible.value : keyboardVisible.value
+  ),
+  desiredHeight: computed(() =>
+    effectiveMobileInputMode.value === 'system'
+      ? ('auto' as const)
+      : activeKeyboardProvider.value?.desiredHeight
+  ),
+  hostRef: computed(() =>
+    effectiveMobileInputMode.value === 'system' ? systemToolbarRef.value : keyboardHostRef.value
+  ),
+})
 
 // Workspace filtering
 const {
@@ -875,7 +899,7 @@ const {
   activePaneId,
   tabs,
   termRefs,
-  builtinTextareaFocused: kbTyping,
+  terminalImeFocused,
   onSystemKeyboardClose: onSystemKeyboardClosed,
 })
 
@@ -1695,9 +1719,15 @@ function onTerminalTouch(e: TouchEvent) {
         effectiveMobileInputMode.value === 'system' ? closeSystemIme() : (kbVisible.value = false)
       return
     }
+    // An un-armed tap means the textarea was already focused when the gesture
+    // started. While kbVisible is true that is a caret-repositioning tap and
+    // must not toggle the toolbar; but a stale focus without kbVisible (e.g.
+    // programmatic refocus after window focus never opens the iOS keyboard)
+    // must fall through and re-open, or the system toolbar can never come
+    // back. v0.22.0 opened unconditionally on tap.
     if (
       effectiveMobileInputMode.value === 'system' &&
-      (!openPending || heldFor >= TERMINAL_LONG_PRESS_MS)
+      (heldFor >= TERMINAL_LONG_PRESS_MS || (!openPending && kbVisible.value))
     )
       return
     if (!hasOpenGuard(appSettings.keyboard_guard_mode)) {
@@ -2316,6 +2346,8 @@ function onWindowCloseCancel() {
 
 onMounted(async () => {
   setupTauriWindowClose()
+  syncKbDebugFlag()
+  window.addEventListener('hashchange', syncKbDebugFlag)
   await desktopLifecycle.setup()
   document.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('focusin', onDocumentFocusIn)
@@ -2448,6 +2480,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('terminal-run-code', onTerminalRunCode)
   window.removeEventListener('dinotty:open-settings', onOpenSettingsRequest)
   window.removeEventListener('pane-drag-hover-switch', onPaneDragHoverSwitch)
+  window.removeEventListener('hashchange', syncKbDebugFlag)
   disposeViewport()
   syncWs.closeWs()
 })
@@ -2482,27 +2515,15 @@ onBeforeUnmount(() => {
     100% - max(0px, var(--mkb-height, 0px) - var(--kb-overlap, 0px)) - var(--sys-kb-height, 0px)
   );
 }
-#app-root.system-toolbar-docked {
-  /* The shortcut toolbar is a flex child, so its own height already reduces the content area.
-   * Only reserve the native keyboard occlusion here. */
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: var(--sys-kb-height, 0px);
-  left: 0;
-  box-sizing: border-box;
-  height: auto;
-}
-#app-root.system-toolbar-docked.system-ime-open {
-  /* system-ime-open already owns the measured keyboard episode. The layout viewport can shrink
-   * with the IME, leaving --sys-kb-height at 0 even though the configured overlap must remain. */
-  --system-ime-overlap: var(--kb-overlap, 0px);
-  bottom: calc(var(--sys-kb-height, 0px) - var(--system-ime-overlap));
-}
-#app-root.system-toolbar-docked.system-ime-open > #system-mobile-kb {
-  /* The root grows by O; move only the shortcut toolbar back by O so its screen position stays. */
-  top: calc(-1 * var(--system-ime-overlap));
-}
+/* The fixed system shortcut toolbar reserves its own height through the host
+ * keyboard band (--mkb-height), and --sys-kb-height covers the native keyboard
+ * occlusion. Do NOT make #app-root position:fixed: iOS WebKit's caret pan on
+ * IME open pushes the whole fixed box - terminal included - off the top of the
+ * screen (#260 regression). Do NOT dock the toolbar in this flow either: on
+ * devices where 100dvh does not track the keyboard the in-flow bar stays at
+ * the screen bottom, buried under the IME (v0.22.0 kept it fixed for exactly
+ * this reason). The system-toolbar-docked / system-ime-open classes stay as
+ * state markers for diagnostics (KbDebugOverlay) and tests. */
 .broadcast-btn {
   position: relative;
   color: #ef4444;

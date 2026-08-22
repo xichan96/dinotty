@@ -291,7 +291,6 @@ describe('useTerminal device text integration', () => {
   it.each([
     ['touch system input', false, 1, 'system', 'ios'],
     ['Windows Tauri touch input', true, 1, 'builtin', 'windows-x86_64'],
-    ['Linux Tauri desktop input', true, 0, 'builtin', 'linux-x86_64'],
   ] as const)(
     'reconciles an auto-pair and later closer on %s',
     (_surface, tauri, touchPoints, inputMode, target) => {
@@ -327,6 +326,33 @@ describe('useTerminal device text integration', () => {
       term.destroy()
     }
   )
+
+  it('sends raw symbols via sym-pairing on desktop without 229 baseline', () => {
+    mocks.isTauri.mockReturnValue(true)
+    mocks.hostTarget.mockReturnValue('linux-x86_64')
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
+    settings.mobile_input_mode = 'builtin'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+    const keyHandler = lastXterm().keyHandler!
+
+    // Desktop does not arm the 229 baseline. Shift+symbol chars are emitted
+    // directly via the sym-pairing rescue; auto-pair is handled by the shell.
+    keyHandler(new KeyboardEvent('keydown', { keyCode: 229, key: 'Process' }))
+    textarea.value = '('
+    textarea.setSelectionRange(1, 1)
+    textarea.dispatchEvent(
+      new InputEvent('input', { inputType: 'insertText', data: '(', isComposing: false })
+    )
+    keyHandler(new KeyboardEvent('keyup', { keyCode: 229, key: 'Process' }))
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['('])
+    term.destroy()
+  })
 
   it('does not duplicate a Tauri 229 symbol through the input rescue path', () => {
     mocks.isTauri.mockReturnValue(true)
@@ -440,6 +466,79 @@ describe('useTerminal device text integration', () => {
     expect(input.mock.calls.map(([data]) => data)).toEqual(['我', '说一句呢'])
     expect((term as any)._ime229Baseline).toBeNull()
     term.destroy()
+  })
+
+  it('sends IME committed text via onData on desktop without 229 baseline interference', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(true)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+    const keyHandler = lastXterm().keyHandler!
+
+    // Desktop (non-touch) does not arm the 229 baseline. The keydown with
+    // keyCode 229 is skipped by xterm, and the IME commit flows through
+    // xterm onData normally.
+    keyHandler(new KeyboardEvent('keydown', { keyCode: 229, key: 'Process' }))
+    lastXterm().dataHandler!('你好')
+    textarea.value = ''
+    textarea.setSelectionRange(0, 0)
+    textarea.dispatchEvent(
+      new InputEvent('input', { inputType: 'insertText', data: '你好', isComposing: false })
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['你好'])
+    expect((term as any)._ime229Baseline).toBeNull()
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it('does not arm the 229 baseline on iPhone builtin-mode input', () => {
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 })
+    settings.mobile_input_mode = 'builtin'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const keyHandler = lastXterm().keyHandler!
+
+    // Builtin mode drives the system keyboard's IME through the same xterm
+    // textarea, but the 229 snapshot/diff machinery is system-mode only
+    // (HEAD behavior). Arming it here drops the builtin keyboard's input.
+    keyHandler(new KeyboardEvent('keydown', { keyCode: 229, key: 'Process' }))
+    expect((term as any)._ime229Baseline).toBeNull()
+
+    lastXterm().dataHandler!('你')
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['你'])
+    term.destroy()
+  })
+
+  it('does not arm the 229 baseline on desktop WebKit that exposes ontouchstart', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(true)
+    // macOS Safari/WKWebView exposes `ontouchstart` without touch hardware, so
+    // isTouchDevice() is true there. The 229 machinery must still stay off or
+    // fast desktop IME typing drops committed words.
+    ;(window as any).ontouchstart = null
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 })
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const keyHandler = lastXterm().keyHandler!
+
+    keyHandler(new KeyboardEvent('keydown', { keyCode: 229, key: 'Process' }))
+    expect((term as any)._ime229Baseline).toBeNull()
+    lastXterm().dataHandler!('你好')
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['你好'])
+    term.destroy()
+    delete (window as any).ontouchstart
+    vi.useRealTimers()
   })
 
   it('does not let an unrelated keyup flush a dictation-owned snapshot', async () => {

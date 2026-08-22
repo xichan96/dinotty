@@ -24,6 +24,7 @@ import {
   applyMobileTerminalModifiers,
   emptyMobileTerminalModifiers,
   handleTerminalShortcutKeydown,
+  hasTouchHardware,
   isDuplicateOnData,
   isShiftSymbolChar,
   isTouchDevice,
@@ -324,8 +325,14 @@ export class TerminalInstance {
     const xt = this.xterm
     const { isAppShortcut } = useKeybindings()
     xt.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      // maxTouchPoints, not isTouchDevice(): desktop Safari/WKWebView exposes
+      // `ontouchstart` without touch hardware, and arming the 229 snapshot
+      // machinery there eats desktop IME commits (#256 regression). The
+      // machinery stays scoped to system-mode touch input (and Tauri touch,
+      // e.g. Windows tablets); iPhone builtin mode never had it armed and
+      // arming it there breaks the builtin keyboard's own input path.
       const acceptsTextarea229 =
-        isTauri() || !isTouchDevice() || settings.mobile_input_mode === 'system'
+        hasTouchHardware() && (settings.mobile_input_mode === 'system' || isTauri())
       const isTextarea229 =
         acceptsTextarea229 &&
         !e.isComposing &&
@@ -554,7 +561,7 @@ export class TerminalInstance {
         // before xterm's input listener sees it. All unmatched events continue
         // through the existing replacement-text handling below.
         if (
-          isTouchDevice() &&
+          hasTouchHardware() &&
           !isTauri() &&
           settings.mobile_input_mode === 'system' &&
           !this._composing &&
@@ -873,11 +880,18 @@ export class TerminalInstance {
       selectionEnd: textarea.selectionEnd,
     }
     const after = normalizeTerminalTextareaSelection(before, observed, this._ime229InputData)
-    const data = terminalTextareaEdit(
+    let data = terminalTextareaEdit(
       before,
       after,
       this.xterm?.modes.applicationCursorKeysMode ?? false
     )
+    // WebKit can deliver the IME confirm keydown after compositionend, so it
+    // reads as a fresh non-composition 229 and arms this baseline while xterm
+    // has already forwarded the commit via onData (dropped while the baseline
+    // owns the diff) and cleared the textarea. The diff then reconstructs
+    // nothing; _ime229InputData still holds the authoritative committed text
+    // and is the only thing preventing the whole IME word from being lost.
+    if (!data && this._ime229InputData) data = this._ime229InputData
     if (!data && !clearEmpty) return
     if (
       after.selectionStart !== observed.selectionStart ||

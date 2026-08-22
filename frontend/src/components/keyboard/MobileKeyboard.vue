@@ -855,6 +855,11 @@ let sysKbArmed = false
 function onViewportChange(info: { height: number; offsetTop: number; baseline: number }) {
   const vh = info.height
   if (vh > naturalVH) naturalVH = vh
+  // Pan-compensated inset: while WebKit's caret pan (offsetTop > 0) is active,
+  // the pan-invariant --sys-kb-height leaves the fixed bar short of the keyboard
+  // top and the input ends up unreachable on iPhone. Anchor to the visual
+  // viewport's live bottom edge instead.
+  const off = info.baseline - (info.offsetTop + vh)
   const wasSysKbOpen = sysKbOpen
   sysKbOpen = naturalVH - vh > 120
   if (sysKbOpen && !wasSysKbOpen) sysKbArmed = textInputFocused.value
@@ -865,10 +870,12 @@ function onViewportChange(info: { height: number; offsetTop: number; baseline: n
     } else if (sysKbOpen && textInputFocused.value) {
       // System keyboard open with our input focused: show bar, hide panels via v-show
       barRef.value.style.display = ''
+      barRef.value.style.bottom = `${Math.max(0, off)}px`
     } else if (sysKbOpen) {
       barRef.value.style.display = 'none'
     } else {
       barRef.value.style.display = ''
+      barRef.value.style.bottom = `${Math.max(0, off)}px`
     }
   }
   if (textInputFocused.value) resizeTextInput()

@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     Json,
 };
@@ -16,16 +16,21 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, RwLock};
 
-use super::server::{self, JsonRpcRequest, McpServer};
+use super::server::{self, JsonRpcRequest, JsonRpcResponse, McpServer};
+use crate::settings::SettingsState;
 
 pub type McpState = Arc<McpServer>;
 
-/// Run MCP stdio transport. Reads JSON-RPC from stdin, writes to stdout.
-pub async fn run_stdio(server: Arc<McpServer>) {
+/// Run MCP stdio transport as a proxy to the main HTTP service. Reads
+/// line-delimited JSON-RPC from stdin, forwards each request to
+/// `POST {base_url}/mcp/message` with the Bearer token, and writes the
+/// response body (the complete JSON-RPC response) back to stdout.
+pub async fn run_stdio(base_url: &str, token: &str) {
     let stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin);
     let mut line = String::new();
+    let client = reqwest::Client::new();
 
     loop {
         line.clear();
@@ -37,22 +42,49 @@ pub async fn run_stdio(server: Arc<McpServer>) {
                     continue;
                 }
 
-                let response = match serde_json::from_str::<JsonRpcRequest>(trimmed) {
-                    Ok(request) => {
-                        server::handle_request(&server, request, &crate::token::TokenInfo::global())
-                            .await
+                let id = serde_json::from_str::<serde_json::Value>(trimmed)
+                    .ok()
+                    .and_then(|v| v.get("id").cloned());
+
+                let response = client
+                    .post(format!("{base_url}/mcp/message"))
+                    .bearer_auth(token)
+                    .header("content-type", "application/json")
+                    .body(trimmed.to_string())
+                    .send()
+                    .await;
+
+                let output = match response {
+                    Ok(resp) => match resp.text().await {
+                        // Notifications (no id) get an empty 200 body; skip them.
+                        Ok(body) if body.is_empty() => String::new(),
+                        Ok(mut body) => {
+                            if !body.ends_with('\n') {
+                                body.push('\n');
+                            }
+                            body
+                        }
+                        Err(e) => {
+                            let resp = JsonRpcResponse::error(
+                                id,
+                                server::INTERNAL_ERROR,
+                                format!("stdio proxy read error: {e}"),
+                            );
+                            format!("{}\n", serde_json::to_string(&resp).unwrap_or_default())
+                        }
+                    },
+                    Err(e) => {
+                        let resp = JsonRpcResponse::error(
+                            id,
+                            -32000,
+                            format!("cannot reach MCP server at {base_url}: {e}"),
+                        );
+                        format!("{}\n", serde_json::to_string(&resp).unwrap_or_default())
                     }
-                    Err(e) => Some(server::JsonRpcResponse::error(
-                        None,
-                        server::PARSE_ERROR,
-                        format!("Parse error: {e}"),
-                    )),
                 };
 
-                if let Some(resp) = response {
-                    let json = serde_json::to_string(&resp).unwrap_or_default();
-                    let _ = stdout.write_all(json.as_bytes()).await;
-                    let _ = stdout.write_all(b"\n").await;
+                if !output.is_empty() {
+                    let _ = stdout.write_all(output.as_bytes()).await;
                     let _ = stdout.flush().await;
                 }
             }
@@ -103,7 +135,12 @@ impl Stream for MpscReceiverStream {
 pub async fn mcp_sse_handler(
     State(_server): State<McpState>,
     State(sse_state): State<Arc<SseState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    State(settings): State<SettingsState>,
+) -> Response {
+    if !settings.read().await.mcp.http_enabled {
+        return (StatusCode::NOT_FOUND, "mcp http disabled").into_response();
+    }
+
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
     // Send initial endpoint event so the client knows where to POST messages
@@ -118,16 +155,23 @@ pub async fn mcp_sse_handler(
     }
 
     let stream = MpscReceiverStream { rx };
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
 /// POST /mcp/message — Client-to-server JSON-RPC messages.
 pub async fn mcp_message_handler(
     State(server): State<McpState>,
     State(sse_state): State<Arc<SseState>>,
+    State(settings): State<SettingsState>,
     axum::Extension(token_info): axum::Extension<crate::token::TokenInfo>,
     Json(request): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
+    let settings = settings.read().await;
+    // HTTP and stdio clients both POST here; stdio is off by default.
+    if !(settings.mcp.http_enabled || settings.mcp.stdio_enabled) {
+        return (StatusCode::NOT_FOUND, "mcp disabled").into_response();
+    }
+
     let response = server::handle_request(&server, request, &token_info).await;
 
     if let Some(resp) = response {

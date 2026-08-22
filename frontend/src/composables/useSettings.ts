@@ -121,6 +121,7 @@ export interface SettingsData {
   monitor: MonitorConfig
   notification: NotificationConfig
   open_api: OpenApiConfig
+  mcp: McpConfig
   auth_token?: string
   ip_whitelist: string[]
   auth: {
@@ -144,6 +145,11 @@ export interface SettingsData {
 
 export interface OpenApiConfig {
   enabled: boolean
+}
+
+export interface McpConfig {
+  http_enabled: boolean
+  stdio_enabled: boolean
 }
 
 export interface LogConfig {
@@ -579,6 +585,10 @@ export const settings = reactive<SettingsData>({
   },
   open_api: {
     enabled: false,
+  },
+  mcp: {
+    http_enabled: true,
+    stdio_enabled: false,
   },
   ip_whitelist: ['127.0.0.1', '::1'],
   auth: {

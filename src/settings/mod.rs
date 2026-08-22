@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 pub use handlers::{get_background, get_settings, put_settings, upload_background};
 pub use io::{create_settings_state, load_settings, load_token, save_settings_sync, save_token};
-pub use logging::{get_log, init_logging, log_dir, log_file_path};
+pub use logging::{get_log, init_logging, init_stderr_logging, log_dir, log_file_path};
 pub use types::{
     default_upload_dir, ActionBottomCluster, ActionKey, ActionKeyboardConfig, AuthConfig,
     BackgroundConfig, BellNotificationConfig, CommandBookmark, CommandCompleteConfig, CustomColors,

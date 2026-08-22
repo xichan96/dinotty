@@ -12,7 +12,7 @@ fn make_server() -> McpServer {
     let manager = Arc::new(SessionManager::new());
     manager.sessions.insert("pane-1".into(), stub_session());
     manager.sessions.insert("pane-2".into(), stub_session());
-    McpServer::new(manager, Arc::new(tokio::sync::RwLock::new(Default::default())))
+    McpServer::new(manager, Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default())))
 }
 
 fn scoped_token(cap: &str, resources: Vec<String>) -> TokenInfo {

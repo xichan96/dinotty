@@ -218,6 +218,8 @@ pub struct Settings {
     pub notification: NotificationConfig,
     #[serde(default)]
     pub open_api: OpenApiConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
     #[serde(skip)]
     pub auth_token: String,
     #[serde(default = "default_ip_whitelist")]
@@ -271,6 +273,20 @@ pub(crate) fn is_false(b: &bool) -> bool {
 pub struct OpenApiConfig {
     #[serde(default)]
     pub enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct McpConfig {
+    #[serde(default = "default_true", alias = "sse_enabled")]
+    pub http_enabled: bool,
+    #[serde(default)]
+    pub stdio_enabled: bool,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self { http_enabled: true, stdio_enabled: false }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -433,6 +449,7 @@ impl Default for Settings {
             monitor: MonitorConfig::default(),
             notification: NotificationConfig::default(),
             open_api: OpenApiConfig::default(),
+            mcp: McpConfig::default(),
             auth_token: String::new(),
             ip_whitelist: default_ip_whitelist(),
             keybindings: std::collections::HashMap::new(),

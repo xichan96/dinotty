@@ -1273,6 +1273,32 @@
         </details>
       </div>
     </CollapsibleSection>
+
+    <CollapsibleSection :title="t('settings.keyboard.mcp')" level="group" default-open>
+      <p class="settings-hint">{{ t('settings.keyboard.mcpHint') }}</p>
+      <div class="settings-row">
+        <label>{{ t('settings.keyboard.mcpHttp') }}</label>
+        <label class="toggle">
+          <input v-model="settings.mcp.http_enabled" type="checkbox" @change="saveSettings()" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <p class="settings-hint">{{ t('settings.keyboard.mcpHttpHint') }}</p>
+      <div class="settings-row">
+        <label>{{ t('settings.keyboard.mcpStdio') }}</label>
+        <label class="toggle">
+          <input v-model="settings.mcp.stdio_enabled" type="checkbox" @change="saveSettings()" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <p class="settings-hint">{{ t('settings.keyboard.mcpStdioHint') }}</p>
+      <details class="open-api-curl">
+        <summary>{{ t('settings.keyboard.mcpExample') }}</summary>
+        <code class="open-api-curl-code"
+          >{&quot;mcpServers&quot;:{&quot;dinotty&quot;:{&quot;command&quot;:&quot;/path/to/dinotty-server&quot;,&quot;args&quot;:[&quot;--mcp-stdio&quot;,&quot;--port&quot;,&quot;8999&quot;]}}}</code
+        >
+      </details>
+    </CollapsibleSection>
   </div>
 </template>
 

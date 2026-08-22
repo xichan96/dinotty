@@ -8,7 +8,7 @@
 
 ### 后端路由已存在
 
-`embedded_server.rs:670` 与 `src/main.rs:875` 都注册了同一路由（两端同步，无 desktop router drift）：
+`src-tauri/src/embedded_server/router.rs:175` 与 `src/main.rs:875` 都注册了同一路由（两端同步，无 desktop router drift）：
 ```rust
 .route("/api/plugins/:id/*path", get(plugin::plugin_asset))
 ```
@@ -280,7 +280,7 @@ jiahao-globe/
 
 | 项目 | 状态 |
 |------|------|
-| 后端路由 | ✅ 已存在（`embedded_server.rs:670` + `main.rs:875`，两端同步） |
+| 后端路由 | ✅ 已存在（`embedded_server/router.rs:175` + `main.rs:875`，两端同步） |
 | 路径安全 | ✅ 已实现 |
 | MIME 类型 | ✅ 已实现（建议补 `nosniff`） |
 | 认证兼容 | ✅ `authFetch` 走 `tauri_fetch` 可携带 Bearer，`<script>` 标签在默认 loopback 旁路下可用 |

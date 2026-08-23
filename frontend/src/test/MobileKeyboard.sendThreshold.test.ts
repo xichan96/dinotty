@@ -32,7 +32,7 @@ vi.mock('../composables/apiBase', () => ({
 }))
 
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'
-import { normalizeQuickSendThreshold } from '../components/settings/KeyboardTab.vue'
+import { normalizeQuickSendThreshold } from '../utils/keyboardEditUtils'
 import { settings } from '../composables/useSettings'
 import { TerminalInstance, setActivePaneId } from '../composables/useTerminal'
 import { TauriIpcTransport } from '../composables/useTransport'

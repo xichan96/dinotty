@@ -61,7 +61,7 @@ describe('KeyboardTab system IME editor', () => {
     ])
 
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
     expect(source).toMatch(/\.system-editor-page\s*\{[^}]*overflow:\s*hidden;/s)
@@ -96,7 +96,7 @@ describe('KeyboardTab system IME editor', () => {
     expect(wrapper.find('.ak-modal').exists()).toBe(true)
 
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
     expect(source).toMatch(
@@ -128,7 +128,7 @@ describe('KeyboardTab system IME editor', () => {
     expect(auto.classes()).not.toContain('system-editor-resizable')
 
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
     expect(source).toMatch(/\.system-editor-compact \.ak-wyg-key\s*\{[^}]*padding-left:\s*14px;/s)
@@ -178,7 +178,7 @@ describe('KeyboardTab system IME editor', () => {
 
   it('keeps the fixed IME preview in the rightmost grid column', () => {
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
 
@@ -226,13 +226,20 @@ describe('KeyboardTab system IME editor', () => {
   })
 
   it('keeps the disabled Agent icon hint readable in both key editors', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+    const akSource = readFileSync(
+      join(process.cwd(), 'src/components/settings/ActionKeyboardEditor.vue'),
+      'utf8'
+    )
+    const systemSource = readFileSync(
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
 
-    expect(source).toMatch(
-      /\.ak-agent-icon-hint,\s*\.system-agent-icon-hint\s*\{[^}]*margin-top:\s*6px;[^}]*line-height:\s*1\.45;/s
+    expect(akSource).toMatch(
+      /\.ak-agent-icon-hint\s*\{[^}]*margin-top:\s*6px;[^}]*line-height:\s*1\.45;/s
+    )
+    expect(systemSource).toMatch(
+      /\.system-agent-icon-hint\s*\{[^}]*margin-top:\s*6px;[^}]*line-height:\s*1\.45;/s
     )
   })
 

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 // load) is covered by the composable and plugin-bundle contract suites.
 
 const source = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
+const coreSource = readFileSync(join(process.cwd(), 'src/composables/useAppCore.ts'), 'utf8')
 
 describe('App.vue keyboard render contract (Phase 3)', () => {
   it('gates the plugin component slot on the resolved provider component', () => {
@@ -26,7 +27,7 @@ describe('App.vue keyboard render contract (Phase 3)', () => {
   })
 
   it('derives the provider component from the resolved active provider', () => {
-    expect(source).toMatch(
+    expect(coreSource).toMatch(
       /const keyboardProviderComponent = computed\(\(\) => activeKeyboardProvider\.value\?\.component\)/
     )
   })

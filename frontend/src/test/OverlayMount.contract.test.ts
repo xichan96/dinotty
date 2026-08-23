@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 // in the store / drag / component specs.
 
 const appSource = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
+const coreSource = readFileSync(join(process.cwd(), 'src/composables/useAppCore.ts'), 'utf8')
 const hostSource = readFileSync(
   join(process.cwd(), 'src/components/plugin/PluginOverlayHost.vue'),
   'utf8'
@@ -27,7 +28,7 @@ describe('overlay host mount + layer contract', () => {
   })
 
   it('provides focusActive to the overlay host for R4 focus restore', () => {
-    expect(appSource).toMatch(/provide\(FOCUS_ACTIVE_KEY, focusActive\)/)
+    expect(coreSource).toMatch(/provide\(FOCUS_ACTIVE_KEY, focusActive\)/)
   })
 
   it('keeps the layer z-index band at 600 with pointer-events none', () => {

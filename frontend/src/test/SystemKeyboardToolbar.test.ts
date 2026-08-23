@@ -54,6 +54,10 @@ function mountToolbar(actionOpen = false, send = vi.fn()) {
 describe('SystemKeyboardToolbar', () => {
   it('rides the keyboard edge as a fixed bar with host-owned height and bottom offset', () => {
     const app = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
+    const keyboardSource = readFileSync(
+      join(process.cwd(), 'src/composables/useAppKeyboard.ts'),
+      'utf8'
+    )
     const toolbar = readFileSync(
       join(process.cwd(), 'src/components/keyboard/SystemKeyboardToolbar.vue'),
       'utf8'
@@ -89,8 +93,8 @@ describe('SystemKeyboardToolbar', () => {
     expect(toolbar).not.toContain('ResizeObserver')
     expect(viewport).toContain('toolbarBottom')
     expect(viewport).toContain("'--system-toolbar-bottom'")
-    expect(app).toMatch(/useViewportResize\(\{[\s\S]*?terminalImeFocused,/)
-    expect(app).toMatch(
+    expect(keyboardSource).toMatch(/useViewportResize\(\{[\s\S]*?terminalImeFocused,/)
+    expect(keyboardSource).toMatch(
       /useKeyboardBand\(\{[\s\S]*?effectiveMobileInputMode\.value === 'system'[\s\S]*?'auto' as const/
     )
   })

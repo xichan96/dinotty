@@ -19,7 +19,6 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
 import { getApiBase, wsUrlWithToken, hasAuthToken } from './apiBase'
 import { isTauri } from './useTransport'
-import { handlePluginChanged } from './usePluginLoader'
 import { toActiveWorkspaceId, useWorkspaces } from './useWorkspaces'
 import { apiCreatePluginTab } from './useTabApi'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
@@ -41,6 +40,11 @@ type MonitorHistoryHandler = (data: Record<string, unknown>[]) => void
 const monitorHistoryHandlers = new Set<MonitorHistoryHandler>()
 let currentClientId: string | null = null
 let sendMarkReadFn: ((payload: SyncMarkRead) => void) | null = null
+// Late-bound from useAppCore: usePluginLoader is a sibling in the module graph
+// (plugin loader -> event bridge -> useSyncWebSocket), so a static import here
+// would form a circular init that TDZ-crashes when useEventBridge registers its
+// top-level onEvent handler.
+let pluginChangedHandler: ((pluginId: string, change: string) => void) | null = null
 let workspaceListReceived = false
 let pendingAutoNewTab = false
 let pendingAutoNewTabTimer: ReturnType<typeof setTimeout> | null = null
@@ -66,6 +70,12 @@ export function onNotification(handler: NotificationHandler): () => void {
   return () => {
     notifyHandlers.delete(handler)
   }
+}
+
+export function setPluginChangedHandler(
+  handler: ((pluginId: string, change: string) => void) | null
+): void {
+  pluginChangedHandler = handler
 }
 
 export function onSuggestions(handler: SuggestionsHandler): () => void {
@@ -617,7 +627,7 @@ export function useSyncWebSocket(opts: {
           })
         }
       } else if (msg.type === 'plugin_changed') {
-        handlePluginChanged(msg.plugin_id, msg.change)
+        pluginChangedHandler?.(msg.plugin_id, msg.change)
       } else if (msg.type === 'ssh_auth_prompt') {
         // SSH keyboard-interactive auth prompt from backend
         // Emit event for the SSH auth dialog to handle

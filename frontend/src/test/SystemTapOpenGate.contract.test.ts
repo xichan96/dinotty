@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 // v0.22.0 opened unconditionally; the #256-259 gating must only suppress
 // caret-repositioning taps while the toolbar is visible.
 
-const source = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8')
+const source = readFileSync(join(process.cwd(), 'src/composables/useAppKeyboard.ts'), 'utf8')
 
 describe('system-mode terminal tap-open gate contract', () => {
   it('only suppresses un-armed taps while the keyboard is already visible', () => {

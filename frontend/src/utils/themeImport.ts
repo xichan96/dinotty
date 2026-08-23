@@ -44,7 +44,8 @@ function parseJsonTheme(text: string): RawTheme | ImportResult {
     return { ok: false, errors: [`Invalid JSON: ${message}`] }
   }
 
-  const root = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  const root =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
   const nested = root.colors
   const source =
     typeof nested === 'object' && nested !== null ? (nested as Record<string, unknown>) : root
@@ -143,7 +144,7 @@ function validateRawTheme(raw: RawTheme): ImportResult {
   const background = validateField('background', raw.background)
   const cursor = validateField('cursor', raw.cursor)
   const ansi = Array.from({ length: 16 }, (_, index) =>
-    validateField(`palette ${index}`, raw.ansi[index]),
+    validateField(`palette ${index}`, raw.ansi[index])
   )
 
   if (errors.length > 0 || foreground === null || background === null || cursor === null) {

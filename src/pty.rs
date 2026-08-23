@@ -473,11 +473,12 @@ pub fn create_session(
                             let outputs: Vec<String> =
                                 (0..results.len()).map(|_| screen.take_command_output()).collect();
                             let sync = screen.drain_sync_events();
-                            (results.into_iter().zip(outputs).collect::<Vec<_>>(), sync)
+                            let osc = screen.drain_osc_actions();
+                            (results.into_iter().zip(outputs).collect::<Vec<_>>(), sync, osc)
                         }))
                     };
                     match feed_result {
-                        Ok((command_results, sync_events)) => {
+                        Ok((command_results, sync_events, osc_actions)) => {
                             // Apply sync transitions before publishing this read to output_tx.
                             // The broadcast task cannot observe these bytes until send() below.
                             for event in sync_events {
@@ -504,6 +505,11 @@ pub fn create_session(
                                         method: result.method,
                                     });
                                 }
+                            }
+                            // OSC 9/777/BEL notification dispatch - after the
+                            // screen lock is released above.
+                            if !osc_actions.is_empty() {
+                                reader_manager.dispatch_osc_actions(&reader_pane, osc_actions);
                             }
                         }
                         Err(e) => {

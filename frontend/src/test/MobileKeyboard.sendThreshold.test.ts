@@ -32,11 +32,12 @@ vi.mock('../composables/apiBase', () => ({
 }))
 
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'
-import { normalizeQuickSendThreshold } from '../components/settings/KeyboardTab.vue'
+import { normalizeQuickSendThreshold } from '../utils/keyboardEditUtils'
 import { settings } from '../composables/useSettings'
 import { TerminalInstance, setActivePaneId } from '../composables/useTerminal'
 import { TauriIpcTransport } from '../composables/useTransport'
 import { createFrozenSendFn, type SendDataFn } from '../utils/frozenSend'
+import { makeMobileKeyboardCtx } from './helpers/makeMobileKeyboardCtx'
 
 const MkbKeyStub = defineComponent({
   name: 'MkbKey',
@@ -46,9 +47,13 @@ const MkbKeyStub = defineComponent({
 
 let wrapper: VueWrapper | undefined
 
-function mountKeyboard(getSendFn: () => SendDataFn | null, errorHandler = vi.fn()) {
+function mountKeyboard(getSend: () => SendDataFn | null, errorHandler = vi.fn()) {
+  const harness = makeMobileKeyboardCtx({
+    visible: true,
+    sendActive: (data) => Promise.resolve(getSend()?.(data)) as Promise<void>,
+  })
   wrapper = mount(MobileKeyboard, {
-    props: { visible: true, paneId: 'p1', getSendFn },
+    props: { ctx: harness.ctx },
     global: {
       config: { errorHandler },
       stubs: {
@@ -60,7 +65,7 @@ function mountKeyboard(getSendFn: () => SendDataFn | null, errorHandler = vi.fn(
       },
     },
   })
-  return wrapper
+  return { wrapper, harness }
 }
 
 async function enterText(mounted: VueWrapper, text: string) {
@@ -105,8 +110,7 @@ afterEach(() => {
 describe('MobileKeyboard configurable send threshold', () => {
   it('scenario 1: sends short text, waits 50ms, then sends Enter with one captured sender', async () => {
     const send = vi.fn()
-    const getSendFn = vi.fn(() => send)
-    const mounted = mountKeyboard(getSendFn)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await enterText(mounted, '0123456789')
     expect(send).toHaveBeenCalledTimes(1)
@@ -116,12 +120,11 @@ describe('MobileKeyboard configurable send threshold', () => {
     expect(send).toHaveBeenCalledTimes(1)
     await advance(1)
     expect(send.mock.calls).toEqual([['0123456789'], ['\r']])
-    expect(getSendFn).toHaveBeenCalledTimes(1)
   })
 
   it('scenario 2: takes the direct branch exactly at N', async () => {
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await enterText(mounted, 'x'.repeat(63))
     await advance(50)
@@ -131,7 +134,7 @@ describe('MobileKeyboard configurable send threshold', () => {
 
   it('scenario 3: sends text only above N', async () => {
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await enterText(mounted, 'x'.repeat(64))
     await advance(100)
@@ -142,7 +145,7 @@ describe('MobileKeyboard configurable send threshold', () => {
   it('scenario 4: N=0 sends every non-empty payload as text only', async () => {
     settings.quick_send_threshold = 0
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await enterText(mounted, 'x')
     await advance(100)
@@ -152,7 +155,7 @@ describe('MobileKeyboard configurable send threshold', () => {
 
   it('scenario 5: empty text sends one bare Enter', async () => {
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await mounted.find('textarea').trigger('keydown', { key: 'Enter' })
     await advance(100)
@@ -163,7 +166,7 @@ describe('MobileKeyboard configurable send threshold', () => {
   it('scenario 6: N=5000 directly sends a 200-character payload', async () => {
     settings.quick_send_threshold = 5000
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
     const text = '中'.repeat(200)
 
     await enterText(mounted, text)
@@ -181,7 +184,7 @@ describe('MobileKeyboard configurable send threshold', () => {
 
   it('scenario 8: ignores composition sends without deferral and rejects NUL/ESC payloads', async () => {
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
     const textarea = mounted.find('textarea')
 
     await textarea.setValue('composing')
@@ -204,12 +207,13 @@ describe('MobileKeyboard configurable send threshold', () => {
     const p1Send = vi.fn()
     const p2Send = vi.fn()
     let currentSend: SendDataFn = p1Send
-    const mounted = mountKeyboard(() => currentSend)
+    const { wrapper: mounted, harness } = mountKeyboard(() => currentSend)
 
     await enterText(mounted, 'pane-pinned')
     await advance(20)
     currentSend = p2Send
-    await mounted.setProps({ paneId: 'p2' })
+    harness.activePaneId.value = 'p2'
+    await nextTick()
     await advance(30)
 
     expect(p1Send.mock.calls).toEqual([['pane-pinned']])
@@ -224,7 +228,7 @@ describe('MobileKeyboard configurable send threshold', () => {
     const text = 'one\ntwo'
     settings.quick_send_threshold = text.length
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await enterText(mounted, text)
     await advance(50)
@@ -240,7 +244,7 @@ describe('MobileKeyboard configurable send threshold', () => {
 
   it('scenario 11: unmount invalidates the pending Enter generation', async () => {
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted } = mountKeyboard(() => send)
 
     await enterText(mounted, 'unmount')
     await advance(20)
@@ -256,7 +260,7 @@ describe('MobileKeyboard configurable send threshold', () => {
     const primary = vi.fn()
     const secondary = vi.fn()
     const frozenSend = createFrozenSendFn(broadcastMode ? [primary, secondary] : [primary])
-    const mounted = mountKeyboard(() => frozenSend)
+    const { wrapper: mounted } = mountKeyboard(() => frozenSend)
 
     await enterText(mounted, 'frozen')
     await advance(20)
@@ -269,7 +273,7 @@ describe('MobileKeyboard configurable send threshold', () => {
 
   it('scenario 13: drops toolbar quick-key and app-action taps while the send lock is held', async () => {
     const send = vi.fn()
-    const mounted = mountKeyboard(() => send)
+    const { wrapper: mounted, harness } = mountKeyboard(() => send)
 
     await enterText(mounted, 'locked')
     await advance(20)
@@ -280,7 +284,7 @@ describe('MobileKeyboard configurable send threshold', () => {
     await advance(30)
 
     expect(send.mock.calls).toEqual([['locked'], ['\r']])
-    expect(mounted.emitted('app-action')).toBeUndefined()
+    expect(harness.onHostEvent).not.toHaveBeenCalledWith('app-action', expect.anything())
   })
 
   it('scenario 14: a synchronous text-leg throw retains text and releases the lock', async () => {
@@ -288,7 +292,7 @@ describe('MobileKeyboard configurable send threshold', () => {
     const send = vi.fn().mockImplementationOnce(() => {
       throw new Error('sync send failed')
     })
-    const mounted = mountKeyboard(() => send, errorHandler)
+    const { wrapper: mounted } = mountKeyboard(() => send, errorHandler)
 
     await enterText(mounted, 'retry')
     await nextTick()
@@ -306,7 +310,7 @@ describe('MobileKeyboard configurable send threshold', () => {
     const textLeg = deferred<void>()
     const errorHandler = vi.fn()
     const send = vi.fn().mockReturnValueOnce(textLeg.promise)
-    const mounted = mountKeyboard(() => send, errorHandler)
+    const { wrapper: mounted } = mountKeyboard(() => send, errorHandler)
 
     await enterText(mounted, 'reject')
     textLeg.reject(new Error('native reject'))
@@ -343,7 +347,7 @@ describe('MobileKeyboard configurable send threshold', () => {
     ;(terminal as any)._transport = transport
     setActivePaneId('p1')
     const appSendClosure = createFrozenSendFn([(data) => terminal.sendData(data)])
-    const mounted = mountKeyboard(() => appSendClosure)
+    const { wrapper: mounted } = mountKeyboard(() => appSendClosure)
 
     await enterText(mounted, 'native')
     await advance(100)
@@ -364,11 +368,12 @@ describe('MobileKeyboard configurable send threshold', () => {
     const p1Send = vi.fn((data: string) => (data === 'pending-pane' ? textLeg.promise : undefined))
     const p2Send = vi.fn()
     let currentSend: SendDataFn = p1Send
-    const mounted = mountKeyboard(() => currentSend)
+    const { wrapper: mounted, harness } = mountKeyboard(() => currentSend)
 
     await enterText(mounted, 'pending-pane')
     currentSend = p2Send
-    await mounted.setProps({ paneId: 'p2' })
+    harness.activePaneId.value = 'p2'
+    await nextTick()
     await enterText(mounted, 'new-pane')
 
     textLeg.resolve()
@@ -383,12 +388,13 @@ describe('MobileKeyboard configurable send threshold', () => {
     const p1Send = vi.fn()
     const p2Send = vi.fn()
     let currentSend: SendDataFn = p1Send
-    const mounted = mountKeyboard(() => currentSend)
+    const { wrapper: mounted, harness } = mountKeyboard(() => currentSend)
 
     await enterText(mounted, 'old-pane')
     await advance(20)
     currentSend = p2Send
-    await mounted.setProps({ paneId: 'p2' })
+    harness.activePaneId.value = 'p2'
+    await nextTick()
     await enterText(mounted, 'new-pane')
 
     await advance(30)
@@ -399,7 +405,7 @@ describe('MobileKeyboard configurable send threshold', () => {
 
     expect(p1Send.mock.calls).toEqual([['old-pane']])
     expect(p2Send.mock.calls).toEqual([['new-pane']])
-    expect(mounted.emitted('app-action')).toBeUndefined()
+    expect(harness.onHostEvent).not.toHaveBeenCalledWith('app-action', expect.anything())
 
     await advance(20)
     expect(p2Send.mock.calls).toEqual([['new-pane'], ['\r']])

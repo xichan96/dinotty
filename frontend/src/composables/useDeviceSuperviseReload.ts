@@ -3,9 +3,7 @@ import { settings, type SettingsData } from './useSettings'
 
 const STORAGE_KEY = 'dinotty_device_supervise_reload_v1'
 
-type DeviceSuperviseReloadOverrides = Partial<
-  Pick<SettingsData, 'reload_after_supervise_tabs'>
->
+type DeviceSuperviseReloadOverrides = Partial<Pick<SettingsData, 'reload_after_supervise_tabs'>>
 
 const overrides = reactive<DeviceSuperviseReloadOverrides>({})
 let loaded = false
@@ -29,7 +27,7 @@ function persistOverrides() {
     } else {
       window.localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ version: 1, overrides: { ...overrides } }),
+        JSON.stringify({ version: 1, overrides: { ...overrides } })
       )
     }
   } catch {}
@@ -86,7 +84,7 @@ function ensureLoaded() {
 ensureLoaded()
 
 const effectiveSuperviseReload = computed(
-  () => overrides.reload_after_supervise_tabs ?? settings.reload_after_supervise_tabs,
+  () => overrides.reload_after_supervise_tabs ?? settings.reload_after_supervise_tabs
 )
 
 export function setOverride(value: boolean) {

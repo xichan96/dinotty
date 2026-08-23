@@ -41,7 +41,6 @@ describe('KeyboardTab system IME editor', () => {
     expect(wrapper.findAll('[data-system-region="lower"][data-system-index]')).toHaveLength(2)
     expect(wrapper.get('.system-editor-ime-pin').find('svg').exists()).toBe(true)
     expect(wrapper.get('.system-editor-ime-pin').text()).toBe('')
-    expect(wrapper.text()).toContain('builtin-only')
     expect(wrapper.text()).toContain('upper-a')
     expect(
       wrapper.findAll('.system-editor-pin-control > span').map((label) => label.text())
@@ -62,7 +61,7 @@ describe('KeyboardTab system IME editor', () => {
     ])
 
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
     expect(source).toMatch(/\.system-editor-page\s*\{[^}]*overflow:\s*hidden;/s)
@@ -97,7 +96,7 @@ describe('KeyboardTab system IME editor', () => {
     expect(wrapper.find('.ak-modal').exists()).toBe(true)
 
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
     expect(source).toMatch(
@@ -129,7 +128,7 @@ describe('KeyboardTab system IME editor', () => {
     expect(auto.classes()).not.toContain('system-editor-resizable')
 
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
     expect(source).toMatch(/\.system-editor-compact \.ak-wyg-key\s*\{[^}]*padding-left:\s*14px;/s)
@@ -179,7 +178,7 @@ describe('KeyboardTab system IME editor', () => {
 
   it('keeps the fixed IME preview in the rightmost grid column', () => {
     const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
 
@@ -226,39 +225,21 @@ describe('KeyboardTab system IME editor', () => {
     expect(checkbox.attributes('disabled')).toBeDefined()
   })
 
-  it('uses the same reactive Agent icon opt-out for Dinotty send keys without changing command data', async () => {
-    settings.action_keyboard = {
-      rows: [[{ label: 'launcher', kind: 'send', send: 'codex --profile work', auto_enter: true }]],
-    }
-    wrapper = mount(KeyboardTab)
-
-    await wrapper.get('.ak-wyg-label').trigger('click')
-    const label = wrapper.get('.ak-modal input.shortcut-input')
-    const checkbox = wrapper.get('.ak-agent-icon-check input')
-    expect(checkbox.attributes('disabled')).toBeDefined()
-
-    await label.setValue('Claude')
-    expect(checkbox.attributes('disabled')).toBeUndefined()
-    expect((checkbox.element as HTMLInputElement).checked).toBe(true)
-    await checkbox.setValue(false)
-    await wrapper.get('.ak-modal .settings-save').trigger('click')
-
-    expect(settings.action_keyboard.rows[0][0]).toMatchObject({
-      label: 'Claude',
-      send: 'codex --profile work',
-      auto_enter: true,
-      display: 'text',
-    })
-  })
-
   it('keeps the disabled Agent icon hint readable in both key editors', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'src/components/settings/KeyboardTab.vue'),
+    const akSource = readFileSync(
+      join(process.cwd(), 'src/components/settings/ActionKeyboardEditor.vue'),
+      'utf8'
+    )
+    const systemSource = readFileSync(
+      join(process.cwd(), 'src/components/settings/SystemKeyboardEditor.vue'),
       'utf8'
     )
 
-    expect(source).toMatch(
-      /\.ak-agent-icon-hint,\s*\.system-agent-icon-hint\s*\{[^}]*margin-top:\s*6px;[^}]*line-height:\s*1\.45;/s
+    expect(akSource).toMatch(
+      /\.ak-agent-icon-hint\s*\{[^}]*margin-top:\s*6px;[^}]*line-height:\s*1\.45;/s
+    )
+    expect(systemSource).toMatch(
+      /\.system-agent-icon-hint\s*\{[^}]*margin-top:\s*6px;[^}]*line-height:\s*1\.45;/s
     )
   })
 
@@ -342,27 +323,6 @@ describe('KeyboardTab system IME editor', () => {
     )
     await wrapper.vm.$nextTick()
     expect((wrapper.get('.system-send-textarea').element as HTMLTextAreaElement).value).toBe('^C')
-  })
-
-  it('uses the same special-key editor for Dinotty keys', async () => {
-    settings.action_keyboard = { rows: [[{ label: 'old', kind: 'send', send: 'x' }]] }
-    wrapper = mount(KeyboardTab)
-
-    await wrapper.get('.ak-wyg-label').trigger('click')
-    await wrapper.get('[data-special-field="kind"]').setValue('special')
-    await wrapper.get('[data-special-field="key"]').setValue('cmd')
-    expect(wrapper.find('[data-special-field="behavior"]').exists()).toBe(false)
-    expect((wrapper.get('[data-special-field="hold"]').element as HTMLInputElement).checked).toBe(
-      false
-    )
-    await wrapper.get('[data-special-field="display"]').setValue('text')
-    await wrapper.get('.ak-modal .settings-save').trigger('click')
-
-    expect(settings.action_keyboard.rows[0][0]).toMatchObject({
-      kind: 'send',
-      special: 'cmd',
-      display: 'text',
-    })
   })
 
   it('uses an Auto-width checkbox and only exposes drag resize for fixed-width keys', async () => {

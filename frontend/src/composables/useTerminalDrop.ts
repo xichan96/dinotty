@@ -27,10 +27,7 @@ async function readDragPboard(): Promise<string[]> {
  * Wires HTML5 drag/drop and clipboard-paste upload. Returns a single cleanup
  * function that tears all of it down.
  */
-export function setupTerminalDrop(
-  wrapper: HTMLElement,
-  host: DropHost
-): () => void {
+export function setupTerminalDrop(wrapper: HTMLElement, host: DropHost): () => void {
   const cleanups: Array<() => void> = []
 
   const xtermEl = wrapper.querySelector('.xterm') as HTMLElement

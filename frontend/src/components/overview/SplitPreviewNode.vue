@@ -4,11 +4,7 @@
     :style="{ flex: node.ratio, flexDirection: node.direction === 'vertical' ? 'column' : 'row' }"
   >
     <template v-for="(child, i) in node.children" :key="i">
-      <div
-        v-if="child.children.length === 0"
-        class="mc-split-leaf"
-        :style="{ flex: child.ratio }"
-      >
+      <div v-if="child.children.length === 0" class="mc-split-leaf" :style="{ flex: child.ratio }">
         <pre class="mc-card-text" v-html="child.html"></pre>
       </div>
       <SplitPreviewNode v-else :node="child" />

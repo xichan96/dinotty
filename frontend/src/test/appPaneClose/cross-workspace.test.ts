@@ -1,12 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import {
-  mountWithTabs,
-  mocks,
-  SplitContainerStub,
-  TabBarStub,
-  localStorageMock,
-} from './_setup'
+import { mountWithTabs, mocks, SplitContainerStub, TabBarStub, localStorageMock } from './_setup'
 import { settings } from '../../composables/useSettings'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useWorkspaces } from '../../composables/useWorkspaces'
@@ -101,10 +95,7 @@ describe('App.vue - activateTab cross-workspace', () => {
 
     workspaceState.activeWorkspaceId.value = 'ws-other'
     await nextTick()
-    expect(visibleTabs().map((tab) => tab.paneId)).toEqual([
-      'terminal-other',
-      'legacy-plugin',
-    ])
+    expect(visibleTabs().map((tab) => tab.paneId)).toEqual(['terminal-other', 'legacy-plugin'])
 
     workspaceState.activeWorkspaceId.value = null
     await nextTick()

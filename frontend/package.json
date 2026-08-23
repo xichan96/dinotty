@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build",
+    "build:builtin-kb": "vite build --config src/keyboard/builtin-keyboard/vite.config.ts && node src/keyboard/builtin-keyboard/build-seed.mjs",
+    "build": "npm run build:builtin-kb && vue-tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

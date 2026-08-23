@@ -58,8 +58,8 @@
 
 <script setup lang="ts">
 import { Keyboard, Languages, PanelTop, ShieldCheck, X } from 'lucide-vue-next'
-import { useI18n } from '../../composables/useI18n'
-import type { MobileInputMode } from '../../composables/useSettings'
+import { useI18n } from '@/composables/useI18n'
+import type { MobileInputMode } from '@/composables/useSettings'
 
 defineProps<{ visible: boolean }>()
 

@@ -118,7 +118,10 @@ fn ingest_gate_table_covers_every_source_and_rule_predicate() {
         evaluate_ingest_gate(&cfg, IngestSource::Bell { debounce_duplicate: true }),
         IngestGateResult::Suppressed(_)
     ));
-    assert_eq!(evaluate_ingest_gate(&cfg, IngestSource::OscNotify), IngestGateResult::Accepted);
+    assert_eq!(
+        evaluate_ingest_gate(&cfg, IngestSource::OscNotify { debounce_duplicate: false }),
+        IngestGateResult::Accepted
+    );
     assert!(matches!(
         evaluate_ingest_gate(&cfg, IngestSource::CommandComplete { matched_rule: true }),
         IngestGateResult::Suppressed(_)
@@ -144,7 +147,7 @@ fn ingest_gate_table_covers_every_source_and_rule_predicate() {
 
     cfg.osc_notify = false;
     assert!(matches!(
-        evaluate_ingest_gate(&cfg, IngestSource::OscNotify),
+        evaluate_ingest_gate(&cfg, IngestSource::OscNotify { debounce_duplicate: false }),
         IngestGateResult::Suppressed(_)
     ));
     cfg.bell.enabled = false;

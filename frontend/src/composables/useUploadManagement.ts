@@ -105,14 +105,18 @@ export function useUploadManagement(opts: UploadManagementOptions): UploadManage
   }
 
   async function pickDefaultBaseDir() {
-    const dir = await invoke<string | null>('pick_workspace_dir', { base: settings.default_base_dir || undefined })
+    const dir = await invoke<string | null>('pick_workspace_dir', {
+      base: settings.default_base_dir || undefined,
+    })
     if (!dir) return
     settings.default_base_dir = dir
     await saveSettings()
   }
 
   async function pickDefaultWorkspaceRoot() {
-    const dir = await invoke<string | null>('pick_workspace_dir', { base: settings.default_workspace_root || undefined })
+    const dir = await invoke<string | null>('pick_workspace_dir', {
+      base: settings.default_workspace_root || undefined,
+    })
     if (!dir) return
     settings.default_workspace_root = dir
     await saveSettings()

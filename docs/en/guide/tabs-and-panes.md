@@ -7,6 +7,7 @@ Dinotty's layout system unifies four pane types -- terminal, file editor, plugin
 | Action | Shortcut |
 |--------|----------|
 | New tab | `Cmd + T` (`Ctrl + T` on Windows/Linux) |
+| From template | `Cmd + Shift + T` (`Ctrl + Shift + T` on Windows/Linux) |
 | Close current tab | `Cmd + W` |
 | Next / previous tab | `Cmd + Shift + ]` / `[` |
 | Jump to tab N | `Cmd + <N>` (e.g., `Cmd + 3`) |

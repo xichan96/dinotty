@@ -1,7 +1,7 @@
 <template>
   <button
-    :class="['mkb-btn', k.cls, { 'mkb-active': isModActive, 'mkb-locked': isModLocked }]"
     :id="k.id"
+    :class="['mkb-btn', k.cls, { 'mkb-active': isModActive, 'mkb-locked': isModLocked }]"
     :disabled="isDisabled"
     :style="keyStyle"
     :aria-label="k.aria || k.l || undefined"
@@ -15,7 +15,7 @@
     @mouseup="onUp"
     @mouseleave="onUp"
   >
-    <component v-if="k.icon" :is="k.icon" :size="20" /><template v-else>{{
+    <component :is="k.icon" v-if="k.icon" :size="20" /><template v-else>{{
       displayLabel
     }}</template>
   </button>
@@ -24,8 +24,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, type CSSProperties } from 'vue'
 import type { AppActionOptions, KeyDef, ModState } from './mkbTypes'
-import { settings } from '../../composables/useSettings'
-import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
+import { settings } from '@/composables/useSettings'
+import { parseKeyboardSpecial } from '@/utils/keyboardSpecialKeys'
 
 let audioCtx: AudioContext | null = null
 
@@ -77,7 +77,9 @@ const isModifier = computed(() => Boolean(parsedSpecial.value?.entry.modifier))
 const isModActive = computed(() => {
   if (!isModifier.value) return false
   const modifier = parsedSpecial.value?.entry.modifier
-  return modifier ? props.state[modifier] : false
+  if (!modifier || !props.state[modifier]) return false
+  const owner = props.state.activeSpecial?.[modifier]
+  return !owner || owner === parsedSpecial.value?.id
 })
 const isModLocked = computed(() => {
   const modifier = parsedSpecial.value?.entry.modifier

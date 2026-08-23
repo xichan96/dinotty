@@ -6,10 +6,7 @@ import { describe, expect, it } from 'vitest'
 import SearchBar from '../components/terminal/SearchBar.vue'
 import { settings } from '../composables/useSettings'
 
-const source = readFileSync(
-  resolve(process.cwd(), 'src/components/terminal/SearchBar.vue'),
-  'utf8'
-)
+const source = readFileSync(resolve(process.cwd(), 'src/components/terminal/SearchBar.vue'), 'utf8')
 
 function mountSearch(locale: 'en' | 'zh') {
   settings.locale = locale
@@ -35,7 +32,11 @@ describe('SearchBar mobile localization', () => {
       'Next (Enter)',
       'Close (Escape)',
     ])
-    expect(en.findAll('button').every((button) => button.attributes('aria-label') === button.attributes('title'))).toBe(true)
+    expect(
+      en
+        .findAll('button')
+        .every((button) => button.attributes('aria-label') === button.attributes('title'))
+    ).toBe(true)
     en.unmount()
 
     const zh = mountSearch('zh')

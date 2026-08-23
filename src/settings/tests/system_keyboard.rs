@@ -141,7 +141,7 @@ fn stale_v8_put_preserves_stored_current_system_fields_only() {
         ..Settings::default()
     };
 
-    preserve_current_system_settings_on_legacy_put(None, &mut incoming, &existing);
+    preserve_current_settings_on_legacy_put(None, &mut incoming, &existing);
 
     assert_eq!(incoming.system_keyboard, Some(stored_layout));
     assert_eq!(incoming.system_toolbar_mode, SystemToolbarMode::PersistentMobile);
@@ -165,7 +165,7 @@ fn current_put_can_reset_system_layout_and_policy() {
         ..Settings::default()
     };
 
-    preserve_current_system_settings_on_legacy_put(
+    preserve_current_settings_on_legacy_put(
         Some(CURRENT_SETTINGS_VERSION),
         &mut incoming,
         &existing,
@@ -300,7 +300,7 @@ fn stale_v11_put_preserves_the_v12_system_layout_and_user_default() {
         ..Settings::default()
     };
 
-    preserve_current_system_settings_on_legacy_put(None, &mut incoming, &existing);
+    preserve_current_settings_on_legacy_put(None, &mut incoming, &existing);
 
     assert_eq!(incoming.system_keyboard, Some(snapshot.clone()));
     assert_eq!(incoming.system_keyboard_user_default, Some(snapshot));
@@ -331,7 +331,7 @@ fn stale_v9_put_preserves_stored_v10_system_fields_without_blocking_locale() {
         ..Settings::default()
     };
 
-    preserve_current_system_settings_on_legacy_put(None, &mut incoming, &existing);
+    preserve_current_settings_on_legacy_put(None, &mut incoming, &existing);
 
     assert_eq!(incoming.system_keyboard, Some(stored_layout));
     assert_eq!(incoming.system_toolbar_mode, SystemToolbarMode::PersistentMobile);
@@ -339,9 +339,9 @@ fn stale_v9_put_preserves_stored_v10_system_fields_without_blocking_locale() {
 }
 
 #[test]
-fn current_v12_put_can_reset_system_layout_and_policy() {
+fn v12_put_can_reset_v12_system_layout_and_policy() {
     let existing = Settings {
-        settings_version: CURRENT_SETTINGS_VERSION,
+        settings_version: 12,
         system_keyboard: serde_json::from_value(serde_json::json!({
             "upper": [], "pages": [[]], "lower_enabled": false, "upper_pinned": 0
         }))
@@ -356,11 +356,7 @@ fn current_v12_put_can_reset_system_layout_and_policy() {
         ..Settings::default()
     };
 
-    preserve_current_system_settings_on_legacy_put(
-        Some(CURRENT_SETTINGS_VERSION),
-        &mut incoming,
-        &existing,
-    );
+    preserve_current_settings_on_legacy_put(Some(12), &mut incoming, &existing);
 
     assert!(incoming.system_keyboard.is_none());
     assert_eq!(incoming.system_toolbar_mode, SystemToolbarMode::FollowIme);

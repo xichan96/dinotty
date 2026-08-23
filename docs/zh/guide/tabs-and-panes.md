@@ -7,6 +7,7 @@ Dinotty 的布局系统统一了终端、文件编辑器、插件、网页预览
 | 操作 | 快捷键 |
 |------|--------|
 | 新建 Tab | `Cmd + T`（Windows/Linux `Ctrl + T`） |
+| 从模板创建 | `Cmd + Shift + T`（Windows/Linux `Ctrl + Shift + T`） |
 | 关闭当前 Tab | `Cmd + W` |
 | 切换到下一个 / 上一个 Tab | `Cmd + Shift + ]` / `[` |
 | 跳转到第 N 个 Tab | `Cmd + <N>`（如 `Cmd + 3`） |

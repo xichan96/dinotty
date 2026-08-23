@@ -20,19 +20,15 @@ describe('plugin assetUrl / fetchAsset', () => {
   it('strips leading ./ from relative path', () => {
     const ctx = usePluginLoader().getPluginContext('test-plugin')
 
-    expect(ctx.assetUrl('./vendor/lib.js')).toBe(
-      '/api/plugins/test-plugin/vendor/lib.js',
-    )
-    expect(ctx.assetUrl('vendor/lib.js')).toBe(
-      '/api/plugins/test-plugin/vendor/lib.js',
-    )
+    expect(ctx.assetUrl('./vendor/lib.js')).toBe('/api/plugins/test-plugin/vendor/lib.js')
+    expect(ctx.assetUrl('vendor/lib.js')).toBe('/api/plugins/test-plugin/vendor/lib.js')
   })
 
   it('encodes non-ASCII path segments', () => {
     const ctx = usePluginLoader().getPluginContext('test-plugin')
 
     expect(ctx.assetUrl('./data/我的文件.json')).toBe(
-      '/api/plugins/test-plugin/data/%E6%88%91%E7%9A%84%E6%96%87%E4%BB%B6.json',
+      '/api/plugins/test-plugin/data/%E6%88%91%E7%9A%84%E6%96%87%E4%BB%B6.json'
     )
   })
 
@@ -55,10 +51,7 @@ describe('plugin assetUrl / fetchAsset', () => {
     await ctx.fetchAsset('./vendor/lib.js')
 
     expect(authFetchMock).toHaveBeenCalledOnce()
-    expect(authFetchMock).toHaveBeenCalledWith(
-      '/api/plugins/test-plugin/vendor/lib.js',
-      undefined,
-    )
+    expect(authFetchMock).toHaveBeenCalledWith('/api/plugins/test-plugin/vendor/lib.js', undefined)
   })
 
   it('fetchAsset forwards init to authFetch', async () => {
@@ -67,9 +60,8 @@ describe('plugin assetUrl / fetchAsset', () => {
 
     await ctx.fetchAsset('./data/grid.json', { method: 'GET' })
 
-    expect(authFetchMock).toHaveBeenCalledWith(
-      '/api/plugins/test-plugin/data/grid.json',
-      { method: 'GET' },
-    )
+    expect(authFetchMock).toHaveBeenCalledWith('/api/plugins/test-plugin/data/grid.json', {
+      method: 'GET',
+    })
   })
 })

@@ -87,11 +87,7 @@ describe('action keyboard live gesture locations', () => {
     const draft = ref<ActionKeyboardConfig | null>(null)
     const gesture = useActionKeyboardGesture({ akDraft: draft, settings })
 
-    gesture.akResizePointerDown(
-      0,
-      0,
-      pointerDown(82, captureElement(slot('main', 0, 1)), 100)
-    )
+    gesture.akResizePointerDown(0, 0, pointerDown(82, captureElement(slot('main', 0, 1)), 100))
     window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 82, clientX: 128 }))
     window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 82, clientX: 128 }))
 

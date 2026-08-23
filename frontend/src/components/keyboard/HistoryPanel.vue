@@ -8,10 +8,10 @@
       <div class="history-panel-header">
         <input
           ref="searchRef"
+          v-model="searchQuery"
           class="history-search"
           type="text"
           placeholder="Search history..."
-          v-model="searchQuery"
           @input="onSearch"
         />
         <button class="history-close-btn" @click="$emit('close')">
@@ -62,8 +62,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import type { SuggestionItem } from '../../composables/useHistory'
-import { useHistory } from '../../composables/useHistory'
+import type { SuggestionItem } from '@/composables/useHistory'
+import { useHistory } from '@/composables/useHistory'
 
 const props = defineProps<{
   items: SuggestionItem[]

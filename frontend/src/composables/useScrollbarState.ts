@@ -27,14 +27,8 @@ export interface ScrollbarState {
 }
 
 export function useScrollbarState(opts: ScrollbarStateOptions): ScrollbarState {
-  const {
-    scrollPos,
-    scrollbarTrackRef,
-    scrollbarThumbRef,
-    isMobile,
-    settings,
-    onScrollToLine,
-  } = opts
+  const { scrollPos, scrollbarTrackRef, scrollbarThumbRef, isMobile, settings, onScrollToLine } =
+    opts
 
   const scrollbarVisible = ref(false)
   let scrollbarIdleTimer: ReturnType<typeof setTimeout> | null = null
@@ -74,7 +68,7 @@ export function useScrollbarState(opts: ScrollbarStateOptions): ScrollbarState {
     () => {
       if (!showScrollbar.value || scrollbarDragging) return
       bumpScrollbarActivity()
-    },
+    }
   )
 
   function scrollbarLineFromClientY(clientY: number): number | null {

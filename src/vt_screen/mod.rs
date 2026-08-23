@@ -10,7 +10,7 @@ mod performer;
 mod render;
 mod screen;
 
-pub use data::{CellAttrs, Color, CommandResult, CommandState, SyncEvent};
+pub use data::{CellAttrs, Color, CommandResult, CommandState, OscAction, SyncEvent};
 pub use screen::VirtualScreen;
 
 // Re-export private items at crate scope so tests in this module (which use
@@ -457,5 +457,205 @@ mod replay_and_resize_tests {
         assert_eq!(vs.scrollback_len(), 0, "blank bottom rows must be trimmed, not scrolled back");
         assert_eq!(vs.snapshot_plain(), "top\n");
         assert_eq!(vs.primary.cursor.row, 0);
+    }
+}
+
+#[cfg(test)]
+mod osc_notification_tests {
+    use super::{OscAction, VirtualScreen};
+
+    #[test]
+    fn osc9_with_message_yields_notify() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;task done\x07");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: None, body: "task done".into() }]
+        );
+    }
+
+    #[test]
+    fn osc9_with_st_terminator_yields_notify() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;via ST\x1b\\");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: None, body: "via ST".into() }]
+        );
+    }
+
+    #[test]
+    fn osc9_empty_message_yields_bell() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;\x07");
+        assert_eq!(vs.drain_osc_actions(), vec![OscAction::Bell]);
+    }
+
+    #[test]
+    fn osc9_bare_single_param_yields_bell() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9\x07");
+        assert_eq!(vs.drain_osc_actions(), vec![OscAction::Bell]);
+    }
+
+    #[test]
+    fn osc9_progress_and_cwd_announces_are_ignored() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;4;50\x07");
+        vs.feed(b"\x1b]9;9;\"/tmp\"\x07");
+        vs.feed(b"\x1b]9;4\x07");
+        vs.feed(b"\x1b]9;9\x07");
+        assert!(vs.drain_osc_actions().is_empty());
+    }
+
+    #[test]
+    fn osc9_message_with_semicolons_is_rejoined() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;part one;part two\x07");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: None, body: "part one;part two".into() }]
+        );
+    }
+
+    #[test]
+    fn osc9_can_be_split_across_feed_calls() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;hel");
+        assert!(vs.drain_osc_actions().is_empty());
+        vs.feed(b"lo\x07");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: None, body: "hello".into() }]
+        );
+    }
+
+    #[test]
+    fn osc9_bel_terminator_does_not_double_fire() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;hi\x07");
+        // Exactly one action: the BEL terminator is consumed by the OSC parser
+        // and must not also trigger execute(0x07).
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: None, body: "hi".into() }]
+        );
+    }
+
+    #[test]
+    fn osc777_notifysend_splits_title_and_body() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]777;notifysend;Title;Body\x07");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: Some("Title".into()), body: "Body".into() }]
+        );
+    }
+
+    #[test]
+    fn osc777_body_with_semicolons_keeps_remainder() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]777;notifysend;Title;Body;More\x07");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: Some("Title".into()), body: "Body;More".into() }]
+        );
+    }
+
+    #[test]
+    fn osc777_variants_are_parsed_leniently() {
+        let mut vs = VirtualScreen::new(20, 5);
+        // `notify` prefix token, body only (no further `;`).
+        vs.feed(b"\x1b]777;notify;Just a body\x07");
+        // `notifysend` with no `;` after the token: body only.
+        vs.feed(b"\x1b]777;notifysend;Solo\x07");
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![
+                OscAction::Notify { title: None, body: "Just a body".into() },
+                OscAction::Notify { title: None, body: "Solo".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn osc777_non_notification_commands_are_ignored() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]777;progress;50\x07");
+        vs.feed(b"\x1b]777;settabicon;Title\x07");
+        assert!(vs.drain_osc_actions().is_empty());
+    }
+
+    #[test]
+    fn bel_byte_yields_bell() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"output\x07more");
+        assert_eq!(vs.drain_osc_actions(), vec![OscAction::Bell]);
+    }
+
+    #[test]
+    fn osc9_long_message_is_truncated_at_char_boundary() {
+        let mut vs = VirtualScreen::new(20, 5);
+        let long = "a".repeat(8192);
+        vs.feed(format!("\x1b]9;{long}\x07").as_bytes());
+        let actions = vs.drain_osc_actions();
+        match actions.as_slice() {
+            [OscAction::Notify { body, .. }] => {
+                // vte caps OSC content at ~1KB; our 4KB cap is defense in depth.
+                assert!(body.len() < 8192, "message must be truncated, got {}", body.len());
+                assert!(body.chars().all(|c| c == 'a'));
+            }
+            other => panic!("expected single Notify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn osc9_multibyte_truncation_lands_on_char_boundary() {
+        let mut vs = VirtualScreen::new(20, 5);
+        // 3000 CJK chars = 9000 bytes; 4096 is not a multiple of 3, so the
+        // naive byte cut would split a character.
+        let long = "中".repeat(3000);
+        vs.feed(format!("\x1b]9;{long}\x07").as_bytes());
+        match vs.drain_osc_actions().as_slice() {
+            [OscAction::Notify { body, .. }] => {
+                // No mojibake: every surviving char is intact (the truncation
+                // point may differ from our 4KB cap because vte caps first).
+                assert!(body.chars().all(|c| c == '中'), "body: {body:?}");
+            }
+            other => panic!("expected single Notify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn osc9_non_utf8_payload_is_lossy() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]9;ok\xff\xfe\x07");
+        match vs.drain_osc_actions().as_slice() {
+            [OscAction::Notify { body, .. }] => assert!(body.starts_with("ok")),
+            other => panic!("expected single Notify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn osc9_chinese_message_round_trips() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed("\x1b]9;任务完成\x07".as_bytes());
+        assert_eq!(
+            vs.drain_osc_actions(),
+            vec![OscAction::Notify { title: None, body: "任务完成".into() }]
+        );
+    }
+
+    #[test]
+    fn osc133_detection_still_works_after_refactor() {
+        let mut vs = VirtualScreen::new(20, 5);
+        vs.feed(b"\x1b]133;A\x07");
+        vs.feed(b"\x1b]133;B\x07");
+        vs.feed(b"\x1b]133;D;0\x07");
+        let results = vs.drain_command_results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].exit_code, 0);
+        // OSC 133 must not produce notification actions.
+        assert!(vs.drain_osc_actions().is_empty());
     }
 }

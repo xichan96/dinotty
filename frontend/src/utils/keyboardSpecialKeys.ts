@@ -1,6 +1,6 @@
 import { ArrowBigUp, ArrowRightToLine, Command, Option, X } from 'lucide-vue-next'
-import ControlGlyphIcon from '../components/icons/ControlGlyphIcon.vue'
-import WindowsFourPaneIcon from '../components/icons/WindowsFourPaneIcon.vue'
+import ControlGlyphIcon from '@/components/icons/ControlGlyphIcon.vue'
+import WindowsFourPaneIcon from '@/components/icons/WindowsFourPaneIcon.vue'
 
 export type KeyboardSpecialId = 'ctrl' | 'shift' | 'alt' | 'opt' | 'cmd' | 'win' | 'tab' | 'esc'
 export type KeyboardSpecialBehavior = 'once' | 'lock'

@@ -191,10 +191,7 @@ export function migratePreviewToLeaf(tab: TabWithLegacyPreview): TerminalTab {
   return {
     ...rest,
     layout: newSplit,
-    paneMru: initializePaneMru(
-      [...getAllLeaves(newSplit).map((l) => l.paneId)],
-      rest.activePaneId
-    ),
+    paneMru: initializePaneMru([...getAllLeaves(newSplit).map((l) => l.paneId)], rest.activePaneId),
   }
 }
 

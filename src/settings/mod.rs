@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 pub use handlers::{get_background, get_settings, put_settings, upload_background};
 pub use io::{create_settings_state, load_settings, load_token, save_settings_sync, save_token};
-pub use logging::{get_log, init_logging, log_dir, log_file_path};
+pub use logging::{get_log, init_logging, init_stderr_logging, log_dir, log_file_path};
 pub use types::{
     default_upload_dir, ActionBottomCluster, ActionKey, ActionKeyboardConfig, AuthConfig,
     BackgroundConfig, BellNotificationConfig, CommandBookmark, CommandCompleteConfig, CustomColors,
@@ -26,13 +26,13 @@ pub use types::{
 };
 
 #[cfg(test)]
-pub(crate) use handlers::preserve_current_system_settings_on_legacy_put;
+pub(crate) use handlers::preserve_current_settings_on_legacy_put;
 #[cfg(test)]
 pub(crate) use io::migrate_settings;
 #[cfg(test)]
 pub(crate) use normalize::{
-    clamp_custom_fonts, clamp_text_config, clamp_text_on_load, clamp_theme_on_put,
-    normalize_action_keyboards,
+    clamp_custom_fonts, clamp_ime_keyboard_overlap_px, clamp_text_config, clamp_text_on_load,
+    clamp_theme_on_put, normalize_action_keyboards,
 };
 #[cfg(test)]
 pub(crate) use types::default_scroll_acceleration;

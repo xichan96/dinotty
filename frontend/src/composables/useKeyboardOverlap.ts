@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, watch, type Ref } from 'vue'
 export interface KeyboardOverlapGate {
   kbVisible: boolean
   textInputFocused: boolean
-  isSingleTerminalTab: boolean
+  layoutEligible: boolean
   hasVerticalPreview: boolean
 }
 
@@ -11,16 +11,13 @@ export interface KeyboardOverlapInputs {
   settingPx: Ref<number>
   kbVisible: Ref<boolean>
   textInputFocused: Ref<boolean>
-  isSingleTerminalTab: Ref<boolean>
+  layoutEligible: Ref<boolean>
   hasVerticalPreview: Ref<boolean>
 }
 
 export function computeOverlapPx(settingPx: number, gate: KeyboardOverlapGate): number {
   const overlapActive =
-    gate.kbVisible &&
-    gate.textInputFocused &&
-    gate.isSingleTerminalTab &&
-    !gate.hasVerticalPreview
+    gate.kbVisible && gate.textInputFocused && gate.layoutEligible && !gate.hasVerticalPreview
 
   return overlapActive ? settingPx : 0
 }
@@ -30,14 +27,14 @@ export function useKeyboardOverlap(inputs: KeyboardOverlapInputs) {
     () =>
       inputs.kbVisible.value &&
       inputs.textInputFocused.value &&
-      inputs.isSingleTerminalTab.value &&
+      inputs.layoutEligible.value &&
       !inputs.hasVerticalPreview.value
   )
   const overlapPx = computed(() =>
     computeOverlapPx(inputs.settingPx.value, {
       kbVisible: inputs.kbVisible.value,
       textInputFocused: inputs.textInputFocused.value,
-      isSingleTerminalTab: inputs.isSingleTerminalTab.value,
+      layoutEligible: inputs.layoutEligible.value,
       hasVerticalPreview: inputs.hasVerticalPreview.value,
     })
   )

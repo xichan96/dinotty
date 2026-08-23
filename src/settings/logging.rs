@@ -99,6 +99,21 @@ pub fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     Some(guard)
 }
 
+/// Stderr-only tracing subscriber for the MCP stdio proxy. Stdout is the
+/// JSON-RPC channel there, so `fmt::layer()`'s default stdout writer must
+/// never be used (the file-disabled branch of [`init_logging`] would corrupt
+/// the protocol).
+#[must_use]
+pub fn init_stderr_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .init();
+    None
+}
+
 #[allow(clippy::unused_async, clippy::missing_panics_doc)]
 pub async fn get_log(
     State(state): State<(Arc<SessionManager>, SettingsState)>,

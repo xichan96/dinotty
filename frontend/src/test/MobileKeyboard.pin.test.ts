@@ -40,13 +40,15 @@ vi.mock('../composables/apiBase', () => ({
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'
 import { useSelectedPath } from '../composables/useFileNavigation'
 import { settings } from '../composables/useSettings'
+import { makeMobileKeyboardCtx } from './helpers/makeMobileKeyboardCtx'
 
 const { selectedPath } = useSelectedPath()
 let wrapper: VueWrapper | undefined
 
 function mountKeyboard() {
+  const harness = makeMobileKeyboardCtx({ visible: true })
   wrapper = mount(MobileKeyboard, {
-    props: { visible: true, paneId: 'p1', getSendFn: () => null },
+    props: { ctx: harness.ctx },
     global: {
       stubs: {
         SuggestionBar: true,
@@ -56,7 +58,7 @@ function mountKeyboard() {
       },
     },
   })
-  return wrapper
+  return { wrapper, harness }
 }
 
 beforeEach(() => {
@@ -72,30 +74,30 @@ afterEach(() => {
 
 describe('MobileKeyboard guarded visibility', () => {
   it('does not collapse from a terminal-scroll document event', async () => {
-    const mounted = mountKeyboard()
+    const { harness } = mountKeyboard()
 
     document.dispatchEvent(new CustomEvent('terminal-scroll'))
     await nextTick()
 
-    expect(mounted.emitted('update:visible')).toBeUndefined()
+    expect(harness.visible.value).toBe(true)
   })
 
   it('does not collapse on path selection in collapse_only mode', async () => {
     settings.keyboard_guard_mode = 'collapse_only'
-    const mounted = mountKeyboard()
+    const { harness } = mountKeyboard()
 
     selectedPath.value = '/tmp/pinned.txt'
     await nextTick()
 
-    expect(mounted.emitted('update:visible')).toBeUndefined()
+    expect(harness.visible.value).toBe(true)
   })
 
   it('preserves path-selection collapse in off mode', async () => {
-    const mounted = mountKeyboard()
+    const { harness } = mountKeyboard()
 
     selectedPath.value = '/tmp/collapse.txt'
     await nextTick()
 
-    expect(mounted.emitted('update:visible')).toEqual([[false]])
+    expect(harness.visible.value).toBe(false)
   })
 })

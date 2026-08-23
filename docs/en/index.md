@@ -45,19 +45,19 @@ Docs are split into two tracks: **User Docs** for end users, and **Dev Docs** fo
 
 ## Dev Docs
 
-- [Plugin Development Guide (中文)](/zh/plugins/plugin-development) - Full plugin development guide
+- [Plugin Development Guide](plugins/plugin-development) - Full plugin development guide
 
-### API (中文)
+### API
 
-- [Open API](/zh/api/open-api) - Terminal I/O, command execution, event subscription (supports AI agents and automation)
-- [Clipboard API](/zh/api/clipboard-api) - Mobile host paste authentication interface
-- [MCP Server](/zh/api/mcp-server) - Built-in MCP JSON-RPC server
+- [Open API](api/open-api) - Terminal I/O, command execution, event subscription (supports AI agents and automation)
+- [Clipboard API](api/clipboard-api) - Mobile host paste authentication interface
+- [MCP Server](api/mcp-server) - Built-in MCP JSON-RPC server
 
-### Internals (中文)
+### Internals
 
-- [Event Bus](/zh/internals/event-bus) - Global event bus for inter-module dispatch
-- [Token Permission System](/zh/internals/token-system) - Capability-based multi-token access control
-- [Audit Log & Webhook](/zh/internals/audit-webhook) - API usage tracking and external notifications
+- [Event Bus](internals/event-bus) - Global event bus for inter-module dispatch
+- [Token Permission System](internals/token-system) - Capability-based multi-token access control
+- [Audit Log & Webhook](internals/audit-webhook) - API usage tracking and external notifications
 
 ### Contributing
 

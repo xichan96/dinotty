@@ -14,7 +14,8 @@ use crate::session::SessionManager;
 
 use super::io::{bg_image_path, migrate_settings, save_settings};
 use super::normalize::{
-    clamp_quick_send_threshold, clamp_text_config, clamp_theme_on_put, normalize_action_keyboards,
+    clamp_ime_keyboard_overlap_px, clamp_quick_send_threshold, clamp_text_config,
+    clamp_theme_on_put, normalize_action_keyboards,
 };
 use super::types::CURRENT_SETTINGS_VERSION;
 use super::{log_file_path, Settings, SettingsState};
@@ -38,6 +39,7 @@ pub async fn put_settings(
     new_settings.settings_version = CURRENT_SETTINGS_VERSION;
     let _ = clamp_text_config(&mut new_settings.text);
     let _ = clamp_quick_send_threshold(&mut new_settings);
+    let _ = clamp_ime_keyboard_overlap_px(&mut new_settings);
     let _ = clamp_theme_on_put(&mut new_settings);
     let _ = normalize_action_keyboards(&mut new_settings);
     // Preserve `active_workspace_id`: it is server-owned (mutated via
@@ -48,7 +50,7 @@ pub async fn put_settings(
     // workspace.
     {
         let existing = state.1.read().await;
-        preserve_current_system_settings_on_legacy_put(
+        preserve_current_settings_on_legacy_put(
             client_settings_version,
             &mut new_settings,
             &existing,
@@ -67,17 +69,25 @@ pub async fn put_settings(
     }
 }
 
-pub(crate) fn preserve_current_system_settings_on_legacy_put(
+pub(crate) fn preserve_current_settings_on_legacy_put(
     client_settings_version: Option<u32>,
     incoming: &mut Settings,
     existing: &Settings,
 ) {
-    if client_settings_version.is_none_or(|version| version < CURRENT_SETTINGS_VERSION)
-        && existing.settings_version >= CURRENT_SETTINGS_VERSION
+    // Protection is field-versioned. Do not compare every field with the moving
+    // CURRENT_SETTINGS_VERSION: v12 clients still understand and may edit v12
+    // system-keyboard fields after the v13 overlap field is introduced.
+    if client_settings_version.is_none_or(|version| version < 12) && existing.settings_version >= 12
     {
         incoming.system_keyboard.clone_from(&existing.system_keyboard);
         incoming.system_keyboard_user_default.clone_from(&existing.system_keyboard_user_default);
         incoming.system_toolbar_mode = existing.system_toolbar_mode;
+    }
+    if client_settings_version.is_none_or(|version| version < 13)
+        && existing.settings_version >= 13
+        && existing.ime_keyboard_overlap_px.is_some()
+    {
+        incoming.ime_keyboard_overlap_px = existing.ime_keyboard_overlap_px;
     }
 }
 

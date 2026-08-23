@@ -1,98 +1,100 @@
 <template>
-  <Teleport to="body">
-    <div class="ssh-edit-backdrop" @click.self="$emit('close')">
-      <div class="ssh-edit-panel">
-        <div class="ssh-edit-header">
-          <h2>{{ profile ? t('ssh.edit') : t('ssh.newHost') }}</h2>
-          <button class="ssh-edit-close" @click="$emit('close')">&times;</button>
+  <BaseDialog
+    :visible="true"
+    :title="profile ? t('ssh.edit') : t('ssh.newHost')"
+    size="md"
+    @close="$emit('close')"
+  >
+    <div class="ssh-edit-body">
+      <div class="ssh-field">
+        <label>{{ t('ssh.name') }}</label>
+        <input v-model="form.name" :placeholder="form.host || 'My Server'" class="ssh-edit-input" />
+      </div>
+
+      <div class="ssh-field-row">
+        <div class="ssh-field ssh-field-host">
+          <label>{{ t('ssh.host') }} *</label>
+          <input v-model="form.host" placeholder="192.168.1.100" class="ssh-edit-input" />
         </div>
-
-        <div class="ssh-edit-body">
-          <div class="ssh-field">
-            <label>{{ t('ssh.name') }}</label>
-            <input v-model="form.name" :placeholder="form.host || 'My Server'" class="ssh-edit-input" />
-          </div>
-
-          <div class="ssh-field-row">
-            <div class="ssh-field ssh-field-host">
-              <label>{{ t('ssh.host') }} *</label>
-              <input v-model="form.host" placeholder="192.168.1.100" class="ssh-edit-input" />
-            </div>
-            <div class="ssh-field ssh-field-port">
-              <label>{{ t('ssh.port') }}</label>
-              <input v-model.number="form.port" type="number" class="ssh-edit-input" />
-            </div>
-          </div>
-
-          <div class="ssh-field">
-            <label>{{ t('ssh.username') }} *</label>
-            <input v-model="form.username" placeholder="root" class="ssh-edit-input" />
-          </div>
-
-          <div class="ssh-field">
-            <label>{{ t('ssh.group') }}</label>
-            <input v-model="form.group" placeholder="Production" class="ssh-edit-input" />
-          </div>
-
-          <div class="ssh-field">
-            <label>{{ t('ssh.authType') }}</label>
-            <div class="ssh-radio-group">
-              <label class="ssh-radio">
-                <input type="radio" v-model="authType" value="password" />
-                <span>{{ t('ssh.authPassword') }}</span>
-              </label>
-              <label class="ssh-radio">
-                <input type="radio" v-model="authType" value="key_file" />
-                <span>{{ t('ssh.authKeyFile') }}</span>
-              </label>
-              <label class="ssh-radio">
-                <input type="radio" v-model="authType" value="key_inline" />
-                <span>{{ t('ssh.authKeyInline') }}</span>
-              </label>
-            </div>
-          </div>
-
-          <div v-if="authType === 'password'" class="ssh-field">
-            <label>{{ t('ssh.password') }}</label>
-            <input v-model="password" type="password" class="ssh-edit-input" />
-          </div>
-
-          <div v-if="authType === 'key_file'" class="ssh-field">
-            <label>{{ t('ssh.keyPath') }}</label>
-            <input v-model="keyPath" placeholder="~/.ssh/id_rsa" class="ssh-edit-input" />
-          </div>
-
-          <div v-if="authType === 'key_inline'" class="ssh-field">
-            <label>{{ t('ssh.privateKey') }}</label>
-            <textarea v-model="privateKey" class="ssh-edit-textarea" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
-          </div>
-
-          <div v-if="authType !== 'password'" class="ssh-field">
-            <label>{{ t('ssh.passphrase') }}</label>
-            <input v-model="passphrase" type="password" class="ssh-edit-input" />
-          </div>
-
-          <div class="ssh-field">
-            <label>{{ t('ssh.defaultCommand') }}</label>
-            <input v-model="form.default_command" placeholder="bash" class="ssh-edit-input" />
-          </div>
-        </div>
-
-        <div class="ssh-edit-footer">
-          <button class="ssh-edit-cancel" @click="$emit('close')">{{ t('ssh.cancel') }}</button>
-          <button class="ssh-edit-save" @click="onSave" :disabled="!isValid">
-            {{ t('ssh.save') }}
-          </button>
+        <div class="ssh-field ssh-field-port">
+          <label>{{ t('ssh.port') }}</label>
+          <input v-model.number="form.port" type="number" class="ssh-edit-input" />
         </div>
       </div>
+
+      <div class="ssh-field">
+        <label>{{ t('ssh.username') }} *</label>
+        <input v-model="form.username" placeholder="root" class="ssh-edit-input" />
+      </div>
+
+      <div class="ssh-field">
+        <label>{{ t('ssh.group') }}</label>
+        <input v-model="form.group" placeholder="Production" class="ssh-edit-input" />
+      </div>
+
+      <div class="ssh-field">
+        <label>{{ t('ssh.authType') }}</label>
+        <div class="ssh-radio-group">
+          <label class="ssh-radio">
+            <input v-model="authType" type="radio" value="password" />
+            <span>{{ t('ssh.authPassword') }}</span>
+          </label>
+          <label class="ssh-radio">
+            <input v-model="authType" type="radio" value="key_file" />
+            <span>{{ t('ssh.authKeyFile') }}</span>
+          </label>
+          <label class="ssh-radio">
+            <input v-model="authType" type="radio" value="key_inline" />
+            <span>{{ t('ssh.authKeyInline') }}</span>
+          </label>
+        </div>
+      </div>
+
+      <div v-if="authType === 'password'" class="ssh-field">
+        <label>{{ t('ssh.password') }}</label>
+        <input v-model="password" type="password" class="ssh-edit-input" />
+      </div>
+
+      <div v-if="authType === 'key_file'" class="ssh-field">
+        <label>{{ t('ssh.keyPath') }}</label>
+        <input v-model="keyPath" placeholder="~/.ssh/id_rsa" class="ssh-edit-input" />
+      </div>
+
+      <div v-if="authType === 'key_inline'" class="ssh-field">
+        <label>{{ t('ssh.privateKey') }}</label>
+        <textarea
+          v-model="privateKey"
+          class="ssh-edit-textarea"
+          rows="4"
+          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+        ></textarea>
+      </div>
+
+      <div v-if="authType !== 'password'" class="ssh-field">
+        <label>{{ t('ssh.passphrase') }}</label>
+        <input v-model="passphrase" type="password" class="ssh-edit-input" />
+      </div>
+
+      <div class="ssh-field">
+        <label>{{ t('ssh.defaultCommand') }}</label>
+        <input v-model="form.default_command" placeholder="bash" class="ssh-edit-input" />
+      </div>
     </div>
-  </Teleport>
+
+    <template #footer>
+      <button class="dialog-btn" @click="$emit('close')">{{ t('ssh.cancel') }}</button>
+      <button class="dialog-btn dialog-btn--primary" :disabled="!isValid" @click="onSave">
+        {{ t('ssh.save') }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import type { SshProfile, SshAuthMethod } from '../../composables/useSettings'
+import BaseDialog from '../ui/BaseDialog.vue'
 
 const { t } = useI18n()
 
@@ -154,9 +156,17 @@ function buildAuthMethod(): SshAuthMethod {
   if (authType.value === 'password') {
     return { type: 'password', password: password.value }
   } else if (authType.value === 'key_file') {
-    return { type: 'key_file', key_path: keyPath.value.trim(), passphrase: passphrase.value || null }
+    return {
+      type: 'key_file',
+      key_path: keyPath.value.trim(),
+      passphrase: passphrase.value || null,
+    }
   } else {
-    return { type: 'key_inline', private_key: privateKey.value, passphrase: passphrase.value || null }
+    return {
+      type: 'key_inline',
+      private_key: privateKey.value,
+      passphrase: passphrase.value || null,
+    }
   }
 }
 
@@ -179,57 +189,7 @@ function onSave() {
 </script>
 
 <style scoped>
-.ssh-edit-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 960;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) 0;
-}
-
-.ssh-edit-panel {
-  width: 90vw;
-  max-width: 440px;
-  max-height: 85vh;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.ssh-edit-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.ssh-edit-header h2 {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--fg-bright);
-  margin: 0;
-}
-.ssh-edit-close {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-muted);
-  font-size: 18px;
-}
-
 .ssh-edit-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -250,13 +210,17 @@ function onSave() {
   display: flex;
   gap: 8px;
 }
-.ssh-field-host { flex: 1; }
-.ssh-field-port { width: 80px; }
+.ssh-field-host {
+  flex: 1;
+}
+.ssh-field-port {
+  width: 80px;
+}
 
 .ssh-edit-input {
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   color: var(--fg);
   padding: 8px 10px;
   font-size: 13px;
@@ -265,13 +229,13 @@ function onSave() {
   box-sizing: border-box;
 }
 .ssh-edit-input:focus {
-  border-color: var(--accent, #4d7fff);
+  border-color: var(--accent);
 }
 
 .ssh-edit-textarea {
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   color: var(--fg);
   padding: 8px 10px;
   font-size: 12px;
@@ -282,7 +246,7 @@ function onSave() {
   resize: vertical;
 }
 .ssh-edit-textarea:focus {
-  border-color: var(--accent, #4d7fff);
+  border-color: var(--accent);
 }
 
 .ssh-radio-group {
@@ -298,42 +262,6 @@ function onSave() {
   cursor: pointer;
 }
 .ssh-radio input {
-  accent-color: var(--accent, #4d7fff);
-}
-
-.ssh-edit-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border);
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-}
-
-.ssh-edit-cancel {
-  padding: 8px 16px;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 13px;
-  border: 1px solid var(--border);
-}
-.ssh-edit-cancel:hover {
-  background: var(--bg-hover);
-}
-
-.ssh-edit-save {
-  padding: 8px 16px;
-  border-radius: 4px;
-  background: var(--accent, #4d7fff);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-}
-.ssh-edit-save:disabled {
-  opacity: 0.5;
-}
-.ssh-edit-save:not(:disabled):hover {
-  opacity: 0.9;
+  accent-color: var(--accent);
 }
 </style>

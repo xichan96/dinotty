@@ -227,6 +227,7 @@ mod tests {
             targets: None,
             show_in_toolbar: None,
             events: None,
+            keyboard_api_version: None,
         }
     }
 
@@ -247,6 +248,7 @@ mod tests {
             targets: None,
             show_in_toolbar: None,
             events: None,
+            keyboard_api_version: None,
         }
     }
 

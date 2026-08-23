@@ -102,9 +102,7 @@ export function useEditorSplit(opts: { paneId: () => string }) {
     }
 
     // Remove from parent
-    const idx = parent.children.findIndex(
-      (c) => c.type === 'editor-leaf' && c.id === leafId
-    )
+    const idx = parent.children.findIndex((c) => c.type === 'editor-leaf' && c.id === leafId)
     if (idx === -1) return
     parent.children.splice(idx, 1)
     parent.ratios.splice(idx, 1)

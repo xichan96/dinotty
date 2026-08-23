@@ -4,6 +4,7 @@ import { Clock } from 'lucide-vue-next'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useI18n } from '../../composables/useI18n'
 import { settings } from '../../composables/useSettings'
+import { uiConfirm } from '../../composables/useConfirm'
 
 const emit = defineEmits<{
   navigate: [path: string]
@@ -13,7 +14,6 @@ const { t } = useI18n()
 const { clearFiles, removeFile, formatRelativeTime } = useRecentFiles()
 
 const collapsed = ref(false)
-const showClearConfirm = ref(false)
 
 // Context menu
 const ctxMenu = ref<{ x: number; y: number; path: string; name: string } | null>(null)
@@ -26,9 +26,12 @@ function onItemClick(path: string) {
   emit('navigate', path)
 }
 
-function doClear() {
-  clearFiles()
-  showClearConfirm.value = false
+async function onClear() {
+  const ok = await uiConfirm(t('recent.clearConfirm'), {
+    confirmText: t('recent.confirmOk'),
+    cancelText: t('recent.cancel'),
+  })
+  if (ok) clearFiles()
 }
 
 function onContextMenu(e: MouseEvent, path: string, name: string) {
@@ -48,19 +51,19 @@ function ctxRemove() {
 </script>
 
 <template>
-  <div class="recent-section" v-if="settings.recent_files.length > 0 || !collapsed">
+  <div v-if="settings.recent_files.length > 0 || !collapsed" class="recent-section">
     <!-- Section header -->
     <div class="recent-section-header" @click="toggleCollapse">
       <span class="recent-twistie">{{ collapsed ? '▶' : '▼' }}</span>
       <Clock :size="12" />
       <span class="recent-section-title">{{ t('recent.title') }}</span>
-      <span class="recent-section-count" v-if="settings.recent_files.length > 0">{{
+      <span v-if="settings.recent_files.length > 0" class="recent-section-count">{{
         settings.recent_files.length
       }}</span>
       <button
         v-if="settings.recent_files.length > 0 && !collapsed"
         class="recent-clear-btn"
-        @click.stop="showClearConfirm = true"
+        @click.stop="onClear"
       >
         {{ t('recent.clear') }}
       </button>
@@ -103,25 +106,6 @@ function ctxRemove() {
         <button class="tree-ctx-item tree-ctx-danger" @click="ctxRemove">
           <span class="tree-ctx-label">{{ t('recent.removeFromHistory') }}</span>
         </button>
-      </div>
-    </div>
-  </Teleport>
-
-  <!-- Clear confirmation -->
-  <Teleport to="body">
-    <div
-      v-if="showClearConfirm"
-      class="recent-confirm-backdrop"
-      @click.self="showClearConfirm = false"
-    >
-      <div class="recent-confirm-dialog">
-        <p>{{ t('recent.clearConfirm') }}</p>
-        <div class="recent-confirm-actions">
-          <button class="recent-confirm-cancel" @click="showClearConfirm = false">
-            {{ t('recent.cancel') }}
-          </button>
-          <button class="recent-confirm-ok" @click="doClear">{{ t('recent.confirmOk') }}</button>
-        </div>
       </div>
     </div>
   </Teleport>
@@ -268,50 +252,5 @@ function ctxRemove() {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
-}
-
-/* Confirm dialog */
-.recent-confirm-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100002;
-}
-.recent-confirm-dialog {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 20px;
-  max-width: 320px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-.recent-confirm-dialog p {
-  margin: 0 0 16px;
-  font-size: 14px;
-  color: var(--fg, #cccccc);
-}
-.recent-confirm-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-.recent-confirm-cancel,
-.recent-confirm-ok {
-  border: none;
-  border-radius: 4px;
-  padding: 6px 16px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.recent-confirm-cancel {
-  background: var(--bg-input);
-  color: var(--fg, #cccccc);
-}
-.recent-confirm-ok {
-  background: var(--color-red, #f44747);
-  color: #fff;
 }
 </style>

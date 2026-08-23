@@ -11,16 +11,11 @@ export interface PersistedFileWorkspaceState {
 
 const store = new Map<string, PersistedFileWorkspaceState>()
 
-export function saveFileWorkspaceState(
-  paneId: string,
-  state: PersistedFileWorkspaceState,
-): void {
+export function saveFileWorkspaceState(paneId: string, state: PersistedFileWorkspaceState): void {
   store.set(paneId, state)
 }
 
-export function loadFileWorkspaceState(
-  paneId: string,
-): PersistedFileWorkspaceState | undefined {
+export function loadFileWorkspaceState(paneId: string): PersistedFileWorkspaceState | undefined {
   return store.get(paneId)
 }
 

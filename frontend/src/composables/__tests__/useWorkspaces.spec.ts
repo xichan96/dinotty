@@ -44,9 +44,9 @@ describe('workspace path helpers', () => {
 
   it('matches Windows drive paths by segment with mixed case and separators', () => {
     expect(isPathWithinWorkspace(String.raw`c:\REPO\dinotty\src`, 'C:/repo/Dinotty/')).toBe(true)
-    expect(isPathWithinWorkspace(String.raw`C:\repo\dinotty-old`, String.raw`C:\repo\dinotty`)).toBe(
-      false
-    )
+    expect(
+      isPathWithinWorkspace(String.raw`C:\repo\dinotty-old`, String.raw`C:\repo\dinotty`)
+    ).toBe(false)
   })
 
   it('matches UNC paths case-insensitively', () => {
@@ -62,7 +62,8 @@ describe('workspace path helpers', () => {
 })
 
 describe('useWorkspaces', () => {
-  const { workspaces, activeWorkspaceId, activeWorkspace, matchWorkspace, filterTabs } = useWorkspaces()
+  const { workspaces, activeWorkspaceId, activeWorkspace, matchWorkspace, filterTabs } =
+    useWorkspaces()
 
   beforeEach(() => {
     settings.default_workspace_root = null
@@ -308,7 +309,13 @@ describe('useWorkspaces', () => {
     })
 
     it('SSH tab with matching connection_id goes to that workspace', () => {
-      workspaces.value.push({ id: 'ws-ssh', name: 'server', path: '/root', order: 3, connection_id: 'profile-abc' })
+      workspaces.value.push({
+        id: 'ws-ssh',
+        name: 'server',
+        path: '/root',
+        order: 3,
+        connection_id: 'profile-abc',
+      })
       const sshTab: TerminalTab = {
         ...makeTab('ssh1', '/root'),
         connectionId: 'profile-abc',

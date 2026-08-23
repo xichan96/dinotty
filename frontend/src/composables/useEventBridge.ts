@@ -11,8 +11,10 @@ type HandlerEntry = {
 
 const handlers = new Map<string, Set<HandlerEntry>>()
 
-// Register a single onEvent listener at module load; dispatches to matching handlers.
-onEvent((e) => {
+// Shared routing body used by both the WS event path and local dispatch
+// (dispatchLocal) so same-client plugins hear the same events with the same
+// target_plugin_id semantics.
+function dispatch(e: SyncEvent) {
   const set = handlers.get(e.event_name)
   if (!set) return
   for (const entry of set) {
@@ -20,9 +22,16 @@ onEvent((e) => {
     if (e.target_plugin_id && entry.pluginId !== e.target_plugin_id) continue
     entry.handler(e.data, e)
   }
-})
+}
 
-function reportPluginSubscription(pluginId: string, eventName: string, kind: 'subscribe' | 'unsubscribe') {
+// Register a single onEvent listener at module load; dispatches to matching handlers.
+onEvent((e) => dispatch(e))
+
+function reportPluginSubscription(
+  pluginId: string,
+  eventName: string,
+  kind: 'subscribe' | 'unsubscribe'
+) {
   void authFetch(apiUrl(`/api/plugins/${encodeURIComponent(pluginId)}/events/${kind}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -36,7 +45,7 @@ function reportPluginSubscription(pluginId: string, eventName: string, kind: 'su
 export function subscribe<T = unknown>(
   eventName: string,
   handler: EventHandler<T>,
-  opts?: { pluginId?: string },
+  opts?: { pluginId?: string }
 ): () => void {
   const entry: HandlerEntry = { handler: handler as EventHandler, pluginId: opts?.pluginId }
   let set = handlers.get(eventName)
@@ -70,7 +79,7 @@ export function hasSubscriber(eventName: string): boolean {
 export function emit(
   eventName: string,
   data: unknown,
-  opts?: { source_pane_id?: string; plugin_id?: string; target_plugin_id?: string },
+  opts?: { source_pane_id?: string; plugin_id?: string; target_plugin_id?: string }
 ): void {
   void authFetch(apiUrl('/api/events/emit'), {
     method: 'POST',
@@ -86,6 +95,17 @@ export function emit(
   })
 }
 
+/** Dispatch an event locally (no backend round-trip, no client_id) so that
+ *  same-client plugins can hear host UI broadcasts (e.g. kb-open / kb-close)
+ *  which the server's broadcast_sync_others would otherwise exclude. */
+export function dispatchLocal(
+  eventName: string,
+  data: unknown,
+  opts?: { source_pane_id?: string; plugin_id?: string; target_plugin_id?: string }
+): void {
+  dispatch({ type: 'event', event_name: eventName, data, ...opts })
+}
+
 if (import.meta.env.DEV) {
-  ;(window as any).__dinotty_eventBridge = { subscribe, emit, hasSubscriber }
+  ;(window as any).__dinotty_eventBridge = { subscribe, emit, dispatchLocal, hasSubscriber }
 }

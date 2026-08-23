@@ -100,7 +100,10 @@ describe('useFileWatch', () => {
   it('root cache is preserved when file deleted at root level', async () => {
     const opts = makeOpts({
       childCache: ref<Record<string, any[]>>({
-        '': [{ name: 'src', is_dir: true, size: 0 }, { name: 'temp.txt', is_dir: false, size: 10 }],
+        '': [
+          { name: 'src', is_dir: true, size: 0 },
+          { name: 'temp.txt', is_dir: false, size: 10 },
+        ],
       }),
     })
     const fw = useFileWatch(opts)
@@ -124,7 +127,10 @@ describe('useFileWatch', () => {
   })
 
   it('batch timer refreshes root directory after file event', async () => {
-    const newEntries = [{ name: 'src', is_dir: true, size: 0 }, { name: 'newfile.txt', is_dir: false, size: 5 }]
+    const newEntries = [
+      { name: 'src', is_dir: true, size: 0 },
+      { name: 'newfile.txt', is_dir: false, size: 5 },
+    ]
     const opts = makeOpts({
       fetchList: vi.fn().mockResolvedValue(newEntries),
     })

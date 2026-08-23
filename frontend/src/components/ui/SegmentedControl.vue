@@ -35,7 +35,9 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const selectedIndex = computed(() => props.options.findIndex((option) => option.value === props.modelValue))
+const selectedIndex = computed(() =>
+  props.options.findIndex((option) => option.value === props.modelValue)
+)
 const buttonElements = ref<Array<HTMLButtonElement | undefined>>([])
 
 function setButtonRef(element: Element | ComponentPublicInstance | null, index: number) {

@@ -7,7 +7,13 @@ import globals from 'globals'
 export default tseslint.config(
   // Global ignores
   {
-    ignores: ['node_modules/**', 'dist/**', '**/*.d.ts'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      '**/*.d.ts',
+      // copied plugin bundle fixtures (see builtinKeyboardPlugin.spec.ts)
+      'src/keyboard/__tests__/__plugin_bundles__/**',
+    ],
   },
   // Base JS recommended rules
   js.configs.recommended,

@@ -66,6 +66,7 @@
     :selected-text="menuSelectedText"
     :link-type="linkType"
     :link-target="linkTarget"
+    :pane-id="props.paneId"
     :is-ssh="!!props.sshHost"
     @close="closeMenu"
     @copy="onMenuCopy"

@@ -18,6 +18,7 @@ use std::time::Instant;
 use crate::platform::process::CommandNoWindowExt;
 use crate::session::SessionManager;
 use crate::settings::SettingsState;
+use crate::token::TokenInfo;
 
 pub struct McpTools {
     manager: Arc<SessionManager>,
@@ -51,6 +52,7 @@ impl McpTools {
                     "properties": {
                         "command": {"type": "string", "description": "Shell command to execute"},
                         "cwd": {"type": "string", "description": "Working directory (optional)"},
+                        "pane_id": {"type": "string", "description": "Pane ID, or 'active' for current pane (optional)"},
                         "timeout": {"type": "number", "description": "Timeout in ms, default 300000 (5min), max 3600000 (1h)"}
                     },
                     "required": ["command"]
@@ -156,22 +158,31 @@ impl McpTools {
         ]
     }
 
-    pub async fn call_tool(&self, name: &str, args: Value) -> Result<String, String> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        args: Value,
+        token_info: &TokenInfo,
+    ) -> Result<String, String> {
         match name {
-            "terminal_execute" => self.tool_terminal_execute(args).await,
-            "terminal_read" => self.tool_terminal_read(args),
-            "terminal_send" => self.tool_terminal_send(args),
-            "terminal_list" => self.tool_terminal_list(),
-            "file_read" => self.tool_file_read(args),
-            "file_write" => self.tool_file_write(args),
-            "file_list" => self.tool_file_list(args),
+            "terminal_execute" => self.tool_terminal_execute(args, token_info).await,
+            "terminal_read" => self.tool_terminal_read(args, token_info),
+            "terminal_send" => self.tool_terminal_send(args, token_info),
+            "terminal_list" => self.tool_terminal_list(token_info),
+            "file_read" => self.tool_file_read(args, token_info),
+            "file_write" => self.tool_file_write(args, token_info),
+            "file_list" => self.tool_file_list(args, token_info),
             "git_status" => self.tool_git_status(args),
-            "git_diff" => self.tool_git_diff(args),
+            "git_diff" => self.tool_git_diff(args, token_info),
             _ => Err(format!("Unknown tool: {name}")),
         }
     }
 
-    async fn tool_terminal_execute(&self, args: Value) -> Result<String, String> {
+    async fn tool_terminal_execute(
+        &self,
+        args: Value,
+        token_info: &TokenInfo,
+    ) -> Result<String, String> {
         let command = args.get("command").and_then(|v| v.as_str()).ok_or("Missing command")?;
         let timeout = args
             .get("timeout")
@@ -180,14 +191,21 @@ impl McpTools {
             .min(3_600_000);
 
         // Get or create a pane
-        let pane_id = self
-            .manager
-            .active_pane_id
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-            .or_else(|| self.manager.sessions.iter().next().map(|e| e.key().clone()))
-            .ok_or("No active terminal session")?;
+        let pane_id = match args.get("pane_id").and_then(|v| v.as_str()) {
+            Some(arg) => resolve_pane(arg, &self.manager)?,
+            None => self
+                .manager
+                .active_pane_id
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+                .or_else(|| self.manager.sessions.iter().next().map(|e| e.key().clone()))
+                .ok_or("No active terminal session")?,
+        };
+
+        if !token_info.check_scope("terminal:write", &pane_id) {
+            return Err(format!("Token terminal:write scope does not include pane {pane_id}"));
+        }
 
         let session = self.manager.sessions.get(&pane_id).ok_or("Pane not found")?;
 
@@ -264,9 +282,13 @@ impl McpTools {
         }
     }
 
-    fn tool_terminal_read(&self, args: Value) -> Result<String, String> {
+    fn tool_terminal_read(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
         let pane_id_arg = args.get("pane_id").and_then(|v| v.as_str()).unwrap_or("active");
         let pane_id = resolve_pane(pane_id_arg, &self.manager)?;
+
+        if !token_info.check_scope("terminal:read", &pane_id) {
+            return Err(format!("Token terminal:read scope does not include pane {pane_id}"));
+        }
 
         let session = self.manager.sessions.get(&pane_id).ok_or("Pane not found")?;
         let screen = session.screen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -274,10 +296,14 @@ impl McpTools {
         Ok(content)
     }
 
-    fn tool_terminal_send(&self, args: Value) -> Result<String, String> {
+    fn tool_terminal_send(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
         let command = args.get("command").and_then(|v| v.as_str()).ok_or("Missing command")?;
         let pane_id_arg = args.get("pane_id").and_then(|v| v.as_str()).unwrap_or("active");
         let pane_id = resolve_pane(pane_id_arg, &self.manager)?;
+
+        if !token_info.check_scope("terminal:write", &pane_id) {
+            return Err(format!("Token terminal:write scope does not include pane {pane_id}"));
+        }
 
         let session = self.manager.sessions.get(&pane_id).ok_or("Pane not found")?;
         let cmd = format!("{command}\n");
@@ -285,11 +311,12 @@ impl McpTools {
         Ok(r#"{"ok": true}"#.into())
     }
 
-    fn tool_terminal_list(&self) -> Result<String, String> {
+    fn tool_terminal_list(&self, token_info: &TokenInfo) -> Result<String, String> {
         let sessions: Vec<Value> = self
             .manager
             .sessions
             .iter()
+            .filter(|e| token_info.check_scope("terminal:read", e.key()))
             .map(|e| {
                 let pane_id = e.key();
                 let session = e.value();
@@ -309,23 +336,41 @@ impl McpTools {
         Ok(serde_json::to_string(&sessions).unwrap_or_default())
     }
 
-    fn tool_file_read(&self, args: Value) -> Result<String, String> {
+    fn tool_file_read(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing path")?;
         let resolved = sandbox_path(path)?;
+        if !token_info.check_path_scope("workspace:read", &resolved) {
+            return Err(format!(
+                "Token workspace:read scope does not include {}",
+                resolved.display()
+            ));
+        }
         std::fs::read_to_string(&resolved).map_err(|e| format!("Read failed: {e}"))
     }
 
-    fn tool_file_write(&self, args: Value) -> Result<String, String> {
+    fn tool_file_write(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing path")?;
         let content = args.get("content").and_then(|v| v.as_str()).ok_or("Missing content")?;
         let resolved = sandbox_path(path)?;
+        if !token_info.check_path_scope("workspace:write", &resolved) {
+            return Err(format!(
+                "Token workspace:write scope does not include {}",
+                resolved.display()
+            ));
+        }
         std::fs::write(&resolved, content).map_err(|e| format!("Write failed: {e}"))?;
         Ok(r#"{"ok": true}"#.into())
     }
 
-    fn tool_file_list(&self, args: Value) -> Result<String, String> {
+    fn tool_file_list(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let resolved = sandbox_path(path)?;
+        if !token_info.check_path_scope("workspace:read", &resolved) {
+            return Err(format!(
+                "Token workspace:read scope does not include {}",
+                resolved.display()
+            ));
+        }
         let entries: Vec<Value> = std::fs::read_dir(&resolved)
             .map_err(|e| format!("Read dir failed: {e}"))?
             .filter_map(std::result::Result::ok)
@@ -348,8 +393,16 @@ impl McpTools {
         String::from_utf8(output.stdout).map_err(|e| format!("utf8 error: {e}"))
     }
 
-    fn tool_git_diff(&self, args: Value) -> Result<String, String> {
+    fn tool_git_diff(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing path")?;
+        if let Ok(resolved) = sandbox_path(path) {
+            if !token_info.check_path_scope("workspace:read", &resolved) {
+                return Err(format!(
+                    "Token workspace:read scope does not include {}",
+                    resolved.display()
+                ));
+            }
+        }
         let mut command = std::process::Command::new("git");
         let output = command
             .no_window()
@@ -384,7 +437,16 @@ fn sandbox_path(path: &str) -> Result<std::path::PathBuf, String> {
     let candidate = std::path::Path::new(path);
 
     // Resolve to canonical path (follows symlinks, resolves ..)
-    let canonical = candidate.canonicalize().map_err(|e| format!("Path not found: {e}"))?;
+    let canonical = match candidate.canonicalize() {
+        Ok(c) => c,
+        // Not-yet-existing leaf (e.g. file_write creating a new file):
+        // resolve the parent and append the file name.
+        Err(_) => candidate
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .and_then(|p| candidate.file_name().map(|n| p.join(n)))
+            .ok_or_else(|| format!("Path not found: {path}"))?,
+    };
 
     let home_canonical = home.canonicalize().map_err(|e| format!("Cannot resolve home: {e}"))?;
 

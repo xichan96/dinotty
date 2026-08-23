@@ -144,7 +144,11 @@ export function useWorkspaces() {
    * Both cwd and workspace.path are assumed to be canonicalized absolute paths from the backend.
    * For SSH tabs, pass `connectionId` to prefer matching by SSH profile ID.
    */
-  function matchWorkspace(cwd: string, connectionId?: string, workspaceId?: string): Workspace | null {
+  function matchWorkspace(
+    cwd: string,
+    connectionId?: string,
+    workspaceId?: string
+  ): Workspace | null {
     // Explicit workspace assignment takes priority
     if (workspaceId) {
       const explicit = workspaces.value.find((w) => w.id === workspaceId)

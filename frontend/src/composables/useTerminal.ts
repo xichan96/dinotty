@@ -24,17 +24,22 @@ import {
   applyMobileTerminalModifiers,
   emptyMobileTerminalModifiers,
   handleTerminalShortcutKeydown,
+  hasTouchHardware,
   isDuplicateOnData,
   isShiftSymbolChar,
   isTouchDevice,
   mobileTerminalModifierActive,
+  normalizeTerminalTextareaSelection,
   stripImeConfirmSpace,
+  terminalTextareaEdit,
+  type TerminalTextareaSnapshot,
   type MobileTerminalModifiers,
 } from '../utils/terminalInput'
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { createTerminalOverlay } from './useTerminalOverlay'
 import { t } from './useI18n'
+import { hasOpenGuard } from '../utils/keyboardGuardMode'
 
 // Re-export pure helpers so existing callers (App.vue, useTabLifecycle,
 // useSplitPane, tests) don't need to update their import paths.
@@ -48,7 +53,9 @@ export {
   isSinglePrintableAscii,
   isSinglePrintableGrapheme,
   isTouchDevice,
+  normalizeTerminalTextareaSelection,
   stripImeConfirmSpace,
+  terminalTextareaEdit,
   terminalKeybindingMatches,
 } from '../utils/terminalInput'
 
@@ -74,6 +81,12 @@ function resolveTerminalFontFamily(configuredFamily: string, cssFallback: string
 // fact. The query covers hidden split panes too.
 // Deliberately sweep on every call so late-created or re-enabled helpers are reconciled.
 let _kbTypingLock = false
+let _systemImeAuthorized = false
+
+export function setSystemImeAuthorized(open: boolean) {
+  _systemImeAuthorized = open
+}
+
 export function setKbTypingLock(active: boolean) {
   _kbTypingLock = active
   document.querySelectorAll('.xterm-helper-textarea').forEach((el) => {
@@ -92,7 +105,10 @@ export function configureMobileInputTextarea(
   textarea: HTMLTextAreaElement,
   mode: MobileInputMode | null | undefined = settings.mobile_input_mode
 ) {
-  if (mode === 'system') {
+  const allowSoftwareKeyboard =
+    mode === 'system' &&
+    (!isTouchDevice() || !hasOpenGuard(settings.keyboard_guard_mode) || _systemImeAuthorized)
+  if (allowSoftwareKeyboard) {
     textarea.inputMode = 'text'
     textarea.setAttribute('virtualkeyboardpolicy', 'auto')
     textarea.enterKeyHint = 'enter'
@@ -139,6 +155,14 @@ export class TerminalInstance {
   private _lastInputData = ''
   private _lastInputTime = 0
   private _symCredits: Array<{ data: string; src: 0 | 1; at: number }> = []
+  private _inputTextarea: HTMLTextAreaElement | null = null
+  private _ime229Baseline: TerminalTextareaSnapshot | null = null
+  private _ime229InputData: string | null = null
+  private _ime229Timer: ReturnType<typeof setTimeout> | null = null
+  // The same textarea snapshot/diff owner handles keyCode 229 and mobile
+  // dictation tail replacements, but their event lifecycles must not overlap.
+  private _ime229Owner: 'key' | 'tail-replacement' | null = null
+  private _imeTailReplacement: { data: string; value: string; sawRaw: boolean } | null = null
   // IME composition state. Tracked via compositionstart/compositionend on the
   // xterm textarea so focusActive() can avoid .focus()/.blur()/.fit() during
   // composition - those calls interrupt the IME session and cause xterm's
@@ -301,6 +325,31 @@ export class TerminalInstance {
     const xt = this.xterm
     const { isAppShortcut } = useKeybindings()
     xt.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      // maxTouchPoints, not isTouchDevice(): desktop Safari/WKWebView exposes
+      // `ontouchstart` without touch hardware, and arming the 229 snapshot
+      // machinery there eats desktop IME commits (#256 regression). The
+      // machinery stays scoped to system-mode touch input (and Tauri touch,
+      // e.g. Windows tablets); iPhone builtin mode never had it armed and
+      // arming it there breaks the builtin keyboard's own input path.
+      const acceptsTextarea229 =
+        hasTouchHardware() && (settings.mobile_input_mode === 'system' || isTauri())
+      const isTextarea229 =
+        acceptsTextarea229 &&
+        !e.isComposing &&
+        !this._composing &&
+        (e.keyCode === 229 || e.key === 'Process')
+      const ownsTextarea229 =
+        isTextarea229 ||
+        (acceptsTextarea229 &&
+          this._ime229Owner === 'key' &&
+          this._ime229Baseline != null &&
+          e.type === 'keyup')
+      if (ownsTextarea229) {
+        if (e.type === 'keydown' && !this._composing) this._startIme229()
+        else if (e.type === 'keyup') this._flushIme229(false)
+        return false
+      }
+      if (e.type === 'keydown' && this._ime229Baseline != null) this._flushIme229(true)
       if (e.type === 'keydown') {
         if (e.isComposing || (e as any).keyCode === 229 || e.key === 'Process') return true
 
@@ -437,6 +486,7 @@ export class TerminalInstance {
     this.xterm.loadAddon(this.searchAddon)
 
     const textarea = wrapper.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
+    this._inputTextarea = textarea
     if (textarea && isTouchDevice()) configureMobileInputTextarea(textarea)
     // Track IME composition state on all platforms so focusActive() can
     // defer .focus()/.blur()/.fit() during composition. Interrupting an
@@ -444,6 +494,7 @@ export class TerminalInstance {
     // text as raw input (P3).
     if (textarea) {
       const onStart = () => {
+        this._clearIme229()
         this._composing = true
         textarea.dataset.dinottyComposing = 'true'
       }
@@ -471,11 +522,75 @@ export class TerminalInstance {
       let _trackedTextareaValue = ''
       textarea.addEventListener('input', ((e: Event) => {
         const ie = e as InputEvent
+        const tailReplacement = this._imeTailReplacement
+        if (tailReplacement) {
+          const matches =
+            !ie.isComposing &&
+            ie.inputType === 'insertText' &&
+            ie.data === tailReplacement.data &&
+            textarea.value === tailReplacement.value
+          this._imeTailReplacement = null
+          if (tailReplacement.sawRaw && matches) {
+            this._ime229InputData = ie.data
+            this._armIme229Fallback()
+            return
+          }
+          if (tailReplacement.sawRaw) {
+            // The DOM is the authoritative result. Reconcile from the original
+            // chain baseline so a later prediction mismatch cannot discard the
+            // earlier raw candidates that were already suppressed.
+            this._ime229InputData = ie.data
+            this._flushIme229(true)
+            return
+          }
+          this._clearIme229()
+        }
+        if (this._ime229Baseline != null && !ie.isComposing) {
+          this._ime229InputData = ie.data
+          this._armIme229Fallback()
+          return
+        }
         if (ie.isComposing) return
         _trackedTextareaValue = textarea.value
       }) as EventListener)
       textarea.addEventListener('beforeinput', ((e: Event) => {
         const ie = e as InputEvent
+        // iOS dictation revises its current hypothesis by selecting a textarea
+        // tail and emitting the whole replacement as insertText. xterm treats
+        // that data as a fresh append, so arm our existing snapshot/diff path
+        // before xterm's input listener sees it. All unmatched events continue
+        // through the existing replacement-text handling below.
+        if (
+          hasTouchHardware() &&
+          !isTauri() &&
+          settings.mobile_input_mode === 'system' &&
+          !this._composing &&
+          !ie.isComposing &&
+          !this.xterm?.options.screenReaderMode &&
+          ie.inputType === 'insertText' &&
+          typeof ie.data === 'string' &&
+          ie.data
+        ) {
+          const start = textarea.selectionStart
+          const end = textarea.selectionEnd
+          if (
+            start != null &&
+            end != null &&
+            start !== end &&
+            end === textarea.value.length &&
+            this._ime229Owner !== 'key'
+          ) {
+            if (this._ime229Baseline == null) this._startIme229('tail-replacement')
+            if (this._ime229Owner === 'tail-replacement') {
+              this._imeTailReplacement = {
+                data: ie.data,
+                value: `${textarea.value.slice(0, start)}${ie.data}`,
+                sawRaw: false,
+              }
+              return
+            }
+          }
+        }
         if (this._composing) return
         // Only intercept insertReplacementText (macOS text replacement);
         // insertText is normal typing and must not send backspaces.
@@ -492,8 +607,9 @@ export class TerminalInstance {
         }
       }) as EventListener)
     }
-    if (textarea && isTauri()) {
+    if (textarea && (isTauri() || isTouchDevice())) {
       const onImeInput = (e: InputEvent) => {
+        if (this._ime229Baseline != null) return
         if (e.inputType !== 'insertText') return
         const data = stripImeConfirmSpace(e.data || '')
         if (!isShiftSymbolChar(data)) return
@@ -732,6 +848,70 @@ export class TerminalInstance {
     }
   }
 
+  private _startIme229(owner: 'key' | 'tail-replacement' = 'key') {
+    if (!this._inputTextarea || this._ime229Baseline != null) return
+    this._ime229Owner = owner
+    this._ime229Baseline = {
+      value: this._inputTextarea.value,
+      selectionStart: this._inputTextarea.selectionStart,
+      selectionEnd: this._inputTextarea.selectionEnd,
+    }
+    this._armIme229Fallback()
+  }
+
+  private _armIme229Fallback() {
+    if (this._ime229Timer) clearTimeout(this._ime229Timer)
+    this._ime229Timer = setTimeout(() => {
+      this._ime229Timer = null
+      this._flushIme229(true)
+    }, 80)
+  }
+
+  private _flushIme229(clearEmpty: boolean) {
+    const before = this._ime229Baseline
+    const textarea = this._inputTextarea
+    if (!before || !textarea || this._composing) {
+      this._clearIme229()
+      return
+    }
+    const observed = {
+      value: textarea.value,
+      selectionStart: textarea.selectionStart,
+      selectionEnd: textarea.selectionEnd,
+    }
+    const after = normalizeTerminalTextareaSelection(before, observed, this._ime229InputData)
+    let data = terminalTextareaEdit(
+      before,
+      after,
+      this.xterm?.modes.applicationCursorKeysMode ?? false
+    )
+    // WebKit can deliver the IME confirm keydown after compositionend, so it
+    // reads as a fresh non-composition 229 and arms this baseline while xterm
+    // has already forwarded the commit via onData (dropped while the baseline
+    // owns the diff) and cleared the textarea. The diff then reconstructs
+    // nothing; _ime229InputData still holds the authoritative committed text
+    // and is the only thing preventing the whole IME word from being lost.
+    if (!data && this._ime229InputData) data = this._ime229InputData
+    if (!data && !clearEmpty) return
+    if (
+      after.selectionStart !== observed.selectionStart ||
+      after.selectionEnd !== observed.selectionEnd
+    ) {
+      textarea.setSelectionRange(after.selectionStart, after.selectionEnd)
+    }
+    this._clearIme229()
+    if (data) this._handleXtermData(data, true)
+  }
+
+  private _clearIme229() {
+    if (this._ime229Timer) clearTimeout(this._ime229Timer)
+    this._ime229Timer = null
+    this._ime229Baseline = null
+    this._ime229InputData = null
+    this._ime229Owner = null
+    this._imeTailReplacement = null
+  }
+
   private _resolveSym(data: string, src: 0 | 1, now: number): boolean {
     if (this._symCredits.length)
       this._symCredits = this._symCredits.filter((c) => now - c.at < IME_SYM_PAIR_MS)
@@ -744,7 +924,7 @@ export class TerminalInstance {
     return true
   }
 
-  private _handleXtermData(rawData: string) {
+  private _handleXtermData(rawData: string, fromIme229 = false) {
     // Mouse reports produced synchronously by our synthetic wheel dispatches
     // (wheel.sendWheelEvent) are legitimate identical repeats; the WKWebView
     // key-replay dedup below must not eat them.
@@ -752,8 +932,22 @@ export class TerminalInstance {
       this._emitInput(rawData)
       return
     }
+    const tailReplacement = this._imeTailReplacement
+    if (
+      !fromIme229 &&
+      this._ime229Owner === 'tail-replacement' &&
+      tailReplacement &&
+      rawData === tailReplacement.data
+    ) {
+      tailReplacement.sawRaw = true
+      return
+    }
+    // The non-composition 229 cycle owns the final textarea diff. xterm can
+    // also surface the same input through onData; accepting both duplicates it.
+    if (this._ime229Baseline != null) return
     const tauri = isTauri()
-    let data = tauri ? stripImeConfirmSpace(rawData) : rawData
+    const rescueImeSymbols = tauri || isTouchDevice()
+    let data = rescueImeSymbols ? stripImeConfirmSpace(rawData) : rawData
     if (!data) return
     const now = performance.now()
     // Gate the WKWebView replay dedup to Tauri only. On web, browsers don't
@@ -764,8 +958,12 @@ export class TerminalInstance {
     if (tauri && isDuplicateOnData(data, this._lastInputData, this._lastInputTime, now)) return
     this._lastInputData = data
     this._lastInputTime = now
-    if (tauri && isShiftSymbolChar(data)) {
+    if (rescueImeSymbols && isShiftSymbolChar(data)) {
       if (!this._resolveSym(data, 1, now)) return
+    }
+    if (fromIme229 && (data.includes('\x1b') || data.includes('\x7f'))) {
+      this._emitInput(data)
+      return
     }
     const modified = applyMobileTerminalModifiers(data, this._mobileModifiers)
     data = modified.data
@@ -836,6 +1034,8 @@ export class TerminalInstance {
     this._wheel = null
     this._touchCleanup?.()
     this._compositionCleanup?.()
+    this._clearIme229()
+    this._inputTextarea = null
     this._dropCleanup?.()
     this._dropCleanup = null
     this._overlayCtl?.cleanup()

@@ -89,22 +89,19 @@ export function useCsvEncoding(opts: CsvEncodingOptions): CsvEncoding {
     void loadCompleteContent()
   })
 
-  watch(
-    [content, filePath, truncated],
-    function synchronizeSelectedFile(values) {
-      const newContent = values[0]
-      const newContentIsTruncated = values[2]
-      displayedContent.value = newContent
-      displayedContentIsTruncated.value = newContentIsTruncated
-      rawBytes.value = null
-      selectedEncoding.value = 'utf-8'
-      encodingError.value = ''
+  watch([content, filePath, truncated], function synchronizeSelectedFile(values) {
+    const newContent = values[0]
+    const newContentIsTruncated = values[2]
+    displayedContent.value = newContent
+    displayedContentIsTruncated.value = newContentIsTruncated
+    rawBytes.value = null
+    selectedEncoding.value = 'utf-8'
+    encodingError.value = ''
 
-      onFileChanged?.()
+    onFileChanged?.()
 
-      if (newContent === '' || newContentIsTruncated) void loadCompleteContent()
-    }
-  )
+    if (newContent === '' || newContentIsTruncated) void loadCompleteContent()
+  })
 
   return {
     selectedEncoding,

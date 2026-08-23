@@ -11,7 +11,12 @@ describe('buildFontList', () => {
   it('starts with System Default, includes anchors, and appends removable custom fonts', () => {
     const items = buildFontList('', ['Fira Code', 'Iosevka'])
 
-    expect(items[0]).toMatchObject({ family: '', kind: 'default', removable: false, selected: true })
+    expect(items[0]).toMatchObject({
+      family: '',
+      kind: 'default',
+      removable: false,
+      selected: true,
+    })
     expect(items.slice(1, 6).map((item) => item.family)).toEqual([...ANCHOR_FAMILIES])
     expect(items.slice(1, 6).every((item) => !item.removable)).toBe(true)
     expect(items.slice(6)).toMatchObject([
@@ -56,7 +61,7 @@ describe('normalizeCustomFonts', () => {
         'foo',
         'Menlo',
         'monospace',
-      ]),
+      ])
     ).toEqual(['Fine', 'Foo'])
   })
 
@@ -93,7 +98,9 @@ describe('normalizeCustomFonts', () => {
   })
 
   it('drops CSS injection vectors', () => {
-    expect(normalizeCustomFonts(['Good', 'Evil<script>', 'Evil;drop', 'Evil{bad}', 'Evil>arrow'])).toEqual(['Good'])
+    expect(
+      normalizeCustomFonts(['Good', 'Evil<script>', 'Evil;drop', 'Evil{bad}', 'Evil>arrow'])
+    ).toEqual(['Good'])
   })
 })
 

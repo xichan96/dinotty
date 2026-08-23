@@ -21,3 +21,9 @@ ghostty-comparison-optimization.md
 # VitePress build output
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+
+# keyboard plugin bundle fixtures copied from the sibling dinotty-plugins repo for vitest
+frontend/src/keyboard/__tests__/__plugin_bundles__/
+
+# builtin-keyboard seed directory (built by npm run build:builtin-kb, embedded by rust_embed)
+seed/builtin-keyboard/

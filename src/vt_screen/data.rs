@@ -30,6 +30,13 @@ pub enum SyncEvent {
     Stop,
 }
 
+/// OSC 9 / OSC 777 / BEL notification detection result
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OscAction {
+    Bell,
+    Notify { title: Option<String>, body: String },
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum MouseProtocol {
     #[default]

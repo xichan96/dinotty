@@ -2,8 +2,12 @@ export const isWindowsClient: boolean =
   typeof navigator !== 'undefined' &&
   /Win/i.test(
     (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ||
-      navigator.platform,
+      navigator.platform
   )
+
+export function isIPhoneClient(): boolean {
+  return typeof navigator !== 'undefined' && /iPhone|iPod/i.test(navigator.userAgent)
+}
 
 /**
  * Returns the current client's host target string, matching the backend

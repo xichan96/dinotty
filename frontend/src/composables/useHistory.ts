@@ -17,10 +17,10 @@ onSuggestions((items) => {
 })
 
 export function useHistory() {
-  async function fetchSuggestions(prefix?: string) {
+  async function fetchSuggestions(prefix?: string, limit = 20): Promise<SuggestionItem[]> {
     const params = new URLSearchParams()
     if (prefix) params.set('prefix', prefix)
-    params.set('limit', '20')
+    params.set('limit', String(limit))
 
     try {
       const res = await authFetch(apiUrl(`/api/history?${params}`))
@@ -30,6 +30,7 @@ export function useHistory() {
     } catch {
       // ignore
     }
+    return suggestions.value
   }
 
   function fetchDebounced(prefix?: string) {

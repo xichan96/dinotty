@@ -5,7 +5,7 @@
         <div class="ssh-header">
           <h2>{{ t('ssh.title') }}</h2>
           <div class="ssh-header-actions">
-            <button class="ssh-new-btn" @click="openNewDialog" :title="t('ssh.newHost')">
+            <button class="ssh-new-btn" :title="t('ssh.newHost')" @click="openNewDialog">
               <Plus :size="14" />
             </button>
             <button class="ssh-close" @click="close">&times;</button>
@@ -44,12 +44,8 @@
           </button>
         </div>
 
-        <div class="ssh-body" ref="listEl">
-          <div
-            v-for="(group, gi) in groupedProfiles"
-            :key="group.name"
-            class="ssh-group"
-          >
+        <div ref="listEl" class="ssh-body">
+          <div v-for="(group, gi) in groupedProfiles" :key="group.name" class="ssh-group">
             <div v-if="group.name" class="ssh-group-label">{{ group.name }}</div>
             <div
               v-for="(profile, pi) in group.items"
@@ -72,18 +68,62 @@
             >
               <GripVertical :size="14" class="ssh-grip" />
               <div class="ssh-item-icon">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="2" y="2" width="20" height="8" rx="2" />
+                  <rect x="2" y="14" width="20" height="8" rx="2" />
+                  <circle cx="6" cy="6" r="1" />
+                  <circle cx="6" cy="18" r="1" />
+                </svg>
               </div>
               <div class="ssh-item-info">
                 <span class="ssh-item-name">{{ profile.name || profile.host }}</span>
-                <span class="ssh-item-addr">{{ profile.username }}@{{ profile.host }}:{{ profile.port }}</span>
+                <span class="ssh-item-addr"
+                  >{{ profile.username }}@{{ profile.host }}:{{ profile.port }}</span
+                >
               </div>
               <div class="ssh-item-actions">
-                <button class="ssh-icon-btn" :title="t('ssh.edit')" @click.stop="editProfile(profile)">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                <button
+                  class="ssh-icon-btn"
+                  :title="t('ssh.edit')"
+                  @click.stop="editProfile(profile)"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
                 </button>
-                <button class="ssh-icon-btn danger" :title="t('ssh.delete')" @click.stop="deleteProfile(profile.id)">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <button
+                  class="ssh-icon-btn danger"
+                  :title="t('ssh.delete')"
+                  @click.stop="deleteProfile(profile.id)"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="3 6 5 6 21 6" />
+                    <path
+                      d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                    />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -125,7 +165,7 @@
               @keydown.escape="close"
               @keydown.enter="quickConnect"
             />
-            <button class="ssh-connect-btn" @click="quickConnect" :disabled="connecting">
+            <button class="ssh-connect-btn" :disabled="connecting" @click="quickConnect">
               {{ connecting ? t('ssh.connecting') : t('ssh.connect') }}
             </button>
           </div>
@@ -166,7 +206,11 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { Plus, GripVertical } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { settings, saveSettings, type SshProfile } from '../../composables/useSettings'
-import { apiCreateSshQuickTab, apiCreateSshTab, type CreateTabResult } from '../../composables/useTabApi'
+import {
+  apiCreateSshQuickTab,
+  apiCreateSshTab,
+  type CreateTabResult,
+} from '../../composables/useTabApi'
 import SshHostEditDialog from './SshHostEditDialog.vue'
 import SshPasswordDialog from './SshPasswordDialog.vue'
 
@@ -335,12 +379,15 @@ async function onPasswordConnect(password: string) {
   connecting.value = true
   error.value = ''
   try {
-    const result = await apiCreateSshQuickTab({
-      host: profile.host,
-      port: profile.port,
-      username: profile.username,
-      auth: { type: 'password', password },
-    }, abortController.signal)
+    const result = await apiCreateSshQuickTab(
+      {
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+        auth: { type: 'password', password },
+      },
+      abortController.signal
+    )
     emit('connect', result)
     close()
   } catch (e: any) {
@@ -755,10 +802,19 @@ defineExpose({ open, close })
 .ssh-input:focus {
   border-color: var(--accent, #4d7fff);
 }
-.ssh-input-user { width: 80px; }
-.ssh-input-host { flex: 1; min-width: 100px; }
-.ssh-input-port { width: 56px; }
-.ssh-input-pass { width: 90px; }
+.ssh-input-user {
+  width: 80px;
+}
+.ssh-input-host {
+  flex: 1;
+  min-width: 100px;
+}
+.ssh-input-port {
+  width: 56px;
+}
+.ssh-input-pass {
+  width: 90px;
+}
 
 .ssh-connect-btn {
   padding: 6px 14px;
@@ -814,7 +870,9 @@ defineExpose({ open, close })
   animation: ssh-spin 0.8s linear infinite;
 }
 @keyframes ssh-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .ssh-cancel-btn {
   margin-left: auto;

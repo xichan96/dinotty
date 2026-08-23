@@ -54,9 +54,18 @@
       >
         <div class="theme-preview" :style="{ background: previewColors(item)['--bg'] }">
           <div class="theme-preview-header">
-            <span class="theme-dot" :style="{ background: previewColors(item)['--color-red'] }"></span>
-            <span class="theme-dot" :style="{ background: previewColors(item)['--color-yellow'] }"></span>
-            <span class="theme-dot" :style="{ background: previewColors(item)['--color-green'] }"></span>
+            <span
+              class="theme-dot"
+              :style="{ background: previewColors(item)['--color-red'] }"
+            ></span>
+            <span
+              class="theme-dot"
+              :style="{ background: previewColors(item)['--color-yellow'] }"
+            ></span>
+            <span
+              class="theme-dot"
+              :style="{ background: previewColors(item)['--color-green'] }"
+            ></span>
           </div>
           <div class="theme-preview-body">
             <span :style="{ color: previewColors(item)['--color-green'] }">$</span>
@@ -65,11 +74,26 @@
           </div>
           <div class="theme-swatches">
             <span class="swatch" :style="{ background: previewColors(item)['--color-red'] }"></span>
-            <span class="swatch" :style="{ background: previewColors(item)['--color-green'] }"></span>
-            <span class="swatch" :style="{ background: previewColors(item)['--color-yellow'] }"></span>
-            <span class="swatch" :style="{ background: previewColors(item)['--color-blue'] }"></span>
-            <span class="swatch" :style="{ background: previewColors(item)['--color-magenta'] }"></span>
-            <span class="swatch" :style="{ background: previewColors(item)['--color-cyan'] }"></span>
+            <span
+              class="swatch"
+              :style="{ background: previewColors(item)['--color-green'] }"
+            ></span>
+            <span
+              class="swatch"
+              :style="{ background: previewColors(item)['--color-yellow'] }"
+            ></span>
+            <span
+              class="swatch"
+              :style="{ background: previewColors(item)['--color-blue'] }"
+            ></span>
+            <span
+              class="swatch"
+              :style="{ background: previewColors(item)['--color-magenta'] }"
+            ></span>
+            <span
+              class="swatch"
+              :style="{ background: previewColors(item)['--color-cyan'] }"
+            ></span>
           </div>
         </div>
         <span class="theme-name">{{ item.label }}</span>
@@ -273,7 +297,7 @@ function selectItem(item: ThemeItem) {
   setThemeSelection(
     item.kind === 'builtin'
       ? { kind: 'builtin', name: item.name! }
-      : { kind: 'custom', uuid: item.uuid! },
+      : { kind: 'custom', uuid: item.uuid! }
   )
 }
 

@@ -55,6 +55,7 @@ fn register_plugin(manager: &PluginManager, id: &str) {
                 targets: None,
                 show_in_toolbar: None,
                 events: None,
+                keyboard_api_version: None,
             },
             install_date: None,
             state: PluginStateValue::Active,
@@ -353,4 +354,237 @@ async fn install_from_dir_dev_link_rejects_existing_broken_symlink() {
     assert!(err.contains("already installed"), "unexpected error: {err}");
     assert!(platform_fs::path_exists_or_symlink(&link));
     assert!(src.join("plugin.json").is_file());
+}
+
+// ─── bundled seed (ensure_seed_dir) ─────────────────────────────────────────
+
+fn seed_tar_gz(version: &str, marker: &str) -> Vec<u8> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let manifest =
+        format!(r#"{{"id":"builtin-keyboard","name":"Builtin Keyboard","version":"{version}"}}"#);
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        for (name, content) in
+            [("plugin.json", manifest.as_bytes()), ("seed-marker.txt", marker.as_bytes())]
+        {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, content).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+    gz.write_all(&tar_bytes).unwrap();
+    gz.finish().unwrap()
+}
+
+fn seed_dir(version: &str, marker: &str) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    let manifest =
+        format!(r#"{{"id":"builtin-keyboard","name":"Builtin Keyboard","version":"{version}"}}"#);
+    std::fs::write(tmp.path().join("plugin.json"), manifest).unwrap();
+    std::fs::write(tmp.path().join("seed-marker.txt"), marker).unwrap();
+    tmp
+}
+
+fn installed_version(manager: &PluginManager, id: &str) -> Option<String> {
+    manager.registry.get(id).map(|info| info.manifest.version.clone())
+}
+
+/// Place a plugin at a given version directly on disk and register it,
+/// simulating a copy already present from a source other than the generic
+/// channels (previous seed, manual placement, future marketplace). The generic
+/// channels refuse the reserved builtin-keyboard id, so this is the setup path
+/// for seed-vs-installed version comparisons.
+fn place_installed_plugin(manager: &PluginManager, id: &str, version: &str, marker: &str) {
+    let dir = manager.plugin_dir.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        format!(r#"{{"id":"{id}","name":"B","version":"{version}"}}"#),
+    )
+    .unwrap();
+    std::fs::write(dir.join("seed-marker.txt"), marker).unwrap();
+    manager.registry.insert(
+        id.into(),
+        PluginInfo {
+            manifest: PluginManifest {
+                id: id.into(),
+                name: "B".into(),
+                version: version.into(),
+                min_app_version: None,
+                description: None,
+                icon: None,
+                entry: None,
+                bin: None,
+                commands: None,
+                styles: None,
+                permissions: None,
+                category: None,
+                targets: None,
+                show_in_toolbar: None,
+                events: None,
+                keyboard_api_version: None,
+            },
+            install_date: None,
+            state: PluginStateValue::Active,
+            error: None,
+            is_dev_link: false,
+        },
+    );
+}
+
+#[tokio::test]
+async fn seed_installs_missing_plugin() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    manager.scan();
+
+    manager.ensure_seed_dir(seed_dir("1.0.0", "from-seed").path()).await.unwrap();
+
+    let dir = manager.plugin_dir.join("builtin-keyboard");
+    assert!(dir.join("plugin.json").is_file());
+    assert_eq!(std::fs::read_to_string(dir.join("seed-marker.txt")).unwrap(), "from-seed");
+    assert_eq!(installed_version(&manager, "builtin-keyboard").as_deref(), Some("1.0.0"));
+}
+
+#[tokio::test]
+async fn seed_skips_when_installed_version_is_not_older() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    place_installed_plugin(&manager, "builtin-keyboard", "1.5.0", "user-installed");
+
+    manager.ensure_seed_dir(seed_dir("1.0.0", "from-seed").path()).await.unwrap();
+
+    let dir = manager.plugin_dir.join("builtin-keyboard");
+    assert_eq!(std::fs::read_to_string(dir.join("seed-marker.txt")).unwrap(), "user-installed");
+    assert_eq!(installed_version(&manager, "builtin-keyboard").as_deref(), Some("1.5.0"));
+}
+
+#[tokio::test]
+async fn seed_updates_an_older_installed_copy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    place_installed_plugin(&manager, "builtin-keyboard", "0.9.0", "old");
+
+    manager.ensure_seed_dir(seed_dir("1.0.0", "from-seed").path()).await.unwrap();
+
+    let dir = manager.plugin_dir.join("builtin-keyboard");
+    assert_eq!(std::fs::read_to_string(dir.join("seed-marker.txt")).unwrap(), "from-seed");
+    assert_eq!(installed_version(&manager, "builtin-keyboard").as_deref(), Some("1.0.0"));
+}
+
+// ─── reserved plugin id guard ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn generic_install_rejects_reserved_builtin_keyboard() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+
+    let err = manager.install(&seed_tar_gz("9.9.9", "poison")).await.unwrap_err();
+
+    assert!(err.contains("managed by the app"), "{err}");
+    assert!(!manager.plugin_dir.join("builtin-keyboard").exists());
+}
+
+#[tokio::test]
+async fn generic_update_rejects_reserved_builtin_keyboard() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    place_installed_plugin(&manager, "builtin-keyboard", "1.0.0", "seed");
+
+    let err =
+        manager.update("builtin-keyboard", &seed_tar_gz("9.9.9", "poison")).await.unwrap_err();
+
+    assert!(err.contains("managed by the app"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(
+            manager.plugin_dir.join("builtin-keyboard").join("seed-marker.txt")
+        )
+        .unwrap(),
+        "seed"
+    );
+}
+
+#[tokio::test]
+async fn folder_install_rejects_reserved_builtin_keyboard() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    let src = write_plugin_source(tmp.path(), "builtin-keyboard");
+
+    let err = manager.install_from_dir(&src, false).await.unwrap_err();
+
+    assert!(err.contains("managed by the app"), "{err}");
+    assert!(!manager.plugin_dir.join("builtin-keyboard").exists());
+}
+
+#[tokio::test]
+async fn git_channel_rejects_reserved_builtin_keyboard() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    let src = write_plugin_source(tmp.path(), "builtin-keyboard");
+    let content = std::fs::read_to_string(src.join("plugin.json")).unwrap();
+    let manifest: PluginManifest = serde_json::from_str(&content).unwrap();
+
+    let err = manager.upsert_from_dir(&src, manifest, false).await.unwrap_err();
+
+    assert!(err.contains("managed by the app"), "{err}");
+    assert!(!manager.plugin_dir.join("builtin-keyboard").exists());
+}
+
+/// 故障演练 2 variant: the plugin directory exists on disk but the plugin is
+/// not registered (corrupt manifest / interrupted scan / partial delete).
+/// `ensure_seed` swaps the stale directory for a healthy seed copy instead of
+/// leaving the orphaned dir to shadow the seed on the next scan.
+#[tokio::test]
+async fn seed_replaces_unregistered_directory_with_healthy_copy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    manager.scan();
+
+    let stale = manager.plugin_dir.join("builtin-keyboard");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("plugin.json"), "{ not valid json").unwrap();
+    std::fs::write(stale.join("stale-marker.txt"), "corrupt leftovers").unwrap();
+
+    manager.ensure_seed_dir(seed_dir("1.0.0", "from-seed").path()).await.unwrap();
+
+    assert_eq!(std::fs::read_to_string(stale.join("seed-marker.txt")).unwrap(), "from-seed");
+    assert!(!stale.join("stale-marker.txt").exists());
+    assert_eq!(installed_version(&manager, "builtin-keyboard").as_deref(), Some("1.0.0"));
+}
+
+/// Manual end-to-end: seeds the REAL built plugin directory, then verifies the
+/// installed plugin scans back and serves its assets. Ignored by default
+/// because the directory is a gitignored build artifact.
+#[tokio::test]
+#[ignore = "requires seed/builtin-keyboard/ (npm run build:builtin-kb)"]
+async fn seed_real_dir_installs_and_scans() {
+    let seed_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("seed/builtin-keyboard");
+    if !seed_dir.join("plugin.json").is_file() {
+        return;
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = test_manager(tmp.path());
+    manager.ensure_seed_dir(&seed_dir).await.unwrap();
+    manager.scan();
+
+    let info = manager.registry.get("builtin-keyboard").unwrap();
+    assert_eq!(info.manifest.entry.as_deref(), Some("./main.js"));
+    assert_eq!(info.manifest.styles.as_deref(), Some("./styles.css"));
+    assert_eq!(info.manifest.keyboard_api_version, Some(1));
+
+    let dir = manager.plugin_dir.join("builtin-keyboard");
+    for asset in ["plugin.json", "main.js", "styles.css"] {
+        assert!(dir.join(asset).is_file(), "{asset} missing from seeded plugin");
+    }
+    let manifest: PluginManifest =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest.id, "builtin-keyboard");
 }

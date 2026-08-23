@@ -39,7 +39,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { SuggestionItem } from '../../composables/useHistory'
+import type { SuggestionItem } from '@/composables/useHistory'
 
 defineProps<{
   suggestions: SuggestionItem[]

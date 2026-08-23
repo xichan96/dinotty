@@ -4,7 +4,7 @@ import { computeOverlapPx, type KeyboardOverlapGate } from '../composables/useKe
 const activeGate: KeyboardOverlapGate = {
   kbVisible: true,
   textInputFocused: true,
-  isSingleTerminalTab: true,
+  layoutEligible: true,
   hasVerticalPreview: false,
 }
 
@@ -20,7 +20,7 @@ describe('computeOverlapPx', () => {
   it.each([
     ['kbVisible', false],
     ['textInputFocused', false],
-    ['isSingleTerminalTab', false],
+    ['layoutEligible', false],
     ['hasVerticalPreview', true],
   ] as const)('returns zero when %s is %s', (field, value) => {
     expect(computeOverlapPx(80, { ...activeGate, [field]: value })).toBe(0)

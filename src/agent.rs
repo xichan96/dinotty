@@ -244,6 +244,14 @@ pub async fn sessions_run(
         }
     };
 
+    if !token_info.check_scope("terminal:write", &pane_id) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "SCOPE_DENIED",
+            &format!("Token terminal:write scope does not include pane {pane_id}"),
+        );
+    }
+
     // Acquire run slot
     {
         let mut limiter = state.run_limiter.write().await;
@@ -433,6 +441,14 @@ pub async fn sessions_send(
         }
     };
 
+    if !token_info.check_scope("terminal:write", &pane_id) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "SCOPE_DENIED",
+            &format!("Token terminal:write scope does not include pane {pane_id}"),
+        );
+    }
+
     match state.manager.sessions.get(&pane_id) {
         Some(session) => {
             let cmd = format!("{}\n", req.command);
@@ -490,6 +506,14 @@ pub async fn sessions_read(
             return error_response(StatusCode::NOT_FOUND, "NOT_FOUND", "No active terminal session")
         }
     };
+
+    if !token_info.check_scope("terminal:read", &pane_id) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "SCOPE_DENIED",
+            &format!("Token terminal:read scope does not include pane {pane_id}"),
+        );
+    }
 
     match state.manager.sessions.get(&pane_id) {
         Some(session) => {

@@ -6,6 +6,17 @@ use super::types::{
 pub(crate) const FONT_ANCHORS: [&str; 5] =
     ["Menlo", "Consolas", "Courier New", "DejaVu Sans Mono", "monospace"];
 
+const IME_KEYBOARD_OVERLAP_MAX: u32 = 300;
+
+pub(crate) fn clamp_ime_keyboard_overlap_px(settings: &mut Settings) -> bool {
+    let Some(value) = settings.ime_keyboard_overlap_px else {
+        return false;
+    };
+    let clamped = value.min(IME_KEYBOARD_OVERLAP_MAX);
+    settings.ime_keyboard_overlap_px = Some(clamped);
+    clamped != value
+}
+
 const BASE_THEME_NAMES: [&str; 3] = ["dark", "light", "dracula"];
 const THEME_CUSTOM_CAP: usize = 15;
 

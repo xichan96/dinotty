@@ -74,6 +74,12 @@
   --scrollbar-thumb: #4a4a4a;
   --scrollbar-thumb-hover: #5a5a5a;
 
+  /* Dialogs */
+  --z-dialog: 2100;
+  --dialog-backdrop: rgba(0, 0, 0, 0.5);
+  --dialog-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --fg-inverse: #ffffff;
+
   /* Misc */
   --radius: 4px;
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -167,6 +173,78 @@ input {
 
 .update-available-toast {
   cursor: pointer;
+}
+
+/* ── vue-toastification dark-theme override ─────────────────────────
+   Align toast cards with the notification panel / dialogs: dark surface,
+   type-colored left stripe + icon, app font, var(--radius). Replaces the
+   library's default colored blocks (blue/green/amber/red). */
+.Vue-Toastification__container {
+  width: min(340px, calc(100vw - 24px));
+  padding: 8px;
+}
+.Vue-Toastification__toast {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-left-color: var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--fg);
+  box-shadow: var(--dialog-shadow);
+  margin-bottom: 8px;
+}
+.Vue-Toastification__toast--info {
+  border-left-color: var(--accent);
+}
+.Vue-Toastification__toast--success {
+  border-left-color: var(--color-green);
+}
+.Vue-Toastification__toast--warning {
+  border-left-color: var(--color-yellow);
+}
+.Vue-Toastification__toast--error {
+  border-left-color: var(--color-red);
+}
+.Vue-Toastification__icon {
+  width: 16px;
+  margin-right: 8px;
+  color: var(--accent);
+}
+.Vue-Toastification__toast--success .Vue-Toastification__icon {
+  color: var(--color-green);
+}
+.Vue-Toastification__toast--warning .Vue-Toastification__icon {
+  color: var(--color-yellow);
+}
+.Vue-Toastification__toast--error .Vue-Toastification__icon {
+  color: var(--color-red);
+}
+.Vue-Toastification__toast-body {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.Vue-Toastification__close-button {
+  color: var(--fg-muted);
+  opacity: 1;
+  font-size: 16px;
+  line-height: 16px;
+  padding-left: 10px;
+}
+.Vue-Toastification__close-button:hover,
+.Vue-Toastification__close-button:focus {
+  color: var(--fg);
+}
+.Vue-Toastification__progress-bar {
+  height: 2px;
+  background: var(--accent);
 }
 
 @media (max-width: 768px) {

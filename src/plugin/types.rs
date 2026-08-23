@@ -30,6 +30,10 @@ pub struct PluginManifest {
     /// is available before the plugin is activated.
     #[serde(default)]
     pub events: Option<Vec<String>>,
+    /// KeyboardContext.version required by a keyboard provider plugin; the host
+    /// frontend rejects contributions that need a newer version.
+    #[serde(default, rename = "keyboardApiVersion")]
+    pub keyboard_api_version: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

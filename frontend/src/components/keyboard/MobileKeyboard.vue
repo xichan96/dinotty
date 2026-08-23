@@ -1,7 +1,7 @@
 <template>
-  <div ref="barRef" id="mobile-kb" v-show="visible">
+  <div v-show="visible" id="mobile-kb" ref="barRef">
     <!-- Default mode: suggestion bar on top -->
-    <div class="mkb-kb-bar" v-show="kbMode === 'default'">
+    <div v-show="kbMode === 'default'" class="mkb-kb-bar">
       <SuggestionBar
         :suggestions="suggestions"
         @select="onSuggestionSelect"
@@ -11,24 +11,24 @@
       <button
         type="button"
         class="mkb-collapse-btn"
-        @mousedown.prevent="emit('update:visible', false)"
-        @touchstart.prevent="emit('update:visible', false)"
+        @mousedown.prevent="requestHide()"
+        @touchstart.prevent="requestHide()"
       >
         ▼
       </button>
     </div>
 
     <!-- Action mode: text input on top -->
-    <div class="mkb-kb-bar" v-show="kbMode === 'action'">
+    <div v-show="kbMode === 'action'" class="mkb-kb-bar">
       <div class="mkb-text-input-glow" :class="{ 'mkb-glow-active': !textInputFocused }">
         <textarea
           ref="textInputRef"
+          v-model="textInput"
           class="mkb-text-input"
           :class="{ 'mkb-text-input-focused': textInputFocused }"
           :placeholder="t('mobileKb.actionPlaceholder')"
           enterkeyhint="send"
           rows="1"
-          v-model="textInput"
           @focus="onTextInputFocus"
           @blur="onTextInputBlur"
           @input="resizeTextInput"
@@ -41,15 +41,15 @@
         v-show="!textInputFocused"
         type="button"
         class="mkb-collapse-btn"
-        @mousedown.prevent="emit('update:visible', false)"
-        @touchstart.prevent="emit('update:visible', false)"
+        @mousedown.prevent="requestHide()"
+        @touchstart.prevent="requestHide()"
       >
         ▼
       </button>
     </div>
 
     <!-- Toolbar (visible when textarea focused) -->
-    <div class="mkb-toolbar" v-show="textInputFocused">
+    <div v-show="textInputFocused" class="mkb-toolbar">
       <button
         type="button"
         class="mkb-tool-btn"
@@ -153,7 +153,7 @@
     </div>
 
     <!-- Swipeable panels container -->
-    <div ref="swipeContainerRef" class="mkb-swipe-container" v-show="!textInputFocused">
+    <div v-show="!textInputFocused" ref="swipeContainerRef" class="mkb-swipe-container">
       <div class="mkb-swipe-track" :style="swipeTrackStyle">
         <!-- Main keyboard panel -->
         <div id="mkb-main-panel">
@@ -177,10 +177,10 @@
           <MkbRow
             :keys="row3"
             :state="modState"
+            stagger="asdf"
             @key-press="onKeyPress"
             @app-action="onAppAction"
             @special="onSpecial"
-            stagger="asdf"
           />
           <!-- Rows 4-5 with arrow cluster -->
           <div class="mkb-rows-45">
@@ -286,8 +286,8 @@
 
     <!-- Swipe indicator dots (outside overflow-hidden container) -->
     <div
-      class="mkb-swipe-dots"
       v-show="!textInputFocused"
+      class="mkb-swipe-dots"
       @touchstart.passive="onSwipeStart"
       @touchmove.passive="onSwipeMove"
       @touchend="onSwipeEnd"
@@ -314,7 +314,7 @@
 
     <FilePickerModal
       :visible="showFilePicker"
-      :pane-id="props.paneId"
+      :pane-id="paneId"
       @update:visible="showFilePicker = $event"
       @select="onFilePickerSelect"
     />
@@ -331,11 +331,11 @@ import MkbRow from './MkbRow.vue'
 import MkbKey from './MkbKey.vue'
 import SuggestionBar from './SuggestionBar.vue'
 import HistoryPanel from './HistoryPanel.vue'
-import FilePickerModal from '../preview/FilePickerModal.vue'
+import FilePickerModal from '@/components/preview/FilePickerModal.vue'
 import type { AppActionOptions, ModState } from './mkbTypes'
-import { useSettings, onThemeChange, onTextChange } from '../../composables/useSettings'
-import { useI18n } from '../../composables/useI18n'
-import { useHistory } from '../../composables/useHistory'
+import { useSettings, onThemeChange, onTextChange } from '@/composables/useSettings'
+import { useI18n } from '@/composables/useI18n'
+import { useHistory } from '@/composables/useHistory'
 import {
   FolderOpen,
   FileText,
@@ -346,44 +346,47 @@ import {
   Trash2,
   KeyboardOff,
 } from 'lucide-vue-next'
-import { useSelectedPath } from '../../composables/useFileNavigation'
-import { shellEscapePath, trailingPathDeleteLen } from '../../utils/shell'
-import { isTauri } from '../../composables/useTransport'
-import { formatMB, useUpload, type UploadProgress } from '../../composables/useUpload'
-import type { UploadResponse } from '../../types/uploads'
+import { useSelectedPath } from '@/composables/useFileNavigation'
+import { shellEscapePath, trailingPathDeleteLen } from '@/utils/shell'
+import { isTauri } from '@/composables/useTransport'
+import { formatMB, useUpload, type UploadProgress } from '@/composables/useUpload'
+import type { UploadResponse } from '@/types/uploads'
 import { useToast } from 'vue-toastification'
-import { useTextareaMetrics } from '../../composables/useTextareaMetrics'
+import { useTextareaMetrics } from '@/composables/useTextareaMetrics'
 import {
   observeSwipePanelHeightTargets,
   resolveSwipePanelHeight,
   useSwipePanel,
-} from '../../composables/useSwipePanel'
-import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
-import type { SendDataFn } from '../../utils/frozenSend'
-import { hasCollapseGuard } from '../../utils/keyboardGuardMode'
+} from '@/composables/useSwipePanel'
+import { useKeyboardLayout } from '@/composables/useKeyboardLayout'
+import type { KeyboardContext, KeyboardHostEventMap } from '../../../../plugin-api/index'
+import { hasCollapseGuard } from '@/utils/keyboardGuardMode'
 import {
   applyMobileTerminalModifiers,
   emptyMobileTerminalModifiers,
   isTouchDevice,
   mobileTerminalModifierActive,
   type MobileTerminalModifiers,
-} from '../../utils/terminalInput'
-import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
-import { resolveResponsiveToastPosition } from '../../utils/toastPosition' 
+} from '@/utils/terminalInputCore'
+import {
+  parseKeyboardSpecial,
+  type KeyboardModifierFamily,
+  type KeyboardSpecialId,
+} from '@/utils/keyboardSpecialKeys'
+import { resolveResponsiveToastPosition } from '@/utils/toastPosition'
 
 const props = defineProps<{
-  visible: boolean
-  paneId: string
-  getSendFn: () => SendDataFn | null
+  ctx: KeyboardContext
 }>()
 
-const emit = defineEmits<{
-  'update:visible': [val: boolean]
-  bookmarks: []
-  'app-action': [id: string, options: AppActionOptions]
-  dismiss: []
-  'typing-change': [focused: boolean]
-}>()
+// Legacy prop surface (visible/paneId/getSendFn) collapsed into the single ctx
+// prop; these computeds keep the template and watchers unchanged.
+const visible = computed(() => props.ctx.visible.value)
+const paneId = computed(() => props.ctx.activePaneId.value ?? '')
+
+function requestHide() {
+  props.ctx.visible.value = false
+}
 
 const { settings } = useSettings()
 const { t } = useI18n()
@@ -393,7 +396,7 @@ const { selectedPath: globalSelectedPath } = useSelectedPath()
 const { uploadFiles, uploadErrorStatus } = useUpload()
 
 const showHistoryPanel = ref(false)
-const allSuggestions = ref<import('../../composables/useHistory').SuggestionItem[]>([])
+const allSuggestions = ref<import('@/composables/useHistory').SuggestionItem[]>([])
 const showFilePicker = ref(false)
 const phoneFileInputRef = ref<HTMLInputElement>()
 const phoneUploading = ref(false)
@@ -414,14 +417,11 @@ let sendLocked = false
 let sendGeneration = 0
 let componentMounted = false
 
-watch(
-  () => props.paneId,
-  () => {
-    if (!sendLocked) return
-    sendLocked = false
-    sendGeneration++
-  }
-)
+watch(paneId, () => {
+  if (!sendLocked) return
+  sendLocked = false
+  sendGeneration++
+})
 
 const {
   resetTextareaMetrics,
@@ -457,6 +457,9 @@ const {
 })
 
 const modifierModes = reactive<MobileTerminalModifiers>(emptyMobileTerminalModifiers())
+const activeModifierSpecial = reactive<Partial<Record<KeyboardModifierFamily, KeyboardSpecialId>>>(
+  {}
+)
 const modState = computed<ModState>(() => ({
   ctrl: mobileTerminalModifierActive(modifierModes.ctrl),
   shift: mobileTerminalModifierActive(modifierModes.shift),
@@ -468,6 +471,7 @@ const modState = computed<ModState>(() => ({
     alt: modifierModes.alt === 'locked',
     meta: modifierModes.meta === 'locked',
   },
+  activeSpecial: activeModifierSpecial,
 }))
 
 const {
@@ -503,7 +507,7 @@ function onTextInputFocus() {
   // the keyboard closing, so onViewportChange sees no fresh open edge to arm on.
   // Without this, a later iOS dismiss would not fall back to the shortcut keyboard.
   if (sysKbOpen) sysKbArmed = true
-  emit('typing-change', true)
+  props.ctx.events.emit('typing-change', { focused: true })
   nextTick(resizeTextInput)
 }
 
@@ -515,7 +519,7 @@ function onTextInputBlur() {
       return
     }
     textInputFocused.value = false
-    emit('typing-change', false)
+    props.ctx.events.emit('typing-change', { focused: false })
     resetTextInputHeight()
     nextTick(updateHeight)
     blurTimer = null
@@ -525,13 +529,13 @@ function onTextInputBlur() {
 function dismissSystemKeyboard() {
   // Lift the sticky-typing guard BEFORE blurring so the terminal becomes
   // focusable again the moment the user leaves typing mode.
-  emit('typing-change', false)
+  props.ctx.events.emit('typing-change', { focused: false })
   // Hide the toolbar immediately so a quick follow-up tap on the same area
   // does not fall through to a quick-key button while the 100ms blur debounce
   // is still holding `textInputFocused` true.
   textInputFocused.value = false
   textInputRef.value?.blur()
-  emit('dismiss')
+  props.ctx.events.emit('dismiss', undefined)
 }
 
 function onCompositionStart() {
@@ -552,16 +556,15 @@ async function sendTextInput() {
   if (composing || sendLocked) return
   const text = textInput.value
   if (text.includes('\0') || text.includes('\x1b')) return
-  const send = props.getSendFn()
-  if (!send) return
+  if (!props.ctx.activePaneId.value) return
   if (!text) {
-    send('\r')
+    void props.ctx.send('active', '\r')
     return
   }
 
   const direct = settings.quick_send_threshold > 0 && text.length <= settings.quick_send_threshold
   if (!direct) {
-    send(text)
+    void props.ctx.send('active', text)
     clearSentText()
     return
   }
@@ -569,11 +572,11 @@ async function sendTextInput() {
   sendLocked = true
   const generation = ++sendGeneration
   try {
-    const textLeg = send(text)
+    const textLeg = props.ctx.send('active', text)
     clearSentText()
     await textLeg
     await new Promise<void>((resolve) => setTimeout(resolve, SPLIT_DELAY_MS))
-    if (componentMounted && generation === sendGeneration) send('\r')
+    if (componentMounted && generation === sendGeneration) void props.ctx.send('active', '\r')
   } catch {
     // Rejected text leg: degrade to two-stage (no \r). Transport already logged.
   } finally {
@@ -602,13 +605,13 @@ function onKeyPress(ch: string) {
     inputBuffer.value = ''
   }
 
-  props.getSendFn()?.(applied.data)
+  void props.ctx.send('active', applied.data)
   if (kbMode.value === 'default') fetchDebounced(inputBuffer.value || undefined)
 }
 
 function onAppAction(id: string, options: AppActionOptions) {
   if (sendLocked) return
-  emit('app-action', id, options)
+  props.ctx.events.emit('app-action', { id, options })
 }
 
 function onToolbarAppAction(id: string, options: AppActionOptions) {
@@ -641,29 +644,28 @@ function onSpecial(sp: string) {
     const family = parsed.entry.modifier
     modifierModes[family] =
       modifierModes[family] === 'off' ? (parsed.behavior === 'lock' ? 'locked' : 'once') : 'off'
+    if (modifierModes[family] !== 'off') activeModifierSpecial[family] = parsed.id
   }
   if (sp === 'kbswitch') {
     switchMode(kbMode.value === 'action' ? 'default' : 'action')
   }
   if (sp === 'bookmarks') {
-    emit('bookmarks')
+    props.ctx.events.emit('bookmarks', undefined)
   }
 }
 
 function onSuggestionSelect(command: string) {
-  const sendFn = props.getSendFn()
-  if (!sendFn) return
+  if (!props.ctx.activePaneId.value) return
   // Clear current input line before inserting suggestion
   const currentLen = inputBuffer.value.length
   if (currentLen > 0) {
-    sendFn('\x15') // Ctrl+U: kill line (works in bash/zsh)
+    void props.ctx.send('active', '\x15') // Ctrl+U: kill line (works in bash/zsh)
   }
   inputBuffer.value = command
-  sendFn(command)
+  void props.ctx.send('active', command)
 }
 
 function onSuggestionEdit(command: string) {
-  const sendFn = props.getSendFn()
   if (kbMode.value === 'action') {
     inputBuffer.value = command
     textInput.value = command
@@ -672,31 +674,28 @@ function onSuggestionEdit(command: string) {
       nextTick(resizeTextInput)
     })
   } else {
-    if (sendFn && inputBuffer.value.length > 0) {
-      sendFn('\x15')
+    if (props.ctx.activePaneId.value && inputBuffer.value.length > 0) {
+      void props.ctx.send('active', '\x15')
     }
     inputBuffer.value = command
-    sendFn?.(command)
+    if (props.ctx.activePaneId.value) void props.ctx.send('active', command)
   }
 }
 
 async function onExpandHistory() {
-  const { authFetch, apiUrl } = await import('../../composables/apiBase')
   try {
-    const res = await authFetch(apiUrl('/api/history?limit=100'))
-    if (res.ok) allSuggestions.value = await res.json()
+    allSuggestions.value = await fetchSuggestions(undefined, 100)
   } catch {}
   showHistoryPanel.value = true
 }
 
 function onHistoryPanelSelect(command: string) {
   showHistoryPanel.value = false
-  const sendFn = props.getSendFn()
-  if (sendFn && inputBuffer.value.length > 0) {
-    sendFn('\x15')
+  if (props.ctx.activePaneId.value && inputBuffer.value.length > 0) {
+    void props.ctx.send('active', '\x15')
   }
   inputBuffer.value = command
-  sendFn?.(command)
+  if (props.ctx.activePaneId.value) void props.ctx.send('active', command)
 }
 
 function onHistoryPanelDelete(command: string) {
@@ -769,7 +768,7 @@ async function onPhoneFileInputChange(ev: Event) {
     const data: UploadResponse = await uploadFiles(files, { onProgress: updatePhoneUploadProgress })
     const paths = data.saved ?? []
     if (paths.length) insertTextAtCaret(paths.map(shellEscapePath).join(' '))
-    window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
+    props.ctx.events.emit('upload-status', data as KeyboardHostEventMap['upload-status'])
     toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
   } catch (err) {
     toast.error(uploadErrorMessage(err), { position: resolveResponsiveToastPosition() })
@@ -822,6 +821,10 @@ function deleteSelectedOrLogicalLine() {
 
 let updateHeightRaf = 0
 function applyHeight() {
+  // The reservation band is host-owned (keyboard-plugin-design.md §三 D, Phase 2):
+  // the host measures this root with a ResizeObserver and writes --mkb-height.
+  // This plugin only resolves its own swipe-panel height so the root's rendered
+  // height (and therefore the reported band) is correct.
   if (!barRef.value) return
   const mainPanel = barRef.value.querySelector('#mkb-main-panel') as HTMLElement | null
   const actionPanel = barRef.value.querySelector('#mkb-action-panel') as HTMLElement | null
@@ -830,14 +833,11 @@ function applyHeight() {
     const actionH = actionPanel ? actionPanel.scrollHeight : 0
     swipeContainerRef.value.style.height = `${resolveSwipePanelHeight(kbMode.value, mainH, actionH)}px`
   }
-  const h = props.visible ? barRef.value.getBoundingClientRect().height : 0
-  document.documentElement.style.setProperty('--mkb-height', `${h}px`)
 }
 function updateHeight() {
   // Debounce via rAF: visualViewport fires both 'resize' and 'scroll' in rapid
   // succession on Windows when the keyboard opens/closes, which would otherwise
-  // trigger multiple --mkb-height changes → multiple terminal resizes → chaotic
-  // redraws in TUI apps like Codex.
+  // apply the swipe-panel height twice in one frame.
   cancelAnimationFrame(updateHeightRaf)
   updateHeightRaf = requestAnimationFrame(applyHeight)
 }
@@ -852,17 +852,20 @@ let sysKbOpen = false
 // read as a dismissal. Cleared on every close edge and on orientation change.
 let sysKbArmed = false
 
-function onViewportChange() {
-  if (!window.visualViewport) return
-  const vh = window.visualViewport.height
+function onViewportChange(info: { height: number; offsetTop: number; baseline: number }) {
+  const vh = info.height
   if (vh > naturalVH) naturalVH = vh
-  const off = window.innerHeight - (window.visualViewport.offsetTop + vh)
+  // Pan-compensated inset: while WebKit's caret pan (offsetTop > 0) is active,
+  // the pan-invariant --sys-kb-height leaves the fixed bar short of the keyboard
+  // top and the input ends up unreachable on iPhone. Anchor to the visual
+  // viewport's live bottom edge instead.
+  const off = info.baseline - (info.offsetTop + vh)
   const wasSysKbOpen = sysKbOpen
   sysKbOpen = naturalVH - vh > 120
   if (sysKbOpen && !wasSysKbOpen) sysKbArmed = textInputFocused.value
-  document.documentElement.style.setProperty('--kb-open', sysKbOpen || props.visible ? '1' : '0')
+  document.documentElement.style.setProperty('--kb-open', sysKbOpen || visible.value ? '1' : '0')
   if (barRef.value) {
-    if (!props.visible) {
+    if (!visible.value) {
       barRef.value.style.display = 'none'
     } else if (sysKbOpen && textInputFocused.value) {
       // System keyboard open with our input focused: show bar, hide panels via v-show
@@ -902,27 +905,24 @@ function onViewportChange() {
   }
 }
 
-watch(
-  () => props.visible,
-  (v) => {
-    if (!v) Object.assign(modifierModes, emptyMobileTerminalModifiers())
-    document.documentElement.style.setProperty('--kb-open', v || sysKbOpen ? '1' : '0')
-    nextTick(applyHeight)
-  }
-)
+watch(visible, (v) => {
+  if (!v) Object.assign(modifierModes, emptyMobileTerminalModifiers())
+  document.documentElement.style.setProperty('--kb-open', v || sysKbOpen ? '1' : '0')
+  nextTick(applyHeight)
+})
 
 watch(globalSelectedPath, () => {
   if (
     globalSelectedPath.value &&
-    props.visible &&
+    visible.value &&
     !hasCollapseGuard(settings.keyboard_guard_mode)
   ) {
-    emit('update:visible', false)
+    props.ctx.visible.value = false
   }
 })
 
 function onWheelCollapse() {
-  if (props.visible) emit('update:visible', false)
+  if (visible.value) props.ctx.visible.value = false
 }
 
 onMounted(() => {
@@ -930,12 +930,9 @@ onMounted(() => {
   fetchSuggestions()
   resetTextInputHeight()
 
-  if (window.visualViewport) {
-    naturalVH = window.visualViewport.height
-    window.visualViewport.addEventListener('resize', onViewportChange)
-    window.visualViewport.addEventListener('scroll', onViewportChange)
-    window.addEventListener('orientationchange', onOrientationChange)
-  }
+  naturalVH = window.visualViewport?.height ?? 0
+  viewportSub = props.ctx.onViewportResize(onViewportChange)
+  window.addEventListener('orientationchange', onOrientationChange)
 
   if (barRef.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -948,6 +945,7 @@ onMounted(() => {
 
 let roAf = 0
 let resizeObserver: ResizeObserver | null = null
+let viewportSub: { dispose(): void } | null = null
 function onOrientationChange() {
   resetTextareaMetrics()
   // Disarm SYNCHRONOUSLY: the viewport resize events that a rotation fires arrive
@@ -957,7 +955,7 @@ function onOrientationChange() {
   // the baseline once the new orientation settles.
   sysKbArmed = false
   setTimeout(() => {
-    naturalVH = window.visualViewport!.height
+    naturalVH = window.visualViewport?.height ?? naturalVH
     // The baseline just moved, so any pending open-edge arming is stale.
     sysKbOpen = false
     sysKbArmed = false
@@ -980,20 +978,18 @@ onBeforeUnmount(() => {
     blurTimer = null
   }
   textInputFocused.value = false
-  emit('typing-change', false)
+  props.ctx.events.emit('typing-change', { focused: false })
   if (sendLocked) {
     sendLocked = false
     sendGeneration++
   }
-  if (window.visualViewport) {
-    window.visualViewport.removeEventListener('resize', onViewportChange)
-    window.visualViewport.removeEventListener('scroll', onViewportChange)
-  }
+  viewportSub?.dispose()
+  viewportSub = null
   window.removeEventListener('orientationchange', onOrientationChange)
   resizeObserver?.disconnect()
   unsubThemeMetrics()
   unsubTextMetrics()
-  document.documentElement.style.setProperty('--mkb-height', '0px')
+  props.ctx.setDesiredHeight(0)
   document.documentElement.style.setProperty('--kb-open', '0')
 })
 </script>

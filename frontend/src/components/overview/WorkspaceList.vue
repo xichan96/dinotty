@@ -127,11 +127,14 @@ function openCtx(e: MouseEvent, ws: Workspace) {
       icon: Trash2,
       danger: true,
       action: async () => {
-        if (!(await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
-          title: t('workspace.delete'),
-          confirmText: t('workspace.delete'),
-          cancelText: t('filePreview.cancel'),
-        }))) return
+        if (
+          !(await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
+            title: t('workspace.delete'),
+            confirmText: t('workspace.delete'),
+            cancelText: t('filePreview.cancel'),
+          }))
+        )
+          return
         try {
           await deleteWorkspace(ws.id)
         } catch (err) {
@@ -269,7 +272,9 @@ function updateDragTarget(clientX: number, clientY: number) {
 
   const elements = document.elementsFromPoint(clientX, clientY)
   for (const el of elements) {
-    const item = (el as HTMLElement).closest('.mc-ws-list-item[data-workspace-id]') as HTMLElement | null
+    const item = (el as HTMLElement).closest(
+      '.mc-ws-list-item[data-workspace-id]'
+    ) as HTMLElement | null
     if (!item) continue
     const id = item.dataset.workspaceId
     if (!id || id === DEFAULT_WORKSPACE_ID || id === dragFromId) continue

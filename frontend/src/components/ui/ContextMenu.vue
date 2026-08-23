@@ -1,6 +1,11 @@
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="ctx-backdrop" @click.self="$emit('close')" @contextmenu.self.prevent="$emit('close')">
+    <div
+      v-if="visible"
+      class="ctx-backdrop"
+      @click.self="$emit('close')"
+      @contextmenu.self.prevent="$emit('close')"
+    >
       <div class="ctx-menu" :style="menuStyle">
         <button
           v-for="(item, i) in items"
@@ -9,7 +14,7 @@
           :class="{ danger: item.danger, disabled: item.disabled }"
           @click="onSelect(item)"
         >
-          <component v-if="item.icon" :is="item.icon" :size="14" class="ctx-icon" />
+          <component :is="item.icon" v-if="item.icon" :size="14" class="ctx-icon" />
           <span>{{ item.label }}</span>
         </button>
       </div>

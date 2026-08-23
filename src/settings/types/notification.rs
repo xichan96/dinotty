@@ -10,6 +10,8 @@ pub struct NotificationConfig {
     pub bell: BellNotificationConfig,
     #[serde(default = "default_true")]
     pub osc_notify: bool,
+    #[serde(default = "default_osc_notify_debounce_ms")]
+    pub osc_notify_debounce_ms: u32,
     #[serde(default)]
     pub idle_reminder: bool,
     #[serde(default)]
@@ -30,6 +32,7 @@ impl Default for NotificationConfig {
             enabled: true,
             bell: BellNotificationConfig::default(),
             osc_notify: true,
+            osc_notify_debounce_ms: default_osc_notify_debounce_ms(),
             idle_reminder: false,
             command_complete: CommandCompleteConfig::default(),
             keyword_match: vec![],
@@ -50,6 +53,10 @@ pub struct BellNotificationConfig {
 
 pub(crate) fn default_debounce_ms() -> u32 {
     300
+}
+
+pub(crate) fn default_osc_notify_debounce_ms() -> u32 {
+    2000
 }
 
 impl Default for BellNotificationConfig {

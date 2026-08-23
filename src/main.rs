@@ -209,7 +209,25 @@ async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
 
 #[tokio::main]
 async fn main() {
-    let _guard = settings::init_logging();
+    let mcp_stdio = std::env::args().any(|a| a == "--mcp-stdio");
+
+    // In stdio proxy mode, stdout is the JSON-RPC channel — logging must stay
+    // on stderr (init_logging's file-disabled fallback writes to stdout).
+    let _guard = if mcp_stdio { settings::init_stderr_logging() } else { settings::init_logging() };
+
+    if mcp_stdio {
+        let port = parse_port();
+        let settings_state = settings::create_settings_state();
+        if !settings_state.read().await.mcp.stdio_enabled {
+            eprintln!("MCP stdio disabled in settings");
+            std::process::exit(1);
+        }
+        let token = settings::load_token()
+            .or_else(|| std::env::var("DINOTTY_TOKEN").ok())
+            .unwrap_or_default();
+        mcp::transport::run_stdio(&format!("http://127.0.0.1:{port}"), &token).await;
+        return;
+    }
 
     let addr = SocketAddr::from(([0, 0, 0, 0], parse_port()));
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
@@ -287,6 +305,13 @@ async fn main() {
 
     let plugins =
         Arc::new(plugin::PluginManager::new(format!("http://127.0.0.1:{port}"), "server".into()));
+    plugins.scan();
+    // Seed the bundled keyboard plugin (installs when missing, updates when the
+    // installed copy is older). Best-effort: a missing/corrupt seed must not
+    // block startup.
+    if let Err(error) = plugins.ensure_seed().await {
+        tracing::warn!(%error, "failed to ensure bundled seed plugin");
+    }
     plugins.scan();
     tracing::info!("Loaded {} plugins", plugins.list().len());
 
@@ -539,6 +564,7 @@ async fn main() {
                         token::SessionsAuthState {
                             global_token: auth_token.clone(),
                             tokens: state.tokens.clone(),
+                            sessions: state.sessions.clone(),
                         },
                         token::sessions_token_middleware,
                     )),

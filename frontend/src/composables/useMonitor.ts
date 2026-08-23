@@ -1,5 +1,8 @@
 import { ref } from 'vue'
-import { onMonitorData as onSyncMonitorData, onMonitorHistory as onSyncMonitorHistory } from './useSyncWebSocket'
+import {
+  onMonitorData as onSyncMonitorData,
+  onMonitorHistory as onSyncMonitorHistory,
+} from './useSyncWebSocket'
 
 export interface CpuData {
   usage: number

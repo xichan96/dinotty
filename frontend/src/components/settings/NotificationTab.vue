@@ -4,47 +4,60 @@
       <div class="settings-row">
         <label>{{ t('notification.enabled') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="cfg.enabled" @change="saveSettings()" />
+          <input v-model="cfg.enabled" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
     </div>
 
     <CollapsibleSection :title="t('notification.triggers')" level="group">
-        <div class="settings-row">
-          <label>{{ t('notification.bellTrigger') }}</label>
-          <label class="toggle">
-            <input type="checkbox" v-model="cfg.bell.enabled" @change="saveSettings()" />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          </label>
-        </div>
-        <div class="settings-row sub">
-          <label>{{ t('notification.debounce') }}</label>
-          <input
-            type="number"
-            class="num-input"
-            v-model.number="cfg.bell.debounce_ms"
-            min="0"
-            max="5000"
-            step="50"
-            @change="saveSettings()"
-          />
-          ms
-        </div>
-        <div class="settings-row">
-          <label>OSC {{ t('notification.oscNotify') }}</label>
-          <label class="toggle">
-            <input type="checkbox" v-model="cfg.osc_notify" @change="saveSettings()" />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <label>{{ t('notification.idleReminder') }}</label>
-          <label class="toggle">
-            <input type="checkbox" v-model="cfg.idle_reminder" @change="saveSettings()" />
-            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-          </label>
-        </div>
+      <div class="settings-row">
+        <label>{{ t('notification.bellTrigger') }}</label>
+        <label class="toggle">
+          <input v-model="cfg.bell.enabled" type="checkbox" @change="saveSettings()" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <div class="settings-row sub">
+        <label>{{ t('notification.debounce') }}</label>
+        <input
+          v-model.number="cfg.bell.debounce_ms"
+          type="number"
+          class="num-input"
+          min="0"
+          max="5000"
+          step="50"
+          @change="saveSettings()"
+        />
+        ms
+      </div>
+      <div class="settings-row">
+        <label>OSC {{ t('notification.oscNotify') }}</label>
+        <label class="toggle">
+          <input v-model="cfg.osc_notify" type="checkbox" @change="saveSettings()" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <div class="settings-row sub">
+        <label>{{ t('notification.oscDebounce') }}</label>
+        <input
+          v-model.number="cfg.osc_notify_debounce_ms"
+          type="number"
+          class="num-input"
+          min="0"
+          max="10000"
+          step="100"
+          @change="saveSettings()"
+        />
+        ms
+      </div>
+      <div class="settings-row">
+        <label>{{ t('notification.idleReminder') }}</label>
+        <label class="toggle">
+          <input v-model="cfg.idle_reminder" type="checkbox" @change="saveSettings()" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
     </CollapsibleSection>
 
     <div class="settings-group">
@@ -52,35 +65,35 @@
       <div class="settings-row">
         <label>{{ t('notification.localPresentation') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="presentation.presentation_enabled" />
+          <input v-model="presentation.presentation_enabled" type="checkbox" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
       <div class="settings-row">
         <label>{{ t('notification.sound') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="presentation.channels.sound" />
+          <input v-model="presentation.channels.sound" type="checkbox" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
       <div class="settings-row">
         <label>{{ t('notification.vibration') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="presentation.channels.vibration" />
+          <input v-model="presentation.channels.vibration" type="checkbox" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
       <div class="settings-row">
         <label>{{ t('notification.popup') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="presentation.channels.popup" />
+          <input v-model="presentation.channels.popup" type="checkbox" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
       <div class="settings-row">
         <label>{{ t('notification.tabIndicator') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="presentation.channels.tab_indicator" />
+          <input v-model="presentation.channels.tab_indicator" type="checkbox" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
@@ -104,22 +117,22 @@
       <div class="settings-row">
         <label>{{ t('notification.ignoreCurrentTab') }}</label>
         <label class="toggle">
-          <input type="checkbox" v-model="presentation.ignore_current_tab" />
+          <input v-model="presentation.ignore_current_tab" type="checkbox" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
       <div class="settings-row quiet-hours-row">
         <label>{{ t('notification.quietHours') }}</label>
-        <input type="time" v-model="presentation.quiet_hours.start" />
+        <input v-model="presentation.quiet_hours.start" type="time" />
         <span>–</span>
-        <input type="time" v-model="presentation.quiet_hours.end" />
+        <input v-model="presentation.quiet_hours.end" type="time" />
       </div>
       <div class="settings-row">
         <label>{{ t('notification.coalesceWindow') }}</label>
         <input
+          v-model.number="presentation.coalesce_window_ms"
           type="number"
           class="num-input coalesce-input"
-          v-model.number="presentation.coalesce_window_ms"
           min="0"
           max="10000"
           step="50"
@@ -135,7 +148,7 @@
       <h3 class="settings-group-title">{{ t('notification.sounds') }}</h3>
       <div v-for="key in soundTypes" :key="key" class="settings-row sound-row">
         <label class="sound-label">{{ t(`notification.type.${key}`) }}</label>
-        <select class="sound-select" v-model="presentation.sounds[key].value">
+        <select v-model="presentation.sounds[key].value" class="sound-select">
           <option v-for="name in builtinNames" :key="name" :value="name">{{ name }}</option>
         </select>
         <input
@@ -157,19 +170,19 @@
       <p class="hook-hint">{{ t('notification.hookEnvHint') }}</p>
       <div v-for="(hook, idx) in cfg.hooks" :key="idx" class="hook-row">
         <label class="toggle toggle-sm">
-          <input type="checkbox" v-model="hook.enabled" @change="saveSettings()" />
+          <input v-model="hook.enabled" type="checkbox" @change="saveSettings()" />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
-        <select class="hook-type-select" v-model="hook.notification_type" @change="saveSettings()">
+        <select v-model="hook.notification_type" class="hook-type-select" @change="saveSettings()">
           <option :value="null">{{ t('notification.hookAll') }}</option>
           <option v-for="nt in notifTypes" :key="nt" :value="nt">
             {{ t(`notification.type.${nt}`) }}
           </option>
         </select>
         <input
+          v-model="hook.command"
           type="text"
           class="hook-cmd-input"
-          v-model="hook.command"
           :placeholder="t('notification.hookCommand')"
           @change="saveSettings()"
         />
@@ -201,17 +214,21 @@
         <template v-if="testMode === 'form'">
           <div class="api-field">
             <label>pane_id</label>
-            <input type="text" v-model="testForm.pane_id" :placeholder="t('notification.optional')" />
+            <input
+              v-model="testForm.pane_id"
+              type="text"
+              :placeholder="t('notification.optional')"
+            />
           </div>
           <div class="api-field">
             <label>title</label>
-            <input type="text" v-model="testForm.title" :placeholder="t('notification.optional')" />
+            <input v-model="testForm.title" type="text" :placeholder="t('notification.optional')" />
           </div>
           <div class="api-field">
             <label>body <span class="required">*</span></label>
             <input
-              type="text"
               v-model="testForm.body"
+              type="text"
               :placeholder="t('notification.testBodyDefault')"
             />
           </div>
@@ -224,7 +241,7 @@
         </template>
 
         <template v-else>
-          <textarea class="raw-editor" v-model="rawJson" rows="8" spellcheck="false" />
+          <textarea v-model="rawJson" class="raw-editor" rows="8" spellcheck="false" />
           <span v-if="rawError" class="api-result err">{{ rawError }}</span>
         </template>
 

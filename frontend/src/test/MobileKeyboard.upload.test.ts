@@ -53,6 +53,7 @@ vi.mock('../composables/useFileNavigation', async () => {
 
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'
 import { trailingPathDeleteLen } from '../utils/shell'
+import { makeMobileKeyboardCtx } from './helpers/makeMobileKeyboardCtx'
 
 function setFiles(input: HTMLInputElement, files: File[]) {
   Object.defineProperty(input, 'files', { value: files, configurable: true })
@@ -70,12 +71,10 @@ describe('MobileKeyboard upload convergence', () => {
     mobileMocks.success.mockReset()
   })
 
-  it('dispatches upload status, inserts returned paths, and resets uploading after success', async () => {
-    mobileMocks.uploadFiles.mockResolvedValue({ ok: true, saved: ['/tmp/a b.txt', '/tmp/c.txt'] })
-    const status = vi.fn()
-    window.addEventListener('dinotty-upload-status', status)
+  function mountKeyboard() {
+    const harness = makeMobileKeyboardCtx({ visible: true })
     const wrapper = mount(MobileKeyboard, {
-      props: { visible: true, paneId: 'p1', getSendFn: () => null },
+      props: { ctx: harness.ctx },
       global: {
         stubs: {
           SuggestionBar: true,
@@ -85,6 +84,14 @@ describe('MobileKeyboard upload convergence', () => {
         },
       },
     })
+    return { wrapper, harness }
+  }
+
+  it('dispatches upload status, inserts returned paths, and resets uploading after success', async () => {
+    mobileMocks.uploadFiles.mockResolvedValue({ ok: true, saved: ['/tmp/a b.txt', '/tmp/c.txt'] })
+    const status = vi.fn()
+    window.addEventListener('dinotty-upload-status', status)
+    const { wrapper, harness } = mountKeyboard()
 
     const textarea = wrapper.find('textarea').element as HTMLTextAreaElement
     textarea.focus()
@@ -100,6 +107,7 @@ describe('MobileKeyboard upload convergence', () => {
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe(
       "'/tmp/a b.txt' /tmp/c.txt"
     )
+    expect(harness.onHostEvent).toHaveBeenCalledWith('upload-status', expect.anything())
     expect(status).toHaveBeenCalled()
     expect(mobileMocks.success).toHaveBeenCalled()
     expect(wrapper.find('button[disabled]').exists()).toBe(false)
@@ -110,17 +118,7 @@ describe('MobileKeyboard upload convergence', () => {
 
   it('maps 413 to the too-large toast and resets uploading after error', async () => {
     mobileMocks.uploadFiles.mockRejectedValue({ status: 413 })
-    const wrapper = mount(MobileKeyboard, {
-      props: { visible: true, paneId: 'p1', getSendFn: () => null },
-      global: {
-        stubs: {
-          SuggestionBar: true,
-          MkbRow: true,
-          HistoryPanel: true,
-          FilePickerModal: true,
-        },
-      },
-    })
+    const { wrapper } = mountKeyboard()
 
     const input = wrapper.find('input[type="file"]').element as HTMLInputElement
     setFiles(input, [new File(['a'], 'a.txt')])
@@ -138,17 +136,7 @@ describe('MobileKeyboard upload convergence', () => {
 
   it('maps 507 to the disk-full toast and resets uploading after error', async () => {
     mobileMocks.uploadFiles.mockRejectedValue({ status: 507 })
-    const wrapper = mount(MobileKeyboard, {
-      props: { visible: true, paneId: 'p1', getSendFn: () => null },
-      global: {
-        stubs: {
-          SuggestionBar: true,
-          MkbRow: true,
-          HistoryPanel: true,
-          FilePickerModal: true,
-        },
-      },
-    })
+    const { wrapper } = mountKeyboard()
 
     const input = wrapper.find('input[type="file"]').element as HTMLInputElement
     setFiles(input, [new File(['a'], 'a.txt')])

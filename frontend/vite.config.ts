@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import monacoEditorPlugin from 'vite-plugin-monaco-editor'
+import { fileURLToPath, URL } from 'node:url'
 
 const monacoPlugin = (monacoEditorPlugin as any).default || monacoEditorPlugin
 
@@ -11,6 +12,11 @@ export default defineConfig({
       languageWorkers: ['editorWorkerService', 'typescript', 'json', 'css', 'html'],
     }),
   ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   server: {
     proxy: {
       '/ws': {

@@ -1,81 +1,84 @@
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="tp-backdrop" @click.self="$emit('close')">
-      <div class="tp-modal">
-        <div class="tp-header">
-          <span class="tp-title">{{ t('palette.applyTemplate') }}</span>
-          <button class="tp-close" @click="$emit('close')">&times;</button>
-        </div>
-        <div class="tp-body">
-          <div class="tp-list-col">
-            <div class="tp-scope-row">
-              <button
-                type="button"
-                :class="['tp-scope-btn', { active: scope === 'workspace' }]"
-                :disabled="!workspaceId"
-                @click="switchScope('workspace')"
-              >
-                {{ t('template.scopeWorkspace') }}
-              </button>
-              <button
-                type="button"
-                :class="['tp-scope-btn', { active: scope === 'global' }]"
-                @click="switchScope('global')"
-              >
-                {{ t('template.scopeGlobal') }}
-              </button>
-            </div>
-
-            <div v-if="loading" class="tp-empty">{{ t('filePreview.loading') }}</div>
-            <div v-else-if="error" class="tp-error">{{ error }}</div>
-            <div v-else-if="templates.length === 0" class="tp-empty">{{ t('template.pickerEmpty') }}</div>
-            <div v-else class="tp-list">
-              <button
-                v-for="tpl in templates"
-                :key="tpl.id"
-                type="button"
-                :class="['tp-item', { selected: tpl.id === selectedId }]"
-                @click="selectedId = tpl.id"
-                @dblclick="onApply"
-              >
-                <div class="tp-item-main">
-                  <div class="tp-item-name">{{ tpl.name }}</div>
-                  <div class="tp-item-meta">
-                    <span>{{ formatTime(tpl.updated_at) }}</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  class="tp-item-delete"
-                  :title="t('template.delete')"
-                  @click.stop="promptDelete(tpl)"
-                >
-                  <Trash2 :size="12" />
-                </button>
-              </button>
-            </div>
-          </div>
-
-          <div class="tp-preview-col">
-            <div v-if="!selectedId" class="tp-preview-empty">{{ t('template.previewEmpty') }}</div>
-            <div v-else-if="previewLoading" class="tp-preview-empty">{{ t('filePreview.loading') }}</div>
-            <div v-else-if="previewError" class="tp-preview-error">{{ previewError }}</div>
-            <TemplateLayoutPreview v-else-if="selectedTemplate" :layout="selectedTemplate.layout" />
-          </div>
-        </div>
-        <div class="tp-footer">
-          <button class="tp-btn cancel" @click="$emit('close')">{{ t('confirm.closeWindowCancel') }}</button>
+  <BaseDialog
+    :visible="visible"
+    :title="t('palette.applyTemplate')"
+    width="min(860px, 96vw)"
+    dialog-class="tp-dialog"
+    @close="$emit('close')"
+  >
+    <div class="tp-body">
+      <div class="tp-list-col">
+        <div class="tp-scope-row">
           <button
-            class="tp-btn primary"
-            :disabled="!selectedId"
-            @click="onApply"
+            type="button"
+            :class="['tp-scope-btn', { active: scope === 'workspace' }]"
+            :disabled="!workspaceId"
+            @click="switchScope('workspace')"
           >
-            {{ t('template.apply') }}
+            {{ t('template.scopeWorkspace') }}
+          </button>
+          <button
+            type="button"
+            :class="['tp-scope-btn', { active: scope === 'global' }]"
+            @click="switchScope('global')"
+          >
+            {{ t('template.scopeGlobal') }}
           </button>
         </div>
+
+        <div v-if="loading" class="tp-empty">{{ t('filePreview.loading') }}</div>
+        <div v-else-if="error" class="tp-error">{{ error }}</div>
+        <div v-else-if="templates.length === 0" class="tp-empty">
+          {{ t('template.pickerEmpty') }}
+        </div>
+        <div v-else class="tp-list">
+          <div
+            v-for="tpl in templates"
+            :key="tpl.id"
+            role="button"
+            tabindex="0"
+            :class="['tp-item', { selected: tpl.id === selectedId }]"
+            @click="selectedId = tpl.id"
+            @dblclick="onApply"
+            @keydown.enter.prevent="selectedId = tpl.id"
+            @keydown.space.prevent="selectedId = tpl.id"
+          >
+            <div class="tp-item-main">
+              <div class="tp-item-name">{{ tpl.name }}</div>
+              <div class="tp-item-meta">
+                <span>{{ formatTime(tpl.updated_at) }}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="tp-item-delete"
+              :title="t('template.delete')"
+              @click.stop="promptDelete(tpl)"
+            >
+              <Trash2 :size="12" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tp-preview-col">
+        <div v-if="!selectedId" class="tp-preview-empty">{{ t('template.previewEmpty') }}</div>
+        <div v-else-if="previewLoading" class="tp-preview-empty">
+          {{ t('filePreview.loading') }}
+        </div>
+        <div v-else-if="previewError" class="tp-preview-error">{{ previewError }}</div>
+        <TemplateLayoutPreview v-else-if="selectedTemplate" :layout="selectedTemplate.layout" />
       </div>
     </div>
-  </Teleport>
+    <template #footer>
+      <button class="dialog-btn" @click="$emit('close')">
+        {{ t('confirm.closeWindowCancel') }}
+      </button>
+      <button class="dialog-btn dialog-btn--primary" :disabled="!selectedId" @click="onApply">
+        {{ t('template.apply') }}
+      </button>
+    </template>
+  </BaseDialog>
 
   <ConfirmModal
     :visible="deleteConfirmVisible"
@@ -92,9 +95,14 @@
 import { ref, watch, computed } from 'vue'
 import { Trash2 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
-import { apiListTemplates, apiGetTemplate, apiDeleteTemplate } from '../../composables/useTemplateApi'
+import {
+  apiListTemplates,
+  apiGetTemplate,
+  apiDeleteTemplate,
+} from '../../composables/useTemplateApi'
 import TemplateLayoutPreview from './TemplateLayoutPreview.vue'
 import ConfirmModal from './ConfirmModal.vue'
+import BaseDialog from './BaseDialog.vue'
 import type { TemplateScope, TemplateIndexEntry } from '../../types/template'
 import type { LayoutTemplate } from '../../types/template'
 
@@ -125,7 +133,7 @@ const deleteTargetName = ref('')
 const deleteConfirmMessage = computed(() =>
   deleteTargetName.value
     ? t('template.deleteMessage').replace('{name}', deleteTargetName.value)
-    : t('template.deleteMessage').replace('{name}', ''),
+    : t('template.deleteMessage').replace('{name}', '')
 )
 
 function switchScope(s: TemplateScope) {
@@ -136,7 +144,7 @@ function switchScope(s: TemplateScope) {
 function currentQuery() {
   return {
     scope: scope.value,
-    workspace_id: scope.value === 'workspace' ? (props.workspaceId || undefined) : undefined,
+    workspace_id: scope.value === 'workspace' ? props.workspaceId || undefined : undefined,
   }
 }
 
@@ -197,7 +205,7 @@ function onApply() {
     'apply',
     selectedId.value,
     scope.value,
-    scope.value === 'workspace' ? (props.workspaceId || undefined) : undefined,
+    scope.value === 'workspace' ? props.workspaceId || undefined : undefined
   )
   emit('close')
 }
@@ -235,14 +243,14 @@ watch(
       previewError.value = ''
       loadList()
     }
-  },
+  }
 )
 
 watch(
   () => scope.value,
   () => {
     if (props.visible) loadList()
-  },
+  }
 )
 
 watch(
@@ -251,62 +259,12 @@ watch(
     if (id && props.visible && !loading.value) {
       loadPreview(id)
     }
-  },
+  }
 )
 </script>
 
 <style scoped>
-.tp-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.tp-modal {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  width: min(860px, 96vw);
-  max-width: 96vw;
-  max-height: min(860px, 88vh);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-.tp-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 0;
-  flex-shrink: 0;
-}
-.tp-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-bright);
-}
-.tp-close {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  color: var(--fg-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.tp-close:hover {
-  background: var(--bg-hover);
-}
 .tp-body {
-  padding: 12px 16px;
   flex: 1;
   overflow: hidden;
   display: flex;
@@ -348,11 +306,13 @@ watch(
   color: var(--fg-muted);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .tp-scope-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--fg-inverse);
 }
 .tp-scope-btn:disabled {
   opacity: 0.4;
@@ -380,7 +340,9 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 .tp-item:hover {
   border-color: var(--accent);
@@ -426,7 +388,7 @@ watch(
 }
 .tp-item-delete:hover {
   background: var(--bg-hover);
-  color: var(--color-red, #ef4444);
+  color: var(--color-red);
 }
 .tp-empty {
   padding: 24px 8px;
@@ -438,9 +400,9 @@ watch(
 .tp-error {
   padding: 8px 10px;
   font-size: 12px;
-  color: var(--color-red, #ef4444);
-  border: 1px solid var(--color-red, #ef4444);
-  border-radius: 4px;
+  color: var(--color-red);
+  border: 1px solid var(--color-red);
+  border-radius: var(--radius);
 }
 .tp-preview-empty {
   flex: 1;
@@ -456,56 +418,30 @@ watch(
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  color: var(--color-red, #ef4444);
+  color: var(--color-red);
   text-align: center;
   padding: 8px;
 }
-.tp-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px 14px;
-  flex-shrink: 0;
-}
-.tp-btn {
-  padding: 6px 16px;
-  border-radius: 5px;
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-  color: var(--fg-muted);
-  background: none;
-}
-.tp-btn.cancel:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-.tp-btn.primary {
-  background: var(--accent);
-  color: #fff;
-}
-.tp-btn.primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.tp-btn.primary:hover:not(:disabled) {
-  opacity: 0.9;
-}
+</style>
 
+<style>
+/* Mobile: template picker goes full-screen (unscoped - .tp-dialog lives in BaseDialog) */
 @media (max-width: 640px) {
-  .tp-modal {
+  .tp-dialog.dialog {
     width: 100vw;
+    max-width: 100vw;
     max-height: 100dvh;
     border-radius: 0;
+    border: none;
   }
-  .tp-body {
+  .tp-dialog .tp-body {
     flex-direction: column;
   }
-  .tp-list-col {
+  .tp-dialog .tp-list-col {
     flex: 0 0 auto;
     max-height: 40%;
   }
-  .tp-preview-col {
+  .tp-dialog .tp-preview-col {
     border-left: none;
     border-top: 1px solid var(--border);
     padding-left: 0;

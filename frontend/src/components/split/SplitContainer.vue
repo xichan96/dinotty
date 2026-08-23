@@ -24,7 +24,9 @@
       :allow-close="allowClose"
       @close="emit('close', leaf.paneId)"
       @reorder="(src, tgt, pos) => emit('reorder', src, tgt, pos)"
-      @drop-on-tab="(srcTab, srcPane, dstTab, pos) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)"
+      @drop-on-tab="
+        (srcTab, srcPane, dstTab, pos) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)
+      "
       @drop-extract="(srcTab, srcPane, idx) => emit('dropExtract', srcTab, srcPane, idx)"
     />
     <template v-if="broadcastActive">
@@ -112,8 +114,14 @@
         @preview-link="(id: string, url: string) => emit('previewLink', id, url)"
         @link-activate="emit('linkActivate')"
         @reorder="(src: string, tgt: string, pos: DropPosition) => emit('reorder', src, tgt, pos)"
-        @drop-on-tab="(srcTab: string, srcPane: string, dstTab: string, pos: DropPosition) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)"
-        @drop-extract="(srcTab: string, srcPane: string, idx: number) => emit('dropExtract', srcTab, srcPane, idx)"
+        @drop-on-tab="
+          (srcTab: string, srcPane: string, dstTab: string, pos: DropPosition) =>
+            emit('dropOnTab', srcTab, srcPane, dstTab, pos)
+        "
+        @drop-extract="
+          (srcTab: string, srcPane: string, idx: number) =>
+            emit('dropExtract', srcTab, srcPane, idx)
+        "
         @split-horizontal="emit('splitHorizontal')"
         @split-vertical="emit('splitVertical')"
         @toggle-broadcast="emit('toggleBroadcast')"

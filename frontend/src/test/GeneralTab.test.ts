@@ -39,6 +39,21 @@ vi.mock('../utils/clipboard', () => ({
   copyToClipboard: vi.fn(async () => true),
 }))
 
+vi.mock('../composables/useConfirm', () => ({
+  uiConfirm: (message: string) => window.confirm(message),
+  confirmState: {
+    visible: false,
+    title: '',
+    message: '',
+    confirmText: 'OK',
+    cancelText: 'Cancel',
+    danger: true,
+    resolve: null,
+  },
+  confirmResolve: vi.fn(),
+  confirmCancel: vi.fn(),
+}))
+
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import GeneralTab from '../components/settings/GeneralTab.vue'

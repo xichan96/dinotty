@@ -16,8 +16,8 @@
           <div class="bookmarks-header-actions">
             <button
               class="bookmarks-add-toggle"
-              @click="toggleAddMode"
               :class="{ active: addMode }"
+              @click="toggleAddMode"
             >
               <Plus :size="14" />
             </button>
@@ -50,7 +50,7 @@
               :placeholder="t('bookmarks.group')"
               class="bookmark-input short"
             />
-            <button class="bookmark-add-btn" @click="addBookmark" :disabled="!newCommand.trim()">
+            <button class="bookmark-add-btn" :disabled="!newCommand.trim()" @click="addBookmark">
               <Check :size="14" />
             </button>
           </div>
@@ -114,7 +114,7 @@
                   class="bookmark-input short"
                   @keydown.escape="cancelEdit"
                 />
-                <button class="bookmark-add-btn" @click="saveEdit" :disabled="!editCommand.trim()">
+                <button class="bookmark-add-btn" :disabled="!editCommand.trim()" @click="saveEdit">
                   <Check :size="14" />
                 </button>
                 <button class="bookmark-edit-cancel" @click="cancelEdit">
@@ -130,8 +130,8 @@
               </div>
               <button
                 class="bookmark-edit"
-                @click.stop="startEdit(bm)"
                 :title="t('bookmarks.edit')"
+                @click.stop="startEdit(bm)"
               >
                 <Pencil :size="12" />
               </button>
@@ -236,7 +236,9 @@ const filteredBookmarks = computed(() => {
   return list
 })
 
-watch(searchQuery, () => { selectedIndex.value = -1 })
+watch(searchQuery, () => {
+  selectedIndex.value = -1
+})
 
 const isTouchDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches
 

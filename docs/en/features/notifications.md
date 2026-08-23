@@ -1,6 +1,6 @@
 # Notification System
 
-Dinotty has a built-in notification system supporting terminal bell detection and custom notification push, designed for AI agent and automation tool integration.
+Dinotty has a built-in notification system that auto-detects terminal notification escape sequences (OSC 9 / OSC 777 / BEL) in pane output, plus custom notification push for AI agent and automation tool integration.
 
 ## User Side
 
@@ -31,6 +31,40 @@ Each notification card shows a `workspace › tab / pane` label for easy source 
 - **Click "Jump" on a toast**: same full jump chain
 
 Jump requires the sender to include `pane_id` when calling the HTTP API (see below).
+
+## Terminal Notification Auto-Detection (Zero Config)
+
+Dinotty parses each terminal pane's output stream on the backend and converts terminal notification escape sequences emitted by programs into notifications - **no hooks or extra configuration required**:
+
+| Sequence | Format | Origin | Effect |
+|----------|--------|--------|--------|
+| `OSC 9` | `ESC ] 9 ; <message> BEL`/`ST` | iTerm2 / Windows Terminal / WezTerm notification protocol | info notification with the message as body |
+| `OSC 777` | `ESC ] 777 ; notifysend ; <title> ; <body> BEL` | ConEmu / urxvt / Ghostty notification protocol | info notification with title |
+| `BEL` | `\a` | all terminals; agent fallback path | bell notification |
+
+Highlights:
+
+- **Background tabs covered**: detection happens on the backend. Switch to another tab or workspace and notifications still arrive, with an unread badge on the source tab; each notification carries `pane_id` for click-to-jump
+- **Zero-config agent integration**: Claude Code, Codex CLI, OpenCode and other agents emit these sequences natively on task completion or when waiting for input - notifications work out of the box (no hook needed)
+- **Flood protection**: identical notifications are deduplicated within a window (default 2s); sustained `BEL` from binary output is rate-limited to at most one per pane per window
+- **No false positives**: terminal-announce sequences such as `OSC 9;4` (taskbar progress) and `OSC 9;9` (cwd tracking) are ignored
+
+Manual verification:
+
+```bash
+printf '\e]9;Task done\a'                    # OSC 9 notification
+printf '\e]777;notifysend;Title;Body\a'      # OSC 777 notification
+printf '\a'                                  # bell notification
+```
+
+> **Popup suppression rules**: no toast when the source pane is the focused pane with the app in the foreground, or when "Ignore current tab popup" is enabled (default on) and the source pane is in the current tab - by design, to avoid disturbing a user who is already looking at that pane. The notification still lands in the bell panel history. To observe a toast: `sleep 3; printf '\e]9;hello\a'` and switch to another tab within 3 seconds.
+
+See `scripts/test-osc-notifications.sh` in the repository for a full interactive verification script.
+
+Related settings:
+
+- **Notification sequences** (settings panel, `notification.osc_notify`): master switch, on by default
+- **Dedup window** (settings panel, `notification.osc_notify_debounce_ms`): dedup window in ms for identical notifications, default 2000
 
 ## HTTP API
 
@@ -80,7 +114,7 @@ curl -X POST ${DINOTTY_URL}/api/notify \
 
 ## Claude Code Integration
 
-When running Claude Code in a dinotty terminal, you can use hooks to automatically send notifications at key moments:
+Recent versions of Claude Code emit OSC 9 notification sequences natively on task completion and when waiting for input; Dinotty detects them automatically, **so notifications work without any configuration**. Use hooks if you need custom notification types, wording, or trigger points:
 
 ```jsonc
 // .claude/settings.json

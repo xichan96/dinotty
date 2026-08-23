@@ -7,7 +7,7 @@ import {
   SquareTerminal,
   Upload,
 } from 'lucide-vue-next'
-import { defs, type KeyBindingDef } from '../composables/useKeybindings'
+import { defs, type KeyBindingDef } from './keybindingCatalog'
 
 export interface AppActionDef {
   id: string

@@ -213,7 +213,7 @@ pub enum ReserveResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IngestSource {
     Bell { debounce_duplicate: bool },
-    OscNotify,
+    OscNotify { debounce_duplicate: bool },
     CommandComplete { matched_rule: bool },
     KeywordMatch { matched_rule: bool },
     Plugin,

@@ -58,9 +58,7 @@ describe('computeWheelPlan', () => {
   })
 
   it('amplifies pixel-mode wheels', () => {
-    expect(
-      computeWheelPlan(input({ deltaMode: 0, deltaY: 120 }), 2, 0)
-    ).toEqual({
+    expect(computeWheelPlan(input({ deltaMode: 0, deltaY: 120 }), 2, 0)).toEqual({
       action: 'amplify',
       deltaMode: 0,
       deltaY: 240,
@@ -78,9 +76,7 @@ describe('computeWheelPlan', () => {
   })
 
   it('de-amplifies pixel-mode wheels below native sensitivity', () => {
-    expect(
-      computeWheelPlan(input({ deltaMode: 0, deltaY: 100, velocity: 0 }), 0.5, 0)
-    ).toEqual({
+    expect(computeWheelPlan(input({ deltaMode: 0, deltaY: 100, velocity: 0 }), 0.5, 0)).toEqual({
       action: 'amplify',
       deltaMode: 0,
       deltaY: 50,
@@ -89,9 +85,7 @@ describe('computeWheelPlan', () => {
   })
 
   it('acceleration lifts sub-1 base', () => {
-    expect(
-      computeWheelPlan(input({ deltaMode: 0, deltaY: 100, velocity: 0.1 }), 0.5, 2)
-    ).toEqual({
+    expect(computeWheelPlan(input({ deltaMode: 0, deltaY: 100, velocity: 0.1 }), 0.5, 2)).toEqual({
       action: 'amplify',
       deltaMode: 0,
       deltaY: 52.5,
@@ -100,9 +94,7 @@ describe('computeWheelPlan', () => {
   })
 
   it('applies level 5 acceleration with the highest coefficient', () => {
-    expect(
-      computeWheelPlan(input({ deltaMode: 0, deltaY: 100, velocity: 0.25 }), 1, 5)
-    ).toEqual({
+    expect(computeWheelPlan(input({ deltaMode: 0, deltaY: 100, velocity: 0.25 }), 1, 5)).toEqual({
       action: 'amplify',
       deltaMode: 0,
       deltaY: 200,
@@ -174,12 +166,7 @@ describe('computeWheelPlan', () => {
 
   it('resets the tracking remainder when wheel direction reverses', () => {
     const prior: TrackingWheelState = { remainder: 0.8, direction: 1 }
-    const plan = computeWheelPlan(
-      input({ isMouseTracking: true, deltaY: -3 }),
-      0.4,
-      0,
-      prior
-    )
+    const plan = computeWheelPlan(input({ isMouseTracking: true, deltaY: -3 }), 0.4, 0, prior)
 
     expect(plan.count).toBe(0)
     expect(plan.deltaY).toBe(-3)
@@ -209,12 +196,10 @@ describe('computeWheelPlan', () => {
   })
 
   it('discards whole-credit overflow above the tracking flood cap', () => {
-    const capped = computeWheelPlan(
-      input({ isMouseTracking: true }),
-      4,
-      0,
-      { remainder: 2.75, direction: 1 }
-    )
+    const capped = computeWheelPlan(input({ isMouseTracking: true }), 4, 0, {
+      remainder: 2.75,
+      direction: 1,
+    })
     const next = computeWheelPlan(
       input({ isMouseTracking: true }),
       0.5,

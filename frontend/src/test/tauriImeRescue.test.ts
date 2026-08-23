@@ -8,13 +8,13 @@ import {
 const IME_SYM_PAIR_MS = 400
 
 type Source = 'input' | 'onData'
-type SymCredit = { data: string, src: 0 | 1, at: number }
+type SymCredit = { data: string; src: 0 | 1; at: number }
 
 class SymPairMirror {
   private _symCredits: SymCredit[] = []
   private _lastInputData = ''
   private _lastInputTime = 0
-  emitted: Array<{ data: string, source: Source }> = []
+  emitted: Array<{ data: string; source: Source }> = []
 
   input(rawData: string, now: number) {
     const data = stripImeConfirmSpace(rawData)
@@ -35,9 +35,13 @@ class SymPairMirror {
   }
 
   private _resolveSym(data: string, src: 0 | 1, now: number): boolean {
-    if (this._symCredits.length) this._symCredits = this._symCredits.filter(c => now - c.at < IME_SYM_PAIR_MS)
-    const i = this._symCredits.findIndex(c => c.data === data && c.src !== src)
-    if (i >= 0) { this._symCredits.splice(i, 1); return false }
+    if (this._symCredits.length)
+      this._symCredits = this._symCredits.filter((c) => now - c.at < IME_SYM_PAIR_MS)
+    const i = this._symCredits.findIndex((c) => c.data === data && c.src !== src)
+    if (i >= 0) {
+      this._symCredits.splice(i, 1)
+      return false
+    }
     this._symCredits.push({ data, src, at: now })
     return true
   }
@@ -49,20 +53,55 @@ class SymPairMirror {
 
 describe('Tauri IME shift-symbol helpers', () => {
   it.each([
-    '!', '/', ':', '@', '[', '`', '{', '~',
-    '！', '／', '：', '＠', '［', '｀', '｛', '～',
-    '——', '……', '“', '”', '‘', '’', '《', '》', '〈', '〉', '¥', '￥',
-    '「', '」', '『', '』', '【', '】', '〔', '〕', '·', '、', '。',
+    '!',
+    '/',
+    ':',
+    '@',
+    '[',
+    '`',
+    '{',
+    '~',
+    '！',
+    '／',
+    '：',
+    '＠',
+    '［',
+    '｀',
+    '｛',
+    '～',
+    '——',
+    '……',
+    '“',
+    '”',
+    '‘',
+    '’',
+    '《',
+    '》',
+    '〈',
+    '〉',
+    '¥',
+    '￥',
+    '「',
+    '」',
+    '『',
+    '』',
+    '【',
+    '】',
+    '〔',
+    '〕',
+    '·',
+    '、',
+    '。',
   ] as const)('accepts punctuation range member %j', (data) => {
     expect(isShiftSymbolChar(data)).toBe(true)
   })
 
-  it.each([
-    'a', 'Z', '0', '9', ' ', '中', 'ab', '', '\t',
-    '　', '０', 'Ａ',
-  ] as const)('rejects non shift-symbol %j', (data) => {
-    expect(isShiftSymbolChar(data)).toBe(false)
-  })
+  it.each(['a', 'Z', '0', '9', ' ', '中', 'ab', '', '\t', '　', '０', 'Ａ'] as const)(
+    'rejects non shift-symbol %j',
+    (data) => {
+      expect(isShiftSymbolChar(data)).toBe(false)
+    }
+  )
 
   it('strips only a two-character symbol plus trailing IME confirm whitespace', () => {
     expect(stripImeConfirmSpace('! ')).toBe('!')

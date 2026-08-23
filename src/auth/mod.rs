@@ -242,6 +242,14 @@ pub async fn auth_middleware(
             .unwrap();
     }
 
+    // Routes that carry their own `sessions_token_middleware`: it validates
+    // session cookies, the global token AND scoped agent tokens, while this
+    // middleware only knows cookie + global token and would reject agent
+    // tokens before they ever reach the capability checks.
+    if is_agent_managed_path(path) {
+        return next.run(request).await;
+    }
+
     // Cookie session check (browser login).
     if let Some(session_id) = extract_session_cookie(&request, port) {
         if sessions.validate(&session_id) {
@@ -276,6 +284,28 @@ pub fn has_valid_auth(request: &Request, sessions: &SessionStore, token: &str) -
         }
     }
     check_token(request, token)
+}
+
+/// Check whether a request carries a valid session cookie (no token involved).
+/// Used by `sessions_token_middleware`, whose routes are exempt from
+/// `auth_middleware` and therefore cannot delegate the cookie check.
+pub fn has_valid_session_cookie(request: &Request, sessions: &SessionStore) -> bool {
+    extract_session_cookie(request, configured_session_cookie_port())
+        .is_some_and(|sid| sessions.validate(&sid))
+}
+
+/// Paths authenticated by `sessions_token_middleware` instead of
+/// `auth_middleware` (it accepts agent tokens in addition to cookies and the
+/// global token). Must stay in sync with the routes mounted under that
+/// middleware in `main.rs`.
+fn is_agent_managed_path(path: &str) -> bool {
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match segments.as_slice() {
+        ["api", "sessions", _, action] => matches!(*action, "run" | "send" | "read"),
+        ["api", "tokens", ..] => true,
+        ["mcp", action] => matches!(*action, "sse" | "message"),
+        _ => false,
+    }
 }
 
 fn extract_session_cookie(request: &Request, port: u16) -> Option<String> {

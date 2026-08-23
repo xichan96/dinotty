@@ -33,6 +33,7 @@ vi.mock('../composables/apiBase', () => ({
 
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'
 import { settings } from '../composables/useSettings'
+import { makeMobileKeyboardCtx } from './helpers/makeMobileKeyboardCtx'
 
 let wrapper: VueWrapper | undefined
 
@@ -55,19 +56,28 @@ afterEach(() => {
   settings.action_keyboard = null
 })
 
+function mountKeyboard(send: (...args: unknown[]) => unknown) {
+  const harness = makeMobileKeyboardCtx({
+    visible: true,
+    sendActive: (data) => Promise.resolve(send(data)) as Promise<void>,
+  })
+  wrapper = mount(MobileKeyboard, {
+    props: { ctx: harness.ctx },
+    global: {
+      stubs: {
+        SuggestionBar: true,
+        HistoryPanel: true,
+        FilePickerModal: true,
+      },
+    },
+  })
+  return wrapper
+}
+
 describe('MobileKeyboard modifier buttons', () => {
   it('releases once modifiers after a combination and keeps persistent modifiers held', async () => {
     const send = vi.fn()
-    wrapper = mount(MobileKeyboard, {
-      props: { visible: true, paneId: 'p1', getSendFn: () => send },
-      global: {
-        stubs: {
-          SuggestionBar: true,
-          HistoryPanel: true,
-          FilePickerModal: true,
-        },
-      },
-    })
+    wrapper = mountKeyboard(send)
 
     const buttons = wrapper.findAll('#mkb-action-panel .mkb-btn')
     expect(buttons.map((button) => button.text())).toEqual([
@@ -95,5 +105,30 @@ describe('MobileKeyboard modifier buttons', () => {
 
     await shiftHold.trigger('mousedown')
     expect(shiftHold.classes()).not.toContain('mkb-active')
+  })
+
+  it('highlights the chosen Cmd/Win alias without activating its sibling', async () => {
+    settings.action_keyboard = {
+      rows: [
+        [
+          { label: 'Cmd', kind: 'send', special: 'cmd:lock', display: 'text' },
+          { label: 'Win', kind: 'send', special: 'win:lock', display: 'text' },
+        ],
+      ],
+      bottom: { rows: [], enter: { label: 'Enter', kind: 'send', send: '\r' } },
+    }
+    wrapper = mountKeyboard(() => {})
+    const buttons = wrapper.findAll('#mkb-action-panel .mkb-btn')
+    const cmd = buttons.find((button) => button.text() === 'Cmd')!
+    const win = buttons.find((button) => button.text() === 'Win')!
+
+    await cmd.trigger('mousedown')
+    expect(cmd.classes()).toContain('mkb-active')
+    expect(win.classes()).not.toContain('mkb-active')
+
+    await cmd.trigger('mousedown')
+    await win.trigger('mousedown')
+    expect(cmd.classes()).not.toContain('mkb-active')
+    expect(win.classes()).toContain('mkb-active')
   })
 })

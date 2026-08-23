@@ -1,47 +1,10 @@
 /// Session regressions that use a stub with `SessionBackend::Exited` to avoid
 /// spawning a real PTY/child process.
+use super::test_support::stub_session;
 use super::*;
 use crate::notification::NotificationBroadcast;
-use std::sync::atomic::AtomicU64;
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
-
-fn stub_session() -> Arc<Session> {
-    let (resize_tx, _resize_rx) = watch::channel(None);
-    let (output_tx, output_rx) = mpsc::unbounded_channel();
-    Arc::new(Session {
-        backend: tokio::sync::Mutex::new(SessionBackend::Exited),
-        ssh_params: None,
-        screen: Mutex::new(VirtualScreen::new(80, 24)),
-        clients: Mutex::new(Vec::new()),
-        next_client_id: AtomicU64::new(1),
-        tauri_client_id: Mutex::new(None),
-        input_tx: Mutex::new(None),
-        status: Mutex::new(SessionStatus::Connected),
-        is_connected: AtomicBool::new(true),
-        size: Mutex::new((80, 24)),
-        exited: Mutex::new(false),
-        shell_type: "test".to_string(),
-        shell_launch_kind: crate::platform::shell::ShellLaunchKind::Native,
-        tauri_on_exit: Mutex::new(None),
-        cwd_state: Mutex::new(CwdState {
-            cwd: PathBuf::from("/"),
-            host_cwd: Some(PathBuf::from("/")),
-            sniff_buf: Vec::new(),
-        }),
-        sync: Mutex::new(SyncState::default()),
-        sync_disable_hook: Mutex::new(None),
-        resize_tx,
-        ssh_cmd_tx: Mutex::new(None),
-        ssh_handle: tokio::sync::Mutex::new(None),
-        sftp_session: Mutex::new(None),
-        remote_home: Mutex::new(None),
-        remote_user: Mutex::new(None),
-        output_tx,
-        output_rx: Mutex::new(Some(output_rx)),
-        pending_results: Mutex::new(Vec::new()),
-    })
-}
 
 fn add_ready_client(session: &Session) -> mpsc::Receiver<SessionClientEvent> {
     let (client_id, rx) = session.add_client();
@@ -356,4 +319,78 @@ async fn kill_and_remove_notifies_attention_ledger_with_a_single_removal_delta()
         serde_json::from_str(&rx.try_recv().expect("tab_closed must follow")).unwrap();
     assert_eq!(tab_closed["type"], "tab_closed");
     assert!(rx.try_recv().is_err(), "no further messages expected after the removal delta");
+}
+
+// ── OSC notification detection → broadcast pipeline ─────────────────────────
+
+fn osc_broadcast_setup(
+) -> (Arc<SessionManager>, Arc<NotificationBroadcast>, mpsc::UnboundedReceiver<String>) {
+    let manager = Arc::new(SessionManager::new());
+    let notifier = Arc::new(NotificationBroadcast::new(
+        Arc::clone(&manager.sync_clients),
+        manager.event_bus.clone(),
+    ));
+    manager.register_notifier(Arc::clone(&notifier));
+    let (client_id, mut rx) = manager.add_sync_client();
+    notifier.register_client(&client_id);
+    // Drain the initial snapshot so only post-setup traffic is counted.
+    let _ = rx.try_recv();
+    (manager, notifier, rx)
+}
+
+fn drain_message_count(rx: &mut mpsc::UnboundedReceiver<String>) -> usize {
+    let mut n = 0;
+    while rx.try_recv().is_ok() {
+        n += 1;
+    }
+    n
+}
+
+#[test]
+fn osc_notify_debounce_drops_duplicate_content_within_window() {
+    let (_manager, notifier, mut rx) = osc_broadcast_setup();
+
+    // Same pane + same payload twice: the second is a debounce duplicate and
+    // must be suppressed before the ledger (no StateDelta, no Notify).
+    notifier.send_notify("osc-pane", None, "task done", "info");
+    notifier.send_notify("osc-pane", None, "task done", "info");
+
+    // One accepted notify broadcasts exactly StateDelta + Notify.
+    assert_eq!(drain_message_count(&mut rx), 2);
+}
+
+#[test]
+fn osc_notify_debounce_allows_different_content_in_same_window() {
+    let (_manager, notifier, mut rx) = osc_broadcast_setup();
+
+    notifier.send_notify("osc-pane", None, "permission needed", "info");
+    notifier.send_notify("osc-pane", None, "turn complete", "info");
+
+    // Both accepted: 2 x (StateDelta + Notify).
+    assert_eq!(drain_message_count(&mut rx), 4);
+}
+
+#[test]
+fn detected_bell_flood_is_capped_by_osc_window() {
+    let (_manager, notifier, mut rx) = osc_broadcast_setup();
+
+    // Simulate binary 0x07 flood: repeated detected bells within the debounce
+    // window must produce at most one bell event (StateDelta + Bell).
+    notifier.send_detected_bell("osc-pane");
+    notifier.send_detected_bell("osc-pane");
+    notifier.send_detected_bell("osc-pane");
+
+    assert_eq!(drain_message_count(&mut rx), 2);
+}
+
+#[test]
+fn detected_bell_passes_through_to_bell_pipeline_when_window_elapsed_content_differs() {
+    // Distinct panes have distinct debounce keys, so bells on different panes
+    // do not starve each other.
+    let (_manager, notifier, mut rx) = osc_broadcast_setup();
+
+    notifier.send_detected_bell("osc-pane-a");
+    notifier.send_detected_bell("osc-pane-b");
+
+    assert_eq!(drain_message_count(&mut rx), 4);
 }

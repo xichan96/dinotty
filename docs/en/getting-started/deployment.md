@@ -172,7 +172,7 @@ CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 ```
 
 ::: warning Token auth
-Publicly exposed containers must configure a token. Either append `-t <token>` to the supervisor command, or write `/etc/dinotty/env` and run `supervisorctl restart dinotty-server`. See [Token Permission System](/zh/internals/token-system).
+Publicly exposed containers must configure a token. Either append `-t <token>` to the supervisor command, or write `/etc/dinotty/env` and run `supervisorctl restart dinotty-server`. See [Token Permission System](/en/internals/token-system).
 :::
 
 ## Cross-Platform Packages

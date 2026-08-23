@@ -304,6 +304,7 @@ mod tests {
                 targets: None,
                 show_in_toolbar: None,
                 events: None,
+                keyboard_api_version: None,
             },
             install_date: None,
             state: PluginStateValue::Active,

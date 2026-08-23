@@ -33,6 +33,8 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   const systemKeyboardOpen = ref(false)
   const systemKeyboardHeight = ref(0)
   const terminalImeFocused = opts.terminalImeFocused ?? ref(false)
+  // The fixed system toolbar rides the keyboard edge: it only needs the
+  // keyboard inset while the terminal's own IME focus is active.
   const toolbarBottom = computed(() =>
     terminalImeFocused.value && systemKeyboardOpen.value ? systemKeyboardHeight.value : 0
   )
@@ -97,7 +99,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
       '--kb-open',
       sysKbOpen || kbVisible.value ? '1' : '0'
     )
-    if (keyboardClosed) opts.onSystemKeyboardClose?.()
+    if (keyboardClosed) {
+      opts.onSystemKeyboardClose?.()
+    }
   }
 
   function onViewportResize() {
@@ -130,8 +134,8 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     systemKeyboardOpen.value = false
     systemKeyboardHeight.value = 0
     document.documentElement.style.setProperty('--sys-kb-height', '0px')
-    document.documentElement.style.setProperty('--kb-open', kbVisible.value ? '1' : '0')
     document.documentElement.style.setProperty('--system-toolbar-bottom', '0px')
+    document.documentElement.style.setProperty('--kb-open', kbVisible.value ? '1' : '0')
   }
 
   function reset() {

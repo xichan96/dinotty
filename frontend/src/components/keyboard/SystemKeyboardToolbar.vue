@@ -2,7 +2,6 @@
   <div
     v-show="visible"
     id="system-mobile-kb"
-    ref="rootRef"
     :class="{ 'system-action-open': actionOpen, 'ime-open': imeOpen }"
   >
     <template v-if="!actionOpen">
@@ -55,7 +54,7 @@
           class="system-kb-ime-toggle"
           :title="imeOpen ? t('mobileKb.dismissKeyboard') : t('mobileKb.showKeyboard')"
           @pointerdown.prevent
-          @click="emit('toggle-ime')"
+          @click="toggleIme"
         >
           <KeyboardOff v-if="imeOpen" :size="18" />
           <Keyboard v-else :size="18" />
@@ -116,8 +115,8 @@
         <div class="system-kb-page-dot-group upper">
           <button
             v-for="page in systemUpperPageCount"
-            :key="`u-${page}`"
             v-show="systemUpperPageCount > 1"
+            :key="`u-${page}`"
             type="button"
             class="system-kb-page-dot"
             :class="{ active: activeUpperPage === page - 1 }"
@@ -129,8 +128,8 @@
         <div v-if="systemLayout.lower_enabled !== false" class="system-kb-page-dot-group lower">
           <button
             v-for="page in systemLowerPageCount"
-            :key="`l-${page}`"
             v-show="systemLowerPageCount > 1"
+            :key="`l-${page}`"
             type="button"
             class="system-kb-page-dot"
             :class="{ active: activeLowerPage === page - 1 }"
@@ -155,12 +154,7 @@
         <strong>{{
           expandedPanel === 'termius' ? t('systemKb.terminalKeys') : t('systemKb.actions')
         }}</strong>
-        <button
-          type="button"
-          class="system-kb-ime-toggle"
-          @pointerdown.prevent
-          @click="emit('toggle-ime')"
-        >
+        <button type="button" class="system-kb-ime-toggle" @pointerdown.prevent @click="toggleIme">
           <KeyboardOff v-if="imeOpen" :size="18" />
           <Keyboard v-else :size="18" />
         </button>
@@ -245,17 +239,31 @@
 </template>
 
 <script setup lang="ts">
+// FROZEN: system keyboard is a frozen-zone component (keyboard-plugin-design.md
+// §5 Phase 1c). Host capabilities are consumed only through the injected
+// KeyboardContext (ctx.*); visible/actionOpen stay host-owned props because the
+// host state machine (persistent toolbar, action-panel guards) needs them.
+// The only host APIs it may call directly are the shared composables that have
+// no ctx counterpart (useUpload/useToast) and pure utilities.
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ChevronLeft, Keyboard, KeyboardOff } from 'lucide-vue-next'
 import MkbKey from './MkbKey.vue'
 import MkbRow from './MkbRow.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
+import type {
+  KeyboardContext,
+  KeyboardHostEventMap,
+  KeyboardIncomingEventMap,
+} from '../../../../plugin-api/index'
 import type { AppActionOptions, KeyDef, ModState } from './mkbTypes'
-import type { SendDataFn } from '../../utils/frozenSend'
 import { useKeyboardLayout } from '../../composables/useKeyboardLayout'
-import { effectiveSystemKeyboard, useSettings, type ActionKey } from '../../composables/useSettings'
-import { useI18n } from '../../composables/useI18n'
+import {
+  DEFAULT_SYSTEM_KEYBOARD,
+  type ActionKey,
+  type SettingsData,
+  type SystemKeyboardConfig,
+} from '../../composables/useSettings'
 import type { SuggestionItem } from '../../composables/useHistory'
 import {
   applyMobileTerminalModifiers,
@@ -275,30 +283,25 @@ import {
   systemKeyboardLayoutStatus,
   systemKeyUnits,
 } from '../../utils/systemKeyboardLayout'
-import { parseKeyboardSpecial } from '../../utils/keyboardSpecialKeys'
+import {
+  parseKeyboardSpecial,
+  type KeyboardModifierFamily,
+  type KeyboardSpecialId,
+} from '../../utils/keyboardSpecialKeys'
 
 const props = defineProps<{
+  ctx: KeyboardContext
   visible: boolean
-  paneId: string
-  getSendFn: () => SendDataFn | null
   actionOpen: boolean
-  imeOpen: boolean
 }>()
 
 const emit = defineEmits<{
   'update:actionOpen': [value: boolean]
-  'modifier-change': [modifiers: MobileTerminalModifiers]
-  'app-action': [id: string, options: AppActionOptions]
-  bookmarks: []
-  dismiss: []
-  'toggle-ime': []
-  'focus-xterm': []
-  'paste-text': [text: string]
 }>()
 
-const { settings } = useSettings()
-const { t } = useI18n()
-const rootRef = ref<HTMLElement>()
+const t = props.ctx.i18n.t
+const paneId = computed(() => props.ctx.activePaneId.value ?? '')
+const imeOpen = computed(() => props.ctx.nativeImeOpen.value)
 const showHistoryPanel = ref(false)
 const showFilePicker = ref(false)
 const phoneFileInputRef = ref<HTMLInputElement>()
@@ -309,6 +312,9 @@ const historyItems = ref<SuggestionItem[]>([])
 const kbMode = ref<'default' | 'action'>('action')
 const expandedPanel = ref<'termius' | 'shortcuts'>('termius')
 const modifierModes = reactive<MobileTerminalModifiers>(emptyMobileTerminalModifiers())
+const activeModifierSpecial = reactive<Partial<Record<KeyboardModifierFamily, KeyboardSpecialId>>>(
+  {}
+)
 const modState = computed<ModState>(() => ({
   ctrl: mobileTerminalModifierActive(modifierModes.ctrl),
   shift: mobileTerminalModifierActive(modifierModes.shift),
@@ -320,12 +326,15 @@ const modState = computed<ModState>(() => ({
     alt: modifierModes.alt === 'locked',
     meta: modifierModes.meta === 'locked',
   },
+  activeSpecial: activeModifierSpecial,
 }))
 
 const { actionFirstRow, actionFollowingRows, actionBottom, actionBottomRows, actionEnter } =
-  useKeyboardLayout({ kbMode, settings })
+  useKeyboardLayout({ kbMode, settings: props.ctx.settingsData as SettingsData })
 
-const systemLayout = computed(() => effectiveSystemKeyboard())
+const systemLayout = computed(
+  () => (props.ctx.settingsData.system_keyboard ?? DEFAULT_SYSTEM_KEYBOARD) as SystemKeyboardConfig
+)
 const systemStatus = computed(() => systemKeyboardLayoutStatus(systemLayout.value))
 const systemUpperPinned = computed(() =>
   systemLayout.value.upper.slice(0, systemStatus.value.upperPinned)
@@ -503,8 +512,12 @@ const termiusKeyRows: KeyDef[][] = [
   ],
 ]
 
+function toggleIme() {
+  props.ctx.setNativeImeOpen(!props.ctx.nativeImeOpen.value)
+}
+
 function publishModifiers() {
-  emit('modifier-change', { ...modifierModes })
+  props.ctx.events.emit('modifier-change', { modifiers: { ...modifierModes } })
 }
 
 function resetModifiers() {
@@ -516,7 +529,7 @@ function onKeyPress(input: string) {
   const applied = applyMobileTerminalModifiers(input, { ...modifierModes })
   Object.assign(modifierModes, applied.modifiers)
   publishModifiers()
-  props.getSendFn()?.(applied.data)
+  void props.ctx.send('active', applied.data)
 }
 
 function onSpecial(special: string) {
@@ -525,14 +538,15 @@ function onSpecial(special: string) {
     const family = parsed.entry.modifier
     modifierModes[family] =
       modifierModes[family] === 'off' ? (parsed.behavior === 'lock' ? 'locked' : 'once') : 'off'
+    if (modifierModes[family] !== 'off') activeModifierSpecial[family] = parsed.id
   }
-  if (special === 'bookmarks') emit('bookmarks')
+  if (special === 'bookmarks') props.ctx.events.emit('bookmarks', undefined)
   if (special === 'kbswitch') closeActionKeyboard()
   publishModifiers()
 }
 
 function onAppAction(id: string, options: AppActionOptions) {
-  emit('app-action', id, options)
+  props.ctx.events.emit('app-action', { id, options })
 }
 
 function onSystemAppAction(id: string, options: AppActionOptions) {
@@ -560,9 +574,9 @@ function onSystemAppAction(id: string, options: AppActionOptions) {
 }
 
 function onFilePickerSelect(path: string) {
-  props.getSendFn()?.(`${shellEscapePath(path)} `)
+  void props.ctx.send('active', `${shellEscapePath(path)} `)
   showFilePicker.value = false
-  emit('focus-xterm')
+  props.ctx.events.emit('focus-xterm', undefined)
 }
 
 async function onPhoneFileInputChange(event: Event) {
@@ -574,10 +588,10 @@ async function onPhoneFileInputChange(event: Event) {
   try {
     const data = await uploadFiles(files)
     const paths = data.saved ?? []
-    if (paths.length) props.getSendFn()?.(`${paths.map(shellEscapePath).join(' ')} `)
-    window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
+    if (paths.length) void props.ctx.send('active', `${paths.map(shellEscapePath).join(' ')} `)
+    props.ctx.events.emit('upload-status', data as KeyboardHostEventMap['upload-status'])
     toast.success(t('mobileKb.uploadDone'), { position: POSITION.BOTTOM_CENTER })
-    emit('focus-xterm')
+    props.ctx.events.emit('focus-xterm', undefined)
   } catch (error) {
     const status = uploadErrorStatus(error)
     const key =
@@ -607,72 +621,49 @@ function openTermiusKeyboard() {
 function closeActionKeyboard() {
   resetModifiers()
   emit('update:actionOpen', false)
-  emit('focus-xterm')
+  props.ctx.events.emit('focus-xterm', undefined)
 }
 
 async function openHistory() {
-  const { authFetch, apiUrl } = await import('../../composables/apiBase')
   try {
-    const response = await authFetch(apiUrl('/api/history?limit=100'))
-    if (response.ok) historyItems.value = await response.json()
+    historyItems.value = await props.ctx.history.fetchSuggestions('', 100)
   } catch {}
   showHistoryPanel.value = true
 }
 
 function onHistorySelect(command: string) {
   showHistoryPanel.value = false
-  props.getSendFn()?.('\x15')
-  emit('paste-text', command)
-  emit('focus-xterm')
+  void props.ctx.send('active', '\x15')
+  props.ctx.events.emit('paste-text', { text: command })
+  props.ctx.events.emit('focus-xterm', undefined)
 }
 
 function onHistoryDelete(command: string) {
   historyItems.value = historyItems.value.filter((item) => item.command !== command)
 }
 
-function updateHeight() {
-  const height = props.visible && rootRef.value ? rootRef.value.getBoundingClientRect().height : 0
-  document.documentElement.style.setProperty('--mkb-height', `${height}px`)
-}
-
-function onModifiersConsumed(event: Event) {
-  const detail = (
-    event as CustomEvent<{
-      paneId: string
-      modifiers: MobileTerminalModifiers
-    }>
-  ).detail
-  if (!detail || detail.paneId !== props.paneId) return
-  Object.assign(modifierModes, detail.modifiers)
+function onModifiersConsumed(data: KeyboardIncomingEventMap['modifiers-consumed']) {
+  if (data.paneId !== paneId.value) return
+  // Sync to the terminal's post-consumption residual state (locked modifiers
+  // survive, 'once' turned off); clear everything when no payload is present.
+  Object.assign(modifierModes, data.modifiers ?? emptyMobileTerminalModifiers())
 }
 
 watch(
   () => props.visible,
   (visible) => {
     if (!visible) resetModifiers()
-    requestAnimationFrame(updateHeight)
   }
 )
-watch(
-  () => props.actionOpen,
-  () => requestAnimationFrame(updateHeight)
-)
-watch(() => props.paneId, resetModifiers)
 
-let resizeObserver: ResizeObserver | null = null
+let modifiersSub: { dispose(): void } | null = null
 onMounted(() => {
-  window.addEventListener('dinotty-mobile-modifiers-consumed', onModifiersConsumed)
-  if (rootRef.value) {
-    resizeObserver = new ResizeObserver(updateHeight)
-    resizeObserver.observe(rootRef.value)
-  }
-  updateHeight()
+  modifiersSub = props.ctx.events.on('modifiers-consumed', onModifiersConsumed)
 })
 
 onBeforeUnmount(() => {
   resetModifiers()
-  resizeObserver?.disconnect()
-  window.removeEventListener('dinotty-mobile-modifiers-consumed', onModifiersConsumed)
-  document.documentElement.style.setProperty('--mkb-height', '0px')
+  modifiersSub?.dispose()
+  props.ctx.setDesiredHeight(0)
 })
 </script>

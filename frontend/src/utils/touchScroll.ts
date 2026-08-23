@@ -18,7 +18,7 @@ export function setupTouchScroll(
     isInTouchSelection: () => boolean
     setTouchMoved: (v: boolean) => void
     sendWheelEvent?: (deltaY: number, clientX: number, clientY: number) => void
-  },
+  }
 ): () => void {
   const { getXterm, isInTouchSelection, setTouchMoved } = opts
 
@@ -56,24 +56,25 @@ export function setupTouchScroll(
   // screen (no scrollback) this was a no-op, so TUI apps like opencode never
   // received scroll input on mobile.
   const sendWheelEvent =
-    opts.sendWheelEvent ?? ((deltaY: number, clientX: number, clientY: number) => {
-    const xterm = getXterm()
-    if (!xterm || deltaY === 0) return
-    const xtermEl = xterm.element
-    if (xtermEl) {
-      xtermEl.dispatchEvent(
-        new WheelEvent('wheel', {
-          deltaY,
-          deltaX: 0,
-          deltaZ: 0,
-          deltaMode: 0,
-          bubbles: true,
-          cancelable: true,
-          clientX,
-          clientY,
-        }),
-      )
-    }
+    opts.sendWheelEvent ??
+    ((deltaY: number, clientX: number, clientY: number) => {
+      const xterm = getXterm()
+      if (!xterm || deltaY === 0) return
+      const xtermEl = xterm.element
+      if (xtermEl) {
+        xtermEl.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY,
+            deltaX: 0,
+            deltaZ: 0,
+            deltaMode: 0,
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          })
+        )
+      }
     })
 
   const onTouchStart = (e: TouchEvent) => {

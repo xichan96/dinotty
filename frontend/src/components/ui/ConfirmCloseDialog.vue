@@ -14,7 +14,6 @@
 import { computed } from 'vue'
 import { useUiStore } from '../../stores/uiStore'
 import { useSessionStore } from '../../stores/sessionStore'
-import { useSettingsStore } from '../../stores/settingsStore'
 import { useI18n } from '../../composables/useI18n'
 import { formatCloseTabMessage } from '../../composables/formatCloseTabMessage'
 import { findFirstLeaf } from '../../types/pane'
@@ -26,8 +25,7 @@ const emit = defineEmits<{
 
 const ui = useUiStore()
 const session = useSessionStore()
-const settingsStore = useSettingsStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const tabTitle = computed(() => {
   const id = ui.pendingCloseTabId
@@ -43,11 +41,7 @@ const tabTitle = computed(() => {
 
 const closeMessage = computed(() => {
   if (!tabTitle.value) return t('confirm.closeTabMessage')
-  return formatCloseTabMessage(
-    t('confirm.closeTabMessage'),
-    tabTitle.value,
-    settingsStore.settings.locale === 'en' ? 'en' : 'zh'
-  )
+  return formatCloseTabMessage(t('confirm.closeTabMessage'), tabTitle.value, locale.value)
 })
 
 function onConfirm() {

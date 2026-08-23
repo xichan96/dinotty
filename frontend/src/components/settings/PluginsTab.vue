@@ -48,7 +48,7 @@
             </button>
           </div>
           <label class="plugin-toggle-inline">
-            <input type="checkbox" v-model="showIncompatibleModel" />
+            <input v-model="showIncompatibleModel" type="checkbox" />
             <span>{{ t('plugin.showIncompatible') }}</span>
           </label>
         </div>
@@ -64,7 +64,9 @@
         >
           <div class="plugin-card-header">
             <span class="plugin-card-name">{{ mp.name }}</span>
-            <span v-if="mp.category" class="plugin-badge category">{{ t('plugin.category.' + mp.category) }}</span>
+            <span v-if="mp.category" class="plugin-badge category">{{
+              t('plugin.category.' + mp.category)
+            }}</span>
             <span class="plugin-card-version">v{{ mp.version }}</span>
             <span v-if="mp.installed_version && !mp.has_update" class="plugin-badge installed">
               {{ t('settings.plugins.installedBadge') }}
@@ -83,8 +85,8 @@
             <button
               v-if="!mp.installed_version && mp.compatible"
               class="plugin-install-btn"
-              @click.stop="onMarketInstall(mp)"
               :disabled="isBusy(mp.id)"
+              @click.stop="onMarketInstall(mp)"
             >
               <span v-if="isBusy(mp.id)" class="plugin-spinner"></span>
               {{ t('settings.plugins.installFromMarket') }}
@@ -92,8 +94,8 @@
             <button
               v-else-if="mp.has_update && mp.compatible"
               class="plugin-install-btn"
-              @click.stop="onMarketInstall(mp)"
               :disabled="isBusy(mp.id)"
+              @click.stop="onMarketInstall(mp)"
             >
               <span v-if="isBusy(mp.id)" class="plugin-spinner"></span>
               {{ t('settings.plugins.updateFromMarket') }}
@@ -139,8 +141,8 @@
           <button
             v-if="!detailPlugin.installed_version"
             class="plugin-install-btn"
-            @click="onMarketInstall(detailPlugin)"
             :disabled="isBusy(detailPlugin.id)"
+            @click="onMarketInstall(detailPlugin)"
           >
             <span v-if="isBusy(detailPlugin.id)" class="plugin-spinner"></span>
             {{ t('settings.plugins.installFromMarket') }}
@@ -148,8 +150,8 @@
           <button
             v-else-if="detailPlugin.has_update"
             class="plugin-install-btn"
-            @click="onMarketInstall(detailPlugin)"
             :disabled="isBusy(detailPlugin.id)"
+            @click="onMarketInstall(detailPlugin)"
           >
             <span v-if="isBusy(detailPlugin.id)" class="plugin-spinner"></span>
             {{ t('settings.plugins.updateFromMarket') }}
@@ -157,8 +159,8 @@
           <button
             v-if="detailPlugin.installed_version"
             class="plugin-action-btn plugin-danger"
-            @click="onUninstall(detailPlugin.id)"
             :disabled="isBusy(detailPlugin.id)"
+            @click="onUninstall(detailPlugin.id)"
           >
             {{ t('settings.plugins.uninstall') }}
           </button>
@@ -191,13 +193,13 @@
       <div class="plugin-toolbar">
         <button
           class="plugin-action-btn"
-          @click="showDirInstall = !showDirInstall"
           :disabled="isBusy('dir-install')"
+          @click="showDirInstall = !showDirInstall"
         >
           <span v-if="isBusy('dir-install')" class="plugin-spinner"></span>
           {{ t('settings.plugins.installFolder') }}
         </button>
-        <button class="plugin-action-btn" @click="onRefresh" :disabled="isBusy('refresh')">
+        <button class="plugin-action-btn" :disabled="isBusy('refresh')" @click="onRefresh">
           <span v-if="isBusy('refresh')" class="plugin-spinner"></span>
           {{ t('settings.plugins.refresh') }}
         </button>
@@ -207,13 +209,13 @@
           {{ installDirPath || t('settings.plugins.browseFolder') }}
         </button>
         <label class="plugin-dev-toggle" :title="t('settings.plugins.devLinkHint')">
-          <input type="checkbox" v-model="devLinkMode" />
+          <input v-model="devLinkMode" type="checkbox" />
           <span>{{ t('settings.plugins.devLinkCheckbox') }}</span>
         </label>
         <button
           class="plugin-action-btn"
-          @click="onInstallFromDir"
           :disabled="!installDirPath.trim() || isBusy('dir-install')"
+          @click="onInstallFromDir"
         >
           <span v-if="isBusy('dir-install')" class="plugin-spinner"></span>
           {{ t('settings.plugins.install') }}
@@ -249,7 +251,9 @@
         <div v-for="p in filteredSettingsPlugins" :key="p.id" class="plugin-card">
           <div class="plugin-card-header">
             <span class="plugin-card-name">{{ p.name }}</span>
-            <span v-if="p.category" class="plugin-badge category">{{ t('plugin.category.' + p.category) }}</span>
+            <span v-if="p.category" class="plugin-badge category">{{
+              t('plugin.category.' + p.category)
+            }}</span>
             <span v-if="p.isDevLink" class="plugin-badge dev">{{
               t('settings.plugins.devBadge')
             }}</span>
@@ -261,6 +265,17 @@
           <div v-if="p.permissions.length" class="plugin-permissions">
             <span class="plugin-permissions-label">{{ t('settings.plugins.permissions') }}</span>
             <code v-for="permission in p.permissions" :key="permission">{{ permission }}</code>
+          </div>
+          <div v-if="p.overlays.length" class="plugin-permissions">
+            <span class="plugin-permissions-label">{{ t('settings.plugins.overlays') }}</span>
+            <label v-for="oid in p.overlays" :key="oid" class="plugin-toggle-inline" :title="oid">
+              <input
+                type="checkbox"
+                :checked="!hiddenOverlayIncludes(oid)"
+                @change="onToggleOverlay(oid, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ overlayName(oid) }}</span>
+            </label>
           </div>
           <div class="plugin-card-actions">
             <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
@@ -282,8 +297,8 @@
             <button
               v-if="p.marketEntry"
               class="plugin-install-btn"
-              @click="onUpdateFromRepo(p.marketEntry!)"
               :disabled="isBusy(p.id)"
+              @click="onUpdateFromRepo(p.marketEntry!)"
             >
               <span v-if="isBusy(p.id)" class="plugin-spinner"></span>
               {{ t('settings.plugins.updateFromMarket') }}
@@ -293,16 +308,16 @@
                 type="file"
                 accept=".tar.gz,.tgz"
                 hidden
-                @change="onUpdateFile($event, p.id)"
                 :disabled="isBusy(`update:${p.id}`)"
+                @change="onUpdateFile($event, p.id)"
               />
               <span v-if="isBusy(`update:${p.id}`)" class="plugin-spinner"></span>
               <span>{{ t('settings.plugins.update') }}</span>
             </label>
             <button
               class="plugin-action-btn plugin-danger"
-              @click="onUninstall(p.id)"
               :disabled="isBusy(p.id)"
+              @click="onUninstall(p.id)"
             >
               {{ t('settings.plugins.uninstall') }}
             </button>
@@ -324,9 +339,8 @@
       :visible="!!confirmUninstall"
       :title="t('settings.plugins.uninstall')"
       :message="t('settings.plugins.confirmUninstall')"
-      :target="confirmUninstall || undefined"
-      :confirmText="t('settings.plugins.uninstall')"
-      :cancelText="t('terminal.cancel')"
+      :confirm-text="t('settings.plugins.uninstall')"
+      :cancel-text="t('terminal.cancel')"
       @confirm="doUninstall"
       @cancel="confirmUninstall = null"
     />
@@ -338,7 +352,9 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { authFetch, apiUrl } from '../../composables/apiBase'
 import { usePluginLoader } from '../../composables/usePluginLoader'
+import { usePluginOverlaysStore } from '../../stores/pluginOverlays'
 import { useMarketplace, type MarketPlugin } from '../../composables/useMarketplace'
+import { hasHostPluginView } from '../../utils/hostPluginViews'
 import { describeHttpError, describeRequestError } from '../../utils/httpError'
 import { uiConfirm } from '../../composables/useConfirm'
 import { settings, saveSettings } from '../../composables/useSettings'
@@ -350,6 +366,7 @@ const emit = defineEmits<{ 'open-plugin': [pluginId: string] }>()
 
 const { t, locale } = useI18n()
 const { loadedPlugins, loadAll, unloadPlugin } = usePluginLoader()
+const overlayStore = usePluginOverlaysStore()
 const {
   plugins: marketPlugins,
   loading: marketLoading,
@@ -390,11 +407,14 @@ const settingsPlugins = computed(() =>
       description: p.manifest.description,
       state: p.state,
       error: p.error,
-      hasComponent: !!p.exports?.component,
+      hasComponent: !!p.exports?.component || hasHostPluginView(p.id),
       permissions: p.manifest.permissions ?? [],
       isDevLink: p.isDevLink,
       category: p.manifest.category,
       marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
+      overlays: overlayStore.overlays
+        .filter((o) => o.pluginId === p.id && !o.defaultHidden)
+        .map((o) => o.id),
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
 )
@@ -415,7 +435,11 @@ const showIncompatibleModel = computed({
   get: () => settings.plugin_prefs?.show_incompatible ?? false,
   set: (v: boolean) => {
     settings.plugin_prefs = {
-      ...(settings.plugin_prefs ?? { hidden_toolbar: [], show_incompatible: false }),
+      ...(settings.plugin_prefs ?? {
+        hidden_toolbar: [],
+        hidden_overlays: [],
+        show_incompatible: false,
+      }),
       show_incompatible: v,
     }
     void saveSettings()
@@ -432,18 +456,14 @@ const filteredMarketPlugins = computed(() => {
   return marketPlugins.value
     .filter((mp) => (settings.plugin_prefs?.show_incompatible ? true : mp.compatible))
     .filter((mp) => !marketCategory.value || mp.category === marketCategory.value)
-    .filter((mp) =>
-      matchesQuery(marketQuery.value, [mp.name, mp.id, mp.description, mp.author])
-    )
+    .filter((mp) => matchesQuery(marketQuery.value, [mp.name, mp.id, mp.description, mp.author]))
     .sort((a, b) => a.name.localeCompare(b.name))
 })
 
 const filteredSettingsPlugins = computed(() => {
   return settingsPlugins.value
     .filter((p) => !installedCategory.value || p.category === installedCategory.value)
-    .filter((p) =>
-      matchesQuery(installedQuery.value, [p.name, p.id, p.description])
-    )
+    .filter((p) => matchesQuery(installedQuery.value, [p.name, p.id, p.description]))
 })
 
 function hiddenToolbarIncludes(id: string): boolean {
@@ -454,10 +474,29 @@ async function toggleToolbarVisible(id: string, visible: boolean) {
   const current = settings.plugin_prefs?.hidden_toolbar ?? []
   const next = visible ? current.filter((x) => x !== id) : [...current, id]
   settings.plugin_prefs = {
-    ...(settings.plugin_prefs ?? { hidden_toolbar: [], show_incompatible: false }),
+    ...(settings.plugin_prefs ?? {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+    }),
     hidden_toolbar: next,
   }
   await saveSettings()
+}
+
+function hiddenOverlayIncludes(id: string): boolean {
+  return (settings.plugin_prefs?.hidden_overlays ?? []).includes(id)
+}
+
+/** 'overlay-demo:fab' -> 'Fab' */
+function overlayName(id: string): string {
+  const short = id.split(':').pop() ?? id
+  return short.charAt(0).toUpperCase() + short.slice(1)
+}
+
+function onToggleOverlay(id: string, visible: boolean) {
+  overlayStore.setUserVisible(id, visible)
+  void saveSettings()
 }
 
 function setStatus(msg: string, ok: boolean) {
@@ -776,7 +815,10 @@ async function onRefresh() {
   border: 1px solid var(--border, #444);
   border-radius: 12px;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
 }
 .plugin-category-chip:hover {
   color: var(--fg, #ccc);

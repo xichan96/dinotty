@@ -23,23 +23,31 @@ describe('notification presentation save boundary before presentation init', () 
   beforeEach(async () => {
     __resetSettingsLoadStateForTest()
     apiMocks.authFetch.mockReset()
-    apiMocks.authFetch.mockImplementation(async (_url, init?: RequestInit) => new Response(
-      init?.method === 'PUT' ? '{}' : JSON.stringify({
-        ...(settings as any),
-        notification: {
-          ...(settings as any).notification,
-          enabled: true,
-          bell: { enabled: true, debounce_ms: 300 },
-          osc_notify: true,
-          channels: loadedChannels,
-          sounds: loadedSounds,
-        },
-      }),
-      { status: 200 },
-    ))
+    apiMocks.authFetch.mockImplementation(
+      async (_url, init?: RequestInit) =>
+        new Response(
+          init?.method === 'PUT'
+            ? '{}'
+            : JSON.stringify({
+                ...(settings as any),
+                notification: {
+                  ...(settings as any).notification,
+                  enabled: true,
+                  bell: { enabled: true, debounce_ms: 300 },
+                  osc_notify: true,
+                  channels: loadedChannels,
+                  sounds: loadedSounds,
+                },
+              }),
+          { status: 200 }
+        )
+    )
     await loadSettings()
     ;(settings.notification as any).channels = {
-      sound: true, vibration: false, panel: true, tab_indicator: false,
+      sound: true,
+      vibration: false,
+      panel: true,
+      tab_indicator: false,
     }
     ;(settings.notification as any).sounds = {
       info: { source: 'custom', value: 'local-diverged', volume: 0.2 },
@@ -60,8 +68,11 @@ describe('notification presentation save boundary before presentation init', () 
       sounds: loadedSounds,
     })
     for (const key of [
-      'presentation_enabled', 'dnd_level',
-      'ignore_current_tab', 'quiet_hours', 'coalesce_window_ms',
+      'presentation_enabled',
+      'dnd_level',
+      'ignore_current_tab',
+      'quiet_hours',
+      'coalesce_window_ms',
     ]) {
       expect(payload.notification).not.toHaveProperty(key)
     }
@@ -76,9 +87,11 @@ describe('notification presentation save boundary before presentation init', () 
     await loadSettings()
     await saveSettings()
 
-    expect(apiMocks.authFetch.mock.calls.some(
-      ([url, init]) => url === '/api/settings' && init?.method === 'PUT',
-    )).toBe(false)
+    expect(
+      apiMocks.authFetch.mock.calls.some(
+        ([url, init]) => url === '/api/settings' && init?.method === 'PUT'
+      )
+    ).toBe(false)
     warn.mockRestore()
   })
 })

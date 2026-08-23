@@ -84,7 +84,8 @@ export function normalizeCustomFonts(list: string[]): string[] {
     const primary = primaryFamily(raw ?? '')
     if (!primary) continue
     if ([...primary].length > 100) continue
-    if (INVALID_RE.test(primary) || CONTROL_RE.test(primary) || CSS_INJECTION_RE.test(primary)) continue
+    if (INVALID_RE.test(primary) || CONTROL_RE.test(primary) || CSS_INJECTION_RE.test(primary))
+      continue
     const id = primary.toLowerCase()
     if (anchors.has(id)) continue
     if (seen.has(id)) continue
@@ -100,7 +101,8 @@ export function validateFontName(name: string, customFonts: string[]): AddFontEr
   const primary = primaryFamily(name)
   if (!primary) return 'blank'
   if ([...primary].length > 100) return 'tooLong'
-  if (INVALID_RE.test(primary) || CONTROL_RE.test(primary) || CSS_INJECTION_RE.test(primary)) return 'invalidChars'
+  if (INVALID_RE.test(primary) || CONTROL_RE.test(primary) || CSS_INJECTION_RE.test(primary))
+    return 'invalidChars'
   const id = primary.toLowerCase()
   if (anchorIdSet().has(id)) return 'duplicate'
   if (new Set(customFonts.map((c) => fontIdentity(c))).has(id)) return 'duplicate'

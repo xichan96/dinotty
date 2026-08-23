@@ -13,7 +13,10 @@ import {
   setOverride,
 } from '../composables/useDeviceTextSettings'
 
-const appearanceMocks = vi.hoisted(() => ({ authFetch: vi.fn(), isFontAvailable: vi.fn(() => true) }))
+const appearanceMocks = vi.hoisted(() => ({
+  authFetch: vi.fn(),
+  isFontAvailable: vi.fn(() => true),
+}))
 
 vi.mock('../composables/apiBase', () => ({
   apiUrl: (path: string) => path,
@@ -29,12 +32,24 @@ vi.mock('../utils/fontAvailability', () => ({
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>()
-  get length() { return this.data.size }
-  clear() { this.data.clear() }
-  getItem(key: string) { return this.data.get(key) ?? null }
-  key(index: number) { return [...this.data.keys()][index] ?? null }
-  removeItem(key: string) { this.data.delete(key) }
-  setItem(key: string, value: string) { this.data.set(key, String(value)) }
+  get length() {
+    return this.data.size
+  }
+  clear() {
+    this.data.clear()
+  }
+  getItem(key: string) {
+    return this.data.get(key) ?? null
+  }
+  key(index: number) {
+    return [...this.data.keys()][index] ?? null
+  }
+  removeItem(key: string) {
+    this.data.delete(key)
+  }
+  setItem(key: string, value: string) {
+    this.data.set(key, String(value))
+  }
 }
 
 describe('AppearanceTab device text overrides', () => {
@@ -87,7 +102,9 @@ describe('AppearanceTab device text overrides', () => {
     expect(appearanceMocks.isFontAvailable).toHaveBeenCalledWith('Fira Code')
     expect(settings.text.font_family).toBe('server-font')
 
-    const menlo = wrapper.findAll('.font-dropdown-item').find((item) => item.text().includes('Menlo'))!
+    const menlo = wrapper
+      .findAll('.font-dropdown-item')
+      .find((item) => item.text().includes('Menlo'))!
     await menlo.trigger('click')
     expect(getEffectiveText().font_family).toContain('Menlo')
     expect(settings.text.font_family).toBe('server-font')
@@ -100,7 +117,9 @@ describe('AppearanceTab device text overrides', () => {
     const wrapper = mount(AppearanceTab)
     await wrapper.find('.font-dropdown-trigger').trigger('click')
     await Promise.resolve()
-    const row = wrapper.findAll('.font-dropdown-item').find((item) => item.text().includes('Fira Code'))!
+    const row = wrapper
+      .findAll('.font-dropdown-item')
+      .find((item) => item.text().includes('Fira Code'))!
     await row.find('.font-item-remove').trigger('click')
     vi.advanceTimersByTime(100)
     await Promise.resolve()
@@ -110,7 +129,7 @@ describe('AppearanceTab device text overrides', () => {
     expect(settings.text.custom_fonts).toEqual([])
     expect(appearanceMocks.authFetch).toHaveBeenCalledWith(
       '/api/settings',
-      expect.objectContaining({ method: 'PUT' }),
+      expect.objectContaining({ method: 'PUT' })
     )
   })
 
@@ -122,7 +141,8 @@ describe('AppearanceTab device text overrides', () => {
     const defaults = { ...settings.text }
     settings.text.cursor_style = 'bar'
     await saveSettings()
-    const put = appearanceMocks.authFetch.mock.calls[appearanceMocks.authFetch.mock.calls.length - 1]!
+    const put =
+      appearanceMocks.authFetch.mock.calls[appearanceMocks.authFetch.mock.calls.length - 1]!
     const body = JSON.parse(put[1].body as string)
     expect(body.text).toMatchObject({
       font_size: defaults.font_size,
@@ -143,7 +163,9 @@ describe('AppearanceTab device text overrides', () => {
     setOverride('font_size', 30)
     const wrapper = mount(AppearanceTab)
     settings.text.font_size = 18
-    const reset = wrapper.findAll('button.setting-reset').find((button) => button.attributes('title') === 'reset to default')!
+    const reset = wrapper
+      .findAll('button.setting-reset')
+      .find((button) => button.attributes('title') === 'reset to default')!
     await reset.trigger('click')
     expect(getEffectiveText().font_size).toBe(18)
 
@@ -154,7 +176,7 @@ describe('AppearanceTab device text overrides', () => {
     await Promise.resolve()
     expect(appearanceMocks.authFetch).toHaveBeenCalledWith(
       '/api/settings',
-      expect.objectContaining({ method: 'PUT' }),
+      expect.objectContaining({ method: 'PUT' })
     )
   })
 })

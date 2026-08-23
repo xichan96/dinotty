@@ -10,6 +10,7 @@ describe('App.vue - terminal-sequence app actions', () => {
     await splitContainer.vm.$emit('register', 'pane-1', activeTerminal)
 
     const keyboard = wrapper.findComponent(MobileKeyboardStub)
+    const ctx = keyboard.props('ctx') as { events: { emit(event: string, data: unknown): void } }
     const cases = [
       ['term.newline', '\x1b\r'],
       ['term.lineStart', '\x01'],
@@ -18,16 +19,15 @@ describe('App.vue - terminal-sequence app actions', () => {
     ] as const
 
     for (const [id, sequence] of cases) {
-      await keyboard.vm.$emit('app-action', id, {})
+      ctx.events.emit('app-action', { id, options: {} })
       expect(activeTerminal.sendData).toHaveBeenLastCalledWith(sequence)
     }
     expect(activeTerminal.sendData).toHaveBeenCalledTimes(cases.length)
 
-    await keyboard.vm.$emit('app-action', 'unknown-action', { autoEnter: true })
+    ctx.events.emit('app-action', { id: 'unknown-action', options: { autoEnter: true } })
     expect(activeTerminal.sendData).toHaveBeenCalledTimes(cases.length)
   })
 })
-
 
 describe('App.vue - records terminal shell type', () => {
   it('writes shell info into the matching leaf pane', async () => {

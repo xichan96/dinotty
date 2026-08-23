@@ -33,18 +33,12 @@ export function genEditorSplitId(): string {
 }
 
 /** Create a single leaf layout */
-export function createEditorLeaf(
-  filePath: string | null = null,
-  isDir = false
-): EditorLeafPane {
+export function createEditorLeaf(filePath: string | null = null, isDir = false): EditorLeafPane {
   return { type: 'editor-leaf', id: genEditorLeafId(), filePath, isDir, ratio: 1, zoomed: false }
 }
 
 /** Find a leaf by id */
-export function findEditorLeaf(
-  layout: EditorPaneLayout,
-  id: string
-): EditorLeafPane | null {
+export function findEditorLeaf(layout: EditorPaneLayout, id: string): EditorLeafPane | null {
   if (layout.type === 'editor-leaf') return layout.id === id ? layout : null
   for (const child of layout.children) {
     const found = findEditorLeaf(child, id)
@@ -119,9 +113,7 @@ export function replaceEditorLeaf(
   replacement: EditorPaneLayout
 ): boolean {
   if (root.type !== 'editor-split') return false
-  const idx = root.children.findIndex(
-    (c) => c.type === 'editor-leaf' && c.id === leafId
-  )
+  const idx = root.children.findIndex((c) => c.type === 'editor-leaf' && c.id === leafId)
   if (idx !== -1) {
     root.children[idx] = replacement
     return true
@@ -133,14 +125,9 @@ export function replaceEditorLeaf(
 }
 
 /** Remove a leaf by id, collapse single-child splits */
-export function removeEditorLeaf(
-  root: EditorPaneLayout,
-  leafId: string
-): boolean {
+export function removeEditorLeaf(root: EditorPaneLayout, leafId: string): boolean {
   if (root.type !== 'editor-split') return false
-  const idx = root.children.findIndex(
-    (c) => c.type === 'editor-leaf' && c.id === leafId
-  )
+  const idx = root.children.findIndex((c) => c.type === 'editor-leaf' && c.id === leafId)
   if (idx !== -1) {
     root.children.splice(idx, 1)
     root.ratios.splice(idx, 1)
@@ -150,10 +137,7 @@ export function removeEditorLeaf(
   for (const child of root.children) {
     if (removeEditorLeaf(child, leafId)) {
       // Collapse single-child splits
-      if (
-        root.children.length === 1 &&
-        root.children[0].type === 'editor-split'
-      ) {
+      if (root.children.length === 1 && root.children[0].type === 'editor-split') {
         const onlyChild = root.children[0] as EditorSplitPane
         root.direction = onlyChild.direction
         root.children = onlyChild.children

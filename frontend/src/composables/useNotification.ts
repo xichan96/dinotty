@@ -26,10 +26,7 @@ export {
   getBuiltinSoundNames,
   __setPresentationEffectsForTest,
 } from './useNotificationAudio'
-import {
-  notificationPresentationEffects,
-  resetPresentationEffects,
-} from './useNotificationAudio'
+import { notificationPresentationEffects, resetPresentationEffects } from './useNotificationAudio'
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error' | 'urgent'
 
@@ -124,19 +121,22 @@ function parseNotificationSessionHistory(raw: string | null): NotificationItem[]
         (item.eventSeq !== undefined && typeof item.eventSeq !== 'string') ||
         (item.notifId !== undefined && typeof item.notifId !== 'string') ||
         (item.epoch !== undefined && typeof item.epoch !== 'string')
-      ) return []
-      return [{
-        id: item.id,
-        type: item.type as NotificationType,
-        paneId: item.paneId as string | undefined,
-        title: item.title,
-        body: item.body,
-        timestamp: item.timestamp,
-        source: item.source as NotificationItem['source'],
-        eventSeq: item.eventSeq as string | undefined,
-        notifId: item.notifId as string | undefined,
-        epoch: item.epoch as string | undefined,
-      }]
+      )
+        return []
+      return [
+        {
+          id: item.id,
+          type: item.type as NotificationType,
+          paneId: item.paneId as string | undefined,
+          title: item.title,
+          body: item.body,
+          timestamp: item.timestamp,
+          source: item.source as NotificationItem['source'],
+          eventSeq: item.eventSeq as string | undefined,
+          notifId: item.notifId as string | undefined,
+          epoch: item.epoch as string | undefined,
+        },
+      ]
     })
   } catch {
     return []
@@ -166,18 +166,22 @@ function persistNotificationSessionHistory(items: NotificationItem[]) {
     }
     sessionStorage.setItem(
       NOTIFICATION_SESSION_HISTORY_KEY,
-      JSON.stringify(items.map(({
-        id,
-        type,
-        paneId,
-        title,
-        body,
-        timestamp,
-        source,
-        eventSeq,
-        notifId,
-        epoch,
-      }) => ({ id, type, paneId, title, body, timestamp, source, eventSeq, notifId, epoch }))),
+      JSON.stringify(
+        items.map(
+          ({ id, type, paneId, title, body, timestamp, source, eventSeq, notifId, epoch }) => ({
+            id,
+            type,
+            paneId,
+            title,
+            body,
+            timestamp,
+            source,
+            eventSeq,
+            notifId,
+            epoch,
+          })
+        )
+      )
     )
   } catch {
     // Session storage is an optional reload bridge. The authoritative ledger and
@@ -186,11 +190,10 @@ function persistNotificationSessionHistory(items: NotificationItem[]) {
 }
 
 const notifications = ref<NotificationItem[]>(loadNotificationSessionHistory())
-watch(
-  notifications,
-  (items) => persistNotificationSessionHistory(items),
-  { deep: true, flush: 'sync' },
-)
+watch(notifications, (items) => persistNotificationSessionHistory(items), {
+  deep: true,
+  flush: 'sync',
+})
 const panelVisible = ref(false)
 let panelEmptyAutohideTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -217,7 +220,7 @@ watch(
       }
     }, PANEL_EMPTY_AUTOHIDE_MS)
   },
-  { flush: 'sync' },
+  { flush: 'sync' }
 )
 
 watch(
@@ -225,7 +228,7 @@ watch(
   (visible) => {
     if (!visible) clearPanelEmptyAutohide()
   },
-  { flush: 'sync' },
+  { flush: 'sync' }
 )
 
 const unreadByPane = shallowReactive<Record<string, NotificationType>>({})
@@ -247,8 +250,10 @@ const deferredHistoryActions = new Map<string, () => void>()
 let hasReceivedInitialSnapshot = false
 
 function hasRestoredHistoryAwaitingSnapshot(predicate: (item: NotificationItem) => boolean) {
-  return !hasReceivedInitialSnapshot
-    && notifications.value.some((item) => item.epoch !== undefined && predicate(item))
+  return (
+    !hasReceivedInitialSnapshot &&
+    notifications.value.some((item) => item.epoch !== undefined && predicate(item))
+  )
 }
 
 function deferHistoryAction(key: string, action: () => void) {
@@ -282,15 +287,11 @@ function gateNotification(item: NotificationItem): PresentationOutput {
       activeTabPaneIds: activeReadContext?.getActiveTabPaneIds() ?? [],
       isAppForeground: activeReadContext?.isAppForeground() ?? false,
       now: () => new Date(),
-    },
+    }
   )
 }
 
-function emitPresentation(
-  item: NotificationItem,
-  output: PresentationOutput,
-  retire: () => void,
-) {
+function emitPresentation(item: NotificationItem, output: PresentationOutput, retire: () => void) {
   const presentation = getNotificationPresentationSettings()
   if (output.playSound) {
     const soundCfg = presentation.sounds[item.type]
@@ -312,12 +313,15 @@ const presentationScheduler = createPresentationScheduler<ScheduledNotification>
 
 function presentNotification(item: NotificationItem, initialOutput: PresentationOutput) {
   const identity = item.presentationIdentity ?? stampPresentationIdentity(item)
-  presentationScheduler.enqueue({
-    ...item,
-    paneId: identity.kind === 'pane' ? identity.id : undefined,
-    notifId: identity.kind === 'notif' ? identity.id : undefined,
-    severity: item.type,
-  }, initialOutput)
+  presentationScheduler.enqueue(
+    {
+      ...item,
+      paneId: identity.kind === 'pane' ? identity.id : undefined,
+      notifId: identity.kind === 'notif' ? identity.id : undefined,
+      severity: item.type,
+    },
+    initialOutput
+  )
 }
 
 function stampPresentationIdentity(item: NotificationItem) {
@@ -404,15 +408,17 @@ export function aggregateSeverity(paneIds: string[]): NotificationType | null {
 }
 
 function safeBigInt(s: string): bigint | null {
-  try { return BigInt(s) } catch { return null }
+  try {
+    return BigInt(s)
+  } catch {
+    return null
+  }
 }
 
 function historyItemMatchesReadTarget(card: NotificationItem, target: OverlayTarget): boolean {
   if ('paneId' in target) {
     const seq = card.eventSeq !== undefined ? safeBigInt(card.eventSeq) : null
-    return card.paneId === target.paneId
-      && seq !== null
-      && seq <= target.throughEventSeq
+    return card.paneId === target.paneId && seq !== null && seq <= target.throughEventSeq
   }
   return card.notifId === target.notifId
 }
@@ -421,9 +427,8 @@ function pruneHistoryByReadTargets(targets: OverlayTarget[]) {
   const epoch = attentionStore.epoch
   if (epoch === null || targets.length === 0) return
   notifications.value = notifications.value.filter(
-    (card) => card.epoch !== epoch || !targets.some((target) =>
-      historyItemMatchesReadTarget(card, target)
-    )
+    (card) =>
+      card.epoch !== epoch || !targets.some((target) => historyItemMatchesReadTarget(card, target))
   )
 }
 
@@ -437,9 +442,7 @@ function pruneHistoryByAuthoritativeRead() {
     if (card.paneId !== undefined) {
       const pane = attentionStore.panes.get(card.paneId)
       const seq = card.eventSeq !== undefined ? safeBigInt(card.eventSeq) : null
-      paneRead = pane !== undefined
-        && seq !== null
-        && pane.readThroughSeq >= seq
+      paneRead = pane !== undefined && seq !== null && pane.readThroughSeq >= seq
     }
 
     let notifRead = false
@@ -490,11 +493,12 @@ function insertHistory(item: NotificationItem) {
   const epoch = attentionStore.epoch
   if (epoch !== null && item.epoch === epoch) {
     const pane = item.paneId === undefined ? undefined : attentionStore.panes.get(item.paneId)
-    const paneRead = pane !== undefined
-      && item.eventSeq !== undefined
-      && pane.readThroughSeq >= BigInt(item.eventSeq)
-    const notifRead = item.notifId !== undefined
-      && attentionStore.notifs.get(item.notifId)?.read === true
+    const paneRead =
+      pane !== undefined &&
+      item.eventSeq !== undefined &&
+      pane.readThroughSeq >= BigInt(item.eventSeq)
+    const notifRead =
+      item.notifId !== undefined && attentionStore.notifs.get(item.notifId)?.read === true
     const overlayRead = [...attentionStore.overlays.values()].some((overlay) =>
       overlay.targets.some((target) => historyItemMatchesReadTarget(item, target))
     )
@@ -992,9 +996,11 @@ export function useNotification() {
     },
     clearForPaneIds(paneIds: string[], reason: MarkReadReason = 'tab_activate') {
       const idSet = new Set(paneIds)
-      if (hasRestoredHistoryAwaitingSnapshot(
-        (notification) => Boolean(notification.paneId && idSet.has(notification.paneId))
-      )) {
+      if (
+        hasRestoredHistoryAwaitingSnapshot((notification) =>
+          Boolean(notification.paneId && idSet.has(notification.paneId))
+        )
+      ) {
         const deferredPaneIds = [...paneIds]
         const key = `clear_panes:${reason}:${[...idSet].sort().join(',')}`
         deferHistoryAction(key, () => useNotification().clearForPaneIds(deferredPaneIds, reason))

@@ -10,7 +10,7 @@ const zhNav = [
 
 const enNav = [
   { text: 'User Docs', link: '/en/introduction' },
-  { text: 'Dev Docs', link: '/zh/plugins/plugin-development' },
+  { text: 'Dev Docs', link: '/en/plugins/plugin-development' },
   { text: 'GitHub', link: GITHUB }
 ]
 
@@ -124,7 +124,7 @@ const enSidebar = [
   {
     text: 'Dev Docs',
     items: [
-      { text: 'Plugin Development Guide (中文)', link: '/zh/plugins/plugin-development' },
+      { text: 'Plugin Development Guide', link: '/en/plugins/plugin-development' },
       {
         text: 'API',
         items: [
@@ -137,11 +137,11 @@ const enSidebar = [
         ]
       },
       {
-        text: 'Internals (中文)',
+        text: 'Internals',
         items: [
-          { text: 'Event Bus', link: '/zh/internals/event-bus' },
-          { text: 'Token Permission System', link: '/zh/internals/token-system' },
-          { text: 'Audit Log & Webhook', link: '/zh/internals/audit-webhook' }
+          { text: 'Event Bus', link: '/en/internals/event-bus' },
+          { text: 'Token Permission System', link: '/en/internals/token-system' },
+          { text: 'Audit Log & Webhook', link: '/en/internals/audit-webhook' }
         ]
       },
       { text: 'Contributing Guide', link: '/en/getting-started/contributing' },
@@ -155,7 +155,7 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   title: 'Dinotty',
-  description: '为 Coding Agent 场景打造的终端 -- 简洁、可拓展、多端同步，会话永不丢失',
+  description: 'A terminal built for coding agents -- simple, extensible, multi-device sync, sessions never lost',
 
   srcExclude: ['README.*.md', 'README.md'],
 
@@ -164,6 +164,14 @@ export default defineConfig({
   ],
 
   locales: {
+    en: {
+      label: 'English',
+      lang: 'en-US',
+      themeConfig: {
+        nav: enNav,
+        sidebar: enSidebar
+      }
+    },
     zh: {
       label: '简体中文',
       lang: 'zh-CN',
@@ -175,14 +183,6 @@ export default defineConfig({
         lastUpdated: { text: '最后更新' },
         search: { provider: 'local', options: { translations: { button: { buttonText: '搜索文档', buttonAriaLabel: '搜索文档' } } } }
       }
-    },
-    en: {
-      label: 'English',
-      lang: 'en-US',
-      themeConfig: {
-        nav: enNav,
-        sidebar: enSidebar
-      }
     }
   },
 
@@ -190,7 +190,7 @@ export default defineConfig({
     logo: '/images/logo.png',
     socialLinks: [{ icon: 'github', link: GITHUB }],
     footer: {
-      message: '基于 MIT 许可发布',
+      message: 'Released under the MIT license',
       copyright: 'Copyright © 2024-present xichan96'
     },
     search: { provider: 'local' }

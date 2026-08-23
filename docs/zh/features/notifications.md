@@ -1,6 +1,6 @@
 # 通知系统
 
-dinotty 内建通知系统，支持终端 bell 检测和自定义通知推送，适用于 AI agent 和自动化工具集成。
+dinotty 内建通知系统，自动检测终端输出中的通知转义序列（OSC 9 / OSC 777 / BEL），并支持自定义通知推送，适用于 AI agent 和自动化工具集成。
 
 ## 用户侧
 
@@ -31,6 +31,40 @@ dinotty 内建通知系统，支持终端 bell 检测和自定义通知推送，
 - **Toast 点击「跳转」按钮**：同上完整跳转链
 
 跳转需要通知发送方在 API 调用时附带 `pane_id`（见下方 HTTP API）。
+
+## 终端通知自动检测（零配置）
+
+dinotty 会在后端解析每个终端 pane 的输出流，自动识别程序发出的终端通知转义序列并转为通知，**无需任何 hook 或额外配置**：
+
+| 序列 | 格式 | 来源 | 效果 |
+|------|------|------|------|
+| `OSC 9` | `ESC ] 9 ; <消息> BEL`/`ST` | iTerm2 / Windows Terminal / WezTerm 通知协议 | info 通知，正文为消息 |
+| `OSC 777` | `ESC ] 777 ; notifysend ; <标题> ; <正文> BEL` | ConEmu / urxvt / Ghostty 通知协议 | info 通知，带标题 |
+| `BEL` | `\a` | 所有终端；agent 的退化路径 | bell 通知 |
+
+特性：
+
+- **覆盖后台 tab**：检测在后端进行。切到其他 tab 或工作区，通知照常弹出，且来源 tab 出现未读标记；通知带 `pane_id`，可点击跳转
+- **agent 零配置接入**：Claude Code、Codex CLI、OpenCode 等在任务完成、等待输入时原生发出这些序列，开箱即得通知（无需再配 hook）
+- **防刷屏**：同内容通知在去重窗口（默认 2 秒）内只弹一条；二进制输出中的连续 `BEL` 被限流为每 pane 每窗口至多一条
+- **不误报**：`OSC 9;4`（任务栏进度）、`OSC 9;9`（工作目录追踪）等 terminal-announce 序列会被忽略
+
+手动验证：
+
+```bash
+printf '\e]9;任务完成\a'                # OSC 9 通知
+printf '\e]777;notifysend;标题;正文\a'   # OSC 777 通知
+printf '\a'                             # bell 通知
+```
+
+> **注意弹窗抑制规则**：通知来源 pane 是聚焦 pane 且应用在前台，或开启了「当前标签页不弹窗」（默认开启）时，当前 tab 内的通知不弹 toast（设计行为，避免打扰正盯着看的用户），但通知仍会进入铃铛面板的历史列表。验证 toast 的正确姿势：`sleep 3; printf '\e]9;hello\a'`，3 秒内切到其他 tab。
+
+仓库内的 `scripts/test-osc-notifications.sh` 提供完整的交互式验证脚本。
+
+相关设置：
+
+- **通知序列**（设置面板，`notification.osc_notify`）：总开关，默认开启
+- **去重窗口**（设置面板，`notification.osc_notify_debounce_ms`）：同内容去重窗口毫秒数，默认 2000
 
 ## HTTP API
 
@@ -80,7 +114,7 @@ curl -X POST ${DINOTTY_URL}/api/notify \
 
 ## 与 Claude Code 集成
 
-在 dinotty 终端中运行 Claude Code 时，可通过 hook 在关键节点自动发送通知：
+新版 Claude Code 在任务完成、等待输入时会原生发出 OSC 9 通知序列，dinotty 自动检测，**无需配置即可收到通知**。如需自定义通知类型、文案或触发时机，可继续使用 hook：
 
 ```jsonc
 // .claude/settings.json

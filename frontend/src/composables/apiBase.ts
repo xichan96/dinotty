@@ -68,7 +68,11 @@ export async function validateToken(token: string): Promise<ValidateTokenResult>
       return { ok: true }
     }
     if (res.status === 429) {
-      return { ok: false, reason: 'locked', retryAfter: parseRetryAfter(res.headers.get('Retry-After')) }
+      return {
+        ok: false,
+        reason: 'locked',
+        retryAfter: parseRetryAfter(res.headers.get('Retry-After')),
+      }
     }
     return { ok: false, reason: 'invalid' }
   } catch {
@@ -209,7 +213,11 @@ export async function requestCode(): Promise<RequestCodeResult> {
       return { ok: true, requestId: String(data.request_id ?? '') }
     }
     if (res.status === 429) {
-      return { ok: false, reason: 'rate_limited', retryAfter: parseRetryAfter(res.headers.get('Retry-After')) }
+      return {
+        ok: false,
+        reason: 'rate_limited',
+        retryAfter: parseRetryAfter(res.headers.get('Retry-After')),
+      }
     }
     return { ok: false, reason: 'unknown' }
   } catch {
@@ -249,7 +257,11 @@ export async function validateCode(requestId: string, code: string): Promise<Val
       return { ok: true }
     }
     if (res.status === 429) {
-      return { ok: false, reason: 'locked', retryAfter: parseRetryAfter(res.headers.get('Retry-After')) }
+      return {
+        ok: false,
+        reason: 'locked',
+        retryAfter: parseRetryAfter(res.headers.get('Retry-After')),
+      }
     }
     const data = await res.json().catch(() => ({}))
     const errStr = typeof data.error === 'string' ? data.error : ''

@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  formatWindowTitle,
-  setTauriWindowTitle,
-  updateDocumentTitle,
-} from '../utils/windowTitle'
+import { formatWindowTitle, setTauriWindowTitle, updateDocumentTitle } from '../utils/windowTitle'
 
 describe('window title', () => {
   it('updates the title when the active workspace changes', () => {

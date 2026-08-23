@@ -33,10 +33,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, defineAsyncComponent } from 'vue'
+import {
+  ref,
+  computed,
+  watch,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+  defineAsyncComponent,
+} from 'vue'
 import { useSettings, notifyTextChange } from '../composables/useSettings'
 import { effectiveTheme } from '../composables/useDeviceThemeSelection'
 import { useI18n } from '../composables/useI18n'
+import { useUiStore } from '../stores/uiStore'
 import {
   Settings as SettingsIcon,
   Palette,
@@ -65,6 +74,7 @@ const emit = defineEmits<{
 
 const { settings, saveSettings, loadSettings, applyCurrentTheme } = useSettings()
 const { t } = useI18n()
+const ui = useUiStore()
 
 function openPlugin(pluginId: string) {
   emit('close')
@@ -79,6 +89,21 @@ function openAbout() {
   activeTab.value = 'about'
   emit('open-about')
 }
+
+// Plugin pages (e.g. builtin-keyboard info card) can jump straight to the
+// keyboard settings tab. The panel is always mounted, so it owns both the
+// tab selection and the open state.
+function onOpenSettingsKeyboard() {
+  activeTab.value = 'keyboard'
+  ui.settingsOpen = true
+}
+
+onMounted(() => {
+  window.addEventListener('dinotty:open-settings-keyboard', onOpenSettingsKeyboard)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('dinotty:open-settings-keyboard', onOpenSettingsKeyboard)
+})
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let suppressSave = false

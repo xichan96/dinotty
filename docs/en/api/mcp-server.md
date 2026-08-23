@@ -6,8 +6,9 @@ Dinotty ships with a built-in MCP (Model Context Protocol) JSON-RPC 2.0 server, 
 
 - [Overview](#overview)
 - [Transports](#transports)
-  - [HTTP + SSE](#http--sse)
+  - [HTTP](#http)
   - [stdio](#stdio)
+- [MCP Switches](#mcp-switches)
 - [Authentication](#authentication)
 - [Tools](#tools)
 - [Resources](#resources)
@@ -22,28 +23,31 @@ The MCP server implements protocol version `2024-11-05` and supports:
 
 - **9 tools**: terminal operations, file read/write, Git queries
 - **3 resources**: session list, screen contents, history
-- **2 transports**: HTTP + SSE (recommended), stdio
+- **2 transports**: HTTP (Streamable HTTP compatible), stdio (the legacy HTTP+SSE stream is kept for compatibility only)
 
 ---
 
 ## Transports
 
-### HTTP + SSE
+### HTTP
 
-For web integration and remote access.
+For web integration and remote access. `POST /mcp/message` returns the complete JSON-RPC response body directly — the same semantics as the MCP spec's Streamable HTTP transport, compatible with current mainstream clients (Claude Code, Claude.ai, Cursor, etc.).
 
 **Endpoints:**
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/mcp/sse` | GET | SSE stream for server messages |
-| `/mcp/message` | POST | Send JSON-RPC requests |
+| `/mcp/message` | POST | Send a JSON-RPC request; returns the JSON-RPC response body directly (empty body for notifications without an id) |
+| `/mcp/sse` | GET | Legacy HTTP+SSE stream for server-pushed messages (deprecated by the spec, kept for compatibility) |
 
-**Flow:**
+**Flow (POST /mcp/message):**
 
-1. Client connects to `GET /mcp/sse`, receives an `endpoint` event
-2. Client posts JSON-RPC requests to `POST /mcp/message`
-3. Server processes the request, returns the response and broadcasts it to all SSE clients
+1. Client posts a JSON-RPC request to `POST /mcp/message` (with the Bearer token)
+2. Server returns the complete JSON-RPC response body
+
+**Legacy SSE stream (`GET /mcp/sse`):**
+
+The MCP spec deprecated the HTTP+SSE transport (replaced by Streamable HTTP on 2025-03-26). `GET /mcp/sse` is kept for legacy clients: connect, receive the `endpoint` event, then post requests to `POST /mcp/message`; responses are also broadcast to all connected SSE clients.
 
 **`endpoint` event:**
 
@@ -53,17 +57,47 @@ For web integration and remote access.
 
 ### stdio
 
-For local CLI integration. Receives JSON-RPC via stdin, returns responses via stdout.
+For local CLI integration. `dinotty-server --mcp-stdio` runs as a stdio proxy: reads line-delimited JSON-RPC from stdin, forwards each request to the local main service (`POST /mcp/message`, with the Bearer token), and writes the response body back to stdout. It does not start its own HTTP server — it connects to an already-running dinotty main process.
+
+**Prerequisites:**
+
+1. The main service is running on a matching port (`--port` defaults to 8999)
+2. `mcp.stdio_enabled` is `true` in settings (otherwise the process exits with an error)
+3. The token is readable (`settings::load_token()`, falling back to the `DINOTTY_TOKEN` environment variable)
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | dinotty-server --mcp-stdio
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | dinotty-server --mcp-stdio --port 8999
 ```
 
 Windows PowerShell:
 
 ```powershell
-'{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | .\dinotty-server.exe --mcp-stdio
+'{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | .\dinotty-server.exe --mcp-stdio --port 8999
 ```
+
+---
+
+## MCP Switches
+
+MCP is enabled by default; the `mcp` block in settings can disable HTTP and/or stdio as needed (checked per-request, so changes apply immediately without a restart):
+
+```json
+"mcp": { "http_enabled": true, "stdio_enabled": false }
+```
+
+| Switch | Default | Effect |
+|--------|---------|--------|
+| `mcp.http_enabled` | `true` | Controls the HTTP endpoints (`POST /mcp/message` and the legacy `GET /mcp/sse`); both return 404 when `false` |
+| `mcp.stdio_enabled` | `false` | Controls the `--mcp-stdio` proxy; the proxy exits with an error when `false` |
+
+`POST /mcp/message` is gated by both switches: it is served while `http_enabled || stdio_enabled` is `true` (the stdio proxy also uses this endpoint), and returns 404 otherwise. The four combinations:
+
+| `http_enabled` | `stdio_enabled` | Behavior |
+|----------------|-----------------|----------|
+| `true` | `false` | HTTP available, stdio proxy unavailable (default) |
+| `false` | `true` | stdio proxy only; HTTP endpoints return 404 |
+| `true` | `true` | Both modes available |
+| `false` | `false` | Fully disabled; `/mcp/sse` and `/mcp/message` both return 404 |
 
 ---
 
@@ -86,6 +120,8 @@ Agent Tokens require the matching capability:
 | `file_*` tools | `workspace:read` / `workspace:write` |
 | `git_*` tools | `workspace:read` |
 
+Agent Token scopes are also enforced (see the [Token System](/en/internals/token-system) doc): `terminal:read` / `terminal:write` scopes restrict the accessible panes (`terminal_list` filters out panes outside the scope), and `workspace:read` / `workspace:write` scopes restrict the accessible directories (directory-prefix matching). `git_status` operates on the process working directory and is not restricted by workspace scopes.
+
 ---
 
 ## Tools
@@ -100,10 +136,13 @@ Execute a shell command and wait for completion.
   "arguments": {
     "command": "ls -la",
     "cwd": "/tmp",
+    "pane_id": "active",
     "timeout": 30000
   }
 }
 ```
+
+`pane_id` is optional, defaulting to `active` (the currently active pane, or the first pane when none is active).
 
 **Returns:** JSON string containing `exit_code`, `stdout`, `duration_ms`, `method`
 

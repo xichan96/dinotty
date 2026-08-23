@@ -22,6 +22,7 @@ const APP_DEFAULTS = [
   ['togglePalette', 'k', false, false],
   ['openBookmarks', 'b', true, false],
   ['newTab', 't', false, false],
+  ['applyTemplate', 't', true, false],
   ['closeTab', 'w', false, false],
   ['splitHorizontal', 'd', false, false],
   ['splitVertical', 'd', true, false],
@@ -91,10 +92,10 @@ describe('unified keybindings', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps the 21 app defaults and persisted shape unchanged', () => {
+  it('keeps the 22 app defaults and persisted shape unchanged', () => {
     const appDefs = keyBindingDefs.filter((def) => (def.kind ?? 'app') === 'app')
 
-    expect(appDefs).toHaveLength(21)
+    expect(appDefs).toHaveLength(22)
     expect(
       appDefs.map((def) => [
         def.id,
@@ -145,87 +146,6 @@ describe('unified keybindings', () => {
 
     expect(dispatch).not.toHaveBeenCalled()
     expect(event.defaultPrevented).toBe(false)
-  })
-
-  it('offers pasteTerminal in the action-key selector with its own default-on auto_enter', async () => {
-    const previous = settings.action_keyboard
-    try {
-      settings.action_keyboard = { rows: [[{ label: 'new', send: '', auto_enter: true }]] }
-      const wrapper = trackWrapper(mount(KeyboardTab))
-
-      expect(wrapper.find('[data-kb-id="pasteTerminal"]').exists()).toBe(false)
-      await wrapper.get('.ak-wyg-label').trigger('click')
-      const kindSelect = wrapper
-        .findAll('.ak-modal select')
-        .find((select) => select.find('option[value="action"]').exists())!
-      await kindSelect.setValue('action')
-      await nextTick()
-
-      const actionSelect = wrapper
-        .findAll('.ak-modal select')
-        .find((select) => select.find('option[value="pasteTerminal"]').exists())!
-      const pasteOption = actionSelect.find('option[value="pasteTerminal"]')
-      expect(pasteOption.text()).toBe('Paste')
-
-      await actionSelect.setValue('pasteTerminal')
-      await nextTick()
-      const autoEnter = wrapper.get<HTMLInputElement>(
-        '.ak-modal .ak-auto-enter-check input[type="checkbox"]',
-      )
-      expect(autoEnter.element.checked).toBe(true)
-      await autoEnter.setValue(false)
-      await wrapper.get('.ak-modal .settings-save').trigger('click')
-
-      expect(settings.action_keyboard.rows[0][0]).toMatchObject({
-        kind: 'action',
-        action: 'pasteTerminal',
-        auto_enter: false,
-      })
-    } finally {
-      settings.action_keyboard = previous
-    }
-  })
-
-  it.each([
-    ['term.newline', 'Newline (do not send)'],
-    ['term.lineStart', 'Jump to Line Start'],
-    ['term.lineEnd', 'Jump to Line End'],
-    ['term.deleteToLineStart', 'Delete path or to Line Start'],
-  ])('offers %s in the action-key selector without auto_enter', async (id, label) => {
-    const previous = settings.action_keyboard
-    try {
-      settings.action_keyboard = { rows: [[{ label: 'new', send: '', auto_enter: true }]] }
-      const wrapper = trackWrapper(mount(KeyboardTab))
-
-      await wrapper.get('.ak-wyg-label').trigger('click')
-      const kindSelect = wrapper
-        .findAll('.ak-modal select')
-        .find((select) => select.find('option[value="action"]').exists())!
-      await kindSelect.setValue('action')
-      await nextTick()
-
-      const actionSelect = wrapper
-        .findAll('.ak-modal select')
-        .find((select) => select.find(`option[value="${id}"]`).exists())!
-      expect(actionSelect.find(`option[value="${id}"]`).text()).toBe(label)
-
-      await actionSelect.setValue(id)
-      await nextTick()
-      expect(wrapper.find('.ak-modal .ak-auto-enter-check').exists()).toBe(false)
-      const repeat = wrapper.get<HTMLInputElement>('.ak-modal .ak-repeat-check input')
-      expect(repeat.element.checked).toBe(false)
-      await repeat.setValue(true)
-
-      await wrapper.get('.ak-modal .settings-save').trigger('click')
-      expect(settings.action_keyboard.rows[0][0]).toMatchObject({
-        kind: 'action',
-        action: id,
-        repeat: true,
-      })
-      expect(settings.action_keyboard.rows[0][0]).not.toHaveProperty('auto_enter')
-    } finally {
-      settings.action_keyboard = previous
-    }
   })
 
   it('formats app bindings exactly as before and terminal bindings with literal modifiers', () => {

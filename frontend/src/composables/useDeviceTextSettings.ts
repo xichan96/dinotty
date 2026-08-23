@@ -45,7 +45,10 @@ function persistOverrides() {
     if (Object.keys(overrides).length === 0) {
       window.localStorage.removeItem(STORAGE_KEY)
     } else {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, overrides: { ...overrides } }))
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ version: 1, overrides: { ...overrides } })
+      )
     }
   } catch {}
 }
@@ -114,14 +117,11 @@ watch(
   (text) => {
     listeners.forEach((fn) => fn(text))
   },
-  { flush: 'sync' },
+  { flush: 'sync' }
 )
 
 export function setOverride(field: 'font_family', value: string): void
-export function setOverride(
-  field: Exclude<DeviceTextField, 'font_family'>,
-  value: number,
-): void
+export function setOverride(field: Exclude<DeviceTextField, 'font_family'>, value: number): void
 export function setOverride(field: DeviceTextField, value: unknown) {
   const normalized = normalizeOverride(field, value)
   if (normalized === undefined) return

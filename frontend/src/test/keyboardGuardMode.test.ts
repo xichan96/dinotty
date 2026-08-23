@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  hasCollapseGuard,
-  hasOpenGuard,
-  type KeyboardGuardMode,
-} from '../utils/keyboardGuardMode'
+import { hasCollapseGuard, hasOpenGuard, type KeyboardGuardMode } from '../utils/keyboardGuardMode'
 
 describe('keyboard guard mode predicates', () => {
   it.each<[KeyboardGuardMode, boolean, boolean]>([

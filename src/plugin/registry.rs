@@ -27,7 +27,7 @@ static REGISTRY_CACHE: std::sync::LazyLock<RegistryCache> =
 
 /// Fetch the registry JSON, using a 5-minute in-memory cache to avoid
 /// repeated cold-start HTTP round-trips to GitHub on every page load.
-async fn fetch_cached_registry() -> Result<String, Response> {
+async fn fetch_cached_registry() -> Result<String, Box<Response>> {
     {
         let guard = REGISTRY_CACHE.data.read().await;
         if let Some((fetched_at, ref body)) = *guard {
@@ -42,15 +42,16 @@ async fn fetch_cached_registry() -> Result<String, Response> {
 
     let client = &crate::proxy::HTTP_CLIENT_FOLLOW_REDIRECTS;
     let resp = client.get(&registry_url).send().await.map_err(|e| {
-        plugin_err(StatusCode::BAD_GATEWAY, &format!("failed to fetch registry: {e}"))
+        Box::new(plugin_err(StatusCode::BAD_GATEWAY, &format!("failed to fetch registry: {e}")))
     })?;
 
     let body = resp.text().await.map_err(|e| {
-        plugin_err(StatusCode::BAD_GATEWAY, &format!("failed to read registry: {e}"))
+        Box::new(plugin_err(StatusCode::BAD_GATEWAY, &format!("failed to read registry: {e}")))
     })?;
 
-    let _: RegistryIndex = serde_json::from_str(&body)
-        .map_err(|e| plugin_err(StatusCode::BAD_GATEWAY, &format!("invalid registry JSON: {e}")))?;
+    let _: RegistryIndex = serde_json::from_str(&body).map_err(|e| {
+        Box::new(plugin_err(StatusCode::BAD_GATEWAY, &format!("invalid registry JSON: {e}")))
+    })?;
 
     {
         let mut guard = REGISTRY_CACHE.data.write().await;
@@ -63,7 +64,7 @@ async fn fetch_cached_registry() -> Result<String, Response> {
 pub async fn get_market_registry(State(pm): State<PluginManagerState>) -> Response {
     let body = match fetch_cached_registry().await {
         Ok(b) => b,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
 
     let registry: RegistryIndex = match serde_json::from_str(&body) {
@@ -115,7 +116,7 @@ pub async fn get_market_registry(State(pm): State<PluginManagerState>) -> Respon
 pub async fn get_market_readme(Path(id): Path<String>) -> Response {
     let body = match fetch_cached_registry().await {
         Ok(b) => b,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
 
     let registry: RegistryIndex = match serde_json::from_str(&body) {

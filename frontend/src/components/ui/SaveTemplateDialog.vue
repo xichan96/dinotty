@@ -1,98 +1,99 @@
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="st-backdrop" @click.self="$emit('close')">
-      <div class="st-modal">
-        <div class="st-header">
-          <span class="st-title">{{ t('template.dialogTitleSave') }}</span>
-          <button class="st-close" @click="$emit('close')">&times;</button>
-        </div>
-        <div class="st-body">
-          <label class="st-label">{{ t('template.nameLabel') }}</label>
-          <input
-            ref="nameInput"
-            v-model="name"
-            class="st-input"
-            :placeholder="t('template.namePlaceholder')"
-            @keydown.enter="onSubmit"
-          />
+  <BaseDialog
+    :visible="visible"
+    :title="t('template.dialogTitleSave')"
+    width="480px"
+    @close="$emit('close')"
+  >
+    <div class="st-body">
+      <label class="st-label">{{ t('template.nameLabel') }}</label>
+      <input
+        ref="nameInput"
+        v-model="name"
+        class="st-input"
+        :placeholder="t('template.namePlaceholder')"
+        @keydown.enter="onSubmit"
+      />
 
-          <label class="st-label">{{ t('template.scopeLabel') }}</label>
-          <div class="st-scope-row">
-            <button
-              type="button"
-              :class="['st-scope-btn', { active: scope === 'workspace' }]"
-              :disabled="!activeWorkspaceId"
-              @click="scope = 'workspace'"
-            >
-              {{ t('template.scopeWorkspace') }}
-            </button>
-            <button
-              type="button"
-              :class="['st-scope-btn', { active: scope === 'global' }]"
-              @click="scope = 'global'"
-            >
-              {{ t('template.scopeGlobal') }}
-            </button>
-          </div>
-          <p class="st-scope-hint">
-            {{ scope === 'workspace' ? t('template.scopeWorkspaceHint') : t('template.scopeGlobalHint') }}
-          </p>
-
-          <label class="st-label">{{ t('template.panesLabel') }}</label>
-          <div v-if="leaves.length === 0" class="st-empty">—</div>
-          <div v-for="(leaf, idx) in leaves" :key="leaf.paneId" class="st-pane-card">
-            <div class="st-pane-header">
-              <span class="st-pane-kind">{{ kindLabel(leaf) }}</span>
-              <span class="st-pane-index">#{{ idx + 1 }}</span>
-            </div>
-            <label class="st-sublabel">{{ t('template.fieldTitle') }}</label>
-            <input
-              v-model="overrides[leaf.paneId].title"
-              class="st-input"
-              :placeholder="leaf.title || ''"
-            />
-            <template v-if="paneKind(leaf) === 'terminal'">
-              <label class="st-sublabel">{{ t('template.fieldCwd') }}</label>
-              <input
-                v-model="overrides[leaf.paneId].cwd"
-                class="st-input"
-                :placeholder="leaf.cwd || ''"
-              />
-              <label class="st-sublabel">{{ t('template.fieldStartupCommand') }}</label>
-              <input
-                v-model="overrides[leaf.paneId].startup_command"
-                class="st-input"
-                :placeholder="leaf.startup_command || ''"
-              />
-            </template>
-            <template v-else-if="paneKind(leaf) === 'files'">
-              <label class="st-sublabel">{{ t('template.fieldPath') }}</label>
-              <input
-                v-model="overrides[leaf.paneId].path"
-                class="st-input"
-                :placeholder="leaf.path || ''"
-              />
-            </template>
-            <template v-else-if="paneKind(leaf) === 'web'">
-              <label class="st-sublabel">{{ t('template.fieldUrl') }}</label>
-              <input
-                v-model="overrides[leaf.paneId].url"
-                class="st-input"
-                :placeholder="leaf.url || ''"
-              />
-            </template>
-          </div>
-          <p v-if="error" class="st-error">{{ error }}</p>
-        </div>
-        <div class="st-footer">
-          <button class="st-btn cancel" @click="$emit('close')">{{ t('confirm.closeWindowCancel') }}</button>
-          <button class="st-btn primary" :disabled="!canSubmit" @click="onSubmit">
-            {{ t('template.save') }}
-          </button>
-        </div>
+      <label class="st-label">{{ t('template.scopeLabel') }}</label>
+      <div class="st-scope-row">
+        <button
+          type="button"
+          :class="['st-scope-btn', { active: scope === 'workspace' }]"
+          :disabled="!activeWorkspaceId"
+          @click="scope = 'workspace'"
+        >
+          {{ t('template.scopeWorkspace') }}
+        </button>
+        <button
+          type="button"
+          :class="['st-scope-btn', { active: scope === 'global' }]"
+          @click="scope = 'global'"
+        >
+          {{ t('template.scopeGlobal') }}
+        </button>
       </div>
+      <p class="st-scope-hint">
+        {{
+          scope === 'workspace' ? t('template.scopeWorkspaceHint') : t('template.scopeGlobalHint')
+        }}
+      </p>
+
+      <label class="st-label">{{ t('template.panesLabel') }}</label>
+      <div v-if="leaves.length === 0" class="st-empty">—</div>
+      <div v-for="(leaf, idx) in leaves" :key="leaf.paneId" class="st-pane-card">
+        <div class="st-pane-header">
+          <span class="st-pane-kind">{{ kindLabel(leaf) }}</span>
+          <span class="st-pane-index">#{{ idx + 1 }}</span>
+        </div>
+        <label class="st-sublabel">{{ t('template.fieldTitle') }}</label>
+        <input
+          v-model="overrides[leaf.paneId].title"
+          class="st-input"
+          :placeholder="leaf.title || ''"
+        />
+        <template v-if="paneKind(leaf) === 'terminal'">
+          <label class="st-sublabel">{{ t('template.fieldCwd') }}</label>
+          <input
+            v-model="overrides[leaf.paneId].cwd"
+            class="st-input"
+            :placeholder="leaf.cwd || ''"
+          />
+          <label class="st-sublabel">{{ t('template.fieldStartupCommand') }}</label>
+          <input
+            v-model="overrides[leaf.paneId].startup_command"
+            class="st-input"
+            :placeholder="leaf.startup_command || ''"
+          />
+        </template>
+        <template v-else-if="paneKind(leaf) === 'files'">
+          <label class="st-sublabel">{{ t('template.fieldPath') }}</label>
+          <input
+            v-model="overrides[leaf.paneId].path"
+            class="st-input"
+            :placeholder="leaf.path || ''"
+          />
+        </template>
+        <template v-else-if="paneKind(leaf) === 'web'">
+          <label class="st-sublabel">{{ t('template.fieldUrl') }}</label>
+          <input
+            v-model="overrides[leaf.paneId].url"
+            class="st-input"
+            :placeholder="leaf.url || ''"
+          />
+        </template>
+      </div>
+      <p v-if="error" class="st-error">{{ error }}</p>
     </div>
-  </Teleport>
+    <template #footer>
+      <button class="dialog-btn" @click="$emit('close')">
+        {{ t('confirm.closeWindowCancel') }}
+      </button>
+      <button class="dialog-btn dialog-btn--primary" :disabled="!canSubmit" @click="onSubmit">
+        {{ t('template.save') }}
+      </button>
+    </template>
+  </BaseDialog>
 </template>
 
 <script setup lang="ts">
@@ -103,6 +104,7 @@ import { apiCreateTemplate } from '../../composables/useTemplateApi'
 import { getAllLeaves, paneKind } from '../../types/pane'
 import type { PaneLayout, LeafPane } from '../../types/pane'
 import type { TemplateScope, PaneOverride } from '../../types/template'
+import BaseDialog from './BaseDialog.vue'
 
 /** Layout leaves may carry `cwd` / `startup_command` fields when they were
  *  saved from a template (the source-tab runtime state doesn't track cwd
@@ -143,10 +145,10 @@ function ensureOverrides() {
     if (!overrides[leaf.paneId]) {
       overrides[leaf.paneId] = {
         title: leaf.title || '',
-        cwd: paneKind(leaf) === 'terminal' ? (leaf.cwd || '') : undefined,
-        startup_command: paneKind(leaf) === 'terminal' ? (leaf.startup_command || '') : undefined,
-        path: paneKind(leaf) === 'files' ? (leaf.path || '') : undefined,
-        url: paneKind(leaf) === 'web' ? (leaf.url || '') : undefined,
+        cwd: paneKind(leaf) === 'terminal' ? leaf.cwd || '' : undefined,
+        startup_command: paneKind(leaf) === 'terminal' ? leaf.startup_command || '' : undefined,
+        path: paneKind(leaf) === 'files' ? leaf.path || '' : undefined,
+        url: paneKind(leaf) === 'web' ? leaf.url || '' : undefined,
       }
     }
   }
@@ -169,7 +171,11 @@ function buildOverrides(): Record<string, PaneOverride> {
     if (o.title && o.title.trim() && o.title !== leaf.title) cleaned.title = o.title.trim()
     if (paneKind(leaf) === 'terminal') {
       if (o.cwd && o.cwd.trim() && o.cwd !== (leaf.cwd || '')) cleaned.cwd = o.cwd.trim()
-      if (o.startup_command && o.startup_command.trim() && o.startup_command !== (leaf.startup_command || ''))
+      if (
+        o.startup_command &&
+        o.startup_command.trim() &&
+        o.startup_command !== (leaf.startup_command || '')
+      )
         cleaned.startup_command = o.startup_command.trim()
     }
     if (paneKind(leaf) === 'files' && o.path && o.path.trim() && o.path !== (leaf.path || '')) {
@@ -194,16 +200,15 @@ watch(
       ensureOverrides()
       nextTick(() => nameInput.value?.focus())
     }
-  },
+  }
 )
 
 async function onSubmit() {
   if (!canSubmit.value) return
   error.value = ''
   try {
-    const finalScope: TemplateScope = scope.value === 'workspace' && activeWorkspaceId.value
-      ? 'workspace'
-      : 'global'
+    const finalScope: TemplateScope =
+      scope.value === 'workspace' && activeWorkspaceId.value ? 'workspace' : 'global'
     const { template_id } = await apiCreateTemplate({
       name: name.value.trim(),
       scope: finalScope,
@@ -220,61 +225,10 @@ async function onSubmit() {
 </script>
 
 <style scoped>
-.st-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.st-modal {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  width: 90vw;
-  max-width: 480px;
-  max-height: 85vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-.st-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 0;
-}
-.st-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-bright);
-}
-.st-close {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  color: var(--fg-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-.st-close:hover {
-  background: var(--bg-hover);
-}
 .st-body {
-  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  overflow-y: auto;
-  flex: 1;
 }
 .st-label {
   font-size: 12px;
@@ -317,11 +271,13 @@ async function onSubmit() {
   color: var(--fg-muted);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .st-scope-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--fg-inverse);
 }
 .st-scope-btn:disabled {
   opacity: 0.4;
@@ -369,37 +325,7 @@ async function onSubmit() {
 }
 .st-error {
   font-size: 12px;
-  color: var(--color-red, #ef4444);
+  color: var(--color-red);
   margin: 2px 0 0;
-}
-.st-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px 14px;
-}
-.st-btn {
-  padding: 6px 16px;
-  border-radius: 5px;
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-  color: var(--fg-muted);
-  background: none;
-}
-.st-btn.cancel:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-.st-btn.primary {
-  background: var(--accent);
-  color: #fff;
-}
-.st-btn.primary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.st-btn.primary:hover:not(:disabled) {
-  opacity: 0.9;
 }
 </style>

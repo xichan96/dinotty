@@ -1,6 +1,6 @@
 use super::data::{
-    Cell, CellAttrs, CommandResult, CommandState, CursorState, PendingCommand, PrivateModes,
-    ScreenBuffer, SyncEvent,
+    Cell, CellAttrs, CommandResult, CommandState, CursorState, OscAction, PendingCommand,
+    PrivateModes, ScreenBuffer, SyncEvent,
 };
 use super::performer::ScreenPerformer;
 use super::render::{attrs_eq, encode_sgr, has_attrs, render_buffer, restore_cursor_state};
@@ -25,6 +25,8 @@ pub struct VirtualScreen {
     pub(crate) last_output_time: Option<Instant>,
     // DEC mode 2026 synchronized output events
     pub(crate) sync_events: Vec<SyncEvent>,
+    // OSC 9/777/BEL notification detection
+    pub(crate) osc_actions: Vec<OscAction>,
     pub(crate) private_modes: PrivateModes,
 }
 
@@ -45,6 +47,7 @@ impl VirtualScreen {
             command_results: Vec::new(),
             last_output_time: None,
             sync_events: Vec::new(),
+            osc_actions: Vec::new(),
             private_modes: PrivateModes::default(),
         }
     }
@@ -57,6 +60,11 @@ impl VirtualScreen {
     /// Drain all pending command results. Called by the WS handler after feeding output.
     pub fn drain_command_results(&mut self) -> Vec<CommandResult> {
         std::mem::take(&mut self.command_results)
+    }
+
+    /// Drain all pending OSC notification actions (OSC 9/777/BEL).
+    pub fn drain_osc_actions(&mut self) -> Vec<OscAction> {
+        std::mem::take(&mut self.osc_actions)
     }
 
     /// Get the collected stdout from the current/last command
@@ -187,6 +195,7 @@ impl VirtualScreen {
             pending_command: &mut self.pending_command,
             command_results: &mut self.command_results,
             sync_events: &mut self.sync_events,
+            osc_actions: &mut self.osc_actions,
             private_modes: &mut self.private_modes,
         };
 
@@ -209,6 +218,7 @@ impl VirtualScreen {
                         pending_command: &mut self.pending_command,
                         command_results: &mut self.command_results,
                         sync_events: &mut self.sync_events,
+                        osc_actions: &mut self.osc_actions,
                         private_modes: &mut self.private_modes,
                     };
                 } else if !enter && performer.using_alternate {
@@ -224,6 +234,7 @@ impl VirtualScreen {
                         pending_command: &mut self.pending_command,
                         command_results: &mut self.command_results,
                         sync_events: &mut self.sync_events,
+                        osc_actions: &mut self.osc_actions,
                         private_modes: &mut self.private_modes,
                     };
                     if let Some(ref s) = saved {

@@ -14,11 +14,11 @@ pub use ssh::*;
 pub use text::*;
 pub use theme::*;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub const CURRENT_SETTINGS_VERSION: u32 = 12;
+pub const CURRENT_SETTINGS_VERSION: u32 = 13;
 pub(crate) const LEGACY_UPLOAD_DIR: &str = "~/.dinotty/uploads";
 
 #[derive(Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -84,11 +84,35 @@ pub enum WorkspaceBadgeMode {
     Both,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+/// Mobile input source: the two host keyboards, or a keyboard plugin id
+/// (see keyboard-plugin-design.md §3.2C). Serialized as a plain string:
+/// "builtin" / "system" / "<plugin-id>".
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MobileInputMode {
     Builtin,
     System,
+    Plugin(String),
+}
+
+impl Serialize for MobileInputMode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            MobileInputMode::Builtin => serializer.serialize_str("builtin"),
+            MobileInputMode::System => serializer.serialize_str("system"),
+            MobileInputMode::Plugin(id) => serializer.serialize_str(id),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MobileInputMode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "builtin" => Ok(MobileInputMode::Builtin),
+            "system" => Ok(MobileInputMode::System),
+            _ => Ok(MobileInputMode::Plugin(s)),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -160,6 +184,10 @@ pub struct Settings {
     pub mobile_input_mode: Option<MobileInputMode>,
     #[serde(default)]
     pub keyboard_guard_mode: KeyboardGuardMode,
+    /// Synchronized overlap for the mobile IME toolbar. `None` means no v13
+    /// client has initialized the value yet; `Some(0)` is an intentional zero.
+    #[serde(default)]
+    pub ime_keyboard_overlap_px: Option<u32>,
     // Legacy v6 input retained only so v7 migration can deserialize it.
     #[serde(default, deserialize_with = "tolerant_legacy_bool", skip_serializing)]
     pub keyboard_keep_on_scroll: bool,
@@ -190,6 +218,8 @@ pub struct Settings {
     pub notification: NotificationConfig,
     #[serde(default)]
     pub open_api: OpenApiConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
     #[serde(skip)]
     pub auth_token: String,
     #[serde(default = "default_ip_whitelist")]
@@ -243,6 +273,20 @@ pub(crate) fn is_false(b: &bool) -> bool {
 pub struct OpenApiConfig {
     #[serde(default)]
     pub enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct McpConfig {
+    #[serde(default = "default_true", alias = "sse_enabled")]
+    pub http_enabled: bool,
+    #[serde(default)]
+    pub stdio_enabled: bool,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self { http_enabled: true, stdio_enabled: false }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -312,7 +356,7 @@ pub(crate) fn default_ip_whitelist() -> Vec<String> {
 }
 
 pub(crate) fn default_locale() -> String {
-    "zh".into()
+    "auto".into()
 }
 
 pub(crate) fn default_shell_kind() -> String {
@@ -390,6 +434,7 @@ impl Default for Settings {
             show_virtual_keyboard: false,
             mobile_input_mode: None,
             keyboard_guard_mode: KeyboardGuardMode::default(),
+            ime_keyboard_overlap_px: None,
             keyboard_keep_on_scroll: false,
             show_workspace_badge_on_tab: None,
             workspace_badge_mode: None,
@@ -404,6 +449,7 @@ impl Default for Settings {
             monitor: MonitorConfig::default(),
             notification: NotificationConfig::default(),
             open_api: OpenApiConfig::default(),
+            mcp: McpConfig::default(),
             auth_token: String::new(),
             ip_whitelist: default_ip_whitelist(),
             keybindings: std::collections::HashMap::new(),

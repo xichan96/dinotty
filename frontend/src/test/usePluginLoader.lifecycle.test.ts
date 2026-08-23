@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { defineComponent } from 'vue'
 
 const api = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -15,10 +16,13 @@ vi.mock('../composables/apiBase', () => ({
 
 import {
   loadedPlugins,
+  resolveKeyboardContributionId,
   usePluginLoader,
   type LoadedPlugin,
   type PluginManifest,
 } from '../composables/usePluginLoader'
+import { useKeyboardProviders } from '../composables/useKeyboardProviders'
+import { usePluginOverlaysStore } from '../stores/pluginOverlays'
 
 function loadedPlugin(manifest: PluginManifest): LoadedPlugin {
   return {
@@ -135,6 +139,60 @@ describe('usePluginLoader lifecycle', () => {
     await expect(context.process.stopAll()).rejects.toThrow(
       'Unable to stop plugin processes: timed out while stopping process (HTTP 504 Gateway Timeout)'
     )
+  })
+
+  it('resolves a keyboard contribution under the plugin id when omitted', () => {
+    expect(resolveKeyboardContributionId('mini-keyboard', undefined)).toBe('mini-keyboard')
+  })
+
+  it('accepts a keyboard contribution id matching the plugin id', () => {
+    expect(resolveKeyboardContributionId('mini-keyboard', 'mini-keyboard')).toBe('mini-keyboard')
+  })
+
+  it('rejects a keyboard contribution id that does not match the plugin id', () => {
+    expect(() => resolveKeyboardContributionId('mini-keyboard', 'builtin-keyboard')).toThrow(
+      "keyboard contribution id 'builtin-keyboard' must match plugin id 'mini-keyboard'"
+    )
+  })
+
+  it('unregisters a keyboard contribution by its resolved id on unload (id omitted)', async () => {
+    const { providers } = useKeyboardProviders()
+    providers.value.clear()
+    const plugin = loadedPlugin({ id: 'kb-plugin', name: 'Kb', version: '1.0.0' })
+    plugin.exports = {
+      // keyboard.id deliberately omitted: registration falls back to the plugin id.
+      keyboard: { component: defineComponent({ render: () => null }), desiredHeight: 200 },
+    }
+    plugin.keyboardContributionId = resolveKeyboardContributionId(plugin.id, undefined)
+    expect(plugin.keyboardContributionId).toBe('kb-plugin')
+    const { keyboard } = plugin.exports
+    providers.value.set(plugin.keyboardContributionId, {
+      id: plugin.keyboardContributionId,
+      kind: 'plugin',
+      component: keyboard!.component,
+    })
+    loadedPlugins.set(plugin.id, plugin)
+
+    await usePluginLoader().unloadPlugin(plugin.id)
+
+    expect(providers.value.has('kb-plugin')).toBe(false)
+  })
+
+  it('unregisters overlay contributions on unload', async () => {
+    const store = usePluginOverlaysStore()
+    const plugin = loadedPlugin({ id: 'ovl-plugin', name: 'Ovl', version: '1.0.0' })
+    plugin.exports = {
+      overlay: [{ id: 'ovl-plugin:fab', component: defineComponent({ render: () => null }) }],
+    }
+    loadedPlugins.set(plugin.id, plugin)
+    // The real loadPlugin activate step isn't exercised by this suite; seed the
+    // store the way activation registration would.
+    store.register(plugin.id, plugin.exports.overlay!)
+    expect(store.overlays).toHaveLength(1)
+
+    await usePluginLoader().unloadPlugin(plugin.id)
+
+    expect(store.overlays).toHaveLength(0)
   })
 
   it('forwards cwd and env options to streaming process spawns', () => {

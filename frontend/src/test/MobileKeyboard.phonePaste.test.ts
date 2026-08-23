@@ -24,6 +24,7 @@ vi.mock('../composables/useHistory', async () => {
 
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'
 import { settings } from '../composables/useSettings'
+import { makeMobileKeyboardCtx } from './helpers/makeMobileKeyboardCtx'
 
 beforeEach(() => {
   settings.locale = 'en'
@@ -40,8 +41,9 @@ afterEach(() => {
 
 describe('MobileKeyboard phone clipboard toolbar', () => {
   it('keeps phone paste inserting into the textarea without dispatching an app action', async () => {
+    const harness = makeMobileKeyboardCtx({ visible: true })
     const wrapper = mount(MobileKeyboard, {
-      props: { visible: true, paneId: 'p1', getSendFn: () => null },
+      props: { ctx: harness.ctx },
       global: {
         stubs: { SuggestionBar: true, MkbRow: true, HistoryPanel: true, FilePickerModal: true },
       },
@@ -56,7 +58,7 @@ describe('MobileKeyboard phone clipboard toolbar', () => {
     await Promise.resolve()
     await nextTick()
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('phone text')
-    expect(wrapper.emitted('app-action')).toBeUndefined()
+    expect(harness.onHostEvent).not.toHaveBeenCalledWith('app-action', expect.anything())
     wrapper.unmount()
   })
 })

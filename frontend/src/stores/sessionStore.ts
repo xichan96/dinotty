@@ -33,9 +33,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function visibleWorkspaceBadge(ws: Workspace): TabInfo['workspace'] {
-    return ws.id === DEFAULT_WORKSPACE_ID && ws.tab_badge === false
-      ? undefined
-      : buildWorkspace(ws)
+    return ws.id === DEFAULT_WORKSPACE_ID && ws.tab_badge === false ? undefined : buildWorkspace(ws)
   }
 
   /** Tab list for TabBar component */
@@ -49,10 +47,15 @@ export const useSessionStore = defineStore('session', () => {
             : t.title,
         index: i + 1,
         type: t.type,
-        shellType: t.type === 'terminal' ? findLeaf(t.layout, t.activePaneId)?.shell_type : undefined,
+        shellType:
+          t.type === 'terminal' ? findLeaf(t.layout, t.activePaneId)?.shell_type : undefined,
       }
       if (t.type === 'terminal') {
-        const ws = matchWorkspace(t.cwd ?? '', t.connectionId, t.workspaceId) ?? defaultWorkspace.value
+        const leaves = getAllLeaves(t.layout)
+        info.singlePane = leaves.length === 1
+        info.singlePaneId = leaves.length === 1 ? leaves[0].paneId : undefined
+        const ws =
+          matchWorkspace(t.cwd ?? '', t.connectionId, t.workspaceId) ?? defaultWorkspace.value
         info.workspace = visibleWorkspaceBadge(ws)
       } else {
         const ws = t.workspaceId

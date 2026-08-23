@@ -2,7 +2,10 @@
   <div class="tlp-root">
     <div class="tlp-header">
       <span class="tlp-title">{{ t('template.previewTitle') }}</span>
-      <span v-if="leafCount > 0" class="tlp-meta">{{ leafCount }} {{ leafCount === 1 ? t('template.paneSingular') : t('template.panePlural') }}</span>
+      <span v-if="leafCount > 0" class="tlp-meta"
+        >{{ leafCount }}
+        {{ leafCount === 1 ? t('template.paneSingular') : t('template.panePlural') }}</span
+      >
     </div>
     <div class="tlp-schematic">
       <TemplateLayoutNode :node="layout" />

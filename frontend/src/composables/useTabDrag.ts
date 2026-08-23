@@ -146,11 +146,7 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
     cleanup()
   }
 
-  function computePaneZone(
-    rect: DOMRect,
-    clientX: number,
-    clientY: number
-  ): PaneZone {
+  function computePaneZone(rect: DOMRect, clientX: number, clientY: number): PaneZone {
     const relX = (clientX - rect.left) / rect.width
     const relY = (clientY - rect.top) / rect.height
     if (relY < 0.25) return 'top'

@@ -15,9 +15,7 @@ export function pickSuccessorTab<T>(
 ): T | undefined {
   if (remainingTabs.length === 0) return undefined
 
-  const workspaceTabs = remainingTabs.filter(
-    (tab) => workspaceIdOf(tab) === closedWorkspaceId
-  )
+  const workspaceTabs = remainingTabs.filter((tab) => workspaceIdOf(tab) === closedWorkspaceId)
   if (workspaceTabs.length > 0) {
     return workspaceTabs[Math.min(workspaceIdxBefore, workspaceTabs.length - 1)]
   }

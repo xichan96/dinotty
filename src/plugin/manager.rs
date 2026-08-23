@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use semver::Version;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
@@ -25,6 +26,32 @@ fn now_unix_seconds() -> Option<u64> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_secs())
+}
+
+/// Whether an installed plugin version should block a seed update.
+/// Unknown installed versions (unparseable) conservatively win: never clobber.
+fn installed_version_not_older(installed: &str, seed: &str) -> bool {
+    match (Version::parse(installed), Version::parse(seed)) {
+        (Ok(installed), Ok(seed)) => installed >= seed,
+        _ => true,
+    }
+}
+
+/// Plugin ids owned by the app itself (bundled seed). The generic user-initiated
+/// channels — upload, folder, git — must not be able to create or replace them,
+/// or a third-party archive could impersonate the trusted bundled keyboard
+/// (keyboard-plugin-design.md 风险表). The seed mechanism (compiled into the
+/// binary) is the only sanctioned writer; a future signed marketplace source
+/// becomes the sanctioned update channel.
+pub(crate) const RESERVED_PLUGIN_IDS: &[&str] = &["builtin-keyboard"];
+
+fn reject_reserved_plugin_id(id: &str) -> Result<(), String> {
+    if RESERVED_PLUGIN_IDS.contains(&id) {
+        return Err(format!(
+            "plugin id '{id}' is managed by the app and cannot be installed or updated through this channel"
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn collect_affected_plugin_ids(
@@ -345,6 +372,89 @@ impl PluginManager {
         }
     }
 
+    /// Ensure the bundled seed plugin (builtin-keyboard) is installed and up to
+    /// date. No-op when no seed directory is embedded (dev checkout without a
+    /// built seed) or when the installed version is not older than the seed.
+    ///
+    /// # Errors
+    /// Returns `Err` if the seed directory is invalid or cannot be installed.
+    pub async fn ensure_seed(&self) -> Result<(), String> {
+        std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
+        let tmp = self.staging_dir("seed-")?;
+        let staged = tmp.path();
+
+        let mut found = false;
+        for file in crate::seed::SeedAssets::iter() {
+            let Some(rest) = file.strip_prefix("builtin-keyboard/") else {
+                continue;
+            };
+            found = true;
+            let path = staged.join(rest);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let content = crate::seed::SeedAssets::get(&file)
+                .ok_or_else(|| format!("failed to read embedded seed file: {file}"))?;
+            std::fs::write(&path, content.data).map_err(|e| e.to_string())?;
+        }
+        if !found {
+            return Ok(());
+        }
+        self.install_seed_staged(staged).await
+    }
+
+    /// Test helper: stage the contents of `src` and install it as the seed.
+    #[cfg(test)]
+    pub(super) async fn ensure_seed_dir(&self, src: &std::path::Path) -> Result<(), String> {
+        std::fs::create_dir_all(&self.plugin_dir).map_err(|e| e.to_string())?;
+        let tmp = self.staging_dir("seed-")?;
+        copy_plugin_dir(src, tmp.path())?;
+        self.install_seed_staged(tmp.path()).await
+    }
+
+    pub(super) async fn install_seed_staged(&self, staged: &std::path::Path) -> Result<(), String> {
+        let manifest: PluginManifest = serde_json::from_str(
+            &std::fs::read_to_string(staged.join("plugin.json"))
+                .map_err(|_| "plugin.json not found in seed".to_string())?,
+        )
+        .map_err(|e| format!("invalid seed plugin.json: {e}"))?;
+        self.validate_for_host(&manifest)?;
+
+        let operation_lock = self.operation_lock(&manifest.id);
+        let _operation = operation_lock.write_owned().await;
+
+        let seed_version = manifest.version.clone();
+        let installed = self.registry.get(&manifest.id).map(|info| info.manifest.version.clone());
+        if let Some(installed) = installed {
+            if installed_version_not_older(&installed, &seed_version) {
+                return Ok(()); // already current; the update channel owns the plugin
+            }
+            // Older installed copy: replace in place with the seed contents.
+            self.replace_with_staged(&manifest.id, staged)?;
+        } else if platform_fs::path_exists_or_symlink(&self.plugin_dir.join(&manifest.id)) {
+            // Directory present but unregistered (corrupt manifest / failed scan):
+            // swap it so the next scan registers a healthy plugin.
+            let dest = self.plugin_dir.join(&manifest.id);
+            platform_fs::remove_plugin_path(&dest)?;
+            std::fs::rename(staged, &dest).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::rename(staged, self.plugin_dir.join(&manifest.id))
+                .map_err(|e| e.to_string())?;
+        }
+
+        self.registry.insert(
+            manifest.id.clone(),
+            PluginInfo {
+                manifest: manifest.clone(),
+                install_date: now_unix_seconds(),
+                state: PluginStateValue::Active,
+                error: None,
+                is_dev_link: false,
+            },
+        );
+        Ok(())
+    }
+
     #[must_use]
     pub fn list(&self) -> Vec<PluginInfo> {
         let mut items: Vec<PluginInfo> = self.registry.iter().map(|r| r.value().clone()).collect();
@@ -477,6 +587,7 @@ impl PluginManager {
             serde_json::from_str(&content).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
         self.validate_for_host(&manifest)?;
+        reject_reserved_plugin_id(&manifest.id)?;
         require_native_approval(&manifest, approve_native)?;
         self.prepare_binary(tmp.path(), &manifest)?;
 
@@ -530,6 +641,7 @@ impl PluginManager {
             serde_json::from_str(&content).map_err(|e| format!("invalid plugin.json: {e}"))?;
 
         self.validate_for_host(&manifest)?;
+        reject_reserved_plugin_id(&manifest.id)?;
         require_native_approval(&manifest, approve_native)?;
         self.prepare_binary(src, &manifest)?;
 
@@ -589,6 +701,7 @@ impl PluginManager {
         approve_native: bool,
     ) -> Result<PluginManifest, String> {
         self.validate_for_host(&manifest)?;
+        reject_reserved_plugin_id(&manifest.id)?;
         require_native_approval(&manifest, approve_native)?;
         std::fs::create_dir_all(&self.plugin_dir)
             .map_err(|e| format!("failed to create plugin directory: {e}"))?;
@@ -648,6 +761,7 @@ impl PluginManager {
         .map_err(|e| format!("invalid plugin.json: {e}"))?;
 
         self.validate_for_host(&manifest)?;
+        reject_reserved_plugin_id(&manifest.id)?;
         require_native_approval(&manifest, approve_native)?;
         if manifest.id != id {
             return Err("plugin id in archive does not match".into());

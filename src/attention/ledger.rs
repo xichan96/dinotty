@@ -39,8 +39,15 @@ pub fn evaluate_ingest_gate(cfg: &NotificationConfig, source: IngestSource) -> I
         IngestSource::Bell { debounce_duplicate: false } | IngestSource::Plugin => {
             IngestGateResult::Accepted
         }
-        IngestSource::OscNotify if cfg.osc_notify => IngestGateResult::Accepted,
-        IngestSource::OscNotify => IngestGateResult::Suppressed("osc_notify_disabled".into()),
+        IngestSource::OscNotify { debounce_duplicate: true } => {
+            IngestGateResult::Suppressed("osc_debounce_duplicate".into())
+        }
+        IngestSource::OscNotify { debounce_duplicate: false } if cfg.osc_notify => {
+            IngestGateResult::Accepted
+        }
+        IngestSource::OscNotify { .. } => {
+            IngestGateResult::Suppressed("osc_notify_disabled".into())
+        }
         IngestSource::CommandComplete { matched_rule }
             if cfg.command_complete.enabled && matched_rule =>
         {

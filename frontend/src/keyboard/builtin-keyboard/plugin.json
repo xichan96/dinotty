@@ -1,0 +1,12 @@
+{
+  "id": "builtin-keyboard",
+  "name": "Builtin Keyboard",
+  "version": "0.1.0",
+  "description": "Dinotty builtin mobile virtual keyboard (single-sourced in the host core; seed-shipped with the app)",
+  "description_zh": "Dinotty 内置移动端虚拟键盘（宿主编译树单源，随 app seed 分发）",
+  "category": "system",
+  "icon": "keyboard",
+  "entry": "./main.js",
+  "styles": "./styles.css",
+  "keyboardApiVersion": 1
+}

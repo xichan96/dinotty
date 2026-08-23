@@ -172,7 +172,9 @@ fn hash_token(token: &str) -> String {
 
 ### Scope 限制
 
-Scope 允许限制 capability 的适用范围：
+Scope 允许限制 capability 的适用范围。`scopes` 中每个条目对应一个 capability，值为该 capability 允许访问的资源列表；某个 capability 没有 scope 条目表示不限制。
+
+**Terminal scope**（`terminal:read` / `terminal:write`）：resource 为 pane ID。
 
 ```json
 {
@@ -183,7 +185,21 @@ Scope 允许限制 capability 的适用范围：
 }
 ```
 
-此 token 只能对 `pane-abc123` 执行写操作。
+此 token 只能对 `pane-abc123` 执行写操作。Agent API（`run` / `send` / `read`）与 MCP terminal 工具都会校验：请求解析出实际 pane 后，若不在 scope 内返回 `403 SCOPE_DENIED`（Agent API）或错误（MCP）。`terminal_list` 会过滤掉 scope 外的 pane，不泄露其存在性。
+
+**Workspace scope**（`workspace:read` / `workspace:write`）：resource 为目录路径（支持 `~/` 前缀），按目录前缀匹配--目标路径必须位于某个 scope 目录之内（含目录本身）：
+
+```json
+{
+  "capabilities": ["workspace:read", "workspace:write"],
+  "scopes": {
+    "workspace:read": ["~/projects/foo"],
+    "workspace:write": ["~/projects/foo"]
+  }
+}
+```
+
+此 token 只能读写 `~/projects/foo` 及其子目录下的文件（MCP `file_read` / `file_write` / `file_list` / `git_diff`）。注意 `git_status` 作用于服务进程的工作目录、不接受路径参数，因此只做 capability 校验、不受 workspace scope 限制。
 
 ---
 

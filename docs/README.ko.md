@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Dinotty 로고" width="200" />
+  <img src="public/images/logo.png" alt="Dinotty 로고" width="200" />
 </p>
 
 <h1 align="center">Dinotty</h1>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">中文</a> | <a href="./README.en.md">English</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.pt.md">Português</a> | 한국어 | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a>
+  <a href="./README.zh.md">中文</a> | <a href="../README.md">English</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.pt.md">Português</a> | 한국어 | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a>
 </p>
 
 ---
@@ -34,17 +34,17 @@
 ## 스크린샷
 
 <p align="center">
-  <img src="images/1.png" alt="모바일에서 Claude Code 실행" width="250" />
-  <img src="images/2.png" alt="htop과 함께하는 풀 키보드 레이아웃" width="250" />
-  <img src="images/3.png" alt="테마 설정" width="250" />
+  <img src="public/images/1.png" alt="모바일에서 Claude Code 실행" width="250" />
+  <img src="public/images/2.png" alt="htop과 함께하는 풀 키보드 레이아웃" width="250" />
+  <img src="public/images/3.png" alt="테마 설정" width="250" />
 </p>
 <p align="center">
-  <img src="images/4.png" alt="커스텀 단축키 키보드" width="250" />
-  <img src="images/5.png" alt="시스템 모니터" width="250" />
-  <img src="images/6.png" alt="알림 시스템" width="250" />
+  <img src="public/images/4.png" alt="커스텀 단축키 키보드" width="250" />
+  <img src="public/images/5.png" alt="시스템 모니터" width="250" />
+  <img src="public/images/6.png" alt="알림 시스템" width="250" />
 </p>
 <p align="center">
-  <img src="images/7.png" alt="태블릿 가로 모드 데스크톱급 레이아웃" width="500" />
+  <img src="public/images/7.png" alt="태블릿 가로 모드 데스크톱급 레이아웃" width="500" />
 </p>
 
 ## 데스크톱 데모
@@ -54,37 +54,37 @@
 **분할 브로드캐스트** - 드래그 가능한 멀티 패인 분할, 한 패인에 입력하면 모든 패인에서 동시에 실행:
 
 <p align="center">
-  <img src="images/gif/1-split-broadcast.gif" alt="분할 브로드캐스트 데모" width="600" />
+  <img src="public/images/gif/1-split-broadcast.gif" alt="분할 브로드캐스트 데모" width="600" />
 </p>
 
 **명령 북마크** - 터미널 텍스트 우클릭으로 북마크, 그룹 관리, 원클릭 실행:
 
 <p align="center">
-  <img src="images/gif/2-command-bookmark.gif" alt="명령 북마크 데모" width="600" />
+  <img src="public/images/gif/2-command-bookmark.gif" alt="명령 북마크 데모" width="600" />
 </p>
 
 **SSH 연결 및 파일 브라우저** - 내장 SSH 클라이언트, 원격 세션이 로컬처럼, 완전한 SFTP 파일 관리:
 
 <p align="center">
-  <img src="images/gif/3-ssh-file-browser.gif" alt="SSH 연결 및 파일 브라우저 데모" width="600" />
+  <img src="public/images/gif/3-ssh-file-browser.gif" alt="SSH 연결 및 파일 브라우저 데모" width="600" />
 </p>
 
 **워크스페이스 관리 및 Mission Control** - 멀티 워크스페이스 격리, Mission Control 개요, 빠른 전환:
 
 <p align="center">
-  <img src="images/gif/4-workspace-mission-control.gif" alt="워크스페이스 관리 데모" width="600" />
+  <img src="public/images/gif/4-workspace-mission-control.gif" alt="워크스페이스 관리 데모" width="600" />
 </p>
 
 **플러그인 시스템** - 핫 리로드 가능한 JS 플러그인, 내장 CC Switch, JSON Formatter 등:
 
 <p align="center">
-  <img src="images/gif/5-plugin.gif" alt="플러그인 시스템 데모" width="600" />
+  <img src="public/images/gif/5-plugin.gif" alt="플러그인 시스템 데모" width="600" />
 </p>
 
 **통합 레이아웃 시스템** - 터미널, 플러그인, 파일 브라우저, 웹 미리보기가 모두 패인; 드래그 가능한 분할, 탭 간 이동, 새 탭으로 추출:
 
 <p align="center">
-  <img src="images/gif/6-layout-sys.gif" alt="통합 레이아웃 시스템 데모" width="600" />
+  <img src="public/images/gif/6-layout-sys.gif" alt="통합 레이아웃 시스템 데모" width="600" />
 </p>
 
 ## 왜 Dinotty인가?
@@ -273,7 +273,7 @@ Dinotty에 기여한 모든 분들께 감사드립니다!
 
 ## Star History
 
-![Star History](images/star-history.svg)
+![Star History](public/images/star-history.svg)
 
 ## 라이선스
 

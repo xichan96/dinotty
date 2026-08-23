@@ -197,6 +197,9 @@ export interface ExtractPaneResult {
   new_tab_id: string
   pane_id: string
   source_layout: any
+  cwd?: string
+  connection_id?: string
+  workspace_id?: string
 }
 
 export async function apiExtractPane(
@@ -264,7 +267,10 @@ export interface SshProfileConnectRequest {
   workspace_id?: string
 }
 
-export async function apiCreateSshQuickTab(req: SshConnectRequest, signal?: AbortSignal): Promise<CreateTabResult> {
+export async function apiCreateSshQuickTab(
+  req: SshConnectRequest,
+  signal?: AbortSignal
+): Promise<CreateTabResult> {
   const res = await authFetch(apiUrl('/api/tabs/ssh/quick'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

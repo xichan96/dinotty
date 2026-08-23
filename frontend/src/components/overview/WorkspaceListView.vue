@@ -127,11 +127,14 @@ function showCtx(ws: Workspace, x: number, y: number) {
       icon: Trash2,
       danger: true,
       action: async () => {
-        if (!(await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
-          title: t('workspace.delete'),
-          confirmText: t('workspace.delete'),
-          cancelText: t('filePreview.cancel'),
-        }))) return
+        if (
+          !(await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
+            title: t('workspace.delete'),
+            confirmText: t('workspace.delete'),
+            cancelText: t('filePreview.cancel'),
+          }))
+        )
+          return
         try {
           await deleteWorkspace(ws.id)
         } catch (err) {

@@ -44,11 +44,15 @@ describe('terminal upload detection', () => {
     })
 
     const file = new File(['x'], 'x.txt')
-    const drop = eventWithData(new Event('drop', { bubbles: true, cancelable: true }), 'dataTransfer', {
-      files: [file],
-      types: [],
-      getData: vi.fn(),
-    })
+    const drop = eventWithData(
+      new Event('drop', { bubbles: true, cancelable: true }),
+      'dataTransfer',
+      {
+        files: [file],
+        types: [],
+        getData: vi.fn(),
+      }
+    )
     xterm.dispatchEvent(drop)
 
     expect(upload).toHaveBeenCalledWith([file])
@@ -70,11 +74,15 @@ describe('terminal upload detection', () => {
       onFileUpload: (files) => term.onFileUpload?.(files),
     })
 
-    const drop = eventWithData(new Event('drop', { bubbles: true, cancelable: true }), 'dataTransfer', {
-      files: [{ path: '/tmp/a b.txt', name: 'a b.txt' }],
-      types: [],
-      getData: vi.fn(),
-    })
+    const drop = eventWithData(
+      new Event('drop', { bubbles: true, cancelable: true }),
+      'dataTransfer',
+      {
+        files: [{ path: '/tmp/a b.txt', name: 'a b.txt' }],
+        types: [],
+        getData: vi.fn(),
+      }
+    )
     xterm.dispatchEvent(drop)
     await flushAsync()
 

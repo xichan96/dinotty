@@ -37,9 +37,7 @@ export interface InlineCreateRename {
   onInlineRenameCancel: () => void
 }
 
-export function useInlineCreateRename(
-  opts: InlineCreateRenameOptions
-): InlineCreateRename {
+export function useInlineCreateRename(opts: InlineCreateRenameOptions): InlineCreateRename {
   const {
     paneId,
     cwdLabel,

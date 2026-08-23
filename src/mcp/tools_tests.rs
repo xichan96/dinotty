@@ -12,7 +12,10 @@ fn make_server() -> McpServer {
     let manager = Arc::new(SessionManager::new());
     manager.sessions.insert("pane-1".into(), stub_session());
     manager.sessions.insert("pane-2".into(), stub_session());
-    McpServer::new(manager, Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default())))
+    McpServer::new(
+        manager,
+        Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default())),
+    )
 }
 
 fn scoped_token(cap: &str, resources: Vec<String>) -> TokenInfo {
@@ -28,11 +31,13 @@ fn scoped_token(cap: &str, resources: Vec<String>) -> TokenInfo {
     }
 }
 
-async fn call_tool(server: &McpServer, name: &str, args: serde_json::Value, token: &TokenInfo) -> Result<String, String> {
-    server
-        .tools
-        .call_tool(name, args, token)
-        .await
+async fn call_tool(
+    server: &McpServer,
+    name: &str,
+    args: serde_json::Value,
+    token: &TokenInfo,
+) -> Result<String, String> {
+    server.tools.call_tool(name, args, token).await
 }
 
 #[tokio::test]
@@ -40,26 +45,13 @@ async fn terminal_read_respects_pane_scope() {
     let server = make_server();
     let token = scoped_token("terminal:read", vec!["pane-1".into()]);
 
-    let ok = call_tool(
-        &server,
-        "terminal_read",
-        serde_json::json!({"pane_id": "pane-1"}),
-        &token,
-    )
-    .await;
+    let ok =
+        call_tool(&server, "terminal_read", serde_json::json!({"pane_id": "pane-1"}), &token).await;
     assert!(ok.is_ok(), "in-scope read should succeed: {ok:?}");
 
-    let denied = call_tool(
-        &server,
-        "terminal_read",
-        serde_json::json!({"pane_id": "pane-2"}),
-        &token,
-    )
-    .await;
-    assert_eq!(
-        denied.unwrap_err(),
-        "Token terminal:read scope does not include pane pane-2"
-    );
+    let denied =
+        call_tool(&server, "terminal_read", serde_json::json!({"pane_id": "pane-2"}), &token).await;
+    assert_eq!(denied.unwrap_err(), "Token terminal:read scope does not include pane pane-2");
 }
 
 #[tokio::test]
@@ -74,10 +66,7 @@ async fn terminal_send_and_execute_respect_pane_scope() {
         &token,
     )
     .await;
-    assert_eq!(
-        denied.unwrap_err(),
-        "Token terminal:write scope does not include pane pane-2"
-    );
+    assert_eq!(denied.unwrap_err(), "Token terminal:write scope does not include pane pane-2");
 
     // terminal_execute with explicit pane_id also goes through the scope check
     // (fails before any command is written to the PTY).
@@ -88,10 +77,7 @@ async fn terminal_send_and_execute_respect_pane_scope() {
         &token,
     )
     .await;
-    assert_eq!(
-        denied.unwrap_err(),
-        "Token terminal:write scope does not include pane pane-2"
-    );
+    assert_eq!(denied.unwrap_err(), "Token terminal:write scope does not include pane pane-2");
 }
 
 #[tokio::test]
@@ -99,18 +85,14 @@ async fn terminal_list_filters_out_of_scope_panes() {
     let server = make_server();
 
     let scoped = scoped_token("terminal:read", vec!["pane-1".into()]);
-    let out = call_tool(&server, "terminal_list", serde_json::json!({}), &scoped)
-        .await
-        .unwrap();
+    let out = call_tool(&server, "terminal_list", serde_json::json!({}), &scoped).await.unwrap();
     let entries: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     let ids: Vec<&str> = entries.iter().filter_map(|e| e["pane_id"].as_str()).collect();
     assert_eq!(ids, vec!["pane-1"]);
 
     // No scope restriction: all panes listed.
     let unscoped = scoped_token("terminal:read", vec![]);
-    let out = call_tool(&server, "terminal_list", serde_json::json!({}), &unscoped)
-        .await
-        .unwrap();
+    let out = call_tool(&server, "terminal_list", serde_json::json!({}), &unscoped).await.unwrap();
     let entries: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
     assert_eq!(entries.len(), 2);
 }

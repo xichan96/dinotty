@@ -213,11 +213,7 @@ async fn main() {
 
     // In stdio proxy mode, stdout is the JSON-RPC channel — logging must stay
     // on stderr (init_logging's file-disabled fallback writes to stdout).
-    let _guard = if mcp_stdio {
-        settings::init_stderr_logging()
-    } else {
-        settings::init_logging()
-    };
+    let _guard = if mcp_stdio { settings::init_stderr_logging() } else { settings::init_logging() };
 
     if mcp_stdio {
         let port = parse_port();

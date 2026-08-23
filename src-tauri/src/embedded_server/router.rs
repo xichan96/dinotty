@@ -72,10 +72,7 @@ pub fn build_router(state: AppState) -> Router {
             post(settings::upload_background).get(settings::get_background),
         )
         .route("/api/log", get(settings::get_log))
-        .route(
-            "/api/templates",
-            get(templates::list_templates).post(templates::create_template),
-        )
+        .route("/api/templates", get(templates::list_templates).post(templates::create_template))
         .route("/api/templates/apply", post(templates::apply_template))
         .route(
             "/api/templates/:id",
@@ -256,11 +253,8 @@ pub fn build_router(state: AppState) -> Router {
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string());
                 let is_preflight = req.method() == axum::http::Method::OPTIONS;
-                let mut response = if is_preflight {
-                    Response::new(Body::empty())
-                } else {
-                    next.run(req).await
-                };
+                let mut response =
+                    if is_preflight { Response::new(Body::empty()) } else { next.run(req).await };
                 if is_clipboard {
                     if is_preflight {
                         *response.status_mut() = StatusCode::NO_CONTENT;
@@ -270,8 +264,8 @@ pub fn build_router(state: AppState) -> Router {
                         axum::http::HeaderValue::from_static("no-store"),
                     );
                 }
-                if let Some(origin) = origin
-                    .filter(|_| !(is_clipboard && response.status() == StatusCode::FORBIDDEN))
+                if let Some(origin) =
+                    origin.filter(|_| !(is_clipboard && response.status() == StatusCode::FORBIDDEN))
                 {
                     let headers = response.headers_mut();
                     headers.insert(

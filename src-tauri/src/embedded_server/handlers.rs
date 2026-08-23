@@ -308,7 +308,9 @@ pub async fn logout(
     )
 }
 
-pub async fn list_sessions_handler(AxumState(state): AxumState<AppState>) -> Json<serde_json::Value> {
+pub async fn list_sessions_handler(
+    AxumState(state): AxumState<AppState>,
+) -> Json<serde_json::Value> {
     let sessions = state.sessions.list();
     Json(serde_json::json!({ "sessions": sessions }))
 }

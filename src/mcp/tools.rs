@@ -204,9 +204,7 @@ impl McpTools {
         };
 
         if !token_info.check_scope("terminal:write", &pane_id) {
-            return Err(format!(
-                "Token terminal:write scope does not include pane {pane_id}"
-            ));
+            return Err(format!("Token terminal:write scope does not include pane {pane_id}"));
         }
 
         let session = self.manager.sessions.get(&pane_id).ok_or("Pane not found")?;
@@ -289,9 +287,7 @@ impl McpTools {
         let pane_id = resolve_pane(pane_id_arg, &self.manager)?;
 
         if !token_info.check_scope("terminal:read", &pane_id) {
-            return Err(format!(
-                "Token terminal:read scope does not include pane {pane_id}"
-            ));
+            return Err(format!("Token terminal:read scope does not include pane {pane_id}"));
         }
 
         let session = self.manager.sessions.get(&pane_id).ok_or("Pane not found")?;
@@ -306,9 +302,7 @@ impl McpTools {
         let pane_id = resolve_pane(pane_id_arg, &self.manager)?;
 
         if !token_info.check_scope("terminal:write", &pane_id) {
-            return Err(format!(
-                "Token terminal:write scope does not include pane {pane_id}"
-            ));
+            return Err(format!("Token terminal:write scope does not include pane {pane_id}"));
         }
 
         let session = self.manager.sessions.get(&pane_id).ok_or("Pane not found")?;

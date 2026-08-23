@@ -93,12 +93,8 @@ async fn enable_open_api(client: &reqwest::Client, base: &str, token: &str) -> T
 }
 
 async fn create_tab(client: &reqwest::Client, base: &str, token: &str) -> TestResult<String> {
-    let resp = client
-        .post(format!("{base}/api/tabs"))
-        .bearer_auth(token)
-        .json(&json!({}))
-        .send()
-        .await?;
+    let resp =
+        client.post(format!("{base}/api/tabs")).bearer_auth(token).json(&json!({})).send().await?;
     assert!(resp.status().is_success(), "POST /api/tabs failed");
     let body: Value = resp.json().await?;
     body.get("pane_id")

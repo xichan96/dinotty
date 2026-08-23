@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use dinotty_server::agent;
+use dinotty_server::api::clipboard;
 use dinotty_server::auth::session::SessionStore;
 use dinotty_server::auth::verification_code::CodeStore;
-use dinotty_server::api::clipboard;
 use dinotty_server::file_watcher::FileWatcherState;
 use dinotty_server::history::HistoryState;
 use dinotty_server::mcp;
@@ -115,7 +115,8 @@ impl axum::extract::FromRef<AppState> for plugin::SubscriptionRegistry {
     }
 }
 
-impl axum::extract::FromRef<AppState> for (plugin::PluginManagerState, plugin::SubscriptionRegistry)
+impl axum::extract::FromRef<AppState>
+    for (plugin::PluginManagerState, plugin::SubscriptionRegistry)
 {
     fn from_ref(state: &AppState) -> Self {
         (state.plugins.clone(), state.subscriptions.clone())

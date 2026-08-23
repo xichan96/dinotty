@@ -728,10 +728,8 @@ mod tests {
 
         // Component-wise prefix: /tmp/x does not cover /tmp/x2
         let info = path_info(vec![scoped.to_string_lossy().into_owned()]);
-        let sibling = scoped.with_file_name(format!(
-            "{}2",
-            scoped.file_name().unwrap().to_string_lossy()
-        ));
+        let sibling =
+            scoped.with_file_name(format!("{}2", scoped.file_name().unwrap().to_string_lossy()));
         assert!(!info.check_path_scope("workspace:read", &sibling));
 
         // `~` expansion

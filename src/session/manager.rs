@@ -938,6 +938,28 @@ impl SessionManager {
         let _ = self.notifier.set(notifier);
     }
 
+    /// Current notifier, if one has been registered. Readers use this to hand
+    /// detected OSC actions to the notification pipeline.
+    #[must_use]
+    pub fn notifier(&self) -> Option<Arc<crate::notification::NotificationBroadcast>> {
+        self.notifier.get().cloned()
+    }
+
+    /// Dispatch OSC 9/777/BEL actions detected by a PTY/SSH reader to the
+    /// notification pipeline. Shared entry point so local and SSH panes
+    /// behave identically. Must be called with no screen lock held.
+    pub fn dispatch_osc_actions(&self, pane_id: &str, actions: Vec<crate::vt_screen::OscAction>) {
+        let Some(notifier) = self.notifier() else { return };
+        for action in actions {
+            match action {
+                crate::vt_screen::OscAction::Bell => notifier.send_detected_bell(pane_id),
+                crate::vt_screen::OscAction::Notify { title, body } => {
+                    notifier.send_notify(pane_id, title.as_deref(), &body, "info");
+                }
+            }
+        }
+    }
+
     pub fn start_event_bridge(self: &Arc<Self>) {
         let manager = Arc::clone(self);
         let mut rx = self.event_bus.subscribe();

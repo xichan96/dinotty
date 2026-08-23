@@ -463,10 +463,16 @@ async fn ssh_reader_task(
                         let bytes = data.to_vec();
                         // CWD sniffing (same as local PTY in pty.rs)
                         session.on_pty_output(&bytes);
-                        {
+                        let osc_actions = {
                             let mut screen =
                                 session.screen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                             screen.feed(&bytes);
+                            screen.drain_osc_actions()
+                        };
+                        // OSC 9/777/BEL notification dispatch - after the
+                        // screen lock is released above.
+                        if !osc_actions.is_empty() {
+                            manager.dispatch_osc_actions(&pane_id, osc_actions);
                         }
                         let _ = session.output_tx.send(bytes);
                     }

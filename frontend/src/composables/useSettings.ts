@@ -162,6 +162,7 @@ export interface NotificationConfig {
   enabled: boolean
   bell: { enabled: boolean; debounce_ms: number }
   osc_notify: boolean
+  osc_notify_debounce_ms: number
   idle_reminder: boolean
   command_complete: { enabled: boolean; threshold_seconds: number }
   keyword_match: { pattern: string; notification_type: string; case_sensitive: boolean }[]
@@ -566,6 +567,7 @@ export const settings = reactive<SettingsData>({
     enabled: true,
     bell: { enabled: true, debounce_ms: 300 },
     osc_notify: true,
+    osc_notify_debounce_ms: 2000,
     idle_reminder: false,
     command_complete: { enabled: false, threshold_seconds: 10 },
     keyword_match: [],

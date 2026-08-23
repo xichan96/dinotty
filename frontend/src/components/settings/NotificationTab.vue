@@ -38,6 +38,19 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
+      <div class="settings-row sub">
+        <label>{{ t('notification.oscDebounce') }}</label>
+        <input
+          v-model.number="cfg.osc_notify_debounce_ms"
+          type="number"
+          class="num-input"
+          min="0"
+          max="10000"
+          step="100"
+          @change="saveSettings()"
+        />
+        ms
+      </div>
       <div class="settings-row">
         <label>{{ t('notification.idleReminder') }}</label>
         <label class="toggle">

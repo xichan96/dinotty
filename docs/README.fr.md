@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Logo de Dinotty" width="200" />
+  <img src="public/images/logo.png" alt="Logo de Dinotty" width="200" />
 </p>
 
 <h1 align="center">Dinotty</h1>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">中文</a> | <a href="./README.en.md">English</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.pt.md">Português</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | Français
+  <a href="./README.zh.md">中文</a> | <a href="../README.md">English</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.pt.md">Português</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | Français
 </p>
 
 ---
@@ -34,17 +34,17 @@ Terminal, plugins, fichiers, SSH et aperçu web sont tous des panneaux. Faites g
 ## Captures d'écran
 
 <p align="center">
-  <img src="images/1.png" alt="Claude Code sur mobile" width="250" />
-  <img src="images/2.png" alt="Disposition clavier complète avec htop" width="250" />
-  <img src="images/3.png" alt="Paramètres de thème" width="250" />
+  <img src="public/images/1.png" alt="Claude Code sur mobile" width="250" />
+  <img src="public/images/2.png" alt="Disposition clavier complète avec htop" width="250" />
+  <img src="public/images/3.png" alt="Paramètres de thème" width="250" />
 </p>
 <p align="center">
-  <img src="images/4.png" alt="Clavier de raccourcis personnalisé" width="250" />
-  <img src="images/5.png" alt="Moniteur système" width="250" />
-  <img src="images/6.png" alt="Système de notifications" width="250" />
+  <img src="public/images/4.png" alt="Clavier de raccourcis personnalisé" width="250" />
+  <img src="public/images/5.png" alt="Moniteur système" width="250" />
+  <img src="public/images/6.png" alt="Système de notifications" width="250" />
 </p>
 <p align="center">
-  <img src="images/7.png" alt="Tablette en paysage avec disposition niveau desktop" width="500" />
+  <img src="public/images/7.png" alt="Tablette en paysage avec disposition niveau desktop" width="500" />
 </p>
 
 ## Démo desktop
@@ -54,37 +54,37 @@ Le client desktop offre une expérience professionnelle comparable à iTerm2 :
 **Split Broadcast** - Division multi-panneaux déplaçable, tapez dans un panneau et exécutez dans tous simultanément :
 
 <p align="center">
-  <img src="images/gif/1-split-broadcast.gif" alt="Démo Split Broadcast" width="600" />
+  <img src="public/images/gif/1-split-broadcast.gif" alt="Démo Split Broadcast" width="600" />
 </p>
 
 **Marque-pages de commandes** - Clic droit sur le texte du terminal pour marquer, gestion de groupes, exécution en un clic :
 
 <p align="center">
-  <img src="images/gif/2-command-bookmark.gif" alt="Démo marque-pages de commandes" width="600" />
+  <img src="public/images/gif/2-command-bookmark.gif" alt="Démo marque-pages de commandes" width="600" />
 </p>
 
 **Connexion SSH et navigateur de fichiers** - Client SSH intégré, sessions distantes comme en local, gestion complète des fichiers SFTP :
 
 <p align="center">
-  <img src="images/gif/3-ssh-file-browser.gif" alt="Démo connexion SSH et navigateur de fichiers" width="600" />
+  <img src="public/images/gif/3-ssh-file-browser.gif" alt="Démo connexion SSH et navigateur de fichiers" width="600" />
 </p>
 
 **Gestion des workspaces et Mission Control** - Isolation multi-workspace, vue d'ensemble Mission Control, bascule rapide :
 
 <p align="center">
-  <img src="images/gif/4-workspace-mission-control.gif" alt="Démo gestion des workspaces" width="600" />
+  <img src="public/images/gif/4-workspace-mission-control.gif" alt="Démo gestion des workspaces" width="600" />
 </p>
 
 **Système de plugins** - Plugins JS hot-reloadable, inclut CC Switch, JSON Formatter et plus :
 
 <p align="center">
-  <img src="images/gif/5-plugin.gif" alt="Démo système de plugins" width="600" />
+  <img src="public/images/gif/5-plugin.gif" alt="Démo système de plugins" width="600" />
 </p>
 
 **Système de layout unifié** - Terminal, plugin, navigateur de fichiers et aperçu web sont tous des panneaux ; division déplaçable, déplacement inter-onglets, extraction comme nouvel onglet :
 
 <p align="center">
-  <img src="images/gif/6-layout-sys.gif" alt="Démo système de layout unifié" width="600" />
+  <img src="public/images/gif/6-layout-sys.gif" alt="Démo système de layout unifié" width="600" />
 </p>
 
 ## Pourquoi Dinotty ?
@@ -273,7 +273,7 @@ Merci à toutes les personnes qui ont contribué à Dinotty !
 
 ## Star History
 
-![Star History](images/star-history.svg)
+![Star History](public/images/star-history.svg)
 
 ## Licence
 

@@ -15,217 +15,217 @@
 </p>
 
 <p align="center">
-  中文 | <a href="./docs/README.en.md">English</a> | <a href="./docs/README.ru.md">Русский</a> | <a href="./docs/README.pt.md">Português</a> | <a href="./docs/README.ko.md">한국어</a> | <a href="./docs/README.es.md">Español</a> | <a href="./docs/README.de.md">Deutsch</a> | <a href="./docs/README.fr.md">Français</a>
+  <a href="./docs/README.zh.md">中文</a> | English | <a href="./docs/README.ru.md">Русский</a> | <a href="./docs/README.pt.md">Português</a> | <a href="./docs/README.ko.md">한국어</a> | <a href="./docs/README.es.md">Español</a> | <a href="./docs/README.de.md">Deutsch</a> | <a href="./docs/README.fr.md">Français</a>
 </p>
 
 ---
 
-为 Coding Agent 场景打造的终端。
+A terminal built for coding agents.
 
-在任意设备上运行 Claude Code、opencode、Codex 或 OpenClaw -- 简洁、可拓展、多端同步，会话永不丢失。
+Run Claude Code, opencode, Codex, or OpenClaw on any device -- simple, extensible, multi-device, never lose a session.
 
-**手机 · iPad · 桌面，一个会话**
+**One session across phone · iPad · desktop**
 
-电脑上写到一半，掏出手机继续，回到桌面一切原样。断网不丢，刷新即回。
+Stop mid-task on your computer, continue on your phone, then return to your desktop and pick up exactly where you left off. Sessions survive disconnects and restore on refresh.
 
-**一切皆 pane，像搭积木一样**
+**Everything is a pane — build your terminal like building blocks**
 
-终端、插件、文件、SSH、网页预览 —— 每个面板都是一块积木，拖拽拼装出你的专属工作台。
+Terminals, plugins, files, SSH, and web previews are all panes. Drag them around to assemble your own workspace.
 
-## 截图
-
-<p align="center">
-  <img src="docs/public/images/1.png" alt="手机上运行 Claude Code" width="250" />
-  <img src="docs/public/images/2.png" alt="完整键盘布局与 htop" width="250" />
-  <img src="docs/public/images/3.png" alt="主题设置" width="250" />
-</p>
-<p align="center">
-  <img src="docs/public/images/4.png" alt="快捷键盘自定义" width="250" />
-  <img src="docs/public/images/5.png" alt="系统监控" width="250" />
-  <img src="docs/public/images/6.png" alt="通知系统" width="250" />
-</p>
-<p align="center">
-  <img src="docs/public/images/7.png" alt="平板横屏桌面级布局" width="500" />
-</p>
-
-## 桌面端演示
-
-桌面端同样专业好用，媲美 iTerm2 的终端体验：
-
-**分屏广播** — 可拖拽的多面板分屏，一个 pane 输入，多个 pane 同步执行：
+## Screenshots
 
 <p align="center">
-  <img src="docs/public/images/gif/1-split-broadcast.gif" alt="分屏广播演示" width="600" />
+  <img src="docs/public/images/1.png" alt="Running Claude Code on mobile" width="250" />
+  <img src="docs/public/images/2.png" alt="Full keyboard layout with htop" width="250" />
+  <img src="docs/public/images/3.png" alt="Theme settings" width="250" />
+</p>
+<p align="center">
+  <img src="docs/public/images/4.png" alt="Custom shortcut keyboard" width="250" />
+  <img src="docs/public/images/5.png" alt="System monitor" width="250" />
+  <img src="docs/public/images/6.png" alt="Notification system" width="250" />
+</p>
+<p align="center">
+  <img src="docs/public/images/7.png" alt="Tablet landscape desktop-class layout" width="500" />
 </p>
 
-**命令收藏** — 右键终端文本直接收藏，分组管理，一键执行：
+## Desktop Demo
+
+The desktop client delivers a professional experience comparable to iTerm2:
+
+**Split Broadcast** — Draggable multi-pane split, type in one pane and execute in all panes simultaneously:
 
 <p align="center">
-  <img src="docs/public/images/gif/2-command-bookmark.gif" alt="命令收藏演示" width="600" />
+  <img src="docs/public/images/gif/1-split-broadcast.gif" alt="Split broadcast demo" width="600" />
 </p>
 
-**SSH 连接与文件浏览器** — 内建 SSH 客户端，远程会话与本地体验一致，SFTP 文件管理全覆盖：
+**Command Bookmarks** — Right-click terminal text to bookmark, group management, one-click execution:
 
 <p align="center">
-  <img src="docs/public/images/gif/3-ssh-file-browser.gif" alt="SSH 连接与文件浏览器演示" width="600" />
+  <img src="docs/public/images/gif/2-command-bookmark.gif" alt="Command bookmarks demo" width="600" />
 </p>
 
-**工作区管理与 Mission Control** — 多工作区隔离，Mission Control 概览，快速切换：
+**SSH Connection & File Browser** — Built-in SSH client, remote sessions feel just like local, full SFTP file management:
 
 <p align="center">
-  <img src="docs/public/images/gif/4-workspace-mission-control.gif" alt="工作区管理演示" width="600" />
+  <img src="docs/public/images/gif/3-ssh-file-browser.gif" alt="SSH connection and file browser demo" width="600" />
 </p>
 
-**插件系统** — JS 插件热重载，内置 CC Switch、JSON Formatter 等：
+**Workspace Management & Mission Control** — Multi-workspace isolation, Mission Control overview, quick switching:
 
 <p align="center">
-  <img src="docs/public/images/gif/5-plugin.gif" alt="插件系统演示" width="600" />
+  <img src="docs/public/images/gif/4-workspace-mission-control.gif" alt="Workspace management demo" width="600" />
 </p>
 
-**统一布局系统** - 终端、插件、文件浏览器、网页预览皆为 pane，可拖拽分屏、跨 Tab 移动、提取为新 Tab：
+**Plugin System** — Hot-reloadable JS plugins with built-in CC Switch, JSON Formatter, and more:
 
 <p align="center">
-  <img src="docs/public/images/gif/6-layout-sys.gif" alt="统一布局系统演示" width="600" />
+  <img src="docs/public/images/gif/5-plugin.gif" alt="Plugin system demo" width="600" />
 </p>
 
-## 理念
+**Unified Layout System** - Terminal, plugin, file browser, and web preview are all panes; draggable split, cross-tab move, extract as new tab:
 
-终端 Coding Agent —— Claude Code、opencode、Codex、OpenClaw —— 功能强大，却总被束缚在单一窗口里。Dinotty 把它解放出来。一个终端，所有设备，所有可能。
+<p align="center">
+  <img src="docs/public/images/gif/6-layout-sys.gif" alt="Unified layout system demo" width="600" />
+</p>
 
-### 多端同步
+## Philosophy
 
-电脑上写到一半，掏出手机继续。回到电脑，一切原样。
+Terminal coding agents - Claude Code, opencode, Codex, OpenClaw - are powerful, yet confined to a single window. Dinotty sets them free. One terminal. Every device. Every possibility.
 
-### 拓展无界
+### Sync everywhere
 
-JS 插件热重载。CC Switch、JSON Formatter、Claude Code 对话管理开箱即用。自定义命令、终端交互、事件订阅、CLI 集成 —— API 皆已就位。
+Half-done on your laptop. Pick up your phone, keep going. Back to your laptop, exactly as you left it.
 
-### 一切皆 pane
+### Endless extensibility
 
-终端、文件、网页预览、Git 变更、SSH 远程。拖拽分屏，跨 Tab 移动，浑然一体。
+JS plugins with hot reload. CC Switch, JSON Formatter, Claude Code dialog management - built in. Custom commands, terminal interaction, event subscriptions, CLI integration - the API is ready.
 
-### 永不掉线
+### Everything is a pane
 
-服务端 VTE，PTY 断网存活。刷新页面，回到原处。
+Terminal, files, web preview, Git changes, SSH remote. Drag to split, move across tabs. All in one flow.
 
-### 自由开源
+### Never drops
 
-自托管。无订阅。无中继。数据，始终在你手中。
+Server-side VTE. PTY survives disconnects. Refresh the page, you're back where you were.
 
-### 轻量级——不是远程桌面
+### Free and open
 
-| | Dinotty | 远程桌面 (VNC/RDP/Parsec) |
+Self-hosted. No subscriptions. No relay. Your data stays on your machine.
+
+### Lightweight — Not a Remote Desktop
+
+| | Dinotty | Remote Desktop (VNC/RDP/Parsec) |
 |---|---|---|
-| **传输数据** | 纯文本（JSON，字节流） | 全屏像素流，30-60 fps |
-| **带宽消耗** | 通常 ~1–10 KB/s | ~1–10 MB/s（多 100–1000 倍） |
-| **移动网络友好** | ✅ 3G/4G 下流畅无延迟 | ❌ 卡顿、高延迟、流量消耗大 |
-| **弱信号容忍度** | ✅ 自动重连，无画面丢失 | ❌ 画面冻结、输入延迟 |
-| **电量消耗** | 低（文本渲染） | 高（视频解码） |
-| **分辨率适配** | 任意尺寸下原生文本渲染 | 位图缩放，手机上模糊 |
-| **交互方式** | 原生触控 + 自定义键盘 | 模拟鼠标，桌面 UI 在手机上很小 |
+| **Data transmitted** | Text only (JSON, bytes) | Full screen pixels at 30-60 fps |
+| **Bandwidth** | ~1–10 KB/s typical | ~1–10 MB/s (100–1000x more) |
+| **Mobile data friendly** | ✅ Works on 3G/4G without lag | ❌ Choppy, high latency, burns data |
+| **Weak signal tolerance** | ✅ Auto-reconnect, no frame loss | ❌ Frozen screen, input lag |
+| **Battery consumption** | Low (text rendering) | High (video decoding) |
+| **Resolution adaptation** | Native text at any size | Scaled bitmap, blurry on phone |
+| **Interaction** | Native touch, custom keyboard | Simulated mouse, tiny desktop UI |
 
-## 核心特性
+## Key Features
 
-- **服务端虚拟终端** — 完整 VTE 解析，服务端掌握精确屏幕状态，支持会话恢复与屏幕快照
-- **会话持久化** — PTY 进程在断网后存活，自动重连 + 指数退避，刷新页面即可恢复
-- **分屏与多 Tab** — 可拖拽分屏、多 Tab 管理，服务端主导的 Pane 生命周期
-- **工作区管理** — 多工作区隔离，Mission Control 概览，工作区级插件 Tab
-- **广播模式** — 一个 pane 输入，多个 pane 同步执行，免费
-- **命令收藏** — 右键终端文本直接收藏，分组管理，一键执行
-- **SSH 远程连接** — 内建 SSH 客户端，支持密码/密钥认证，远程会话与本地体验一致
-- **远程文件管理（SFTP）** — SSH 连接下自动启用 SFTP，文件浏览、编辑、上传、下载全覆盖
-- **服务器列表** — 管理多台远程服务器，快速切换连接
-- **响应式布局** — 竖屏上下排列，横屏左右并排；触控优化的按钮与面板缩放
-- **可自定义快捷键盘** — 为手机补齐 Ctrl/Esc/功能键，支持任意转义序列
-- **内建文件浏览器** — 代码高亮、Markdown 渲染、Office 文档预览、音视频播放
-- **Git 变更指示** — 编辑器 gutter 增/改/删标记，inline diff，Stage/Revert
-- **网页预览** — 内建反向代理，在 iframe 中预览本地开发服务器
-- **通知系统** — 终端 bell/OSC 检测，WebSocket 推送，可配置声音提醒
-- **系统监控** — 实时 CPU/内存/网络图表
-- **插件系统** — JS 插件 + CLI 桥接，热重载，内置 CC Switch、JSON Formatter、Claude Code 对话管理等
-- **Open API** — HTTP 端点，支持 Stream Deck、快捷指令等外部设备控制
-- **命令面板** — 快速访问命令启动器
-- **桌面应用** — 可选 Tauri 原生客户端
+- **Server-side virtual terminal** — full VTE parser, server knows exact screen state, enables session recovery & screen snapshots
+- **Session persistence** — PTY processes survive disconnection, auto-reconnect with exponential backoff, refresh page to restore
+- **Split pane & multi-tab** — draggable split, multi-tab management with server-led pane lifecycle
+- **Workspace management** — multi-workspace isolation, Mission Control overview, workspace-scoped plugin tabs
+- **Broadcast mode** — input in one pane, execute in all panes simultaneously, free
+- **Command bookmarks** — right-click terminal text to bookmark, group management, one-click execution
+- **SSH remote connection** — built-in SSH client with password/key auth, remote sessions feel just like local
+- **Remote file management (SFTP)** — auto-enabled over SSH connections, full file browse/edit/upload/download
+- **Server list** — manage multiple remote servers, quick switch connections
+- **Responsive layout** — portrait stacks vertically, landscape side-by-side; touch-optimized buttons & pane resizing
+- **Customizable shortcut keyboard** — add Ctrl/Esc/function keys for mobile, supports arbitrary escape sequences
+- **Built-in file browser** — code highlighting, Markdown rendering, Office document preview, audio/video playback
+- **Git change indicators** — gutter marks for added/modified/deleted lines, inline diff, Stage/Revert
+- **Web preview** — built-in reverse proxy to preview local dev servers in iframe
+- **Notification system** — terminal bell/OSC detection, WebSocket push, configurable sound alerts
+- **System monitor** — real-time CPU/memory/network charts
+- **Plugin system** — JS plugins + CLI bridge, hot-reload; ships with CC Switch, JSON Formatter, Claude Code conversation manager, etc.
+- **Open API** — HTTP endpoint for external device control (Stream Deck, Shortcuts, automation scripts)
+- **Command palette** — quick-access command launcher
+- **Desktop app** — optional Tauri-based native client
 
-## 差异化亮点
+## Key Differentiators
 
-- **服务端虚拟终端** - 不是 WebSocket-to-PTY 透传，PTY 在断网后存活，刷新页面即恢复会话
-- **多端同步** - 浏览器即同步，桌面深度编码、移动随时接管
-- **轻量纯文本传输** - ~1-10 KB/s，3G/4G 流畅，远胜远程桌面 100-1000 倍带宽
-- **自包含工作环境** - 内建文件浏览、网页预览、Git 变更、SSH/SFTP、插件系统
-- **免费开源** - 自托管，无订阅无中继
+- **Server-side virtual terminal** - Not a WebSocket-to-PTY pipe; PTY survives disconnect, refresh page to restore session
+- **Multi-device sync** - Browser-based sync, deep coding on desktop, take over from mobile
+- **Lightweight text-only transport** - ~1-10 KB/s, smooth on 3G/4G, 100-1000x less bandwidth than remote desktop
+- **Self-contained environment** - Built-in file browser, web preview, Git changes, SSH/SFTP, plugin system
+- **Free & open source** - Self-hosted, no subscription, no relay fees
 
-完整方案对比见 [方案对比](docs/zh/getting-started/comparison.md)。
+See [comparison with other solutions](docs/en/getting-started/comparison.md) for details.
 
-## 安装
+## Installation
 
-前往 [GitHub Releases](https://github.com/xichan96/dinotty/releases) 下载对应平台的安装包或二进制：
+Download the installer or binary for your platform from [GitHub Releases](https://github.com/xichan96/dinotty/releases):
 
-| 平台 | 格式 | 说明 |
-|------|------|------|
-| **macOS** | `.dmg` | 双击打开，拖入 Applications 即可 |
+| Platform | Format | Notes |
+|----------|--------|-------|
+| **macOS** | `.dmg` | Open and drag to Applications |
 | **Linux** | `.deb` | `sudo dpkg -i dinotty_*.deb` |
-| **Windows** | `.exe` / 源码构建 | 在 PowerShell 中运行 `dinotty-server.exe`，也可从源码构建 |
+| **Windows** | `.exe` / source build | Run `dinotty-server.exe` from PowerShell, or build from source |
 
-> 也可以从源码构建，见下方「快速开始」。
+> You can also build from source, see "Quick Start" below.
 
-**macOS 注意事项**：由于应用未签名，macOS 可能会提示 **"Dinotty" is damaged and can't be opened**。安装后请在终端执行以下命令解除限制：
+**macOS Note**: Since the app is unsigned, macOS may show **"Dinotty" is damaged and can't be opened**. Run the following command after installation to remove the restriction:
 
 ```bash
 xattr -cr /Applications/Dinotty.app
 ```
 
-**Linux 一键下载安装**：
+**Linux one-liner install**:
 
 ```bash
 VERSION=$(curl -s https://api.github.com/repos/xichan96/dinotty/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | sed 's/^v//') && curl -LO "https://github.com/xichan96/dinotty/releases/download/v${VERSION}/dinotty-server_${VERSION}-1_amd64.deb" && sudo dpkg -i "dinotty-server_${VERSION}-1_amd64.deb"
 ```
 
-**Linux 启动方式**：
+**Linux startup**:
 
 ```bash
 # systemd
 systemctl start dinotty
-systemctl enable dinotty  # 开机自启
+systemctl enable dinotty  # auto-start on boot
 
-# Docker 容器
+# Docker container
 nohup dinotty-server &
 ```
 
-**Windows 启动方式**：
+**Windows startup**:
 
 ```powershell
 # PowerShell
 .\dinotty-server.exe -p 8999
 
-# 可选：指定默认 shell（优先级高于自动检测）
+# Optional: override the default shell before auto-detection
 $env:DINOTTY_SHELL = "pwsh.exe"
 .\dinotty-server.exe
 ```
 
-Windows 默认 shell 检测顺序为 `DINOTTY_SHELL` → `pwsh.exe` → `powershell.exe` → `%ComSpec%` / `cmd.exe`。
+On Windows, the default shell is detected in this order: `DINOTTY_SHELL` → `pwsh.exe` → `powershell.exe` → `%ComSpec%` / `cmd.exe`.
 
-默认监听端口 **8999**，启动后访问 `http://<your-ip>:8999`。可通过 `-p` 参数指定端口：
+Default port is **8999**. After starting, visit `http://<your-ip>:8999`. Use `-p` to specify a custom port:
 
 ```bash
 dinotty-server -p 3000
 ```
 
-## 快速开始
+## Quick Start
 
 ```bash
-# 克隆仓库（推荐 shallow clone，体积小速度快）
+# Clone repo (shallow clone recommended — faster and smaller)
 git clone --depth 1 --single-branch -b dev git@github.com:xichan96/dinotty.git
 cd dinotty
 
-# 构建前端
+# Build frontend
 cd frontend && pnpm install && pnpm run build && cd ..
 
-# 运行服务器
+# Run server
 cargo run
 ```
 
-Windows PowerShell 下可使用等价的分步命令：
+Windows PowerShell equivalent:
 
 ```powershell
 git clone --depth 1 --single-branch -b dev git@github.com:xichan96/dinotty.git
@@ -237,77 +237,70 @@ cd ..
 cargo run
 ```
 
-在浏览器中打开 http://127.0.0.1:8999 。
+Open http://127.0.0.1:8999 in your browser.
 
 ```bash
-# 带调试日志运行
+# Backend with debug logging
 RUST_LOG=debug cargo run
 
-# 前端类型检查
+# Frontend type-check
 cd frontend && npx vue-tsc --noEmit
 ```
 
 ```powershell
-# Windows PowerShell 带调试日志运行
+# Windows PowerShell debug logging
 $env:RUST_LOG = "debug"
 cargo run
 ```
 
-## 验证码登录
+## Verification Code Login
 
-除默认的「令牌登录」外，dinotty 支持「验证码登录」作为**互斥替代**选项：在「安全与访问」设置中选择后，远程用户登录时由后端生成 6 位验证码并通过消息通知插件（如 `feishu-notify`）推送到你本人，登录页输入验证码即可建会话。验证码 5 分钟有效、一次性消费、5 次错误后失效。这种方式不依赖静态 token，可降低 token 被 XSS / 截图 / 设备被盗 / 社工后的风险。
+In addition to the default "Token" login, dinotty supports "Verification Code" login as a **mutually exclusive** alternative: when selected in "Security & Access", remote users receive a 6-digit code generated server-side and pushed to you via a notifier plugin (e.g. `feishu-notify`). Entering the code on the login page creates a session. Codes are valid for 5 minutes, single-use, and invalidated after 5 wrong attempts. This removes the static token from the remote login path, mitigating XSS / screenshot / device theft / social engineering risks to the token itself.
 
-启用前需先安装一个消息通知类插件并保持对 `auth.verification_code` 事件的订阅，否则切换选项会置灰。`login_method=verification_code` 时卸载当前订阅了该事件的插件会被后端 409 拒绝，防止误操作导致远程无法登录。
+Before enabling, install a messaging notifier plugin and keep it subscribed to the `auth.verification_code` event - otherwise the option is disabled in the UI. While `login_method=verification_code`, uninstalling a plugin currently subscribed to that event is rejected with 409 to prevent accidental lockout.
 
-### 紧急恢复
+### Emergency Recovery
 
-如果验证码登录被卡住（通知插件被卸载、订阅丢失、邮件/IM 收不到消息），可在服务端主机上编辑 `~/.dinotty/settings.json`（Windows 下为 `%APPDATA%\dinotty\settings.json`），将 `auth.login_method` 改回 `"token"`，然后重启 dinotty 服务即可恢复令牌登录。该路径只对服务端主机本机用户可写，远程登录用户无权修改。
+If verification code login is stuck (notifier plugin uninstalled, subscription lost, or IM/email not arriving), edit `~/.dinotty/settings.json` (Windows: `%APPDATA%\dinotty\settings.json`) on the server host, set `auth.login_method` back to `"token"`, and restart the dinotty service. This path is only writable by the server host's local user; remote login users cannot modify it.
 
-## 技术栈
+## Tech Stack
 
-| 层级 | 技术 |
-|------|------|
-| 后端 | Rust, Axum 0.7, Tokio, portable-pty, vte, russh, russh-sftp |
-| 前端 | Vue 3, TypeScript, Vite, xterm.js 5 |
-| 桌面端 | Tauri |
+| Layer | Technology |
+|-------|-----------|
+| Backend | Rust, Axum 0.7, Tokio, portable-pty, vte, russh, russh-sftp |
+| Frontend | Vue 3, TypeScript, Vite, xterm.js 5 |
+| Desktop | Tauri |
 
-**Rust 编写 · 单二进制 · 零依赖部署** — 服务端跑完整 VT 状态机，不是管道转发，断线会话不丢失。
+**Written in Rust · Single binary · Zero dependencies** — Runs a full VT state machine on the server, not a pipe-forwarding proxy, so sessions survive disconnection.
 
-## 更多文档
+## More Documentation
 
-- [方案对比](docs/zh/getting-started/comparison.md) — 与 ttyd/gotty/Wetty 及其他 AI Coding 远程方案的差异
-- [部署指南](docs/zh/getting-started/deployment.md) — systemd、Docker、Windows 原生运行、跨平台构建、配置说明
-- [发布指南](docs/zh/getting-started/releasing.md) — 统一版本管理、版本 PR、`dev` 到 `main` 晋升、Tag 与 GitHub Release
-- [文件编辑器](docs/zh/features/file-editor.md) — 分屏、多光标编辑、Cursor Group 跨文件同步
-- [通知系统](docs/zh/features/notifications.md) — HTTP API、Claude Code 集成、Open API
-- [插件系统](docs/zh/plugins/plugins.md) — 安装、清单、API、内置插件
-- [插件开发](docs/zh/plugins/plugin-development.md) — 完整的插件开发文档
-- [Agent API](docs/zh/api/agent-api.md) — HTTP/WebSocket 结构化交互，供 AI Agent 与自动化脚本调用
-- [主机剪贴板 API](docs/zh/api/clipboard-api.md) — 移动端主机粘贴使用的敏感认证接口
-- [MCP Server](docs/zh/api/mcp-server.md) — 内置 MCP JSON-RPC 服务器，AI 助手直接操作终端会话
-- [Token 权限系统](docs/zh/internals/token-system.md) — 基于 Capability 的多 Token 细粒度访问控制
-- [Event Bus](docs/zh/internals/event-bus.md) — 全局事件总线，模块间事件分发
-- [审计日志与 Webhook](docs/zh/internals/audit-webhook.md) — API 使用追踪与外部通知
-- [贡献指南](docs/zh/getting-started/contributing.md) — 分支策略、Commit 规范、代码风格
+- [Comparison](docs/en/getting-started/comparison.md) — differences vs ttyd/gotty/Wetty and other AI coding remote solutions
+- [Deployment Guide](docs/en/getting-started/deployment.md) — systemd, Docker, Windows native run, cross-platform build, configuration
+- [Release Guide](docs/en/getting-started/releasing.md) — unified version management, version PRs, `dev` to `main` promotion, tags, and GitHub Releases
+- [File Editor](docs/en/features/file-editor.md) — split panes, multi-cursor editing, Cursor Group cross-file sync
+- [Notification System](docs/en/features/notifications.md) — HTTP API, Claude Code integration, Open API
+- [Plugin System](docs/en/plugins/plugins.md) — installation, manifest, API, built-in plugins
+- [Plugin Development](docs/zh/plugins/plugin-development.md) — full plugin development guide (Chinese)
+- [Host Clipboard API](docs/en/api/clipboard-api.md) — sensitive authenticated endpoint used by mobile host paste
+- [MCP Server](docs/en/api/mcp-server.md) — built-in MCP JSON-RPC server for AI assistants to operate terminal sessions
+- [Token Permission System](docs/zh/internals/token-system.md) — capability-based multi-token fine-grained access control (Chinese)
+- [Event Bus](docs/zh/internals/event-bus.md) — global event bus for inter-module event dispatch (Chinese)
+- [Audit Log & Webhook](docs/zh/internals/audit-webhook.md) — API usage tracking and external notifications (Chinese)
+- [Contributing](docs/en/getting-started/contributing.md) — branch strategy, commit convention, code style
 
-## 贡献者
+## Contributors
 
-感谢所有为 Dinotty 做出贡献的人！
+Thanks to all the people who have contributed to Dinotty!
 
 <a href="https://github.com/xichan96/dinotty/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=xichan96/dinotty" />
 </a>
 
-## 加入 QQ 群
-
-<p align="center">
-  <img src="docs/public/images/qq.png" alt="QQ 群" width="200" />
-</p>
-
 ## Star History
 
 ![Star History](docs/public/images/star-history.svg)
 
-## 许可证
+## License
 
 MIT

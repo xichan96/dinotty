@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Dinotty Logo" width="200" />
+  <img src="public/images/logo.png" alt="Dinotty Logo" width="200" />
 </p>
 
 <h1 align="center">Dinotty</h1>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">中文</a> | <a href="./README.en.md">English</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.pt.md">Português</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | Deutsch | <a href="./README.fr.md">Français</a>
+  <a href="./README.zh.md">中文</a> | <a href="../README.md">English</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.pt.md">Português</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | Deutsch | <a href="./README.fr.md">Français</a>
 </p>
 
 ---
@@ -34,17 +34,17 @@ Terminal, Plugins, Dateien, SSH und Web-Vorschau sind alles Panes. Ziehe sie und
 ## Screenshots
 
 <p align="center">
-  <img src="images/1.png" alt="Claude Code auf dem Handy" width="250" />
-  <img src="images/2.png" alt="Vollständige Tastaturbelegung mit htop" width="250" />
-  <img src="images/3.png" alt="Theme-Einstellungen" width="250" />
+  <img src="public/images/1.png" alt="Claude Code auf dem Handy" width="250" />
+  <img src="public/images/2.png" alt="Vollständige Tastaturbelegung mit htop" width="250" />
+  <img src="public/images/3.png" alt="Theme-Einstellungen" width="250" />
 </p>
 <p align="center">
-  <img src="images/4.png" alt="Custom Shortcut-Tastatur" width="250" />
-  <img src="images/5.png" alt="Systemmonitor" width="250" />
-  <img src="images/6.png" alt="Benachrichtigungssystem" width="250" />
+  <img src="public/images/4.png" alt="Custom Shortcut-Tastatur" width="250" />
+  <img src="public/images/5.png" alt="Systemmonitor" width="250" />
+  <img src="public/images/6.png" alt="Benachrichtigungssystem" width="250" />
 </p>
 <p align="center">
-  <img src="images/7.png" alt="Tablet im Querformat mit Desktop-Level-Layout" width="500" />
+  <img src="public/images/7.png" alt="Tablet im Querformat mit Desktop-Level-Layout" width="500" />
 </p>
 
 ## Desktop-Demo
@@ -54,37 +54,37 @@ Der Desktop-Client bietet ein professionelles Erlebnis vergleichbar mit iTerm2:
 **Split Broadcast** - Ziehbare Multi-Pane-Aufteilung, tippe in einem Pane und führe in allen gleichzeitig aus:
 
 <p align="center">
-  <img src="images/gif/1-split-broadcast.gif" alt="Split Broadcast Demo" width="600" />
+  <img src="public/images/gif/1-split-broadcast.gif" alt="Split Broadcast Demo" width="600" />
 </p>
 
 **Command Bookmarks** - Rechtsklick auf Terminaltext zum Bookmarken, Gruppenverwaltung, Ein-Klick-Ausführung:
 
 <p align="center">
-  <img src="images/gif/2-command-bookmark.gif" alt="Command Bookmarks Demo" width="600" />
+  <img src="public/images/gif/2-command-bookmark.gif" alt="Command Bookmarks Demo" width="600" />
 </p>
 
 **SSH-Verbindung und Dateibrowser** - Eingebauter SSH-Client, Remote-Sessions fühlen sich lokal an, vollständiges SFTP-Dateimanagement:
 
 <p align="center">
-  <img src="images/gif/3-ssh-file-browser.gif" alt="SSH-Verbindung und Dateibrowser Demo" width="600" />
+  <img src="public/images/gif/3-ssh-file-browser.gif" alt="SSH-Verbindung und Dateibrowser Demo" width="600" />
 </p>
 
 **Workspace-Management und Mission Control** - Multi-Workspace-Isolation, Mission Control-Übersicht, schnelles Wechseln:
 
 <p align="center">
-  <img src="images/gif/4-workspace-mission-control.gif" alt="Workspace-Management Demo" width="600" />
+  <img src="public/images/gif/4-workspace-mission-control.gif" alt="Workspace-Management Demo" width="600" />
 </p>
 
 **Plugin-System** - Hot-Reload-fähige JS-Plugins, inklusive CC Switch, JSON Formatter und mehr:
 
 <p align="center">
-  <img src="images/gif/5-plugin.gif" alt="Plugin-System Demo" width="600" />
+  <img src="public/images/gif/5-plugin.gif" alt="Plugin-System Demo" width="600" />
 </p>
 
 **Einheitliches Layout-System** - Terminal, Plugin, Dateibrowser und Web-Vorschau sind alles Panes; ziehbare Aufteilung, Tab-übergreifendes Verschieben, als neues Tab extrahieren:
 
 <p align="center">
-  <img src="images/gif/6-layout-sys.gif" alt="Einheitliches Layout-System Demo" width="600" />
+  <img src="public/images/gif/6-layout-sys.gif" alt="Einheitliches Layout-System Demo" width="600" />
 </p>
 
 ## Warum Dinotty?
@@ -273,7 +273,7 @@ Danke an alle, die zu Dinotty beigetragen haben!
 
 ## Star History
 
-![Star History](images/star-history.svg)
+![Star History](public/images/star-history.svg)
 
 ## Lizenz
 

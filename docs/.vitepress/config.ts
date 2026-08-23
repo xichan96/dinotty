@@ -155,7 +155,7 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   title: 'Dinotty',
-  description: '为 Coding Agent 场景打造的终端 -- 简洁、可拓展、多端同步，会话永不丢失',
+  description: 'A terminal built for coding agents -- simple, extensible, multi-device sync, sessions never lost',
 
   srcExclude: ['README.*.md', 'README.md'],
 
@@ -164,6 +164,14 @@ export default defineConfig({
   ],
 
   locales: {
+    en: {
+      label: 'English',
+      lang: 'en-US',
+      themeConfig: {
+        nav: enNav,
+        sidebar: enSidebar
+      }
+    },
     zh: {
       label: '简体中文',
       lang: 'zh-CN',
@@ -175,14 +183,6 @@ export default defineConfig({
         lastUpdated: { text: '最后更新' },
         search: { provider: 'local', options: { translations: { button: { buttonText: '搜索文档', buttonAriaLabel: '搜索文档' } } } }
       }
-    },
-    en: {
-      label: 'English',
-      lang: 'en-US',
-      themeConfig: {
-        nav: enNav,
-        sidebar: enSidebar
-      }
     }
   },
 
@@ -190,7 +190,7 @@ export default defineConfig({
     logo: '/images/logo.png',
     socialLinks: [{ icon: 'github', link: GITHUB }],
     footer: {
-      message: '基于 MIT 许可发布',
+      message: 'Released under the MIT license',
       copyright: 'Copyright © 2024-present xichan96'
     },
     search: { provider: 'local' }

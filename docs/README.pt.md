@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Logo do Dinotty" width="200" />
+  <img src="public/images/logo.png" alt="Logo do Dinotty" width="200" />
 </p>
 
 <h1 align="center">Dinotty</h1>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">中文</a> | <a href="./README.en.md">English</a> | <a href="./README.ru.md">Русский</a> | Português | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a>
+  <a href="./README.zh.md">中文</a> | <a href="../README.md">English</a> | <a href="./README.ru.md">Русский</a> | Português | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a>
 </p>
 
 ---
@@ -34,17 +34,17 @@ Terminal, plugins, arquivos, SSH e visualização web são todos painéis. Arras
 ## Screenshots
 
 <p align="center">
-  <img src="images/1.png" alt="Rodando Claude Code no celular" width="250" />
-  <img src="images/2.png" alt="Layout completo de teclado com htop" width="250" />
-  <img src="images/3.png" alt="Configurações de tema" width="250" />
+  <img src="public/images/1.png" alt="Rodando Claude Code no celular" width="250" />
+  <img src="public/images/2.png" alt="Layout completo de teclado com htop" width="250" />
+  <img src="public/images/3.png" alt="Configurações de tema" width="250" />
 </p>
 <p align="center">
-  <img src="images/4.png" alt="Teclado customizado de atalhos" width="250" />
-  <img src="images/5.png" alt="Monitor do sistema" width="250" />
-  <img src="images/6.png" alt="Sistema de notificações" width="250" />
+  <img src="public/images/4.png" alt="Teclado customizado de atalhos" width="250" />
+  <img src="public/images/5.png" alt="Monitor do sistema" width="250" />
+  <img src="public/images/6.png" alt="Sistema de notificações" width="250" />
 </p>
 <p align="center">
-  <img src="images/7.png" alt="Tablet em paisagem com layout nível desktop" width="500" />
+  <img src="public/images/7.png" alt="Tablet em paisagem com layout nível desktop" width="500" />
 </p>
 
 ## Demo no desktop
@@ -54,37 +54,37 @@ O cliente desktop oferece uma experiência profissional comparável ao iTerm2:
 **Split Broadcast** - Divisão multinpainel arrastável, digite em um painel e execute em todos simultaneamente:
 
 <p align="center">
-  <img src="images/gif/1-split-broadcast.gif" alt="Demo do Split Broadcast" width="600" />
+  <img src="public/images/gif/1-split-broadcast.gif" alt="Demo do Split Broadcast" width="600" />
 </p>
 
 **Bookmarks de comandos** - Clique direito no texto do terminal para favoritar, gestão de grupos, execução com um clique:
 
 <p align="center">
-  <img src="images/gif/2-command-bookmark.gif" alt="Demo dos bookmarks de comandos" width="600" />
+  <img src="public/images/gif/2-command-bookmark.gif" alt="Demo dos bookmarks de comandos" width="600" />
 </p>
 
 **Conexão SSH e navegador de arquivos** - Cliente SSH embutido, sessões remotas parecem locais, gestão completa de arquivos SFTP:
 
 <p align="center">
-  <img src="images/gif/3-ssh-file-browser.gif" alt="Demo de conexão SSH e navegador de arquivos" width="600" />
+  <img src="public/images/gif/3-ssh-file-browser.gif" alt="Demo de conexão SSH e navegador de arquivos" width="600" />
 </p>
 
 **Gestão de workspaces e Mission Control** - Isolamento multi-workspace, visão geral do Mission Control, troca rápida:
 
 <p align="center">
-  <img src="images/gif/4-workspace-mission-control.gif" alt="Demo de gestão de workspaces" width="600" />
+  <img src="public/images/gif/4-workspace-mission-control.gif" alt="Demo de gestão de workspaces" width="600" />
 </p>
 
 **Sistema de plugins** - Plugins JS com hot-reload, vem com CC Switch, JSON Formatter e mais:
 
 <p align="center">
-  <img src="images/gif/5-plugin.gif" alt="Demo do sistema de plugins" width="600" />
+  <img src="public/images/gif/5-plugin.gif" alt="Demo do sistema de plugins" width="600" />
 </p>
 
 **Sistema unificado de layout** - Terminal, plugin, navegador de arquivos e pré-visualização web são todos painéis; divisão arrastável, movimentação entre abas, extração como nova aba:
 
 <p align="center">
-  <img src="images/gif/6-layout-sys.gif" alt="Demo do sistema unificado de layout" width="600" />
+  <img src="public/images/gif/6-layout-sys.gif" alt="Demo do sistema unificado de layout" width="600" />
 </p>
 
 ## Por que Dinotty?
@@ -273,7 +273,7 @@ Obrigado a todas as pessoas que contribuíram para o Dinotty!
 
 ## Star History
 
-![Star History](images/star-history.svg)
+![Star History](public/images/star-history.svg)
 
 ## Licença
 

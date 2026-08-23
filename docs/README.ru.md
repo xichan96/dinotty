@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Логотип Dinotty" width="200" />
+  <img src="public/images/logo.png" alt="Логотип Dinotty" width="200" />
 </p>
 
 <h1 align="center">Dinotty</h1>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="../README.md">中文</a> | <a href="./README.en.md">English</a> | Русский | <a href="./README.pt.md">Português</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a>
+  <a href="./README.zh.md">中文</a> | <a href="../README.md">English</a> | Русский | <a href="./README.pt.md">Português</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.es.md">Español</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a>
 </p>
 
 ---
@@ -34,17 +34,17 @@
 ## Скриншоты
 
 <p align="center">
-  <img src="images/1.png" alt="Запуск Claude Code на мобильном" width="250" />
-  <img src="images/2.png" alt="Полная раскладка клавиатуры с htop" width="250" />
-  <img src="images/3.png" alt="Настройки темы" width="250" />
+  <img src="public/images/1.png" alt="Запуск Claude Code на мобильном" width="250" />
+  <img src="public/images/2.png" alt="Полная раскладка клавиатуры с htop" width="250" />
+  <img src="public/images/3.png" alt="Настройки темы" width="250" />
 </p>
 <p align="center">
-  <img src="images/4.png" alt="Пользовательская клавиатура горячих клавиш" width="250" />
-  <img src="images/5.png" alt="Системный монитор" width="250" />
-  <img src="images/6.png" alt="Система уведомлений" width="250" />
+  <img src="public/images/4.png" alt="Пользовательская клавиатура горячих клавиш" width="250" />
+  <img src="public/images/5.png" alt="Системный монитор" width="250" />
+  <img src="public/images/6.png" alt="Система уведомлений" width="250" />
 </p>
 <p align="center">
-  <img src="images/7.png" alt="Альбомная ориентация планшета — уровень десктопа" width="500" />
+  <img src="public/images/7.png" alt="Альбомная ориентация планшета — уровень десктопа" width="500" />
 </p>
 
 ## Демонстрация десктопа
@@ -54,37 +54,37 @@
 **Разделённое вещание** — перетаскиваемое разделение на несколько панелей, ввод в одной панели и одновременное выполнение во всех:
 
 <p align="center">
-  <img src="images/gif/1-split-broadcast.gif" alt="Демо разделённого вещания" width="600" />
+  <img src="public/images/gif/1-split-broadcast.gif" alt="Демо разделённого вещания" width="600" />
 </p>
 
 **Закладки команд** — правый клик по тексту терминала для закладки, управление группами, запуск одним кликом:
 
 <p align="center">
-  <img src="images/gif/2-command-bookmark.gif" alt="Демо закладок команд" width="600" />
+  <img src="public/images/gif/2-command-bookmark.gif" alt="Демо закладок команд" width="600" />
 </p>
 
 **SSH-подключение и файловый браузер** — встроенный SSH-клиент, удалённые сессии ощущаются как локальные, полное управление файлами по SFTP:
 
 <p align="center">
-  <img src="images/gif/3-ssh-file-browser.gif" alt="Демо SSH-подключения и файлового браузера" width="600" />
+  <img src="public/images/gif/3-ssh-file-browser.gif" alt="Демо SSH-подключения и файлового браузера" width="600" />
 </p>
 
 **Управление рабочими пространствами и Mission Control** — изоляция нескольких пространств, обзор Mission Control, быстрое переключение:
 
 <p align="center">
-  <img src="images/gif/4-workspace-mission-control.gif" alt="Демо управления рабочими пространствами" width="600" />
+  <img src="public/images/gif/4-workspace-mission-control.gif" alt="Демо управления рабочими пространствами" width="600" />
 </p>
 
 **Система плагинов** — JS-плагины с горячей перезагрузкой, встроенные CC Switch, JSON Formatter и другие:
 
 <p align="center">
-  <img src="images/gif/5-plugin.gif" alt="Демо системы плагинов" width="600" />
+  <img src="public/images/gif/5-plugin.gif" alt="Демо системы плагинов" width="600" />
 </p>
 
 **Единая система компоновки** — терминал, плагин, файловый браузер и веб-предпросмотр — всё это панели; перетаскиваемое разделение, перемещение между вкладками, извлечение как новой вкладки:
 
 <p align="center">
-  <img src="images/gif/6-layout-sys.gif" alt="Демо единой системы компоновки" width="600" />
+  <img src="public/images/gif/6-layout-sys.gif" alt="Демо единой системы компоновки" width="600" />
 </p>
 
 ## Почему Dinotty?
@@ -273,7 +273,7 @@ cargo run
 
 ## Star History
 
-![Star History](images/star-history.svg)
+![Star History](public/images/star-history.svg)
 
 ## Лицензия
 

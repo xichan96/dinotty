@@ -356,7 +356,7 @@ pub(crate) fn default_ip_whitelist() -> Vec<String> {
 }
 
 pub(crate) fn default_locale() -> String {
-    "zh".into()
+    "auto".into()
 }
 
 pub(crate) fn default_shell_kind() -> String {

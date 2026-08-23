@@ -4,8 +4,15 @@ import { messages } from './i18n-messages'
 
 export type Locale = 'en' | 'zh'
 
+function detectSystemLocale(): Locale {
+  const lang = typeof navigator !== 'undefined' ? navigator.language : ''
+  return lang.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+}
+
 function normalizeLocale(raw: string | undefined): Locale {
-  return raw === 'en' ? 'en' : 'zh'
+  if (raw === 'en') return 'en'
+  if (raw === 'auto') return detectSystemLocale()
+  return 'zh'
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {

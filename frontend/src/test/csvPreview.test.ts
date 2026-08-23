@@ -1,8 +1,15 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CsvPreview from '../components/workspace/CsvPreview.vue'
 import FilePreviewContent from '../components/workspace/FilePreviewContent.vue'
 import { detectCsvDelimiter, isCsvPreviewFile, parseCsvText } from '../utils/csvPreview'
+import { settings } from '../composables/useSettings'
+
+// This suite asserts Chinese UI strings; pin the locale explicitly since the
+// default is now 'auto' (which jsdom resolves to English).
+beforeEach(() => {
+  settings.locale = 'zh'
+})
 
 describe('CSV preview utilities', function csvPreviewUtilitiesSuite() {
   it('recognizes CSV and TSV paths without matching spreadsheet files', function recognizesPaths() {

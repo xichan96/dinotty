@@ -546,7 +546,7 @@ export const settings = reactive<SettingsData>({
   reload_after_supervise_tabs: false,
   space_confirms_dialogs: false,
   windowsAltAsCmd: isWindowsClient,
-  locale: 'zh',
+  locale: 'auto',
   auto_check_updates: true,
   shell: 'auto',
   shell_path: null,

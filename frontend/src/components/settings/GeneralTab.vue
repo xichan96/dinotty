@@ -12,6 +12,7 @@
             style="flex: 1"
             @change="saveSettings()"
           >
+            <option value="auto">{{ t('settings.lang.auto') }}</option>
             <option value="zh">{{ t('settings.lang.zh') }}</option>
             <option value="en">{{ t('settings.lang.en') }}</option>
           </select>

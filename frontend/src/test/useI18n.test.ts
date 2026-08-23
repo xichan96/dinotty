@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useI18n } from '../composables/useI18n'
 import { settings } from '../composables/useSettings'
 
@@ -202,5 +202,37 @@ describe('useI18n - quick-send and keyboard-guard copy', () => {
   ] as const)('keeps the audited %s value for %s', (locale, key, expected) => {
     settings.locale = locale
     expect(useI18n().t(key)).toBe(expected)
+  })
+})
+
+describe('follow-system locale (auto)', () => {
+  let languageSpy: ReturnType<typeof vi.spyOn> | undefined
+
+  function mockNavigatorLanguage(lang: string) {
+    languageSpy?.mockRestore()
+    languageSpy = vi.spyOn(navigator, 'language', 'get').mockReturnValue(lang)
+  }
+
+  afterEach(() => {
+    languageSpy?.mockRestore()
+    languageSpy = undefined
+  })
+
+  it("resolves 'auto' to zh when the browser language is Chinese", () => {
+    mockNavigatorLanguage('zh-CN')
+    settings.locale = 'auto'
+    expect(useI18n().locale.value).toBe('zh')
+  })
+
+  it("resolves 'auto' to en when the browser language is not Chinese", () => {
+    mockNavigatorLanguage('en-US')
+    settings.locale = 'auto'
+    expect(useI18n().locale.value).toBe('en')
+  })
+
+  it('uses the resolved language for t()', () => {
+    mockNavigatorLanguage('fr-FR')
+    settings.locale = 'auto'
+    expect(useI18n().t('settings.language')).toBe('Language')
   })
 })

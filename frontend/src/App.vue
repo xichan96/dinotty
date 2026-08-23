@@ -689,7 +689,7 @@ const tabBarRef = ref<InstanceType<typeof TabBar> | null>(null)
 const bookmarksRef = ref<InstanceType<typeof CommandBookmarks>>()
 const serverListRef = ref<InstanceType<typeof ServerList>>()
 const sshPanelRef = ref<InstanceType<typeof SshHostsPanel>>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { getBinding, formatBinding } = useKeybindings()
 const notif = useNotification()
 const presentationSettings = useNotificationPresentation().settings
@@ -1094,7 +1094,7 @@ useKeyboardOverlap({
 })
 
 watch(
-  () => appSettings.locale,
+  locale,
   (l) => {
     document.documentElement.lang = l === 'en' ? 'en' : 'zh-CN'
   },

@@ -334,10 +334,15 @@ export function useSplitPane(opts: {
       if (src) {
         src.layout = ensureSplitRoot(result.source_layout)
         src.paneMru = removePaneFromMru(src.paneMru, paneId).paneMru
-        inheritedCwd = src.cwd
-        inheritedConnectionId = src.connectionId
-        inheritedWorkspaceId = src.workspaceId
       }
+      // Prefer the extracted pane's real metadata from the REST response over
+      // the source tab's fields. The source tab's cwd can be empty or stale
+      // (e.g. after split), which previously dropped the new tab into the
+      // default workspace. Fall back to `src.*` only when the response omits
+      // them (e.g. SSH sessions report workspace via connection_id, cwd=None).
+      inheritedCwd = result.cwd ?? src?.cwd
+      inheritedConnectionId = result.connection_id ?? src?.connectionId
+      inheritedWorkspaceId = result.workspace_id ?? src?.workspaceId
       // Push locally with inherited fields so the new tab lands in the
       // same workspace as its source. The TabCreated broadcast will
       // find this existing entry and skip pushing a duplicate.

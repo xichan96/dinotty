@@ -492,19 +492,38 @@ pub async fn extract_pane(
         active_pane_id: session::first_leaf_id(&new_src_layout)
             .unwrap_or_else(|| req.pane_id.clone()),
     });
+    // Derive workspace metadata from the extracted pane's live PTY session.
+    // The new tab must carry the pane's real cwd/connection/workspace or the
+    // frontend drops it into the default workspace (previously broadcast
+    // `cwd: None`).
+    let cwd = manager.sessions.get(&req.pane_id).and_then(|session| {
+        session.cwd_for_workspace().map(|path| path.to_string_lossy().to_string())
+    });
+    let connection_id = manager
+        .sessions
+        .get(&req.pane_id)
+        .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.profile_id.clone()));
+    let workspace_id = manager
+        .sessions
+        .get(&req.pane_id)
+        .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()));
+
     manager.broadcast_sync(&SyncMsg::TabCreated {
         tab_id: new_tab_id.clone(),
         pane_id: active_pane_id.clone(),
         layout: Some(new_layout.clone()),
-        cwd: None,
-        connection_id: None,
-        workspace_id: None,
+        cwd: cwd.clone(),
+        connection_id: connection_id.clone(),
+        workspace_id: workspace_id.clone(),
     });
 
     Json(serde_json::json!({
         "new_tab_id": new_tab_id,
         "pane_id": active_pane_id,
         "source_layout": new_src_layout,
+        "cwd": cwd,
+        "connection_id": connection_id,
+        "workspace_id": workspace_id,
     }))
     .into_response()
 }

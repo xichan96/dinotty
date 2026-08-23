@@ -179,6 +179,7 @@
         >
           <LayoutTemplate :size="14" class="new-menu-icon" />
           <span class="new-menu-label">{{ t('palette.fromTemplate') }}</span>
+          <kbd class="new-menu-kbd">{{ kbdApplyTemplate }}</kbd>
         </div>
       </div>
     </div>
@@ -273,6 +274,7 @@ const kbdSplitH = formatBinding(getBinding('splitHorizontal')).join('')
 const kbdSplitV = formatBinding(getBinding('splitVertical')).join('')
 const kbdBroadcast = formatBinding(getBinding('toggleBroadcast')).join('')
 const kbdSshConnect = formatBinding(getBinding('sshConnect')).join('')
+const kbdApplyTemplate = formatBinding(getBinding('applyTemplate')).join('')
 
 export interface TabInfo {
   paneId: string

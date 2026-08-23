@@ -1423,7 +1423,7 @@ const { defs, getBinding, formatBinding, isReadOnly } = useKeybindings()
 const appDefs = computed(() => defs.filter((def) => (def.kind ?? 'app') === 'app'))
 const terminalDefs = computed(() => defs.filter((def) => def.kind === 'terminal'))
 
-const tabGroupIds = ['newTab', 'closeTab', 'switchTab']
+const tabGroupIds = ['newTab', 'applyTemplate', 'closeTab', 'switchTab']
 const paneGroupIds = [
   'splitHorizontal',
   'splitVertical',

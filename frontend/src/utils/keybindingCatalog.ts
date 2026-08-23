@@ -24,6 +24,7 @@ import {
   Delete,
   Layers,
   RefreshCw,
+  LayoutTemplate,
 } from 'lucide-vue-next'
 
 export interface KeyBinding {
@@ -62,6 +63,12 @@ export const defs: KeyBindingDef[] = [
     defaultBinding: { key: 't', shift: false },
     icon: Plus,
     titleKey: 'keybinding.newTab',
+  },
+  {
+    id: 'applyTemplate',
+    defaultBinding: { key: 't', shift: true },
+    icon: LayoutTemplate,
+    titleKey: 'keybinding.applyTemplate',
   },
   {
     id: 'closeTab',

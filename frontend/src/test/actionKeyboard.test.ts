@@ -33,6 +33,7 @@ describe('app action catalog', () => {
       'togglePalette',
       'openBookmarks',
       'newTab',
+      'applyTemplate',
       'closeTab',
       'splitHorizontal',
       'splitVertical',
@@ -58,7 +59,7 @@ describe('app action catalog', () => {
       'term.lineEnd',
       'term.deleteToLineStart',
     ])
-    expect(APP_ACTIONS).toHaveLength(27)
+    expect(APP_ACTIONS).toHaveLength(28)
   })
 
   it('uses the registry icons for actions whose old catalog icons differed', () => {

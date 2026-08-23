@@ -2097,6 +2097,7 @@ const paletteCommands = computed<Command[]>(() => {
       icon: '⊷',
       title: t('palette.applyTemplate'),
       subtitle: t('palette.applyTemplateDesc'),
+      kbd: formatBinding(getBinding('applyTemplate')),
       action: () => {
         templatePickerVisible.value = true
       },
@@ -2139,6 +2140,9 @@ const keyActions: Record<string, (options?: AppActionOptions) => void> = {
   togglePalette: () => paletteRef.value?.toggle(),
   openBookmarks: () => bookmarksRef.value?.open(),
   newTab: () => newTab(),
+  applyTemplate: () => {
+    templatePickerVisible.value = true
+  },
   closeTab: async () => {
     if (!activePaneId.value) return
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)

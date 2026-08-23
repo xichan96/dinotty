@@ -22,6 +22,7 @@ const APP_DEFAULTS = [
   ['togglePalette', 'k', false, false],
   ['openBookmarks', 'b', true, false],
   ['newTab', 't', false, false],
+  ['applyTemplate', 't', true, false],
   ['closeTab', 'w', false, false],
   ['splitHorizontal', 'd', false, false],
   ['splitVertical', 'd', true, false],
@@ -91,10 +92,10 @@ describe('unified keybindings', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps the 21 app defaults and persisted shape unchanged', () => {
+  it('keeps the 22 app defaults and persisted shape unchanged', () => {
     const appDefs = keyBindingDefs.filter((def) => (def.kind ?? 'app') === 'app')
 
-    expect(appDefs).toHaveLength(21)
+    expect(appDefs).toHaveLength(22)
     expect(
       appDefs.map((def) => [
         def.id,

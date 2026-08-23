@@ -252,6 +252,8 @@ export interface RecentEntry {
 
 export interface PluginPrefsConfig {
   hidden_toolbar: string[]
+  /** Overlay ids the user has turned off in the plugin tab (persistent). */
+  hidden_overlays: string[]
   show_incompatible: boolean
 }
 
@@ -504,7 +506,7 @@ export const settings = reactive<SettingsData>({
   theme: { preset: 'dark', custom: null },
   custom_themes: [],
   hidden_builtins: [],
-  plugin_prefs: { hidden_toolbar: [], show_incompatible: false },
+  plugin_prefs: { hidden_toolbar: [], hidden_overlays: [], show_incompatible: false },
   background: { mode: 'solid', color: null, opacity: 1.0, has_image: false },
   text: {
     font_size: 14,

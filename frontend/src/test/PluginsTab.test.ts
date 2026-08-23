@@ -1,6 +1,10 @@
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent } from 'vue'
 import PluginsTab from '../components/settings/PluginsTab.vue'
+import { usePluginOverlaysStore } from '../stores/pluginOverlays'
+import { settings } from '../composables/useSettings'
 
 const transportMocks = vi.hoisted(() => ({
   isTauri: vi.fn(),
@@ -13,6 +17,13 @@ const pluginMocks = vi.hoisted(() => ({
   installFromMarket: vi.fn(),
   loadAll: vi.fn(),
   unloadPlugin: vi.fn(),
+  loadedPlugins: new Map<string, any>(),
+}))
+
+vi.mock('../composables/apiBase', () => ({
+  authFetch: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+  apiUrl: (path: string) => path,
+  getApiBase: vi.fn().mockResolvedValue(''),
 }))
 
 vi.mock('../composables/useTransport', () => ({
@@ -22,7 +33,7 @@ vi.mock('../composables/useTransport', () => ({
 
 vi.mock('../composables/usePluginLoader', () => ({
   usePluginLoader: () => ({
-    loadedPlugins: new Map(),
+    loadedPlugins: pluginMocks.loadedPlugins,
     loadAll: pluginMocks.loadAll,
     unloadPlugin: pluginMocks.unloadPlugin,
   }),
@@ -46,6 +57,9 @@ vi.mock('../composables/useMarketplace', async () => {
 describe('PluginsTab folder picker', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setActivePinia(createPinia())
+    pluginMocks.loadedPlugins.clear()
+    settings.plugin_prefs = { hidden_toolbar: [], hidden_overlays: [], show_incompatible: false }
     transportMocks.isTauri.mockReturnValue(true)
   })
 
@@ -68,6 +82,38 @@ describe('PluginsTab folder picker', () => {
     })
     expect(wrapper.get('.plugin-browse-btn').text()).toBe('C:\\plugins\\sample')
     expect(wrapper.findComponent({ name: 'FilePickerModal' }).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows a per-overlay toggle in the installed tab and persists hiding via the pref', async () => {
+    const store = usePluginOverlaysStore()
+    store.register('overlay-demo', [
+      { id: 'overlay-demo:fab', component: defineComponent({ render: () => null }) },
+    ])
+    pluginMocks.loadedPlugins.set('overlay-demo', {
+      id: 'overlay-demo',
+      manifest: { name: 'Overlay Demo', version: '0.1.0', description: 'demo', permissions: [] },
+      state: 'active',
+      exports: {},
+      isDevLink: false,
+    })
+
+    const wrapper = mount(PluginsTab, {
+      global: { stubs: { ConfirmModal: true } },
+    })
+
+    await wrapper.findAll('.plugin-tab')[1].trigger('click')
+
+    const toggle = wrapper.get('.plugin-toggle-inline[title="overlay-demo:fab"]')
+    expect(toggle.text()).toContain('Fab')
+    const input = toggle.get('input[type="checkbox"]')
+    expect((input.element as HTMLInputElement).checked).toBe(true)
+
+    await input.setValue(false)
+
+    expect(store.isVisible(store.overlays[0] as Parameters<typeof store.isVisible>[0])).toBe(false)
+    expect(settings.plugin_prefs.hidden_overlays).toContain('overlay-demo:fab')
+    expect((input.element as HTMLInputElement).checked).toBe(false)
     wrapper.unmount()
   })
 })

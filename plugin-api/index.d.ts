@@ -40,6 +40,36 @@ export interface MonitorSeries {
   visible?: () => boolean
 }
 
+/**
+ * A plugin-contributed global overlay. Rendered into the host-owned floating
+ * layer (mounted as a sibling of `#app-root`, above every view), draggable to
+ * any position without intercepting the underlying terminal/plugin pages.
+ */
+export interface OverlayContribution {
+  /** Globally unique, recommend `plugin-id:overlay-name` (like MonitorSeries.id) */
+  id: string
+  /** Overlay component. Host injects the plugin's own PluginContext as the `api` prop (same as PluginView). */
+  component: Component
+  /** Whether the widget body is interactive. Default true (clickable/draggable, only its own pixels).
+   *  false = pure-display layer, pointer-events:none, never intercepts clicks;
+   *  a passive layer still carries a host-rendered header bar for reposition. */
+  interactive?: boolean
+  /** Drag mode (interactive=true): 'whole' = whole widget draggable (tap = click, drag = move, FAB case);
+   *  'grip' = the widget's OWN header is the drag surface: mark the header element with a
+   *  `data-drag-handle` attribute (host attaches pointer capture to it, so the rest of the
+   *  widget keeps its own gestures/scroll). If a grip widget declares no `[data-drag-handle]`,
+   *  the host falls back to a small drag bar above the widget. Default 'whole'. */
+  dragHandle?: 'whole' | 'grip'
+  /** Default position: viewport px or corner anchor. Default 'bottom-right' (clears the status bar). */
+  defaultPosition?:
+    | { x: number; y: number }
+    | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  /** One-time visibility check, evaluated ONCE at registration (merged with defaultVisible;
+   *  on throw defaults to visible). Runtime visibility is the component's own reactive state. */
+  visible?: () => boolean
+  defaultVisible?: boolean
+}
+
 export type PluginLocale = 'en' | 'zh'
 
 export interface PluginContext {
@@ -390,6 +420,8 @@ export interface PluginExports {
   monitor?: { series: MonitorSeries[] }
   /** 键盘 provider 贡献点（渲染进宿主预留 band） */
   keyboard?: KeyboardContribution
+  /** 全局浮层贡献点（渲染进宿主 fixed overlay layer，#app-root 之外） */
+  overlay?: OverlayContribution[]
 }
 
 /**

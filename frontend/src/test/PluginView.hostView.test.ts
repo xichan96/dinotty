@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent } from 'vue'
 import PluginView from '../components/plugin/PluginView.vue'
 import type { LoadedPlugin, PluginContext } from '../composables/usePluginLoader'
@@ -12,6 +13,10 @@ afterEach(() => {
 })
 
 const fakeApi = {} as PluginContext
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
 
 function mountView(plugin: LoadedPlugin) {
   wrapper = mount(PluginView, {

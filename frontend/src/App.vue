@@ -347,6 +347,7 @@
       @apply="onTemplateApplied"
     />
   </div>
+  <PluginOverlayHost v-if="authenticated" :get-plugin-context="getPluginContext" />
 </template>
 
 <script setup lang="ts">
@@ -357,6 +358,7 @@ import {
   shallowRef,
   computed,
   watch,
+  provide,
   onMounted,
   onBeforeUnmount,
   nextTick,
@@ -390,6 +392,7 @@ import PromptModal from './components/ui/PromptModal.vue'
 import MultiSelectPicker from './components/ui/MultiSelectPicker.vue'
 import SaveTemplateDialog from './components/ui/SaveTemplateDialog.vue'
 import TemplatePicker from './components/ui/TemplatePicker.vue'
+import PluginOverlayHost from './components/plugin/PluginOverlayHost.vue'
 import { promptState, promptResolve, promptCancel } from './composables/usePrompt'
 import CommandBookmarks from './components/command/CommandBookmarks.vue'
 import ServerList from './components/ServerList.vue'
@@ -423,6 +426,8 @@ import {
 import { useI18n } from './composables/useI18n'
 import { keyEventMatchesBinding, useKeybindings } from './composables/useKeybindings'
 import { usePluginNotifyBridge } from './composables/usePluginNotifyBridge'
+import { useOverlayKeyboardBroadcast } from './composables/useOverlayKeyboardBroadcast'
+import { FOCUS_ACTIVE_KEY } from './composables/useFocusActive'
 import { useSshAuth } from './composables/useSshAuth'
 import { useCursorPicker } from './composables/useCursorPicker'
 import { useOverviewCallbacks } from './composables/useOverviewCallbacks'
@@ -914,6 +919,8 @@ const {
   onSystemKeyboardClose: onSystemKeyboardClosed,
 })
 
+useOverlayKeyboardBroadcast({ systemKeyboardOpen, kbVisible })
+
 const onSshConnectRef = shallowRef<
   (result: {
     tab_id: string
@@ -966,6 +973,10 @@ const {
   sendSync: (msg) => sendSyncFn(msg),
   showCreateTerminalError: (error) => showShellApiError(error, 'terminal.createFailed'),
 })
+
+// Overlay host is a sibling of #app-root and cannot reach this per-instance
+// composable state directly, so focusActive is provided for it (design R4).
+provide(FOCUS_ACTIVE_KEY, focusActive)
 
 const {
   overviewOpen,

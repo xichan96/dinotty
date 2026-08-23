@@ -266,6 +266,17 @@
             <span class="plugin-permissions-label">{{ t('settings.plugins.permissions') }}</span>
             <code v-for="permission in p.permissions" :key="permission">{{ permission }}</code>
           </div>
+          <div v-if="p.overlays.length" class="plugin-permissions">
+            <span class="plugin-permissions-label">{{ t('settings.plugins.overlays') }}</span>
+            <label v-for="oid in p.overlays" :key="oid" class="plugin-toggle-inline" :title="oid">
+              <input
+                type="checkbox"
+                :checked="!hiddenOverlayIncludes(oid)"
+                @change="onToggleOverlay(oid, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ overlayName(oid) }}</span>
+            </label>
+          </div>
           <div class="plugin-card-actions">
             <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
               <input
@@ -341,6 +352,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { authFetch, apiUrl } from '../../composables/apiBase'
 import { usePluginLoader } from '../../composables/usePluginLoader'
+import { usePluginOverlaysStore } from '../../stores/pluginOverlays'
 import { useMarketplace, type MarketPlugin } from '../../composables/useMarketplace'
 import { hasHostPluginView } from '../../utils/hostPluginViews'
 import { describeHttpError, describeRequestError } from '../../utils/httpError'
@@ -354,6 +366,7 @@ const emit = defineEmits<{ 'open-plugin': [pluginId: string] }>()
 
 const { t, locale } = useI18n()
 const { loadedPlugins, loadAll, unloadPlugin } = usePluginLoader()
+const overlayStore = usePluginOverlaysStore()
 const {
   plugins: marketPlugins,
   loading: marketLoading,
@@ -399,6 +412,9 @@ const settingsPlugins = computed(() =>
       isDevLink: p.isDevLink,
       category: p.manifest.category,
       marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
+      overlays: overlayStore.overlays
+        .filter((o) => o.pluginId === p.id && !o.defaultHidden)
+        .map((o) => o.id),
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
 )
@@ -419,7 +435,11 @@ const showIncompatibleModel = computed({
   get: () => settings.plugin_prefs?.show_incompatible ?? false,
   set: (v: boolean) => {
     settings.plugin_prefs = {
-      ...(settings.plugin_prefs ?? { hidden_toolbar: [], show_incompatible: false }),
+      ...(settings.plugin_prefs ?? {
+        hidden_toolbar: [],
+        hidden_overlays: [],
+        show_incompatible: false,
+      }),
       show_incompatible: v,
     }
     void saveSettings()
@@ -454,10 +474,29 @@ async function toggleToolbarVisible(id: string, visible: boolean) {
   const current = settings.plugin_prefs?.hidden_toolbar ?? []
   const next = visible ? current.filter((x) => x !== id) : [...current, id]
   settings.plugin_prefs = {
-    ...(settings.plugin_prefs ?? { hidden_toolbar: [], show_incompatible: false }),
+    ...(settings.plugin_prefs ?? {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+    }),
     hidden_toolbar: next,
   }
   await saveSettings()
+}
+
+function hiddenOverlayIncludes(id: string): boolean {
+  return (settings.plugin_prefs?.hidden_overlays ?? []).includes(id)
+}
+
+/** 'overlay-demo:fab' -> 'Fab' */
+function overlayName(id: string): string {
+  const short = id.split(':').pop() ?? id
+  return short.charAt(0).toUpperCase() + short.slice(1)
+}
+
+function onToggleOverlay(id: string, visible: boolean) {
+  overlayStore.setUserVisible(id, visible)
+  void saveSettings()
 }
 
 function setStatus(msg: string, ok: boolean) {

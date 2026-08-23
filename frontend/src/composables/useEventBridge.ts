@@ -11,8 +11,10 @@ type HandlerEntry = {
 
 const handlers = new Map<string, Set<HandlerEntry>>()
 
-// Register a single onEvent listener at module load; dispatches to matching handlers.
-onEvent((e) => {
+// Shared routing body used by both the WS event path and local dispatch
+// (dispatchLocal) so same-client plugins hear the same events with the same
+// target_plugin_id semantics.
+function dispatch(e: SyncEvent) {
   const set = handlers.get(e.event_name)
   if (!set) return
   for (const entry of set) {
@@ -20,7 +22,10 @@ onEvent((e) => {
     if (e.target_plugin_id && entry.pluginId !== e.target_plugin_id) continue
     entry.handler(e.data, e)
   }
-})
+}
+
+// Register a single onEvent listener at module load; dispatches to matching handlers.
+onEvent((e) => dispatch(e))
 
 function reportPluginSubscription(
   pluginId: string,
@@ -90,6 +95,17 @@ export function emit(
   })
 }
 
+/** Dispatch an event locally (no backend round-trip, no client_id) so that
+ *  same-client plugins can hear host UI broadcasts (e.g. kb-open / kb-close)
+ *  which the server's broadcast_sync_others would otherwise exclude. */
+export function dispatchLocal(
+  eventName: string,
+  data: unknown,
+  opts?: { source_pane_id?: string; plugin_id?: string; target_plugin_id?: string }
+): void {
+  dispatch({ type: 'event', event_name: eventName, data, ...opts })
+}
+
 if (import.meta.env.DEV) {
-  ;(window as any).__dinotty_eventBridge = { subscribe, emit, hasSubscriber }
+  ;(window as any).__dinotty_eventBridge = { subscribe, emit, dispatchLocal, hasSubscriber }
 }

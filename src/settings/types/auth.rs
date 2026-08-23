@@ -96,5 +96,7 @@ pub struct PluginPrefsConfig {
     #[serde(default)]
     pub hidden_toolbar: Vec<String>,
     #[serde(default)]
+    pub hidden_overlays: Vec<String>,
+    #[serde(default)]
     pub show_incompatible: bool,
 }

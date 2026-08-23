@@ -22,6 +22,7 @@ import {
   type PluginManifest,
 } from '../composables/usePluginLoader'
 import { useKeyboardProviders } from '../composables/useKeyboardProviders'
+import { usePluginOverlaysStore } from '../stores/pluginOverlays'
 
 function loadedPlugin(manifest: PluginManifest): LoadedPlugin {
   return {
@@ -175,6 +176,23 @@ describe('usePluginLoader lifecycle', () => {
     await usePluginLoader().unloadPlugin(plugin.id)
 
     expect(providers.value.has('kb-plugin')).toBe(false)
+  })
+
+  it('unregisters overlay contributions on unload', async () => {
+    const store = usePluginOverlaysStore()
+    const plugin = loadedPlugin({ id: 'ovl-plugin', name: 'Ovl', version: '1.0.0' })
+    plugin.exports = {
+      overlay: [{ id: 'ovl-plugin:fab', component: defineComponent({ render: () => null }) }],
+    }
+    loadedPlugins.set(plugin.id, plugin)
+    // The real loadPlugin activate step isn't exercised by this suite; seed the
+    // store the way activation registration would.
+    store.register(plugin.id, plugin.exports.overlay!)
+    expect(store.overlays).toHaveLength(1)
+
+    await usePluginLoader().unloadPlugin(plugin.id)
+
+    expect(store.overlays).toHaveLength(0)
   })
 
   it('forwards cwd and env options to streaming process spawns', () => {

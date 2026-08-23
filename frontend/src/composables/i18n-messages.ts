@@ -979,6 +979,10 @@ export const messages: Record<Locale, Record<string, string>> = {
     'plugin.showInToolbar': 'Show in toolbar',
     'plugin.incompatible': 'Not supported on this system',
     'plugin.showIncompatible': 'Show incompatible',
+    'overlay.close': 'Close overlay',
+    'overlay.adjustPosition': 'Adjust position',
+    'overlay.done': 'Done',
+    'settings.plugins.overlays': 'Overlays',
   },
   zh: {
     'app.settings': '设置',
@@ -1925,5 +1929,9 @@ export const messages: Record<Locale, Record<string, string>> = {
     'plugin.showInToolbar': '在工具栏显示',
     'plugin.incompatible': '当前系统不支持',
     'plugin.showIncompatible': '显示不兼容插件',
+    'overlay.close': '关闭浮层',
+    'overlay.adjustPosition': '调整位置',
+    'overlay.done': '完成',
+    'settings.plugins.overlays': '悬浮浮层',
   },
 }

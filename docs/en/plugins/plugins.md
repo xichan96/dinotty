@@ -2,7 +2,7 @@
 
 Dinotty extends functionality through plugins. Plugins run in dedicated tabs, render UI with Vue 3, and have access to built-in APIs for the terminal, notifications, persistent storage, and more.
 
-This page is for **plugin users**: how to install, uninstall, and use built-in plugins. If you want to develop your own plugin, see the [Plugin Development Guide (中文)](/zh/plugins/plugin-development).
+This page is for **plugin users**: how to install, uninstall, and use built-in plugins. If you want to develop your own plugin, see the [Plugin Development Guide](./plugin-development).
 
 ## Installing Plugins
 
@@ -57,11 +57,11 @@ Each plugin directory must have a `plugin.json` describing its metadata. Users c
 | `permissions` | ❌ | Permissions the plugin requires (e.g., `["terminal.output"]`) |
 | `description` | ❌ | Plugin description, shown in the dropdown menu |
 
-Full field definitions and how to write them: [Plugin Development Guide (中文) -> Plugin Manifest](/zh/plugins/plugin-development).
+Full field definitions and how to write them: [Plugin Development Guide -> Plugin Manifest](./plugin-development#plugin-manifest-pluginjson).
 
 ## Plugin API Quick Reference
 
-A plugin's JS entry exports an `activate(context)` function. The `context` object provides (full dev details in the [Plugin Development Guide (中文)](/zh/plugins/plugin-development)):
+A plugin's JS entry exports an `activate(context)` function. The `context` object provides (full dev details in the [Plugin Development Guide](./plugin-development)):
 
 | Category | API | Description |
 |----------|-----|-------------|
@@ -97,7 +97,7 @@ The return value of `activate(context)` may include:
 | **Command Bookmarks** | Command bookmarks with batch execution to multiple terminals |
 | **Text Diff** | Text diff comparison tool with line-by-line highlighting |
 
-For the full plugin development guide, see [Plugin Development Guide (中文)](/zh/plugins/plugin-development).
+For the full plugin development guide, see [Plugin Development Guide](./plugin-development).
 
 Dinotty selects a native plugin target on the backend; it never trusts the remote browser platform. Supported keys are `windows-x86_64`, `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, and `macos-aarch64`. `entries[current-target]` takes precedence over legacy `entry`. Unknown targets, missing entries, paths outside the plugin directory, escaping symlinks, and non-regular files are rejected.
 

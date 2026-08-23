@@ -10,7 +10,7 @@ const zhNav = [
 
 const enNav = [
   { text: 'User Docs', link: '/en/introduction' },
-  { text: 'Dev Docs', link: '/zh/plugins/plugin-development' },
+  { text: 'Dev Docs', link: '/en/plugins/plugin-development' },
   { text: 'GitHub', link: GITHUB }
 ]
 
@@ -124,7 +124,7 @@ const enSidebar = [
   {
     text: 'Dev Docs',
     items: [
-      { text: 'Plugin Development Guide (中文)', link: '/zh/plugins/plugin-development' },
+      { text: 'Plugin Development Guide', link: '/en/plugins/plugin-development' },
       {
         text: 'API',
         items: [
@@ -137,11 +137,11 @@ const enSidebar = [
         ]
       },
       {
-        text: 'Internals (中文)',
+        text: 'Internals',
         items: [
-          { text: 'Event Bus', link: '/zh/internals/event-bus' },
-          { text: 'Token Permission System', link: '/zh/internals/token-system' },
-          { text: 'Audit Log & Webhook', link: '/zh/internals/audit-webhook' }
+          { text: 'Event Bus', link: '/en/internals/event-bus' },
+          { text: 'Token Permission System', link: '/en/internals/token-system' },
+          { text: 'Audit Log & Webhook', link: '/en/internals/audit-webhook' }
         ]
       },
       { text: 'Contributing Guide', link: '/en/getting-started/contributing' },

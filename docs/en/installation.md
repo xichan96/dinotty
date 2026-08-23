@@ -98,7 +98,7 @@ DINOTTY_SHELL=/bin/zsh dinotty-server
 ```
 
 ::: warning Token auth
-Publicly exposed servers **must** configure token auth. See [Token Permission System](/zh/internals/token-system) and the [Auth Security Design](https://github.com/xichan96/dinotty/blob/dev/.claude/doc/auth-security-design.md).
+Publicly exposed servers **must** configure token auth. See [Token Permission System](/en/internals/token-system) and the [Auth Security Design](https://github.com/xichan96/dinotty/blob/dev/.claude/doc/auth-security-design.md).
 :::
 
 ## Upgrade

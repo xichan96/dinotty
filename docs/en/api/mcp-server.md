@@ -120,7 +120,7 @@ Agent Tokens require the matching capability:
 | `file_*` tools | `workspace:read` / `workspace:write` |
 | `git_*` tools | `workspace:read` |
 
-Agent Token scopes are also enforced (see the [Token System](/zh/internals/token-system) doc, Chinese): `terminal:read` / `terminal:write` scopes restrict the accessible panes (`terminal_list` filters out panes outside the scope), and `workspace:read` / `workspace:write` scopes restrict the accessible directories (directory-prefix matching). `git_status` operates on the process working directory and is not restricted by workspace scopes.
+Agent Token scopes are also enforced (see the [Token System](/en/internals/token-system) doc): `terminal:read` / `terminal:write` scopes restrict the accessible panes (`terminal_list` filters out panes outside the scope), and `workspace:read` / `workspace:write` scopes restrict the accessible directories (directory-prefix matching). `git_status` operates on the process working directory and is not restricted by workspace scopes.
 
 ---
 

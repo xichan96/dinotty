@@ -70,8 +70,8 @@ Mission Control flows through `/ws/sync` and uses the global token (query string
 
 ## Internals
 
-For the "non-API" design layer - event system, permission model, audit logs (docs are Chinese-only):
+For the "non-API" design layer - event system, permission model, audit logs:
 
-- [Event Bus](/zh/internals/event-bus) - internal event bus
-- [Token Permission System](/zh/internals/token-system) - Agent Token capability model
-- [Audit & Webhook](/zh/internals/audit-webhook) - operation audit log and external webhook delivery
+- [Event Bus](/en/internals/event-bus) - internal event bus
+- [Token Permission System](/en/internals/token-system) - Agent Token capability model
+- [Audit Log & Webhook](/en/internals/audit-webhook) - operation audit log and external webhook delivery

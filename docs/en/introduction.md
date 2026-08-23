@@ -71,4 +71,4 @@ Self-hosted. No subscriptions. No relay. Your data stays on your machine.
 
 - [Deployment Guide](getting-started/deployment) - Install and deploy Dinotty
 - [Comparison](getting-started/comparison) - Compare with ttyd/gotty/Wetty and other solutions
-- [Plugin Development](/zh/plugins/plugin-development) (中文) - Build your own plugins
+- [Plugin Development](plugins/plugin-development) - Build your own plugins

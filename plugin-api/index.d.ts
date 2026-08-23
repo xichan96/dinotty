@@ -42,8 +42,9 @@ export interface MonitorSeries {
 
 /**
  * A plugin-contributed global overlay. Rendered into the host-owned floating
- * layer (mounted as a sibling of `#app-root`, above every view), draggable to
- * any position without intercepting the underlying terminal/plugin pages.
+ * layer (z-index band 600, sibling of #app-root) above all views — FABs, info
+ * dashboards, terminal pets. The host owns dragging, position clamp, and
+ * persistence; the widget only renders and owns its runtime visibility.
  */
 export interface OverlayContribution {
   /** Globally unique, recommend `plugin-id:overlay-name` (like MonitorSeries.id) */
@@ -52,13 +53,14 @@ export interface OverlayContribution {
   component: Component
   /** Whether the widget body is interactive. Default true (clickable/draggable, only its own pixels).
    *  false = pure-display layer, pointer-events:none, never intercepts clicks;
-   *  a passive layer still carries a host-rendered header bar for reposition. */
+   *  a passive layer has no drag handle — reposition it via the plugin tab's Overlays
+   *  section ("Adjust position"), which temporarily lifts pointer-events. */
   interactive?: boolean
   /** Drag mode (interactive=true): 'whole' = whole widget draggable (tap = click, drag = move, FAB case);
    *  'grip' = the widget's OWN header is the drag surface: mark the header element with a
    *  `data-drag-handle` attribute (host attaches pointer capture to it, so the rest of the
    *  widget keeps its own gestures/scroll). If a grip widget declares no `[data-drag-handle]`,
-   *  the host falls back to a small drag bar above the widget. Default 'whole'. */
+   *  the whole widget becomes a strict long-press (hold ~300ms) drag surface. Default 'whole'. */
   dragHandle?: 'whole' | 'grip'
   /** Default position: viewport px or corner anchor. Default 'bottom-right' (clears the status bar). */
   defaultPosition?:

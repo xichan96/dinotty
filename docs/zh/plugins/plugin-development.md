@@ -10,6 +10,7 @@
 - [插件入口与生命周期](#插件入口与生命周期)
 - [API 参考](#api-参考)
 - [渲染 UI](#渲染-ui)
+- [全局浮层（overlay）](#全局浮层-overlay)
 - [CSS 样式](#css-样式)
 - [命令面板集成](#命令面板集成)
 - [持久化存储](#持久化存储)
@@ -41,6 +42,7 @@ Dinotty 会扫描用户插件目录，在浏览器中动态 `import()` 加载 JS
 插件可以：
 
 - 在独立标签页中渲染自定义 UI（Vue 3 render function）
+- 向宿主注册**全局浮层**（悬浮在所有视图之上的常驻组件）
 - 向命令面板注册命令
 - 向终端面板发送输入
 - 读写持久化键值存储
@@ -405,6 +407,75 @@ return {
 ```
 
 > **注意**：`ctx.onMounted` / `ctx.onUnmounted` 必须在组件的 `setup()` 内或 `activate()` 顶层调用（激活时即为 setup 期间），不能在异步回调中调用。
+
+---
+
+## 全局浮层（overlay）
+
+除了标签页组件，插件还可以向宿主注册**全局浮层**——悬浮在**所有视图之上**（终端 / 插件页 / 文件浏览器 / 设置 / 概览…）的常驻组件。浮层由宿主渲染进固定的 overlay 层（`#app-root` 之外的兄弟节点），可拖到任意位置，且不拦截底层终端与插件页交互。
+
+在 `activate` 返回值中提供 `overlay` 数组：
+
+```js
+export function activate(ctx) {
+  return {
+    overlay: [
+      {
+        id: 'my-plugin:fab', // 全局唯一，建议 `plugin-id:overlay-name`
+        component: {
+          render() {
+            return ctx.h(
+              'button',
+              { class: 'fab', onClick: () => ctx.open() }, // 打开该插件的标签页
+              '＋'
+            )
+          },
+        },
+      },
+    ],
+  }
+}
+```
+
+### 配置项
+
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `id` | `string` | 必填 | 全局唯一，建议 `plugin-id:overlay-name` |
+| `component` | `Component` | 必填 | Vue 组件（render function）。宿主把该插件自己的 `PluginContext` 作为 `api` prop 注入，另提供可选的 `dragging: Ref<boolean>` prop（拖拽期间为 `true`，可据此隐藏 tooltip） |
+| `interactive` | `boolean` | `true` | 组件本体是否交互。`false` = 纯展示浮层，`pointer-events:none` 穿透，不拦截任何点击 |
+| `dragHandle` | `'whole' \| 'grip'` | `'whole'` | 拖动模式（`interactive:true` 时生效） |
+| `defaultPosition` | `{ x, y } \| 锚点` | `'bottom-right'` | 默认位置（视口 px 或 `'top-left'` / `'top-right'` / `'bottom-left'` / `'bottom-right'` 角落锚点），自动让开状态栏 |
+| `visible` | `() => boolean` | — | 注册时求值一次的动态显隐（与 `defaultVisible` 合并） |
+| `defaultVisible` | `boolean` | `true` | 默认显隐 |
+
+### 拖动模式
+
+`dragHandle` 决定浮层如何被拖动：
+
+- **`'whole'`**（默认）— 整块可拖，tap = 点击命令、drag = 移动（FAB 场景）。
+- **`'grip'`** — 组件自己的 header 即拖拽面：把 header 元素标 `data-drag-handle` 属性，宿主只对该元素做指针捕获，内容区（滚动 / 手势）全留给插件。若 grip 组件未声明 `[data-drag-handle]`，宿主把整块组件当**长按拖拽面**：按住约 300ms 不动才进入拖动，期间移动 / 滚动照常放行给内容。
+
+```js
+component: {
+  render() {
+    return ctx.h('div', { class: 'panel' }, [
+      ctx.h('div', { class: 'panel__head', 'data-drag-handle': '' }, '拖拽头部'),
+      ctx.h('div', { class: 'panel__body' }, '内容区可滚动 / 可交互'),
+    ])
+  },
+},
+```
+
+### 被动浮层与穿透
+
+`interactive: false` 的浮层是纯展示层（状态药丸等），`pointer-events:none` 完全不拦截点击，底层终端照常可点。宿主**不渲染任何拖拽把手**；位置调整在插件标签页的 **Overlays 管理区**点「调整位置」进入 reposition 模式（临时放开指针、虚线高亮整块），拖完自动退出并恢复穿透。
+
+### 动态显隐 `visible()`
+
+`visible()` 只做**注册时的一次性判定**（与 `defaultVisible` 合并；抛错按可见处理），不做轮询。返回 `false` 或 `defaultVisible:false` 时宿主不渲染该浮层但保留注册。**运行期显隐应由组件自身的响应式状态控制**（如组件内 `v-if="hasSensor"`）——宿主不渲染时组件根本不挂载，组件内的条件渲染跑不了。
+
+> **管理入口**：插件标签页的 **Overlays** 管理区列出该插件**全部**已注册浮层（含被 `visible()` / `defaultVisible:false` 隐藏的，可重新打开），每行提供「开关」与「调整位置」；设置页「已安装」卡片也提供 per-overlay 开关（持久化到 `hidden_overlays` pref）。
 
 ---
 

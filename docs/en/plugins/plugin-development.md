@@ -10,6 +10,7 @@ This document explains how to develop plugins for Dinotty.
 - [Entry Point & Lifecycle](#entry-point-lifecycle)
 - [API Reference](#api-reference)
 - [Rendering UI](#rendering-ui)
+- [Global Overlays (overlay)](#global-overlays-overlay)
 - [CSS Styles](#css-styles)
 - [Command Palette Integration](#command-palette-integration)
 - [Persistent Storage](#persistent-storage)
@@ -41,6 +42,7 @@ Dinotty scans the user's plugin directory and dynamically loads the JS entry wit
 Plugins can:
 
 - Render custom UIs in dedicated tabs (Vue 3 render functions)
+- Register **global overlays** (persistent widgets floating above every view)
 - Register commands in the command palette
 - Send input to terminal panes
 - Read/write persistent key-value storage
@@ -405,6 +407,75 @@ return {
 ```
 
 > **Note**: `ctx.onMounted` / `ctx.onUnmounted` must be called inside the component's `setup()` or at the top level of `activate()` (activation counts as setup time). Do not call them from async callbacks.
+
+---
+
+## Global Overlays (overlay)
+
+Besides a tab component, a plugin can register **global overlays** — persistent widgets rendered **above every view** (terminal, plugin tabs, file browser, settings, overview…). The host renders them into a dedicated overlay layer (a sibling mounted outside `#app-root`), draggable to any position without intercepting the underlying terminal/plugin pages.
+
+Provide an `overlay` array in the `activate` return value:
+
+```js
+export function activate(ctx) {
+  return {
+    overlay: [
+      {
+        id: 'my-plugin:fab', // globally unique; use `plugin-id:overlay-name`
+        component: {
+          render() {
+            return ctx.h(
+              'button',
+              { class: 'fab', onClick: () => ctx.open() }, // open this plugin's tab
+              '+'
+            )
+          },
+        },
+      },
+    ],
+  }
+}
+```
+
+### Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | `string` | required | Globally unique; use `plugin-id:overlay-name` |
+| `component` | `Component` | required | Vue component (render function). The host injects the plugin's own `PluginContext` as the `api` prop, plus an optional `dragging: Ref<boolean>` prop (`true` while dragging, e.g. to hide tooltips) |
+| `interactive` | `boolean` | `true` | Whether the widget body is interactive. `false` = pure-display layer with `pointer-events:none`, never intercepts clicks |
+| `dragHandle` | `'whole' \| 'grip'` | `'whole'` | Drag mode (effective when `interactive:true`) |
+| `defaultPosition` | `{ x, y } \| anchor` | `'bottom-right'` | Default position (viewport px or a `'top-left'` / `'top-right'` / `'bottom-left'` / `'bottom-right'` corner anchor), clears the status bar |
+| `visible` | `() => boolean` | — | One-time visibility check at registration (merged with `defaultVisible`) |
+| `defaultVisible` | `boolean` | `true` | Default visibility |
+
+### Drag Modes
+
+`dragHandle` decides how the overlay is dragged:
+
+- **`'whole'`** (default) — the whole widget is draggable; tap = click, drag = move (FAB case).
+- **`'grip'`** — the widget's own header is the drag surface: mark the header element with a `data-drag-handle` attribute and the host attaches pointer capture to it only, leaving the content area (scroll / gestures) to the plugin. If a grip widget declares no `[data-drag-handle]`, the host treats the whole widget as a **long-press drag surface**: hold for ~300ms without moving to enter a drag; movement / scroll before that passes through to the content.
+
+```js
+component: {
+  render() {
+    return ctx.h('div', { class: 'panel' }, [
+      ctx.h('div', { class: 'panel__head', 'data-drag-handle': '' }, 'Drag header'),
+      ctx.h('div', { class: 'panel__body' }, 'Content area can scroll / interact'),
+    ])
+  },
+},
+```
+
+### Passive Overlays & Passthrough
+
+An `interactive: false` overlay is a pure-display layer (e.g. a status pill): `pointer-events:none`, it never intercepts clicks and the terminal below stays clickable. The host renders **no drag handle**; reposition it from the plugin tab's **Overlays** section by clicking **Adjust position** (temporarily enables pointer events with a dashed highlight around the whole widget), then drag; it auto-exits and restores passthrough when the drag settles.
+
+### Dynamic Visibility via `visible()`
+
+`visible()` is evaluated **once at registration** (merged with `defaultVisible`; a thrown error counts as visible) — it is not polled. Returning `false` (or `defaultVisible:false`) means the host does not render the overlay but keeps it registered. **Runtime visibility must be the component's own reactive state** (e.g. `v-if="hasSensor"` inside the component) — the component is not even mounted while the host hides it, so inner conditionals never run.
+
+> **Management entry points**: the plugin tab's **Overlays** section lists **all** of the plugin's registered overlays (including ones hidden by `visible()` / `defaultVisible:false`, which can be re-enabled), with a toggle and an "Adjust position" button per overlay; the Settings → Plugins → Installed card also provides a per-overlay toggle (persisted to the `hidden_overlays` pref).
 
 ---
 

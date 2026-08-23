@@ -401,7 +401,7 @@ pub async fn move_pane(
     }
 }
 
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn extract_pane(
     State(manager): State<Arc<SessionManager>>,
     Json(req): Json<ExtractPaneRequest>,

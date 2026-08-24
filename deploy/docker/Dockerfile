@@ -17,6 +17,9 @@ COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml 
 RUN cd frontend && pnpm install --frozen-lockfile
 
 # 构建前端
+# plugin-api/ 在 frontend/ 之外，但 frontend/src 通过 ../../../plugin-api/index
+# 引入契约类型（vue-tsc 需要），必须一并复制，否则类型检查失败。
+COPY plugin-api/ plugin-api/
 COPY frontend/ frontend/
 RUN cd frontend && pnpm build
 
@@ -37,9 +40,12 @@ RUN mkdir -p src && \
 
 # 复制实际源码和前端产物
 COPY src/ src/
-COPY src-tauri/ src-tauri/ 
+COPY src-tauri/ src-tauri/
 COPY build.rs ./
 COPY --from=frontend /app/frontend/dist/ frontend/dist/
+# src/seed.rs 用 rust_embed 嵌入 seed/（缺失即编译失败）；
+# seed/builtin-keyboard/ 是 pnpm build 的产物，从前端阶段取。
+COPY --from=frontend /app/seed/ seed/
 
 # 重新编译（依赖已缓存）
 RUN touch src/main.rs src/lib.rs && \

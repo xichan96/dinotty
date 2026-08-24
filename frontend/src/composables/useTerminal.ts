@@ -1462,6 +1462,16 @@ export class TerminalInstance {
 
     const processNext = () => {
       if (!this.xterm || this._writeQueue.length === 0 || processed >= SYNC_BATCH_LIMIT) {
+        // Self-heal: an un-pinned viewport that has returned to ybase (user
+        // scrolled back down, or the un-pin never actually moved the view)
+        // must resume following the tail. Without this, one un-pin event
+        // detaches the viewport for the rest of the stream (issue #268).
+        if (!this._writePinnedToBottom && this.xterm) {
+          const buf = this.xterm.buffer.active
+          if (buf.viewportY >= buf.baseY) {
+            this._writePinnedToBottom = true
+          }
+        }
         // Read _writePinnedToBottom fresh here, not at batch entry. A
         // wheel-up mid-batch flips the flag to false; using a batch-entry
         // snapshot would override the user's scroll with scrollToBottom.

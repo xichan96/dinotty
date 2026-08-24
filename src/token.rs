@@ -732,11 +732,13 @@ mod tests {
             scoped.with_file_name(format!("{}2", scoped.file_name().unwrap().to_string_lossy()));
         assert!(!info.check_path_scope("workspace:read", &sibling));
 
-        // `~` expansion
+        // `~` expansion. Windows temp_dir() lives under the home directory,
+        // so use a sibling of home to get a path guaranteed outside it.
         let home = dirs::home_dir().unwrap().canonicalize().unwrap();
         let info = path_info(vec!["~/".into()]);
         assert!(info.check_path_scope("workspace:read", &home));
-        assert!(!info.check_path_scope("workspace:read", &tmp.join("definitely-not-home")));
+        let outside_home = home.parent().unwrap().join("definitely-not-home");
+        assert!(!info.check_path_scope("workspace:read", &outside_home));
 
         // Nonexistent scope entries are skipped
         let info = path_info(vec!["/nonexistent/dinotty-scope-dir".into()]);

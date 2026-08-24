@@ -109,10 +109,14 @@ export function createTerminalWheel(host: WheelHost): TerminalWheel {
       // xterm's isUserScrolling=true; without this filter, a single inertia
       // event between rAF-yielded write batches would un-pin and drop the
       // viewport above ybase mid-stream.
+      // The !isAtBottom() guard: an upward tick at the bottom reveals no
+      // history (viewport can't move), so it must not un-pin - otherwise a
+      // single stray trackpad tick detaches the viewport from the live tail
+      // for the rest of the stream (issue #268).
       if (e.deltaY < 0) {
         if (wheelUpResetTimer) clearTimeout(wheelUpResetTimer)
         wheelUpAccumulated += Math.abs(e.deltaY)
-        if (wheelUpAccumulated > 8) {
+        if (wheelUpAccumulated > 8 && !isAtBottom()) {
           host.setWritePinnedToBottom(false)
         }
         wheelUpResetTimer = setTimeout(() => {

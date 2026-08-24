@@ -54,9 +54,12 @@ export default defineConfig({
       // Fallback for @/ specifiers pointing to source files that are bundled
       // as-is (pure helpers, local SFC leaves, icons). Must come after the
       // host-composable aliases so those take precedence.
+      // fileURLToPath yields backslashes on Windows; vite only normalizes
+      // trailing slashes when BOTH find and replacement end with '/', so keep
+      // forward slashes or the '@/' prefix match silently breaks on Windows.
       {
         find: '@/',
-        replacement: fileURLToPath(new URL('../../../src/', import.meta.url)),
+        replacement: fileURLToPath(new URL('../../../src/', import.meta.url)).replace(/\\/g, '/'),
       },
     ],
   },

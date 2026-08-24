@@ -34,6 +34,15 @@ const toastOptions: PluginOptions = {
 
 // Register service worker for PWA installability
 if ('serviceWorker' in navigator) {
+  // When a new SW takes control, reload once so the page runs the new build
+  // rather than sitting on whatever the old one had cached. The flag guards
+  // against a reload loop if control changes again mid-reload.
+  let reloading = false
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return
+    reloading = true
+    window.location.reload()
+  })
   navigator.serviceWorker.register('/sw.js').catch(() => {})
 }
 

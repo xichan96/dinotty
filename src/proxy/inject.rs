@@ -23,6 +23,16 @@ if(!pp)return u.href;
 var base=u.origin;
 return pp+u.pathname.slice(1)+u.search+u.hash;
 }
+function fixAbs(v){
+if(typeof v!=='string')return v;
+var pp=proxyPrefix();
+if(!pp)return v;
+if(v.charAt(0)==='/'&&v.charAt(1)!=='/'&&v.indexOf(pp)!==0)return pp+v.slice(1);
+if(v.indexOf(location.origin)===0){
+var r=v.slice(location.origin.length);
+if(r.charAt(0)==='/'&&r.indexOf(pp)!==0)return pp+r.slice(1);}
+return v;
+}
 function rewrite(u){
 try{var p=new URL(u,location.href);
 var h=p.hostname;
@@ -136,6 +146,18 @@ if(_desc2&&_desc2.set){
 var _origSet2=_desc2.set;
 Object.defineProperty(HTMLImageElement.prototype,'srcset',{get:function(){return _desc2.get.call(this);},set:function(v){try{var parts=v.split(',').map(function(entry){var s=entry.trim().split(/\s+/);if(!s.length)return entry;var url=s[0];var desc=s.slice(1).join(' ');try{var u=new URL(url,location.href);var pp=proxyPrefix();if(pp&&u.origin===location.origin&&u.pathname.startsWith('/')&&!u.pathname.startsWith(pp)){url=pp+u.pathname.slice(1)+u.search+u.hash;}}catch(e){}return desc?url+' '+desc:url;});v=parts.join(', ');}catch(e){}_origSet2.call(this,v);}});
 }
+})();
+(function(){
+var _d=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
+if(_d&&_d.set){
+var _s=_d.set;
+Object.defineProperty(HTMLScriptElement.prototype,'src',{get:function(){return _d.get.call(this);},set:function(v){_s.call(this,fixAbs(v));}});
+}
+var _sa=Element.prototype.setAttribute;
+Element.prototype.setAttribute=function(n,v){
+if(typeof n==='string'&&n.toLowerCase()==='src'&&this instanceof HTMLScriptElement){v=fixAbs(v);}
+return _sa.call(this,n,v);
+};
 })();
 var _pushState=history.pushState;
 history.pushState=function(){var r=_pushState.apply(this,arguments);notifyNav();return r;};
@@ -268,3 +290,44 @@ return r;
 };
 window.addEventListener('popstate',function(){notifyNav(realUrl());});
 })();</script>";
+
+#[cfg(test)]
+mod tests {
+    use super::INJECT_SCRIPT_INTERNAL;
+
+    /// The harness-style loader creates `<script>` elements at runtime with
+    /// root-absolute `src="/plugins/..."`. `<base href>` does not apply to
+    /// root-absolute URLs and the server-side HTML rewriter never sees
+    /// runtime-created elements, so the only thing that can fix those is a
+    /// client-side hook on the script `src` setter.
+    #[test]
+    fn hooks_script_src_and_set_attribute() {
+        assert!(
+            INJECT_SCRIPT_INTERNAL.contains("HTMLScriptElement.prototype,'src'"),
+            "script src setter hook missing: runtime-injected /plugins/*.js would 404"
+        );
+        assert!(
+            INJECT_SCRIPT_INTERNAL.contains("Element.prototype.setAttribute"),
+            "setAttribute('src', ...) hook missing"
+        );
+    }
+
+    /// `fixAbs` must stay pure string manipulation. The script installs a
+    /// `window.URL` shim earlier that already applies the proxy prefix, so a
+    /// `new URL(...)` inside `fixAbs` would see an already-prefixed pathname,
+    /// conclude no rewrite was needed, and silently return the 404-ing URL.
+    #[test]
+    fn fix_abs_does_not_depend_on_url_shim() {
+        let start = INJECT_SCRIPT_INTERNAL
+            .find("function fixAbs(")
+            .expect("fixAbs helper missing from inject script");
+        let body = &INJECT_SCRIPT_INTERNAL[start..];
+        let end = body.find("\nfunction ").unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(
+            !body.contains("new URL("),
+            "fixAbs must not use new URL(): the window.URL shim already prefixes \
+             the pathname, which would defeat the rewrite"
+        );
+    }
+}

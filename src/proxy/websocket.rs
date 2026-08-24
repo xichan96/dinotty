@@ -42,8 +42,12 @@ pub async fn proxy_websocket(
     let mut forward_headers = Vec::new();
     for (name, value) in req.headers() {
         let n = name.as_str();
+        // `origin` is deliberately excluded: like the HTTP path, it describes
+        // the browser→dinotty hop. `into_client_request` sets `Host` from the
+        // upstream URL, so forwarding the browser's Origin leaves the pair
+        // mismatched and an upstream same-origin fence rejects the upgrade.
+        // It is re-added below, aligned with that Host.
         if (n == "cookie"
-            || n == "origin"
             || n == "authorization"
             || n.starts_with("x-")
             || n.starts_with("sec-websocket-"))
@@ -89,6 +93,18 @@ pub async fn proxy_websocket(
             request
                 .headers_mut()
                 .insert("Sec-WebSocket-Protocol", protocols.join(", ").parse().unwrap());
+        }
+        // Same-origin `Origin` for the upstream, derived from the `Host` that
+        // `into_client_request` set from `upstream_url` — so the two always
+        // agree even for an IPv6 or non-default-port authority. This mirrors
+        // `same_origin_headers` on the HTTP path; see `should_forward_header`
+        // for why the browser's own `Origin` must not survive.
+        if let Some(host) = request.headers().get(axum::http::header::HOST).cloned() {
+            if let Ok(h) = host.to_str() {
+                if let Ok(v) = format!("http://{h}").parse() {
+                    request.headers_mut().insert(axum::http::header::ORIGIN, v);
+                }
+            }
         }
         let connect_result = tokio_tungstenite::connect_async(request).await;
 

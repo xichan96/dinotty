@@ -219,6 +219,40 @@ fn parse_preview_path(after: &str) -> Option<(String, u16, String)> {
     }
 }
 
+/// Whether a browser request header should be passed through to the upstream.
+///
+/// Two groups are dropped. Hop-by-hop headers (`host`, `connection`, `upgrade`)
+/// describe this TCP connection, and `accept-encoding` is dropped so the
+/// upstream sends plaintext that [`build_proxied_response`] can rewrite.
+///
+/// The rest — `origin` and `sec-fetch-*` — describe the browser's relationship
+/// to *dinotty*, not to the upstream, and forwarding them verbatim is what
+/// breaks same-origin fences. Since `host` is dropped, reqwest sets it to the
+/// upstream authority; an untouched `Origin` then still names dinotty. A fence
+/// of the shape `Origin.host === Host.host` rejects exactly that pair, and no
+/// upstream allowlist can help, because the two headers are compared against
+/// *each other* rather than against a configured list. `Sec-Fetch-Site` is a
+/// second, independent fence: an upstream refusing `cross-site` sees a false
+/// positive, since that label describes browser→dinotty. Both are re-added by
+/// [`same_origin_headers`].
+fn should_forward_header(name: &str) -> bool {
+    !matches!(name, "host" | "connection" | "upgrade" | "accept-encoding" | "origin")
+        && !name.starts_with("sec-fetch-")
+}
+
+/// Headers presenting the proxy as a same-origin caller of `host:port`.
+///
+/// `Origin` is built from the same authority reqwest will put in `Host`, so the
+/// pair always agrees. `Sec-Fetch-Site` describes this proxy→upstream hop.
+///
+/// This makes dinotty vouch for the browser, which weakens the upstream's own
+/// CSRF protection — sound only because dinotty is the trust boundary:
+/// non-loopback callers already cleared session/token auth in
+/// [`check_preview_auth`] before reaching here.
+fn same_origin_headers(host: &str, port: u16) -> [(&'static str, String); 2] {
+    [("origin", format!("http://{host}:{port}")), ("sec-fetch-site", "same-origin".to_string())]
+}
+
 async fn proxy_internal(
     host: &str,
     port: u16,
@@ -279,13 +313,15 @@ async fn proxy_internal(
         .request(reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap(), &target_url);
 
     for (name, value) in &headers {
-        let n = name.as_str();
-        if n == "host" || n == "connection" || n == "upgrade" || n == "accept-encoding" {
+        if !should_forward_header(name.as_str()) {
             continue;
         }
         if let Ok(v) = value.to_str() {
-            proxy_req = proxy_req.header(n, v);
+            proxy_req = proxy_req.header(name.as_str(), v);
         }
+    }
+    for (name, value) in same_origin_headers(host, port) {
+        proxy_req = proxy_req.header(name, value);
     }
 
     if !body_bytes.is_empty() {
@@ -344,4 +380,89 @@ async fn extract_request(
             )
         })?;
     Ok((method, headers, body_bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{same_origin_headers, should_forward_header};
+
+    /// The regression this file exists for. A dev server that guards its API
+    /// with `Origin.host === Host.host` 403s every proxied request if the
+    /// browser's `Origin` survives, because dropping `host` makes reqwest set
+    /// `Host` to the upstream authority. The failure is silent from dinotty's
+    /// side — it just relays the upstream's 403 — so nothing else would catch a
+    /// refactor that put `origin` back in the pass-through set.
+    #[test]
+    fn browser_origin_is_never_forwarded() {
+        assert!(!should_forward_header("origin"));
+    }
+
+    /// `Sec-Fetch-Site: cross-site` is an *independent* rejection path: an
+    /// upstream can refuse on it with no `Origin` present at all. A browser
+    /// reaching dinotty over a tunnel labels the preview iframe's requests
+    /// `cross-site`, which describes browser→dinotty and is a false positive
+    /// for the proxy→upstream hop.
+    #[test]
+    fn fetch_metadata_describes_the_browser_hop_and_is_dropped() {
+        for h in ["sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"] {
+            assert!(!should_forward_header(h), "{h} must not leak to the upstream");
+        }
+    }
+
+    #[test]
+    fn hop_by_hop_headers_are_dropped() {
+        for h in ["host", "connection", "upgrade", "accept-encoding"] {
+            assert!(!should_forward_header(h), "{h} describes this connection, not the upstream");
+        }
+    }
+
+    /// The rewrite must stay surgical. If credentials or `Sec-WebSocket-*`
+    /// stopped flowing, previews of authenticated dev servers would break in a
+    /// way that looks unrelated to this code.
+    #[test]
+    fn credentials_and_content_headers_still_reach_upstream() {
+        for h in [
+            "cookie",
+            "authorization",
+            "content-type",
+            "content-length",
+            "accept",
+            "user-agent",
+            "referer",
+            "sec-websocket-key",
+            "sec-websocket-protocol",
+            "x-requested-with",
+        ] {
+            assert!(should_forward_header(h), "{h} must be forwarded");
+        }
+    }
+
+    /// The two headers are only useful if they agree; a fence compares them to
+    /// each other. `Host` is whatever reqwest derives from the target URL's
+    /// authority, so `Origin` must be built from that same authority.
+    #[test]
+    fn injected_origin_matches_the_upstream_authority() {
+        // 203.0.113.0/24 is RFC 5737 documentation space.
+        let headers = same_origin_headers("203.0.113.7", 5173);
+        assert_eq!(headers[0], ("origin", "http://203.0.113.7:5173".to_string()));
+        assert_eq!(headers[1], ("sec-fetch-site", "same-origin".to_string()));
+    }
+
+    /// The port is always explicit, including for 80/443. Omitting it would
+    /// make `Origin` and `Host` disagree as strings even when they name the
+    /// same authority, and the fence is a string comparison.
+    #[test]
+    fn injected_origin_keeps_the_port_explicit() {
+        assert_eq!(same_origin_headers("127.0.0.1", 8080)[0].1, "http://127.0.0.1:8080");
+        assert!(same_origin_headers("localhost", 3000)[0].1.ends_with(":3000"));
+    }
+
+    /// Header names arrive lowercased from `HeaderMap`, but a match arm is an
+    /// exact comparison — pin that assumption so a future caller passing raw
+    /// bytes cannot silently bypass the filter.
+    #[test]
+    fn unrelated_headers_are_unaffected() {
+        assert!(should_forward_header("x-sec-fetch-site"), "only a prefix match should apply");
+        assert!(should_forward_header("origination-id"), "substring of `origin` is not `origin`");
+    }
 }

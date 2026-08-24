@@ -162,6 +162,7 @@ pub async fn auth_middleware(
     if path == "/"
         || path == "/api/token-configured"
         || path == "/manifest.json"
+        || path == "/sw.js"
         || path == "/logo.png"
         || path.starts_with("/assets/")
         || path.starts_with("/icons/")

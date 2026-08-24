@@ -17,6 +17,7 @@ use axum::{
 };
 use rust_embed::Embed;
 use std::net::SocketAddr;
+use tower_http::compression::CompressionLayer;
 
 use std::sync::Arc;
 
@@ -121,11 +122,34 @@ async fn static_handler(Path(path): Path<String>) -> impl IntoResponse {
     match StaticFiles::get(&lookup) {
         Some(content) => {
             let mime = mime_guess::from_path(&lookup).first_or_octet_stream();
+            // Vite emits every asset under assets/ with a content hash in its
+            // filename, so a given URL's bytes never change: cache forever.
+            // A new build produces new filenames, which index.html (no-store)
+            // points at, so users still pick up updates immediately.
             Response::builder()
                 .header(header::CONTENT_TYPE, mime.as_ref())
+                .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
                 .body(Body::from(content.data.into_owned()))
                 .unwrap()
         }
+        None => {
+            Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("not found")).unwrap()
+        }
+    }
+}
+
+/// Serves the service worker. Must be reachable without auth (the browser
+/// fetches it before any session exists) and must never be cached: the SW
+/// script itself is how updates are discovered, so a stale copy would pin
+/// users to an old cache strategy indefinitely.
+async fn sw_handler() -> impl IntoResponse {
+    match StaticFiles::get("sw.js") {
+        Some(content) => Response::builder()
+            .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
+            .header(header::CACHE_CONTROL, "no-cache")
+            .header("Service-Worker-Allowed", "/")
+            .body(Body::from(content.data.into_owned()))
+            .unwrap(),
         None => {
             Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("not found")).unwrap()
         }
@@ -575,6 +599,7 @@ async fn main() {
             .route("/assets/*path", get(static_handler))
             .route("/icons/*path", get(icon_handler))
             .route("/manifest.json", get(manifest_handler))
+            .route("/sw.js", get(sw_handler))
             .route(
                 "/logo.png",
                 get(|| async {
@@ -612,6 +637,10 @@ async fn main() {
                 },
             ))
             .layer(middleware::from_fn_with_state(state.clone(), dynamic_cors_middleware))
+            // gzip/brotli for text payloads. DefaultPredicate already skips
+            // SSE (text/event-stream), gRPC, images and bodies under 32 bytes,
+            // so terminal streaming and already-compressed assets are untouched.
+            .layer(CompressionLayer::new().gzip(true).br(true))
             .with_state(state);
 
     tracing::info!("Listening on http://0.0.0.0:{}", port);

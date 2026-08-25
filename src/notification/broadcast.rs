@@ -146,22 +146,27 @@ impl NotificationBroadcast {
         }
         let severity = severity_from_type(notification_type).unwrap_or(Severity::Info);
         let occurred_at = now_ms();
+        // OSC 9/777 are explicit "notify the user" requests: record them on the
+        // pane-decoupled notif path (like POST /api/notify) so presentation is
+        // never suppressed by the client's focused-pane rules. pane_id stays
+        // attached to the debounce key, event bus and hooks for pane context.
+        let notif_id = Uuid::new_v4().to_string();
         let (event_seq, delta) = self
             .ledger
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .record_pane_event(pane_id, occurred_at, severity, occurred_at);
+            .record_notif_event(&notif_id, occurred_at, severity, occurred_at);
         self.broadcast(&SyncMsg::StateDelta { delta });
         self.broadcast(&SyncMsg::Notify {
             v: MIN_PROTOCOL_VERSION,
-            pane_id: pane_id.to_string(),
+            pane_id: String::new(),
             title: title.map(String::from),
             body: body.to_string(),
             notification_type: notification_type.to_string(),
             event_seq: event_seq.to_string(),
             occurred_at,
             severity,
-            notif_id: None,
+            notif_id: Some(notif_id),
         });
         self.event_bus.publish(BusEvent::Notify {
             pane_id: pane_id.to_string(),

@@ -360,6 +360,29 @@ fn osc_notify_debounce_drops_duplicate_content_within_window() {
 }
 
 #[test]
+fn osc_notify_uses_pane_decoupled_notif_path() {
+    let (_manager, notifier, mut rx) = osc_broadcast_setup();
+
+    notifier.send_notify("osc-pane", Some("Task done title"), "task done", "info");
+
+    let mut messages = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        messages.push(msg);
+    }
+    let notify = messages
+        .iter()
+        .map(|m| serde_json::from_str::<serde_json::Value>(m).expect("valid json"))
+        .find(|v| v["type"] == "notify")
+        .expect("notify message must be broadcast");
+    // OSC 9/777 are explicit notify requests: they ride the notif path (empty
+    // pane_id + notifId) so client-side focused-pane suppression never applies.
+    assert_eq!(notify["pane_id"], "");
+    assert!(notify["notifId"].as_str().is_some_and(|id| !id.is_empty()));
+    assert_eq!(notify["title"], "Task done title");
+    assert_eq!(notify["body"], "task done");
+}
+
+#[test]
 fn osc_notify_debounce_allows_different_content_in_same_window() {
     let (_manager, notifier, mut rx) = osc_broadcast_setup();
 

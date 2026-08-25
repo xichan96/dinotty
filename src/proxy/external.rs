@@ -29,7 +29,17 @@ fn is_private_ip(ip: IpAddr) -> bool {
                 || v4.octets()[0] == 100 && v4.octets()[1] >= 64 && v4.octets()[1] <= 127
                 || v4.octets() == [169, 254, 169, 254]
         }
-        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        IpAddr::V6(v6) => {
+            // IPv4-mapped (::ffff:a.b.c.d) is routable to the IPv4 network on
+            // major stacks - run it through the V4 checks, not the V6 ones.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_private_ip(IpAddr::V4(v4));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+        }
     }
 }
 
@@ -37,6 +47,8 @@ async fn check_host_not_private(parsed: &reqwest::Url, msg: &str) -> Result<(), 
     let Some(host) = parsed.host_str() else {
         return Ok(());
     };
+    // IPv6 literals keep their brackets in host_str(); strip before parsing.
+    let host = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_ip(ip) {
             return Err(Box::new(
@@ -68,6 +80,32 @@ async fn check_host_not_private(parsed: &reqwest::Url, msg: &str) -> Result<(), 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_private_ip;
+
+    #[test]
+    fn ipv6_private_ranges_are_blocked() {
+        assert!(is_private_ip("::1".parse().unwrap()));
+        assert!(is_private_ip("fe80::1".parse().unwrap()));
+        assert!(is_private_ip("fc00::1".parse().unwrap()));
+        assert!(is_private_ip("fd12::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_hits_v4_checks() {
+        assert!(is_private_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("::ffff:169.254.169.254".parse().unwrap()));
+        assert!(is_private_ip("::ffff:10.0.0.5".parse().unwrap()));
+    }
+
+    #[test]
+    fn public_ips_are_allowed() {
+        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("2001:4860:4860::8888".parse().unwrap()));
+    }
 }
 
 /// # Panics

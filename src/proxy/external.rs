@@ -11,7 +11,7 @@ use std::net::IpAddr;
 use super::inject::INJECT_SCRIPT_EXTERNAL;
 use super::response::build_proxied_response;
 use super::rewrite::{rewrite_form_urlencoded_body, RewriteMode};
-use super::{extract_request, HTTP_CLIENT_FOLLOW_REDIRECTS};
+use super::extract_request;
 
 #[derive(Deserialize)]
 pub struct ExternalProxyParams {
@@ -43,43 +43,78 @@ fn is_private_ip(ip: IpAddr) -> bool {
     }
 }
 
-async fn check_host_not_private(parsed: &reqwest::Url, msg: &str) -> Result<(), Box<Response>> {
+/// Validated upstream target: DNS was resolved once, every address passed the
+/// private-IP check, and `domain` is set when the connection must be pinned to
+/// `addrs` (DNS-rebinding defense: the HTTP client re-resolves otherwise, and
+/// a re-resolve between check and connect can return a private address).
+struct ResolvedTarget {
+    domain: Option<String>,
+    addrs: Vec<std::net::SocketAddr>,
+}
+
+fn forbidden(msg: &str) -> Box<Response> {
+    Box::new(
+        Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::from(msg.to_string()))
+            .unwrap(),
+    )
+}
+
+async fn resolve_target(parsed: &reqwest::Url, msg: &str) -> Result<ResolvedTarget, Box<Response>> {
+    let port = parsed.port_or_known_default().unwrap_or(80);
     let Some(host) = parsed.host_str() else {
-        return Ok(());
+        return Ok(ResolvedTarget { domain: None, addrs: vec![] });
     };
     // IPv6 literals keep their brackets in host_str(); strip before parsing.
     let host = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_ip(ip) {
-            return Err(Box::new(
-                Response::builder()
-                    .status(StatusCode::FORBIDDEN)
-                    .body(Body::from(msg.to_string()))
-                    .unwrap(),
-            ));
+            return Err(forbidden(msg));
         }
-    } else {
-        let port = parsed.port_or_known_default().unwrap_or(80);
-        let addrs = tokio::net::lookup_host((host, port)).await.map_err(|_| {
+        return Ok(ResolvedTarget {
+            domain: None,
+            addrs: vec![std::net::SocketAddr::new(ip, port)],
+        });
+    }
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| {
             Box::new(
                 Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
                     .body(Body::from("DNS resolution failed"))
                     .unwrap(),
             )
-        })?;
-        for addr in addrs {
-            if is_private_ip(addr.ip()) {
-                return Err(Box::new(
-                    Response::builder()
-                        .status(StatusCode::FORBIDDEN)
-                        .body(Body::from(msg.to_string()))
-                        .unwrap(),
-                ));
-            }
+        })?
+        .collect();
+    tracing::debug!("external proxy: resolved {host} -> {addrs:?}");
+    for addr in &addrs {
+        if is_private_ip(addr.ip()) {
+            return Err(forbidden(msg));
         }
     }
-    Ok(())
+    Ok(ResolvedTarget { domain: Some(host.to_string()), addrs })
+}
+
+/// Per-hop client with DNS pinned to the validated addresses. Built per hop
+/// because reqwest has no per-request resolver override; redirects are handled
+/// manually so every hop is resolved + validated before connecting.
+fn pinned_client(target: &ResolvedTarget) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .user_agent(super::PROXY_USER_AGENT)
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
+        .gzip(true)
+        .brotli(true);
+    if let (Some(domain), addrs) = (&target.domain, target.addrs.as_slice()) {
+        if !addrs.is_empty() {
+            builder = builder.resolve_to_addrs(domain, addrs);
+        }
+    }
+    builder.build().unwrap()
 }
 
 #[cfg(test)]
@@ -140,7 +175,7 @@ pub async fn external_proxy_handler(
     }
 
     if let Err(r) =
-        check_host_not_private(&parsed, "Access to private/internal addresses is not allowed").await
+        resolve_target(&parsed, "Access to private/internal addresses is not allowed").await
     {
         return *r;
     }
@@ -150,62 +185,115 @@ pub async fn external_proxy_handler(
         Err(r) => return *r,
     };
 
-    let mut proxy_req = HTTP_CLIENT_FOLLOW_REDIRECTS.request(
-        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap(),
-        target_url.clone(),
-    );
-
-    for (name, value) in &headers {
-        let n = name.as_str();
-        if n == "host"
-            || n == "connection"
-            || n == "upgrade"
-            || n == "origin"
-            || n == "referer"
-            || n == "accept-encoding"
+    let mut current_url = parsed;
+    let mut current_method =
+        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap();
+    let mut current_body = body_bytes;
+    let mut upstream_resp = None;
+    for _hop in 0..10 {
+        // Resolve + validate BEFORE connecting; the pinned client then connects
+        // to exactly these addresses, closing the DNS-rebinding TOCTOU window.
+        let target = match resolve_target(
+            &current_url,
+            "Access to private/internal addresses is not allowed",
+        )
+        .await
         {
+            Ok(t) => t,
+            Err(r) => return *r,
+        };
+
+        let mut proxy_req = pinned_client(&target)
+            .request(current_method.clone(), current_url.clone());
+
+        for (name, value) in &headers {
+            let n = name.as_str();
+            if n == "host"
+                || n == "connection"
+                || n == "upgrade"
+                || n == "origin"
+                || n == "referer"
+                || n == "accept-encoding"
+                || n == "content-length"
+            {
+                continue;
+            }
+            if let Ok(v) = value.to_str() {
+                proxy_req = proxy_req.header(n, v);
+            }
+        }
+
+        if !current_body.is_empty() {
+            let content_type_val =
+                headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
+            if content_type_val.contains("application/x-www-form-urlencoded") {
+                let mode = RewriteMode::External(current_url.to_string());
+                if let Some(rewritten) =
+                    rewrite_form_urlencoded_body(&current_body, current_url.as_str(), &mode)
+                {
+                    proxy_req = proxy_req.body(rewritten);
+                } else {
+                    proxy_req = proxy_req.body(current_body.clone());
+                }
+            } else {
+                proxy_req = proxy_req.body(current_body.clone());
+            }
+        }
+
+        let resp = match proxy_req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = format!("Proxy error: {e}");
+                return Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                    .body(Body::from(msg))
+                    .unwrap();
+            }
+        };
+
+        let status = resp.status();
+        if status.is_redirection() {
+            let Some(loc) = resp.headers().get(header::LOCATION).and_then(|v| v.to_str().ok())
+            else {
+                upstream_resp = Some(resp);
+                break;
+            };
+            let Ok(next) = current_url.join(loc) else {
+                upstream_resp = Some(resp);
+                break;
+            };
+            if next.scheme() != "http" && next.scheme() != "https" {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from("Only http/https redirects are supported"))
+                    .unwrap();
+            }
+            // Browser-like redirect semantics: 303 always rewrites to GET;
+            // 301/302 rewrite POST/PUT/DELETE to GET; 307/308 preserve.
+            if status.as_u16() == 303
+                || ((status.as_u16() == 301 || status.as_u16() == 302)
+                    && current_method != reqwest::Method::GET
+                    && current_method != reqwest::Method::HEAD)
+            {
+                current_method = reqwest::Method::GET;
+                current_body = Vec::new().into();
+            }
+            current_url = next;
             continue;
         }
-        if let Ok(v) = value.to_str() {
-            proxy_req = proxy_req.header(n, v);
-        }
+        upstream_resp = Some(resp);
+        break;
     }
 
-    if !body_bytes.is_empty() {
-        let content_type_val =
-            headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
-        if content_type_val.contains("application/x-www-form-urlencoded") {
-            let mode = RewriteMode::External(target_url.clone());
-            if let Some(rewritten) = rewrite_form_urlencoded_body(&body_bytes, &target_url, &mode) {
-                proxy_req = proxy_req.body(rewritten);
-            } else {
-                proxy_req = proxy_req.body(body_bytes);
-            }
-        } else {
-            proxy_req = proxy_req.body(body_bytes);
-        }
-    }
-
-    let upstream_resp = match proxy_req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            let msg = format!("Proxy error: {e}");
-            return Response::builder()
-                .status(StatusCode::BAD_GATEWAY)
-                .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                .body(Body::from(msg))
-                .unwrap();
-        }
+    let Some(upstream_resp) = upstream_resp else {
+        return Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .body(Body::from("Too many redirects"))
+            .unwrap();
     };
 
-    let final_url = upstream_resp.url().clone();
-    let final_url_str = final_url.to_string();
-    if let Err(r) =
-        check_host_not_private(&final_url, "Redirect to private/internal address is not allowed")
-            .await
-    {
-        return *r;
-    }
+    let final_url_str = current_url.to_string();
 
     let inject_base = "";
     let escaped_url = final_url_str

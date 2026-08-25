@@ -59,7 +59,7 @@ pub static HTTP_CLIENT_FOLLOW_REDIRECTS: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .no_proxy()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .user_agent(PROXY_USER_AGENT)
         .pool_idle_timeout(Duration::from_secs(90))
         .pool_max_idle_per_host(10)
         .connect_timeout(Duration::from_secs(5))
@@ -69,6 +69,8 @@ pub static HTTP_CLIENT_FOLLOW_REDIRECTS: LazyLock<Client> = LazyLock::new(|| {
         .build()
         .unwrap()
 });
+
+pub(crate) const PROXY_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 fn make_base_tag(host: &str, port: u16) -> String {
     if host == "127.0.0.1" {

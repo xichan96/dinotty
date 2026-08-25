@@ -106,6 +106,21 @@ fn check_preview_auth(
     token: &str,
 ) -> Option<Response> {
     if real_ip.is_loopback() {
+        // Loopback is trusted without a session, but not when the call was
+        // scripted cross-site by a website in the local user's browser.
+        if crate::auth::is_cross_site_browser_request(req.headers()) {
+            tracing::warn!(
+                "preview: reject cross-site browser request to {} (origin {:?})",
+                req.uri().path(),
+                req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok())
+            );
+            return Some(
+                Response::builder()
+                    .status(StatusCode::FORBIDDEN)
+                    .body(Body::from("Cross-site requests are not allowed"))
+                    .unwrap(),
+            );
+        }
         return None;
     }
     if !allow_external {

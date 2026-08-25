@@ -143,6 +143,7 @@ pub fn check_lockout(
 
 /// # Panics
 /// Panics if the response builder fails (which should not happen with valid status codes and bodies).
+#[allow(clippy::too_many_lines)]
 pub async fn auth_middleware(
     request: Request,
     next: Next,
@@ -436,10 +437,9 @@ pub fn is_cross_site_browser_request(headers: &HeaderMap) -> bool {
 
     // 3. Legacy fallback without fetch metadata: an Origin authority that
     // disagrees with Host means cross-site.
-    if let (Some(authority), Some(host)) = (
-        &origin_authority,
-        headers.get("host").and_then(|v| v.to_str().ok()),
-    ) {
+    if let (Some(authority), Some(host)) =
+        (&origin_authority, headers.get("host").and_then(|v| v.to_str().ok()))
+    {
         return !authority.eq_ignore_ascii_case(host);
     }
     false

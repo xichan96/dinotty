@@ -407,10 +407,9 @@ fn cross_site_browser_request_detection() {
         ("host", "127.0.0.1:58999"),
     ])));
     // Origin "null" (sandboxed iframe) is treated as cross-site.
-    assert!(is_cross_site_browser_request(&mk(&[
-        ("origin", "null"),
-        ("host", "127.0.0.1:58999"),
-    ])));
+    assert!(is_cross_site_browser_request(&mk(
+        &[("origin", "null"), ("host", "127.0.0.1:58999"),]
+    )));
 
     // Sec-Fetch-Site: cross-site without Origin (older/Safari variants).
     assert!(is_cross_site_browser_request(&mk(&[

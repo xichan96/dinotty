@@ -8,10 +8,10 @@ use axum::{
 use serde::Deserialize;
 use std::net::IpAddr;
 
+use super::extract_request;
 use super::inject::INJECT_SCRIPT_EXTERNAL;
 use super::response::build_proxied_response;
 use super::rewrite::{rewrite_form_urlencoded_body, RewriteMode};
-use super::extract_request;
 
 #[derive(Deserialize)]
 pub struct ExternalProxyParams {
@@ -52,13 +52,8 @@ struct ResolvedTarget {
     addrs: Vec<std::net::SocketAddr>,
 }
 
-fn forbidden(msg: &str) -> Box<Response> {
-    Box::new(
-        Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(Body::from(msg.to_string()))
-            .unwrap(),
-    )
+fn forbidden(msg: &str) -> Response {
+    Response::builder().status(StatusCode::FORBIDDEN).body(Body::from(msg.to_string())).unwrap()
 }
 
 async fn resolve_target(parsed: &reqwest::Url, msg: &str) -> Result<ResolvedTarget, Box<Response>> {
@@ -70,7 +65,7 @@ async fn resolve_target(parsed: &reqwest::Url, msg: &str) -> Result<ResolvedTarg
     let host = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_ip(ip) {
-            return Err(forbidden(msg));
+            return Err(Box::new(forbidden(msg)));
         }
         return Ok(ResolvedTarget {
             domain: None,
@@ -91,7 +86,7 @@ async fn resolve_target(parsed: &reqwest::Url, msg: &str) -> Result<ResolvedTarg
     tracing::debug!("external proxy: resolved {host} -> {addrs:?}");
     for addr in &addrs {
         if is_private_ip(addr.ip()) {
-            return Err(forbidden(msg));
+            return Err(Box::new(forbidden(msg)));
         }
     }
     Ok(ResolvedTarget { domain: Some(host.to_string()), addrs })
@@ -115,32 +110,6 @@ fn pinned_client(target: &ResolvedTarget) -> reqwest::Client {
         }
     }
     builder.build().unwrap()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_private_ip;
-
-    #[test]
-    fn ipv6_private_ranges_are_blocked() {
-        assert!(is_private_ip("::1".parse().unwrap()));
-        assert!(is_private_ip("fe80::1".parse().unwrap()));
-        assert!(is_private_ip("fc00::1".parse().unwrap()));
-        assert!(is_private_ip("fd12::1".parse().unwrap()));
-    }
-
-    #[test]
-    fn ipv4_mapped_ipv6_hits_v4_checks() {
-        assert!(is_private_ip("::ffff:127.0.0.1".parse().unwrap()));
-        assert!(is_private_ip("::ffff:169.254.169.254".parse().unwrap()));
-        assert!(is_private_ip("::ffff:10.0.0.5".parse().unwrap()));
-    }
-
-    #[test]
-    fn public_ips_are_allowed() {
-        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
-        assert!(!is_private_ip("2001:4860:4860::8888".parse().unwrap()));
-    }
 }
 
 /// # Panics
@@ -186,8 +155,7 @@ pub async fn external_proxy_handler(
     };
 
     let mut current_url = parsed;
-    let mut current_method =
-        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap();
+    let mut current_method = reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap();
     let mut current_body = body_bytes;
     let mut upstream_resp = None;
     for _hop in 0..10 {
@@ -203,8 +171,8 @@ pub async fn external_proxy_handler(
             Err(r) => return *r,
         };
 
-        let mut proxy_req = pinned_client(&target)
-            .request(current_method.clone(), current_url.clone());
+        let mut proxy_req =
+            pinned_client(&target).request(current_method.clone(), current_url.clone());
 
         for (name, value) in &headers {
             let n = name.as_str();
@@ -313,4 +281,30 @@ pub async fn external_proxy_handler(
         Some(RewriteMode::External(final_url_str)),
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_private_ip;
+
+    #[test]
+    fn ipv6_private_ranges_are_blocked() {
+        assert!(is_private_ip("::1".parse().unwrap()));
+        assert!(is_private_ip("fe80::1".parse().unwrap()));
+        assert!(is_private_ip("fc00::1".parse().unwrap()));
+        assert!(is_private_ip("fd12::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_hits_v4_checks() {
+        assert!(is_private_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("::ffff:169.254.169.254".parse().unwrap()));
+        assert!(is_private_ip("::ffff:10.0.0.5".parse().unwrap()));
+    }
+
+    #[test]
+    fn public_ips_are_allowed() {
+        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("2001:4860:4860::8888".parse().unwrap()));
+    }
 }

@@ -187,10 +187,13 @@ async fn handle_sync_socket(
         }
     });
 
-    // Monitor SSH keyboard-interactive auth prompts and forward to frontend
+    // Monitor SSH keyboard-interactive auth prompts and forward to frontend.
+    // The outer loop has no exit condition of its own - it MUST be aborted when
+    // the socket closes (see cleanup below), or it leaks a 100ms poller per
+    // connection (and per reconnect).
     let auth_mgr = Arc::clone(&manager);
     let auth_ws_out = ws_out_tx.clone();
-    tokio::spawn(async move {
+    let ssh_auth_monitor = tokio::spawn(async move {
         let mut known_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -401,6 +404,12 @@ async fn handle_sync_socket(
                             });
                         }
                     }
+                } else {
+                    tracing::warn!(
+                        "Ignoring malformed sync message (len={}): {:.80}",
+                        text.len(),
+                        text
+                    );
                 }
             }
             Message::Ping(data) => {
@@ -416,6 +425,7 @@ async fn handle_sync_socket(
     fwd.abort();
     writer_task.abort();
     ping_task.abort();
+    ssh_auth_monitor.abort();
     notifier.unregister_client(&client_id);
 }
 

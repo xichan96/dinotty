@@ -590,7 +590,14 @@
   flex-direction: column;
   box-sizing: border-box;
   gap: 4px;
-  padding: 5px max(5px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+  /* The bottom inset is reserved only while it is actually exposed. This toolbar is fixed to
+   * the keyboard edge, so once the keyboard is up it covers the home indicator and reserving
+   * its inset costs terminal height for space nothing can occupy. --sys-kb-height is the
+   * measured occlusion, 0px whenever nothing occludes, so with the keyboard down the
+   * expression is identical to max(8px, env(safe-area-inset-bottom)). The var() fallback
+   * matters because useViewportResize's teardown removes the property rather than zeroing it. */
+  padding: 5px max(5px, env(safe-area-inset-right))
+    max(8px, calc(env(safe-area-inset-bottom, 0px) - var(--sys-kb-height, 0px)))
     max(5px, env(safe-area-inset-left));
   border-top: 1px solid color-mix(in srgb, var(--border), white 7%);
   background: color-mix(in srgb, var(--bg-surface), black 4%);

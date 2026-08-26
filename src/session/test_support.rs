@@ -38,3 +38,17 @@ pub(crate) fn stub_session() -> Arc<Session> {
         pending_results: Mutex::new(Vec::new()),
     })
 }
+
+/// Add a client whose snapshot replay already completed (`snapshot_pending`
+/// cleared), so `broadcast()` delivers live output to it immediately.
+pub(crate) fn add_ready_client(session: &Session) -> (u64, mpsc::Receiver<SessionClientEvent>) {
+    let (client_id, rx) = session.add_client();
+    let clients = session.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    clients
+        .iter()
+        .find(|client| client.id == client_id)
+        .expect("newly added client must exist")
+        .snapshot_pending
+        .store(false, Ordering::Relaxed);
+    (client_id, rx)
+}

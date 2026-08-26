@@ -372,101 +372,19 @@ pub fn real_client_ip(headers: &HeaderMap, conn_ip: IpAddr, trusted_proxies: &[S
     conn_ip
 }
 
-/// Check whether a WebSocket upgrade request's Origin header is allowed.
-/// - `real_ip`: the client resolved from `X-Forwarded-For` (equals the direct
-///   peer when there is no trusted proxy in between).
-/// - `conn_ip`: the direct TCP peer, used to decide whether the proxy headers
-///   (`X-Forwarded-Host`) may be trusted.
-/// - No Origin header: allow (non-browser clients like wscat / curl).
-/// - Real client on loopback (Tauri desktop, local dev servers, scripts):
-///   local origins pass; requests scripted by a website in the local user's
-///   browser are rejected (same discrimination as `auth_middleware`).
-/// - Origin equals the effective host: allow (same-origin, covers arbitrary
-///   tunneling subdomains without wildcard matching).
-/// - Behind a trusted reverse proxy (direct peer in `trusted_proxies`): the
-///   effective host is `X-Forwarded-Host` (the original Host before the proxy
-///   rewrote it). Trust must be decided on the DIRECT peer - the proxy
-///   connects from its own IP while the client it forwards is remote, so
-///   deciding on `real_ip` never honors the proxy's header.
-/// - Hostname-only fallback: if exact match fails, compare just the hostname
-///   (without port) to handle proxies that normalize the Host header.
-/// - Otherwise: must match `allowed_origins` whitelist.
+/// 暂时关闭：反代（极空间等 NAS）默认不带 X-Forwarded-Host，Host 被改写为内部
+/// 地址，导致 Origin 与 Host 比对失配，所有非 /ws 的 WS 端点（监控、sync、
+/// watch、notify、history 等）全部 403。cookie session 鉴权仍在 `auth_middleware`
+/// 生效，跨站 WS CSRF 风险有限。后续修复 `trusted_proxies` 语义 bug（应用直连
+/// peer 判断而非 `real_ip`）并加拒绝日志后再恢复。
 #[must_use]
 pub fn check_ws_origin(
-    headers: &HeaderMap,
-    allowed_origins: &[String],
-    real_ip: IpAddr,
-    conn_ip: IpAddr,
-    trusted_proxies: &[String],
+    _headers: &HeaderMap,
+    _allowed_origins: &[String],
+    _client_ip: std::net::IpAddr,
+    _trusted_proxies: &[String],
 ) -> bool {
-    if origin_allowed(headers, allowed_origins, real_ip, conn_ip, trusted_proxies) {
-        return true;
-    }
-    tracing::warn!(
-        origin = ?headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()),
-        host = ?headers.get(header::HOST).and_then(|v| v.to_str().ok()),
-        x_forwarded_host = ?headers.get("x-forwarded-host").and_then(|v| v.to_str().ok()),
-        conn_ip = %conn_ip,
-        real_ip = %real_ip,
-        "ws origin check rejected upgrade"
-    );
-    false
-}
-
-fn origin_allowed(
-    headers: &HeaderMap,
-    allowed_origins: &[String],
-    real_ip: IpAddr,
-    conn_ip: IpAddr,
-    trusted_proxies: &[String],
-) -> bool {
-    // Real client on loopback (Tauri webview, localhost dev servers, local
-    // scripts). Blanket-allowing here would also admit WS handshakes scripted
-    // by a random website in the local user's browser (which connects from
-    // 127.0.0.1 yet is controlled by that site), so reuse the browser/native
-    // discrimination: local origins and native clients pass, scripted
-    // cross-site requests fail.
-    if real_ip.is_loopback() {
-        return !is_cross_site_browser_request(headers);
-    }
-    let Some(origin) = headers.get(header::ORIGIN) else {
-        return true;
-    };
-    let Ok(origin_str) = origin.to_str() else {
-        return false;
-    };
-    // Same-origin shortcut: Origin = scheme://host matches the request Host.
-    // Whether X-Forwarded-Host may replace Host is decided on the DIRECT
-    // peer (see the doc comment above) - deciding on real_ip was the
-    // pre-fix bug that 403'd every WS endpoint behind a Host-rewriting proxy.
-    let effective_host = if is_ip_whitelisted(conn_ip, trusted_proxies) {
-        headers
-            .get("x-forwarded-host")
-            .and_then(|h| h.to_str().ok())
-            .map(|h| h.split(',').next().unwrap_or("").trim())
-            .filter(|h| !h.is_empty())
-            .or_else(|| headers.get(header::HOST).and_then(|h| h.to_str().ok()))
-    } else {
-        headers.get(header::HOST).and_then(|h| h.to_str().ok())
-    };
-    if let Some(host) = effective_host {
-        let origin_host = origin_str
-            .strip_prefix("http://")
-            .or_else(|| origin_str.strip_prefix("https://"))
-            .unwrap_or(origin_str);
-        // Exact match (includes port).
-        if origin_host == host {
-            return true;
-        }
-        // Hostname-only fallback: some reverse proxies strip or rewrite the
-        // port in the Host header.  Compare just the hostname part.
-        let origin_hostname = origin_host.split(':').next().unwrap_or(origin_host);
-        let host_hostname = host.split(':').next().unwrap_or(host);
-        if origin_hostname == host_hostname {
-            return true;
-        }
-    }
-    allowed_origins.iter().any(|o| o.trim() == origin_str)
+    true
 }
 
 /// True when the request looks like a browser-originated cross-site call.

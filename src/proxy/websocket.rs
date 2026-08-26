@@ -25,13 +25,7 @@ pub async fn proxy_websocket(
         .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
         .map_or_else(|| "127.0.0.1".parse().unwrap(), |ci| ci.ip());
     let real_ip = crate::auth::real_client_ip(req.headers(), conn_ip, trusted_proxies);
-    if !crate::auth::check_ws_origin(
-        req.headers(),
-        allowed_origins,
-        real_ip,
-        conn_ip,
-        trusted_proxies,
-    ) {
+    if !crate::auth::check_ws_origin(req.headers(), allowed_origins, real_ip, trusted_proxies) {
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::from("origin not allowed"))

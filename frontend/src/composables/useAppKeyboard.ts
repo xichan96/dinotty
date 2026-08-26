@@ -3,6 +3,7 @@ import { createKeyboardContext } from '../keyboard/createKeyboardContext'
 import { useKeyboardBand } from '../keyboard/useKeyboardBand'
 import type { KeyboardHostEventMap } from '../../../plugin-api/index'
 import { useViewportResize } from './useViewportResize'
+import { useViewportPanLock } from './useViewportPanLock'
 import { useOverlayKeyboardBroadcast } from './useOverlayKeyboardBroadcast'
 import { useKeyboardOverlap } from './useKeyboardOverlap'
 import { imeKeyboardOverlapPx, type MobileInputMode } from './useSettings'
@@ -28,10 +29,11 @@ export interface AppKeyboardOptions {
   actions: ReturnType<typeof useAppActions>
   settingsStore: ReturnType<typeof useSettingsStore>
   bookmarksRef: Ref<{ open(): void } | undefined>
+  appRootRef: Ref<HTMLElement | null>
 }
 
 export function useAppKeyboard(options: AppKeyboardOptions) {
-  const { core, actions, settingsStore, bookmarksRef } = options
+  const { core, actions, settingsStore, bookmarksRef, appRootRef } = options
   const { dispatchAppAction } = actions
   const {
     kbTyping,
@@ -193,6 +195,13 @@ export function useAppKeyboard(options: AppKeyboardOptions) {
     termRefs,
     terminalImeFocused,
     onSystemKeyboardClose: onSystemKeyboardClosed,
+  })
+
+  const { dispose: disposePanLock } = useViewportPanLock(appRootRef, {
+    isActive: () =>
+      effectiveMobileInputMode.value === 'system' &&
+      terminalImeFocused.value &&
+      systemKeyboardOpen.value,
   })
 
   useOverlayKeyboardBroadcast({ systemKeyboardOpen, kbVisible })
@@ -607,6 +616,7 @@ export function useAppKeyboard(options: AppKeyboardOptions) {
     systemKeyboardOpen,
     isLandscape,
     disposeViewport,
+    disposePanLock,
     dismissTerminalKeyboard,
     closeSystemIme,
     requestTerminalKeyboard,

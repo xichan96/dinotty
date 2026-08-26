@@ -7,6 +7,7 @@
   <div
     v-else
     id="app-root"
+    ref="appRootRef"
     :class="{
       'system-toolbar-docked': effectiveMobileInputMode === 'system' && systemToolbarVisible,
       'system-ime-open': effectiveMobileInputMode === 'system' && systemKeyboardOpen,
@@ -441,6 +442,7 @@ const windowCloseConfirmVisible = ref(false)
 const trayVisibilityDialogVisible = ref(false)
 const previewMenuOpen = ref(false)
 const lastTabCloseShortcutAt = ref(0)
+const appRootRef = ref<HTMLElement | null>(null)
 const tabBarRef = ref<InstanceType<typeof TabBar> | null>(null)
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
 const bookmarksRef = ref<InstanceType<typeof CommandBookmarks>>()
@@ -468,7 +470,7 @@ const actions = useAppActions({
   lastTabCloseShortcutAt,
   toast,
 })
-const keyboard = useAppKeyboard({ core, actions, settingsStore, bookmarksRef })
+const keyboard = useAppKeyboard({ core, actions, settingsStore, bookmarksRef, appRootRef })
 const connectivity = useAppConnectivity({ core, sshPanelRef, persist })
 const tauri = useAppTauri({
   desktopLifecycle,
@@ -581,6 +583,7 @@ const {
   systemKeyboardOpen,
   keyboardCtx,
   disposeViewport,
+  disposePanLock,
   toggleTerminalKeyboard,
   onSystemActionKeyboardChange,
   onMobileInputGuideChoose,
@@ -757,6 +760,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pane-drag-hover-switch', onPaneDragHoverSwitch)
   window.removeEventListener('hashchange', syncKbDebugFlag)
   disposeViewport()
+  disposePanLock()
   syncWs.closeWs()
 })
 </script>

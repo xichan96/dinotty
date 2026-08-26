@@ -38,14 +38,19 @@ pub(crate) use normalize::{
 pub(crate) use types::default_scroll_acceleration;
 
 #[must_use]
-pub fn config_dir() -> PathBuf {
+pub fn instance_suffix() -> String {
     // Compile-time suffix (set via build script / `DINOTTY_CONFIG_SUFFIX` at
     // build) takes precedence; otherwise fall back to the runtime env var
     // (used by integration tests to isolate each server's config dir).
-    let suffix = option_env!("DINOTTY_CONFIG_SUFFIX")
+    option_env!("DINOTTY_CONFIG_SUFFIX")
         .map(str::to_string)
         .or_else(|| std::env::var("DINOTTY_CONFIG_SUFFIX").ok())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+#[must_use]
+pub fn config_dir() -> PathBuf {
+    let suffix = instance_suffix();
     dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(format!("dinotty{suffix}"))
 }
 

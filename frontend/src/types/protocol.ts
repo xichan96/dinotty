@@ -140,6 +140,11 @@ export interface SyncTabRenamed {
   title: string
 }
 
+export interface SyncTabReordered {
+  type: 'tab_reordered'
+  tab_ids: string[]
+}
+
 /// Server -> client: MC open/close flipped. Contains the full selection
 /// snapshot so receivers can refresh both `open` and the selected card
 /// atomically. Broadcast includes the sender; the frontend treats it as an
@@ -279,6 +284,11 @@ export interface SyncRenameTab {
   title: string
 }
 
+export interface SyncReorderTabs {
+  type: 'tab_reordered'
+  tab_ids: string[]
+}
+
 export interface SyncSshAuthResponse {
   type: 'ssh_auth_response'
   pane_id: string
@@ -400,6 +410,7 @@ export type SyncServerMsg =
   | SyncTabClosed
   | SyncTabActivated
   | SyncTabRenamed
+  | SyncTabReordered
   | SyncPluginChanged
   | SyncLayoutUpdated
   | SyncSshAuthPrompt
@@ -480,5 +491,6 @@ export type SyncClientMsg =
   | SyncSshAuthResponse
   | SyncMarkRead
   | SyncRenameTab
+  | SyncReorderTabs
   | SyncMissionControlOp
   | SyncInput

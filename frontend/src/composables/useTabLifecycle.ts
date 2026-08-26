@@ -401,6 +401,12 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
   function reorderTab(fromId: string, toId: string) {
     session.reorderTab(fromId, toId)
     persist()
+    // Broadcast the full local tab order so other clients can mirror it.
+    // The server filters to tabs it tracks and echoes the canonical order.
+    const tabIds = tabs.value.map((t) => t.paneId)
+    if (tabIds.length > 1) {
+      sendSync({ type: 'tab_reordered', tab_ids: tabIds })
+    }
   }
 
   function onRenameTab(paneId: string, title: string) {

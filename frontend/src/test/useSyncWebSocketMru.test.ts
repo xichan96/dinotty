@@ -107,10 +107,9 @@ describe('useSyncWebSocket pane MRU', () => {
   it('uses and focuses the MRU fallback when a focused pane exits', async () => {
     const { tab, emitLayout, focusActive } = await setup()
     emitLayout(layout('a', 'c'), 'c')
-    await Promise.resolve()
     expect(tab.paneMru).toEqual(['a', 'c'])
     expect(tab.activePaneId).toBe('a')
-    expect(focusActive).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(focusActive).toHaveBeenCalledOnce())
   })
 
   it('preserves focus when a non-focused pane exits', async () => {
@@ -123,10 +122,9 @@ describe('useSyncWebSocket pane MRU', () => {
   it('applies a pane focus change received from another client', async () => {
     const { tab, emitLayout, focusActive } = await setup()
     emitLayout(layout('a', 'b', 'c'), 'c')
-    await Promise.resolve()
     expect(tab.paneMru).toEqual(['c', 'b', 'a'])
     expect(tab.activePaneId).toBe('c')
-    expect(focusActive).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(focusActive).toHaveBeenCalledOnce())
   })
 
   it('keeps the synchronized focus when another client closes a non-focused pane', async () => {

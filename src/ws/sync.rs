@@ -377,6 +377,14 @@ async fn handle_sync_socket(
                                 );
                             }
                         }
+                        SyncClientMsg::TabReordered { tab_ids } => {
+                            if let Some(order) = manager.reorder_tabs(&tab_ids) {
+                                manager.broadcast_sync_others(
+                                    &SyncMsg::TabReordered { tab_ids: order },
+                                    &client_id,
+                                );
+                            }
+                        }
                         SyncClientMsg::MissionControlOp { op } => {
                             handle_mission_control_op(op, &manager, &workspaces, &mc).await;
                         }

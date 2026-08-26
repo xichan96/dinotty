@@ -13,7 +13,7 @@ Dinotty's layout system unifies four pane types -- terminal, file editor, plugin
 | Jump to tab N | `Cmd + <N>` (e.g., `Cmd + 3`) |
 | Rename tab | Double-click the tab title |
 
-Tab order is persisted per workspace and restored on page refresh.
+Tab order is persisted per workspace and restored on page refresh; drag-reordering tabs syncs live to every connected device.
 
 ## Splits
 

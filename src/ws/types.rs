@@ -68,6 +68,9 @@ pub enum SyncClientMsg {
         tab_id: String,
         title: String,
     },
+    TabReordered {
+        tab_ids: Vec<String>,
+    },
     /// Mission Control operation from a sync client (hardware keyboard or
     /// desktop frontend). Server holds the global MC state and broadcasts
     /// `MissionControlToggled` / `SelectionChanged` to all clients.

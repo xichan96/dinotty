@@ -177,8 +177,10 @@ pub async fn plugin_spawn_ws(
     let allowed_origins = s.auth.allowed_origins.clone();
     let trusted_proxies = s.auth.trusted_proxies.clone();
     drop(s);
-    let real_ip = crate::auth::real_client_ip(&headers, addr.ip(), &trusted_proxies);
-    if !crate::auth::check_ws_origin(&headers, &allowed_origins, real_ip, &trusted_proxies) {
+    let conn_ip = addr.ip();
+    let real_ip = crate::auth::real_client_ip(&headers, conn_ip, &trusted_proxies);
+    if !crate::auth::check_ws_origin(&headers, &allowed_origins, real_ip, conn_ip, &trusted_proxies)
+    {
         return plugin_err(StatusCode::FORBIDDEN, "origin not allowed");
     }
     if !pm.registry.contains_key(&id) {

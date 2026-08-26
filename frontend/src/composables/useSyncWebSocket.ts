@@ -548,17 +548,17 @@ export function useSyncWebSocket(opts: {
       } else if (msg.type === 'tab_reordered') {
         // Apply the server's canonical order to the tabs we have. Tabs not in
         // the list (e.g. local-only plugin tabs) keep their slots; only the
-        // listed tabs are rearranged into the given sequence. suppressSync
+        // listed tabs are rearranged into the given sequence. withSuppressed
         // guards against re-broadcasting while the local array is being moved.
         const orderSet = new Set(msg.tab_ids)
         const listed = msg.tab_ids
           .map((id) => tabs.value.find((t) => t.paneId === id))
           .filter((t): t is Tab => !!t)
         if (listed.length === 0) return
-        let k = 0
-        suppressSync = true
-        tabs.value = tabs.value.map((t) => (orderSet.has(t.paneId) ? listed[k++]! : t))
-        suppressSync = false
+        await withSuppressed(async () => {
+          let k = 0
+          tabs.value = tabs.value.map((t) => (orderSet.has(t.paneId) ? listed[k++]! : t))
+        })
         persist()
       } else if (msg.type === 'mission_control_toggled') {
         // Backend flipped MC open/close. Update local mirror only - never

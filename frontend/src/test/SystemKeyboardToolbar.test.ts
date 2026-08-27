@@ -85,9 +85,10 @@ describe('SystemKeyboardToolbar', () => {
     expect(toolbarRule).toMatch(/position:\s*fixed/)
     expect(toolbarRule).toMatch(/bottom:\s*var\(--system-toolbar-bottom,\s*0px\)/)
     expect(toolbarPadding).toContain('8px')
-    expect(toolbarPadding).toContain('safe-area-inset-bottom')
-    // Reserving the inset under an open keyboard costs height for covered space.
-    expect(toolbarPadding).toContain('--sys-kb-height')
+    // The bottom inset is deliberately absent: the toolbar's border-box height is subtracted
+    // from the terminal viewport, so reserving it would cost terminal height in every session.
+    expect(toolbarPadding).not.toContain('safe-area-inset-bottom')
+    expect(toolbarPadding).not.toContain('--sys-kb-height')
     // The frozen toolbar must not own geometry: the host owns both the height
     // band (--mkb-height via useKeyboardBand 'auto') and passes the terminal
     // IME focus into the viewport composable that writes the bottom offset.

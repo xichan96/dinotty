@@ -84,9 +84,14 @@ describe('SystemKeyboardToolbar', () => {
     const toolbarPadding = toolbarRule.match(/padding:\s*([^;]+);/s)?.[1] ?? ''
     expect(toolbarRule).toMatch(/position:\s*fixed/)
     expect(toolbarRule).toMatch(/bottom:\s*var\(--system-toolbar-bottom,\s*0px\)/)
-    expect(toolbarPadding).toContain('8px')
-    // The bottom inset is deliberately absent: the toolbar's border-box height is subtracted
-    // from the terminal viewport, so reserving it would cost terminal height in every session.
+    // Pin all four shorthand values. `toContain('8px')` alone is too weak: it still passes
+    // if the bottom value regresses to 0 while 8px turns up in some other position. The
+    // bottom inset is deliberately absent - the toolbar's border-box height is subtracted
+    // from the terminal viewport, so reserving it would cost terminal height in every
+    // session.
+    expect(toolbarPadding.replace(/\s+/g, ' ').trim()).toBe(
+      '5px max(5px, env(safe-area-inset-right)) 8px max(5px, env(safe-area-inset-left))'
+    )
     expect(toolbarPadding).not.toContain('safe-area-inset-bottom')
     expect(toolbarPadding).not.toContain('--sys-kb-height')
     // The frozen toolbar must not own geometry: the host owns both the height

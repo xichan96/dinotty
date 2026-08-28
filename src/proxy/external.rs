@@ -5,8 +5,12 @@ use axum::{
     http::{header, StatusCode},
     response::Response,
 };
+use reqwest::Client;
 use serde::Deserialize;
-use std::net::IpAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use super::extract_request;
 use super::inject::INJECT_SCRIPT_EXTERNAL;
@@ -50,6 +54,100 @@ fn is_private_ip(ip: IpAddr) -> bool {
 struct ResolvedTarget {
     domain: Option<String>,
     addrs: Vec<std::net::SocketAddr>,
+}
+
+const CLIENT_CACHE_TTL: Duration = Duration::from_mins(5);
+const CLIENT_CACHE_CAP: usize = 64;
+
+/// Per-target HTTP clients, reused so each target's connection pool stays warm.
+///
+/// reqwest pins DNS at Client build time (`resolve_to_addrs`), so the
+/// DNS-rebinding defense forces a fresh client per resolved hop. Building one
+/// per request also throws away its connection pool - every page load pays a
+/// new TCP+TLS handshake. Keying on (authority, validated addrs) reuses the
+/// pool while the DNS answer is unchanged, and a changed answer produces a
+/// different key with a freshly re-validated client. Entries expire after
+/// [`CLIENT_CACHE_TTL`] so DNS moves are picked up; the map is size-capped.
+struct PinnedClients {
+    inner: Mutex<HashMap<PinnedKey, PinnedEntry>>,
+    ttl: Duration,
+    cap: usize,
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct PinnedKey {
+    /// `scheme://host[:port]` of the upstream target.
+    authority: String,
+    /// Validated addresses, sorted so DNS answer order does not fragment the key.
+    addrs: Vec<SocketAddr>,
+}
+
+struct PinnedEntry {
+    client: Arc<Client>,
+    created: Instant,
+}
+
+static PINNED_CLIENTS: LazyLock<PinnedClients> =
+    LazyLock::new(|| PinnedClients::new(CLIENT_CACHE_TTL, CLIENT_CACHE_CAP));
+
+impl PinnedClients {
+    fn new(ttl: Duration, cap: usize) -> Self {
+        Self { inner: Mutex::new(HashMap::new()), ttl, cap }
+    }
+
+    /// Return the client pinned to `target`'s validated addresses, reusing the
+    /// cached one when the same authority resolved to the same addresses within
+    /// `ttl`. Wrapped in `Arc` so callers and tests can compare identity (two
+    /// returns from the same entry share the Arc).
+    fn client_for(&self, authority: &str, target: &ResolvedTarget) -> Arc<Client> {
+        let mut addrs = target.addrs.clone();
+        addrs.sort();
+        let key = PinnedKey { authority: authority.to_string(), addrs };
+        let now = Instant::now();
+        let mut map = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = map.get(&key) {
+            if now.duration_since(entry.created) < self.ttl {
+                return entry.client.clone();
+            }
+            map.remove(&key);
+        }
+        let client = Arc::new(pinned_client(target));
+        map.insert(key, PinnedEntry { client: Arc::clone(&client), created: now });
+        evict_oldest(&mut map, self.ttl, self.cap, now);
+        client
+    }
+}
+
+fn evict_oldest(
+    map: &mut HashMap<PinnedKey, PinnedEntry>,
+    ttl: Duration,
+    cap: usize,
+    now: Instant,
+) {
+    if map.len() <= cap {
+        return;
+    }
+    map.retain(|_, entry| now.duration_since(entry.created) < ttl);
+    while map.len() > cap {
+        let mut oldest_key = None;
+        let mut oldest_created = Instant::now();
+        for (key, entry) in map.iter() {
+            if oldest_key.is_none() || entry.created < oldest_created {
+                oldest_key = Some(key.clone());
+                oldest_created = entry.created;
+            }
+        }
+        let Some(oldest) = oldest_key else { break };
+        map.remove(&oldest);
+    }
+}
+
+/// Stable cache key for a target URL: `scheme://host[:port]`. The scheme is
+/// included so http/https to the same host:port cannot share a client entry.
+fn proxy_authority(url: &reqwest::Url) -> String {
+    let host = url.host_str().unwrap_or_default();
+    let port = url.port().map_or_else(String::new, |p| format!(":{p}"));
+    format!("{}://{host}{port}", url.scheme())
 }
 
 fn forbidden(msg: &str) -> Response {
@@ -100,8 +198,10 @@ fn pinned_client(target: &ResolvedTarget) -> reqwest::Client {
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .user_agent(super::PROXY_USER_AGENT)
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(5)
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
         .gzip(true)
         .brotli(true);
     if let (Some(domain), addrs) = (&target.domain, target.addrs.as_slice()) {
@@ -171,8 +271,10 @@ pub async fn external_proxy_handler(
             Err(r) => return *r,
         };
 
-        let mut proxy_req =
-            pinned_client(&target).request(current_method.clone(), current_url.clone());
+        let authority = proxy_authority(&current_url);
+        let mut proxy_req = PINNED_CLIENTS
+            .client_for(&authority, &target)
+            .request(current_method.clone(), current_url.clone());
 
         for (name, value) in &headers {
             let n = name.as_str();
@@ -285,7 +387,74 @@ pub async fn external_proxy_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::is_private_ip;
+    use super::*;
+
+    fn target(domain: Option<&str>, addrs: &[&str]) -> ResolvedTarget {
+        ResolvedTarget {
+            domain: domain.map(String::from),
+            addrs: addrs.iter().map(|s| s.parse().unwrap()).collect(),
+        }
+    }
+
+    #[test]
+    fn same_target_reuses_the_same_client() {
+        let cache = PinnedClients::new(Duration::from_secs(60), 4);
+        let t = target(Some("example.com"), &["93.184.216.34:443"]);
+        let c1 = cache.client_for("https://example.com", &t);
+        let c2 = cache.client_for("https://example.com", &t);
+        assert!(Arc::ptr_eq(&c1, &c2), "second call must reuse the cached client");
+    }
+
+    #[test]
+    fn changed_dns_answer_builds_a_fresh_client() {
+        let cache = PinnedClients::new(Duration::from_secs(60), 4);
+        let t1 = target(Some("example.com"), &["93.184.216.34:443"]);
+        let t2 = target(Some("example.com"), &["203.0.113.7:443"]);
+        let c1 = cache.client_for("https://example.com", &t1);
+        let c2 = cache.client_for("https://example.com", &t2);
+        assert!(!Arc::ptr_eq(&c1, &c2), "a different address set must not reuse the client");
+    }
+
+    #[test]
+    fn different_scheme_is_a_distinct_entry() {
+        let cache = PinnedClients::new(Duration::from_secs(60), 4);
+        let t = target(Some("example.com"), &["93.184.216.34:443"]);
+        let c1 = cache.client_for("https://example.com", &t);
+        let c2 = cache.client_for("http://example.com", &t);
+        assert!(!Arc::ptr_eq(&c1, &c2));
+    }
+
+    #[test]
+    fn expired_entry_is_rebuilt() {
+        let cache = PinnedClients::new(Duration::from_millis(5), 4);
+        let t = target(Some("example.com"), &["93.184.216.34:443"]);
+        let c1 = cache.client_for("https://example.com", &t);
+        std::thread::sleep(Duration::from_millis(20));
+        let c2 = cache.client_for("https://example.com", &t);
+        assert!(!Arc::ptr_eq(&c1, &c2), "an expired entry must be rebuilt");
+    }
+
+    #[test]
+    fn cap_evicts_the_oldest_entry() {
+        let cache = PinnedClients::new(Duration::from_secs(60), 2);
+        let t1 = target(Some("example.com"), &["93.184.216.34:443"]);
+        let t2 = target(Some("example.com"), &["203.0.113.7:443"]);
+        let t3 = target(Some("example.com"), &["198.51.100.7:443"]);
+        let c1 = cache.client_for("https://example.com", &t1);
+        let _ = cache.client_for("https://example.com", &t2);
+        let _ = cache.client_for("https://example.com", &t3);
+        // The third insert evicted t1 (oldest); re-requesting it must rebuild.
+        let rebuilt = cache.client_for("https://example.com", &t1);
+        assert!(!Arc::ptr_eq(&c1, &rebuilt), "evicted entry must be rebuilt");
+    }
+
+    #[test]
+    fn authority_is_scheme_host_port() {
+        let a1 = proxy_authority(&reqwest::Url::parse("https://example.com/path").unwrap());
+        assert_eq!(a1, "https://example.com");
+        let a2 = proxy_authority(&reqwest::Url::parse("http://example.com:8080/x").unwrap());
+        assert_eq!(a2, "http://example.com:8080");
+    }
 
     #[test]
     fn ipv6_private_ranges_are_blocked() {

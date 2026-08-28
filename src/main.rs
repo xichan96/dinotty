@@ -361,7 +361,14 @@ async fn main() {
     let webhooks = Arc::new(webhook::WebhookDispatcher::new(webhook_configs));
     webhooks.start(&manager.event_bus);
 
-    let mcp_server = Arc::new(mcp::server::McpServer::new(manager.clone(), settings_state.clone()));
+    // Shared single instance: the in-flight WSL probe dedup relies on it.
+    let shell_probe_service =
+        Arc::new(dinotty_server::platform::shell_probe::ShellProbeService::new());
+    let mcp_server = Arc::new(mcp::server::McpServer::new(
+        manager.clone(),
+        settings_state.clone(),
+        Arc::clone(&shell_probe_service),
+    ));
     let mcp_sse = Arc::new(mcp::transport::SseState::new());
     let workspaces_state = workspace_mgmt::create_workspaces_state();
     let mc_state = mission_control::create_mission_control_state();
@@ -387,7 +394,7 @@ async fn main() {
     let state = AppState {
         manager: Arc::clone(&manager),
         settings: settings_state,
-        shell_probe: Arc::new(dinotty_server::platform::shell_probe::ShellProbeService::new()),
+        shell_probe: shell_probe_service,
         file_watcher: Arc::new(FileWatcherState::new(file_watcher_event_bus)),
         monitor: monitor_state,
         notifier,

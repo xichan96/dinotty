@@ -117,10 +117,13 @@ Agent Tokens require the matching capability:
 | Operation | Required Capability |
 |-----------|---------------------|
 | `terminal_*` tools | `terminal:read` / `terminal:write` |
+| `tab_create` / `pane_split` | `terminal:create` |
 | `file_*` tools | `workspace:read` / `workspace:write` |
 | `git_*` tools | `workspace:read` |
 
 Agent Token scopes are also enforced (see the [Token System](/en/internals/token-system) doc): `terminal:read` / `terminal:write` scopes restrict the accessible panes (`terminal_list` filters out panes outside the scope), and `workspace:read` / `workspace:write` scopes restrict the accessible directories (directory-prefix matching). `git_status` operates on the process working directory and is not restricted by workspace scopes.
+
+A `terminal:create` scope restricts which panes may be used as the split source: `pane_split` requires the source pane to be in scope (tokens without a scope entry are unrestricted). `tab_create` is capability-gated only — a new tab's pane id does not exist before creation and cannot be pre-scoped; after `tab_create`, a scoped token must add the returned `pane_id` to its `terminal:read` / `terminal:write` scopes before the new pane can be read or written.
 
 ---
 
@@ -186,6 +189,48 @@ List all active terminal sessions.
 ```
 
 **Returns:** JSON array; each item has `pane_id`, `shell`, `cols`, `rows`, `cwd`
+
+### tab_create
+
+Create a new terminal tab (equivalent to REST `POST /api/tabs`). Without `argv` it launches an interactive shell using the user's shell settings; with `argv` it runs a one-shot command.
+
+```json
+{
+  "name": "tab_create",
+  "arguments": {
+    "cwd": "/Users/dev/project",
+    "argv": ["claude"],
+    "title": "Agent"
+  }
+}
+```
+
+All arguments are optional: `cwd` defaults to the default workspace root, omitting `argv` launches the interactive shell, and `title` defaults to `"Terminal"`.
+
+**Returns:** JSON string containing `tab_id`, `pane_id`, `layout`, `cwd`
+
+### pane_split
+
+Split a pane inside an existing tab (equivalent to REST `POST /api/tabs/:tab_id/pane`). When the source pane is an SSH session, the new pane clones the same SSH connection parameters.
+
+```json
+{
+  "name": "pane_split",
+  "arguments": {
+    "tab_id": "<tab_id>",
+    "pane_id": "<pane_id>",
+    "direction": "horizontal",
+    "cwd": "/Users/dev/project",
+    "force_local": false
+  }
+}
+```
+
+Only `tab_id` is required: `pane_id` defaults to the tab's active pane, `direction` defaults to `"horizontal"` (accepts `horizontal` / `vertical` / `left` / `right` / `top` / `bottom`), local panes default `cwd` to the source pane's CWD, and `force_local: true` creates a local PTY even when the source is SSH.
+
+**Returns:** JSON string containing `tab_id`, `new_pane_id`, `layout` (the updated full layout tree)
+
+**Hints:** both `tab_create` and `pane_split` are `readOnlyHint: false`, `destructiveHint: false`
 
 ### file_read
 

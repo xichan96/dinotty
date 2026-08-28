@@ -16,14 +16,16 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::platform::process::CommandNoWindowExt;
+use crate::platform::shell_probe::ShellProbeService;
 use crate::session::SessionManager;
 use crate::settings::SettingsState;
+use crate::tabs::service::{CreateTabError, SplitPaneError};
 use crate::token::TokenInfo;
 
 pub struct McpTools {
     manager: Arc<SessionManager>,
-    #[allow(dead_code)]
     settings: SettingsState,
+    shell_probe: Arc<ShellProbeService>,
 }
 
 #[derive(Serialize)]
@@ -37,8 +39,12 @@ pub struct ToolDef {
 }
 
 impl McpTools {
-    pub fn new(manager: Arc<SessionManager>, settings: SettingsState) -> Self {
-        Self { manager, settings }
+    pub fn new(
+        manager: Arc<SessionManager>,
+        settings: SettingsState,
+        shell_probe: Arc<ShellProbeService>,
+    ) -> Self {
+        Self { manager, settings, shell_probe }
     }
 
     #[must_use]
@@ -93,6 +99,35 @@ impl McpTools {
                 description: "List all active terminal sessions".into(),
                 input_schema: serde_json::json!({"type": "object", "properties": {}}),
                 annotations: Some(serde_json::json!({"readOnlyHint": true})),
+            },
+            ToolDef {
+                name: "tab_create".into(),
+                description: "Create a new terminal tab (optionally running a one-shot command). Mirrors POST /api/tabs. Returns tab_id, pane_id, layout, cwd.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "cwd": {"type": "string", "description": "Working directory (optional, defaults to the default workspace root)"},
+                        "argv": {"type": "array", "items": {"type": "string"}, "description": "Command to run instead of the interactive shell, e.g. [\"claude\"] (optional)"},
+                        "title": {"type": "string", "description": "Tab title (optional, default \"Terminal\")"}
+                    }
+                }),
+                annotations: Some(serde_json::json!({"readOnlyHint": false, "destructiveHint": false})),
+            },
+            ToolDef {
+                name: "pane_split".into(),
+                description: "Split a pane inside an existing tab, creating a sibling pane. Mirrors POST /api/tabs/:tab_id/pane. Supports SSH source panes. Returns new_pane_id and the updated layout.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "tab_id": {"type": "string", "description": "Tab to split in"},
+                        "pane_id": {"type": "string", "description": "Source pane (optional, defaults to the tab's active pane)"},
+                        "direction": {"type": "string", "description": "horizontal | vertical | left | right | top | bottom (optional, default horizontal)"},
+                        "cwd": {"type": "string", "description": "CWD override for local panes (optional, defaults to the source pane's CWD)"},
+                        "force_local": {"type": "boolean", "description": "Create a local PTY even when the source pane is SSH (optional, default false)"}
+                    },
+                    "required": ["tab_id"]
+                }),
+                annotations: Some(serde_json::json!({"readOnlyHint": false, "destructiveHint": false})),
             },
             ToolDef {
                 name: "file_read".into(),
@@ -169,6 +204,8 @@ impl McpTools {
             "terminal_read" => self.tool_terminal_read(args, token_info),
             "terminal_send" => self.tool_terminal_send(args, token_info),
             "terminal_list" => self.tool_terminal_list(token_info),
+            "tab_create" => self.tool_tab_create(args, token_info).await,
+            "pane_split" => self.tool_pane_split(args, token_info).await,
             "file_read" => self.tool_file_read(args, token_info),
             "file_write" => self.tool_file_write(args, token_info),
             "file_list" => self.tool_file_list(args, token_info),
@@ -334,6 +371,133 @@ impl McpTools {
             })
             .collect();
         Ok(serde_json::to_string(&sessions).unwrap_or_default())
+    }
+
+    async fn tool_tab_create(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
+        if !token_info.has_capability("terminal:create") {
+            return Err("Token lacks terminal:create capability".into());
+        }
+
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+        let title = args.get("title").and_then(|v| v.as_str()).map(String::from);
+        let argv_opt = match args.get("argv") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(items)) => {
+                let mut parsed = Vec::with_capacity(items.len());
+                for item in items {
+                    let s = item
+                        .as_str()
+                        .ok_or_else(|| "argv must be an array of strings".to_string())?;
+                    parsed.push(s.to_string());
+                }
+                Some(parsed)
+            }
+            Some(_) => return Err("argv must be an array of strings".into()),
+        };
+
+        let req = crate::tabs::CreateTabRequest { cwd, argv: argv_opt, title };
+        match crate::tabs::service::create_tab(&self.manager, &self.settings, &self.shell_probe, req)
+            .await
+        {
+            Ok(outcome) => Ok(serde_json::json!({
+                "tab_id": outcome.tab_id,
+                "pane_id": outcome.pane_id,
+                "layout": outcome.layout,
+                "cwd": outcome.cwd,
+            })
+            .to_string()),
+            Err(err) => Err(match err {
+                CreateTabError::Validation(e) => format!("Invalid request: {e}"),
+                CreateTabError::ShellResolve(e) => format!("Shell resolve failed: {e}"),
+                CreateTabError::PtyCreate(e) => format!("PTY create failed: {e}"),
+                CreateTabError::SessionDiedEarly { argv_command: true } => {
+                    "command exited before tab creation completed".into()
+                }
+                CreateTabError::SessionDiedEarly { argv_command: false } => {
+                    "session closed before tab creation completed".into()
+                }
+            }),
+        }
+    }
+
+    async fn tool_pane_split(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
+        if !token_info.has_capability("terminal:create") {
+            return Err("Token lacks terminal:create capability".into());
+        }
+
+        let tab_id = args
+            .get("tab_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing tab_id")?
+            .to_string();
+
+        // Resolve the source pane: explicit pane_id, else the tab's active pane
+        // (fallback: first leaf).
+        let source_pane_id = if let Some(id) = args.get("pane_id").and_then(|v| v.as_str()) {
+            id.to_string()
+        } else {
+            let tab_val = self
+                .manager
+                .tab_layouts
+                .get(&tab_id)
+                .ok_or_else(|| format!("tab not found: {tab_id}"))?;
+            let pane_id = tab_val
+                .get("active_pane_id")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .or_else(|| {
+                    tab_val.get("layout").and_then(crate::session::first_leaf_id)
+                })
+                .ok_or("tab has no panes")?;
+            drop(tab_val);
+            pane_id
+        };
+
+        if !token_info.check_scope("terminal:create", &source_pane_id) {
+            return Err(format!(
+                "Token terminal:create scope does not include pane {source_pane_id}"
+            ));
+        }
+
+        let direction = args
+            .get("direction")
+            .and_then(|v| v.as_str())
+            .unwrap_or("horizontal")
+            .to_string();
+        let force_local =
+            args.get("force_local").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
+
+        let req = crate::tabs::SplitPaneRequest {
+            pane_id: source_pane_id,
+            direction,
+            force_local,
+            cwd,
+        };
+        match crate::tabs::service::split_pane(
+            &self.manager,
+            &self.settings,
+            &self.shell_probe,
+            &tab_id,
+            req,
+        )
+        .await
+        {
+            Ok(outcome) => Ok(serde_json::json!({
+                "tab_id": tab_id,
+                "new_pane_id": outcome.new_pane_id,
+                "layout": outcome.layout,
+            })
+            .to_string()),
+            Err(err) => Err(match err {
+                SplitPaneError::TabNotFound => format!("tab not found: {tab_id}"),
+                SplitPaneError::TabHasNoLayout => "tab has no layout".into(),
+                SplitPaneError::PaneNotFoundInTab => "pane not found in tab".into(),
+                SplitPaneError::ShellResolve(e) => format!("Shell resolve failed: {e}"),
+                SplitPaneError::SessionCreate(e) => format!("session create failed: {e}"),
+                SplitPaneError::LayoutUpdateFailed => "failed to update layout".into(),
+            }),
+        }
     }
 
     fn tool_file_read(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {

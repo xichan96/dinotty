@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::platform::{shell::ShellPreference, shell_probe::ShellProbeService, shell::ShellResolveError};
+use crate::platform::{
+    shell::ShellPreference, shell::ShellResolveError, shell_probe::ShellProbeService,
+};
 use crate::pty;
 use crate::session::{self, SessionManager, SyncMsg};
 use crate::settings::SettingsState;

@@ -396,8 +396,13 @@ impl McpTools {
         };
 
         let req = crate::tabs::CreateTabRequest { cwd, argv: argv_opt, title };
-        match crate::tabs::service::create_tab(&self.manager, &self.settings, &self.shell_probe, req)
-            .await
+        match crate::tabs::service::create_tab(
+            &self.manager,
+            &self.settings,
+            &self.shell_probe,
+            req,
+        )
+        .await
         {
             Ok(outcome) => Ok(serde_json::json!({
                 "tab_id": outcome.tab_id,
@@ -425,11 +430,8 @@ impl McpTools {
             return Err("Token lacks terminal:create capability".into());
         }
 
-        let tab_id = args
-            .get("tab_id")
-            .and_then(|v| v.as_str())
-            .ok_or("Missing tab_id")?
-            .to_string();
+        let tab_id =
+            args.get("tab_id").and_then(|v| v.as_str()).ok_or("Missing tab_id")?.to_string();
 
         // Resolve the source pane: explicit pane_id, else the tab's active pane
         // (fallback: first leaf).
@@ -445,9 +447,7 @@ impl McpTools {
                 .get("active_pane_id")
                 .and_then(|v| v.as_str())
                 .map(String::from)
-                .or_else(|| {
-                    tab_val.get("layout").and_then(crate::session::first_leaf_id)
-                })
+                .or_else(|| tab_val.get("layout").and_then(crate::session::first_leaf_id))
                 .ok_or("tab has no panes")?;
             drop(tab_val);
             pane_id
@@ -459,21 +459,14 @@ impl McpTools {
             ));
         }
 
-        let direction = args
-            .get("direction")
-            .and_then(|v| v.as_str())
-            .unwrap_or("horizontal")
-            .to_string();
+        let direction =
+            args.get("direction").and_then(|v| v.as_str()).unwrap_or("horizontal").to_string();
         let force_local =
             args.get("force_local").and_then(serde_json::Value::as_bool).unwrap_or(false);
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(String::from);
 
-        let req = crate::tabs::SplitPaneRequest {
-            pane_id: source_pane_id,
-            direction,
-            force_local,
-            cwd,
-        };
+        let req =
+            crate::tabs::SplitPaneRequest { pane_id: source_pane_id, direction, force_local, cwd };
         match crate::tabs::service::split_pane(
             &self.manager,
             &self.settings,

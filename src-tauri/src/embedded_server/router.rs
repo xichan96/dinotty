@@ -169,7 +169,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/plugins/:id/events/subscribe", post(plugin::subscribe))
         .route("/api/plugins/:id/events/unsubscribe", post(plugin::unsubscribe))
         .route("/api/plugins/events/has-subscriber", get(plugin::has_subscriber))
-
         .route("/api/plugins/:id/workspace/readDir", get(plugin::plugin_workspace_read_dir))
         .route("/api/plugins/:id/workspace/readFile", get(plugin::plugin_workspace_read_file))
         .route("/api/plugins/:id/workspace/file", put(plugin::plugin_workspace_put_file))

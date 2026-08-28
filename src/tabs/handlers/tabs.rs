@@ -7,9 +7,9 @@ use axum::{
     Json,
 };
 
+use crate::platform::shell_probe::ShellProbeService;
 use crate::session::{self, SessionManager, SyncMsg};
 use crate::settings::SettingsState;
-use crate::platform::shell_probe::ShellProbeService;
 
 use super::super::service;
 use super::super::types::CreateTabRequest;
@@ -70,11 +70,10 @@ pub async fn create_tab(
                 (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response()
             }
             service::CreateTabError::ShellResolve(e) => shell_error_response(&e),
-            service::CreateTabError::PtyCreate(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e })),
-            )
-                .into_response(),
+            service::CreateTabError::PtyCreate(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+                    .into_response()
+            }
             service::CreateTabError::SessionDiedEarly { argv_command } => {
                 let message = if argv_command {
                     "command exited before tab creation completed"

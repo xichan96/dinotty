@@ -30,11 +30,10 @@ pub async fn split_pane(
         }))
         .into_response(),
         Err(err) => match err {
-            service::SplitPaneError::TabNotFound => (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "tab not found" })),
-            )
-                .into_response(),
+            service::SplitPaneError::TabNotFound => {
+                (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
+                    .into_response()
+            }
             service::SplitPaneError::TabHasNoLayout => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "tab has no layout" })),
@@ -46,11 +45,10 @@ pub async fn split_pane(
             )
                 .into_response(),
             service::SplitPaneError::ShellResolve(e) => shell_error_response(&e),
-            service::SplitPaneError::SessionCreate(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e })),
-            )
-                .into_response(),
+            service::SplitPaneError::SessionCreate(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+                    .into_response()
+            }
             service::SplitPaneError::LayoutUpdateFailed => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "failed to update layout" })),

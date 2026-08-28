@@ -192,15 +192,12 @@ async fn mcp_call(
         .await?;
     assert_eq!(resp.status(), reqwest::StatusCode::OK, "POST /mcp/message failed");
     let body: Value = resp.json().await?;
-    let error = body["error"].as_str().or_else(|| {
-        body["error"]["message"].as_str()
-    });
+    let error = body["error"].as_str().or_else(|| body["error"]["message"].as_str());
     if let Some(message) = error {
         return Err(format!("tools/call {name} returned error: {message}").into());
     }
-    let text = body["result"]["content"][0]["text"]
-        .as_str()
-        .ok_or("missing result.content[0].text")?;
+    let text =
+        body["result"]["content"][0]["text"].as_str().ok_or("missing result.content[0].text")?;
     Ok(serde_json::from_str(text)?)
 }
 
@@ -237,13 +234,8 @@ async fn mcp_tools_create_tab_and_split_pane() -> TestResult {
     );
 
     // Verify the server-side tab state reflects the split (2 leaves).
-    let tabs: Value = client
-        .get(format!("{base}/api/tabs"))
-        .bearer_auth(token)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let tabs: Value =
+        client.get(format!("{base}/api/tabs")).bearer_auth(token).send().await?.json().await?;
     let entry = tabs["tabs"]
         .as_array()
         .unwrap()

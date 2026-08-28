@@ -302,6 +302,8 @@
       </CollapsibleSection>
     </div>
 
+    <OpenInterfacesSection />
+
     <CollapsibleSection :title="t('settings.group.filesFolders')" level="group">
       <section class="settings-section">
         <div class="settings-row">
@@ -614,6 +616,7 @@ import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMo
 import CollapsibleSection from './CollapsibleSection.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import ShellPicker from './ShellPicker.vue'
+import OpenInterfacesSection from './OpenInterfacesSection.vue'
 import { useToast } from 'vue-toastification'
 import { isTauri } from '../../composables/useTransport'
 import { authFetch, apiUrl } from '../../composables/apiBase'

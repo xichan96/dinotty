@@ -404,6 +404,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     'settings.keyboard.mcpStdioHint':
       'Allow the local stdio proxy — run `dinotty-server --mcp-stdio --port <port>` from an MCP client configuration.',
     'settings.keyboard.mcpExample': 'stdio client config example',
+    'settings.openApi.agentApi': 'Agent API',
+    'settings.openApi.agentApiHint':
+      'Agent API exposes terminal read/write/execute to external agents. It is enabled by the Open API switch and requires an Agent Token with the matching capabilities.',
+    'settings.openApi.agentApiTokenHint':
+      'Create an Agent Token via the /api/tokens API and grant only the capabilities the agent needs.',
     'keyboard.textInput.placeholder': 'Type text, then tap send…',
     'mobileKb.actionPlaceholder': 'Type or paste commands…',
     'mobileKb.insertMacFile': 'Insert Mac file',
@@ -762,6 +767,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'settings.group.behavior': 'Behavior',
     'settings.group.advancedSecurity': 'Advanced Security',
     'settings.group.filesFolders': 'Files & Folders',
+    'settings.group.openApi': 'Open Interfaces',
     'settings.group.uploads': 'Uploads',
     'settings.advancedText': 'Advanced',
     'settings.log': 'Logging',
@@ -1376,6 +1382,11 @@ export const messages: Record<Locale, Record<string, string>> = {
     'settings.keyboard.mcpStdioHint':
       '允许本地 stdio 代理——在 MCP 客户端配置中运行 `dinotty-server --mcp-stdio --port <端口>`。',
     'settings.keyboard.mcpExample': 'stdio 客户端配置示例',
+    'settings.openApi.agentApi': 'Agent API',
+    'settings.openApi.agentApiHint':
+      'Agent API 向外部 agent 开放终端的读/写/执行能力。随「开放接口」开关生效，并需要具备相应 capability 的 Agent Token。',
+    'settings.openApi.agentApiTokenHint':
+      '通过 /api/tokens API 创建 Agent Token，只授予 agent 所需的 capability。',
     'keyboard.textInput.placeholder': '输入文字后点发送键提交…',
     'mobileKb.actionPlaceholder': '输入或粘贴命令…',
     'mobileKb.insertMacFile': '插入 Mac 文件',
@@ -1555,6 +1566,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'settings.group.behavior': '行为',
     'settings.group.advancedSecurity': '高级安全',
     'settings.group.filesFolders': '文件与目录',
+    'settings.group.openApi': '开放接口',
     'settings.group.uploads': '上传',
     'settings.advancedText': '高级',
     'settings.log': '日志',

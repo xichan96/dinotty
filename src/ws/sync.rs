@@ -254,7 +254,9 @@ async fn handle_sync_socket(
                             // letting a sync client set an arbitrary
                             // active_pane_id on the server.
                             let Some(leaf_id) = resolve_activate_leaf(&manager, &pane_id) else {
-                                tracing::warn!("sync: reject activate_tab for unknown pane {pane_id}");
+                                tracing::warn!(
+                                    "sync: reject activate_tab for unknown pane {pane_id}"
+                                );
                                 continue;
                             };
                             manager.set_active_pane_id(Some(leaf_id));

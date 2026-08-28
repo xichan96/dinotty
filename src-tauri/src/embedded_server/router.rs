@@ -169,6 +169,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/plugins/:id/events/subscribe", post(plugin::subscribe))
         .route("/api/plugins/:id/events/unsubscribe", post(plugin::unsubscribe))
         .route("/api/plugins/events/has-subscriber", get(plugin::has_subscriber))
+
+        .route("/api/plugins/:id/workspace/readDir", get(plugin::plugin_workspace_read_dir))
+        .route("/api/plugins/:id/workspace/readFile", get(plugin::plugin_workspace_read_file))
+        .route("/api/plugins/:id/workspace/file", put(plugin::plugin_workspace_put_file))
+        .route("/api/plugins/:id/workspace/stat", get(plugin::plugin_workspace_stat))
+        .route("/api/plugins/:id/workspace/mkdir", post(plugin::plugin_workspace_mkdir))
+        .route("/api/plugins/:id/workspace/delete", delete(plugin::plugin_workspace_delete))
+        .route("/api/plugins/:id/workspace/rename", post(plugin::plugin_workspace_rename))
+        .route("/api/plugins/:id/workspace/move", post(plugin::plugin_workspace_move))
         .route("/api/plugins/:id/*path", get(plugin::plugin_asset))
         // Sessions extended API (run/send/read/events) + Token management + MCP
         // - dual-track auth via sessions_token_middleware

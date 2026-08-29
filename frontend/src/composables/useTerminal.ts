@@ -36,6 +36,7 @@ import {
   type MobileTerminalModifiers,
 } from '../utils/terminalInput'
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
+import { attachImeHeuristic } from '../utils/imeAnchor'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { createTerminalOverlay } from './useTerminalOverlay'
 import { t } from './useI18n'
@@ -146,6 +147,9 @@ export class TerminalInstance {
   private _suppressTitleChange = false
   private _touchCleanup: (() => void) | null = null
   private _compositionCleanup: (() => void) | null = null
+  // Pins the IME textarea/composition-view to Ink's inverse caret cell while
+  // composing (Windows ConPTY cursor drift). Detached in destroy().
+  private _imeAnchorDetach: { detach(): void } | null = null
   private _resizeObserver: ResizeObserver | null = null
   private _themeUnsub: (() => void) | null = null
   private _textUnsub: (() => void) | null = null
@@ -320,6 +324,11 @@ export class TerminalInstance {
     this.xterm.loadAddon(this.fitAddon)
 
     this.xterm.open(wrapper)
+
+    // Anchor the IME preedit/candidate window to Ink's fake caret (a lone
+    // inverse cell) instead of the hardware cursor, which Claude Code on
+    // Windows ConPTY leaves at the right edge of the status row (#276).
+    this._imeAnchorDetach = attachImeHeuristic(this.xterm)
 
     // Ctrl+Shift+C/V: Linux-style copy/paste (macOS uses Cmd+C/V natively)
     const xt = this.xterm
@@ -1034,6 +1043,8 @@ export class TerminalInstance {
     this._wheel = null
     this._touchCleanup?.()
     this._compositionCleanup?.()
+    this._imeAnchorDetach?.detach()
+    this._imeAnchorDetach = null
     this._clearIme229()
     this._inputTextarea = null
     this._dropCleanup?.()

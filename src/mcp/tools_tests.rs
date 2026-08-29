@@ -15,6 +15,7 @@ fn make_server() -> McpServer {
     McpServer::new(
         manager,
         Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default())),
+        Arc::new(crate::platform::shell_probe::ShellProbeService::new()),
     )
 }
 
@@ -203,6 +204,108 @@ async fn handle_request_passes_token_info_to_tools() {
     let error = response.error.expect("out-of-scope read must fail");
     assert!(
         error.message.contains("scope does not include pane pane-2"),
+        "unexpected error message: {}",
+        error.message
+    );
+}
+
+#[tokio::test]
+async fn list_tools_includes_tab_and_pane_tools() {
+    let server = make_server();
+    let names: Vec<String> = server.tools.list_tools().into_iter().map(|t| t.name).collect();
+    assert!(names.contains(&"tab_create".to_string()), "tab_create missing from tools/list");
+    assert!(names.contains(&"pane_split".to_string()), "pane_split missing from tools/list");
+}
+
+#[tokio::test]
+async fn tab_create_denied_without_capability() {
+    let server = make_server();
+    let token = scoped_token("terminal:read", vec![]);
+
+    let denied = call_tool(&server, "tab_create", serde_json::json!({}), &token).await;
+    assert_eq!(denied.unwrap_err(), "Token lacks terminal:create capability");
+}
+
+#[tokio::test]
+async fn tab_create_validation_rejects_bad_argv_and_cwd() {
+    // All denials fire in validation, before any shell probe or PTY spawn.
+    let server = make_server();
+    let token = scoped_token("terminal:create", vec![]);
+
+    let denied = call_tool(&server, "tab_create", serde_json::json!({"argv": []}), &token).await;
+    assert_eq!(denied.unwrap_err(), "Invalid request: argv must be a non-empty array");
+
+    let denied = call_tool(&server, "tab_create", serde_json::json!({"argv": [""]}), &token).await;
+    assert_eq!(denied.unwrap_err(), "Invalid request: argv[0] must be a non-empty string");
+
+    let denied = call_tool(
+        &server,
+        "tab_create",
+        serde_json::json!({"cwd": "/definitely/not/a/dir"}),
+        &token,
+    )
+    .await;
+    assert_eq!(denied.unwrap_err(), "Invalid request: cwd must exist and be a directory");
+
+    let denied =
+        call_tool(&server, "tab_create", serde_json::json!({"argv": "not-an-array"}), &token).await;
+    assert_eq!(denied.unwrap_err(), "argv must be an array of strings");
+}
+
+#[tokio::test]
+async fn pane_split_denied_out_of_scope_pane() {
+    let manager = Arc::new(SessionManager::new());
+    manager.sessions.insert("pane-1".into(), stub_session());
+    manager.sessions.insert("pane-2".into(), stub_session());
+    manager.insert_tab(
+        "tab-1".into(),
+        serde_json::json!({
+            "layout": {"type": "leaf", "paneId": "pane-1", "title": "t", "ratio": 1},
+            "active_pane_id": "pane-1",
+        }),
+    );
+    let server = McpServer::new(
+        manager,
+        Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default())),
+        Arc::new(crate::platform::shell_probe::ShellProbeService::new()),
+    );
+    let token = scoped_token("terminal:create", vec!["pane-1".into()]);
+
+    // Explicit out-of-scope source pane: denial fires before any session spawn.
+    let denied = call_tool(
+        &server,
+        "pane_split",
+        serde_json::json!({"tab_id": "tab-1", "pane_id": "pane-2"}),
+        &token,
+    )
+    .await;
+    assert_eq!(denied.unwrap_err(), "Token terminal:create scope does not include pane pane-2");
+
+    // Missing tab: resolved before the scope check (pane id is needed first).
+    let denied =
+        call_tool(&server, "pane_split", serde_json::json!({"tab_id": "tab-x"}), &token).await;
+    assert_eq!(denied.unwrap_err(), "tab not found: tab-x");
+}
+
+#[tokio::test]
+async fn handle_request_gates_terminal_create() {
+    let server = make_server();
+    let token = scoped_token("terminal:read", vec![]);
+
+    let request = JsonRpcRequest {
+        jsonrpc: "2.0".into(),
+        id: Some(serde_json::json!(1)),
+        method: "tools/call".into(),
+        params: Some(serde_json::json!({
+            "name": "tab_create",
+            "arguments": {}
+        })),
+    };
+
+    let response = handle_request(&server, request, &token).await.expect("response");
+    let error = response.error.expect("capability gate must reject tab_create");
+    assert!(
+        error.message.contains("Token lacks terminal:create capability"),
         "unexpected error message: {}",
         error.message
     );

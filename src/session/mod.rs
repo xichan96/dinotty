@@ -54,7 +54,7 @@ pub struct PendingCommandResult {
     pub method: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SessionClientEvent {
     Output(String),
     Resize {
@@ -810,3 +810,6 @@ mod cwd_tests;
 
 #[cfg(test)]
 mod layout_tests;
+
+#[cfg(test)]
+mod snapshot_concurrency_tests;

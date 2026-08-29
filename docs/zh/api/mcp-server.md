@@ -117,10 +117,13 @@ Agent Token 需要相应 capability：
 | 操作 | 所需 Capability |
 |------|----------------|
 | `terminal_*` 工具 | `terminal:read` / `terminal:write` |
+| `tab_create` / `pane_split` | `terminal:create` |
 | `file_*` 工具 | `workspace:read` / `workspace:write` |
 | `git_*` 工具 | `workspace:read` |
 
 Agent Token 的 scope 同样生效（详见 [Token 系统](/zh/internals/token-system)）：`terminal:read` / `terminal:write` 的 scope 限制可访问的 pane（`terminal_list` 会过滤 scope 外的 pane），`workspace:read` / `workspace:write` 的 scope 限制可访问的目录（按目录前缀匹配）。`git_status` 作用于进程工作目录，不受 workspace scope 限制。
+
+`terminal:create` 的 scope 限制可分裂的源 pane：`pane_split` 要求源 pane 在 scope 内（未配置 scope 的 token 视为不限制）。`tab_create` 只做 capability 门控——新 tab 的 pane id 在创建前不存在，无法预先写入 scope；scoped token 建完 tab 后，需把返回的 `pane_id` 加入 `terminal:read` / `terminal:write` scope 才能对新 pane 读写。
 
 ---
 
@@ -186,6 +189,48 @@ Agent Token 的 scope 同样生效（详见 [Token 系统](/zh/internals/token-s
 ```
 
 **返回：** JSON 数组，每项包含 `pane_id`、`shell`、`cols`、`rows`、`cwd`
+
+### tab_create
+
+创建新终端 tab（等价于 REST `POST /api/tabs`）。省略 `argv` 时按用户 shell 设置启动交互式 shell；提供 `argv` 时运行一次性命令。
+
+```json
+{
+  "name": "tab_create",
+  "arguments": {
+    "cwd": "/Users/dev/project",
+    "argv": ["claude"],
+    "title": "Agent"
+  }
+}
+```
+
+参数均可省略：`cwd` 默认取默认工作区根目录，`argv` 省略时启动交互 shell，`title` 默认 `"Terminal"`。
+
+**返回：** JSON 字符串，包含 `tab_id`、`pane_id`、`layout`、`cwd`
+
+### pane_split
+
+在已有 tab 内分裂 pane（等价于 REST `POST /api/tabs/:tab_id/pane`）。源 pane 是 SSH 会话时，新 pane 复用同一 SSH 连接参数。
+
+```json
+{
+  "name": "pane_split",
+  "arguments": {
+    "tab_id": "<tab_id>",
+    "pane_id": "<pane_id>",
+    "direction": "horizontal",
+    "cwd": "/Users/dev/project",
+    "force_local": false
+  }
+}
+```
+
+仅 `tab_id` 必填：`pane_id` 默认取该 tab 的激活 pane，`direction` 默认 `"horizontal"`（接受 `horizontal` / `vertical` / `left` / `right` / `top` / `bottom`），本地 pane 的 `cwd` 默认继承源 pane，`force_local` 为 true 时即使源是 SSH 也创建本地 PTY。
+
+**返回：** JSON 字符串，包含 `tab_id`、`new_pane_id`、`layout`（更新后的完整布局树）
+
+**注解：** `tab_create` / `pane_split` 均为 `readOnlyHint: false`, `destructiveHint: false`
 
 ### file_read
 

@@ -167,7 +167,111 @@ async fn stdio_proxy_lists_tools_from_main_server() -> TestResult {
         response.contains("terminal_execute"),
         "response should contain terminal_execute: {response}"
     );
+    assert!(
+        response.contains("tab_create") && response.contains("pane_split"),
+        "response should contain tab_create and pane_split: {response}"
+    );
     assert!(response.contains(r#""id":1"#), "response should echo id 1: {response}");
+    Ok(())
+}
+
+async fn mcp_call(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    id: i64,
+    name: &str,
+    arguments: Value,
+) -> TestResult<Value> {
+    let resp = client
+        .post(format!("{base}/mcp/message"))
+        .bearer_auth(token)
+        .header("content-type", "application/json")
+        .json(&json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":arguments}}))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "POST /mcp/message failed");
+    let body: Value = resp.json().await?;
+    let error = body["error"].as_str().or_else(|| body["error"]["message"].as_str());
+    if let Some(message) = error {
+        return Err(format!("tools/call {name} returned error: {message}").into());
+    }
+    let text =
+        body["result"]["content"][0]["text"].as_str().ok_or("missing result.content[0].text")?;
+    Ok(serde_json::from_str(text)?)
+}
+
+#[tokio::test]
+async fn mcp_tools_create_tab_and_split_pane() -> TestResult {
+    let suffix = unique_suffix();
+    let token = "mcp-tab-create-e2e-token";
+    let (_guard, base) = spawn_server(token, &suffix)?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?;
+    wait_until_ready(&client, &base).await?;
+
+    // The DINOTTY_TOKEN env var is a global token, so it passes the
+    // terminal:create capability gate.
+    let created = mcp_call(&client, &base, token, 1, "tab_create", json!({})).await?;
+    let tab_id = created["tab_id"].as_str().unwrap_or_default().to_string();
+    let pane_id = created["pane_id"].as_str().unwrap_or_default().to_string();
+    assert!(!tab_id.is_empty(), "tab_create must return tab_id: {created}");
+    assert!(!pane_id.is_empty(), "tab_create must return pane_id: {created}");
+    assert_eq!(
+        created["layout"]["paneId"].as_str(),
+        Some(pane_id.as_str()),
+        "initial layout must be a single leaf for the new pane: {created}"
+    );
+
+    // Split with pane_id omitted: defaults to the tab's active pane.
+    let split = mcp_call(&client, &base, token, 2, "pane_split", json!({"tab_id": tab_id})).await?;
+    let new_pane_id = split["new_pane_id"].as_str().unwrap_or_default().to_string();
+    assert!(!new_pane_id.is_empty(), "pane_split must return new_pane_id: {split}");
+    assert_ne!(new_pane_id, pane_id, "split must create a distinct pane");
+    let layout_json = split["layout"].to_string();
+    assert!(
+        layout_json.contains(&pane_id) && layout_json.contains(&new_pane_id),
+        "updated layout must contain both panes: {split}"
+    );
+
+    // Verify the server-side tab state reflects the split (2 leaves).
+    let tabs: Value =
+        client.get(format!("{base}/api/tabs")).bearer_auth(token).send().await?.json().await?;
+    let entry = tabs["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["tab_id"].as_str() == Some(tab_id.as_str()))
+        .expect("created tab should appear in GET /api/tabs");
+    let layout = entry["layout"].to_string();
+    assert!(
+        layout.contains(&new_pane_id),
+        "GET /api/tabs layout should contain the split pane: {entry}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_tab_create_rejects_invalid_cwd() -> TestResult {
+    let suffix = unique_suffix();
+    let token = "mcp-tab-create-e2e-token";
+    let (_guard, base) = spawn_server(token, &suffix)?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(20)).build()?;
+    wait_until_ready(&client, &base).await?;
+
+    let resp = client
+        .post(format!("{base}/mcp/message"))
+        .bearer_auth(token)
+        .header("content-type", "application/json")
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tab_create","arguments":{"cwd":"/definitely/not/a/dir"}}}))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: Value = resp.json().await?;
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("cwd must exist and be a directory"),
+        "expected cwd validation error, got: {message}"
+    );
     Ok(())
 }
 

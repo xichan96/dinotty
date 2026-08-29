@@ -5,7 +5,6 @@
     <ActionKeyboardEditor />
     <SystemKeyboardEditor />
     <AdvancedKeyboardSettings />
-    <OpenApiSection />
   </div>
 </template>
 
@@ -15,5 +14,4 @@ import KeybindingSection from './KeybindingSection.vue'
 import ActionKeyboardEditor from './ActionKeyboardEditor.vue'
 import SystemKeyboardEditor from './SystemKeyboardEditor.vue'
 import AdvancedKeyboardSettings from './AdvancedKeyboardSettings.vue'
-import OpenApiSection from './OpenApiSection.vue'
 </script>

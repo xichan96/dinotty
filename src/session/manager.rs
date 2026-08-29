@@ -390,6 +390,38 @@ impl SessionManager {
         false
     }
 
+    /// Apply a client-provided tab order. Unknown ids are dropped and tabs
+    /// known to the server but absent from the list keep their relative order,
+    /// appended after the listed ones. Returns the new full `tab_order` when
+    /// the order changed, or `None` when it is a no-op (so the caller can skip
+    /// the broadcast).
+    pub fn reorder_tabs(&self, tab_ids: &[String]) -> Option<Vec<String>> {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut new_order: Vec<String> = Vec::new();
+        for id in tab_ids {
+            if seen.insert(id.as_str()) && self.tab_layouts.contains_key(id.as_str()) {
+                new_order.push(id.clone());
+            }
+        }
+        if new_order.is_empty() {
+            return None;
+        }
+        let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for id in order.iter() {
+            if !seen.contains(id.as_str()) {
+                new_order.push(id.clone());
+            }
+        }
+        if *order == new_order {
+            return None;
+        }
+        order.clone_from(&new_order);
+        drop(order);
+        self.schedule_snapshot();
+        Some(new_order)
+    }
+
     /// Publish a newly-created tab only if the exact session is still a member.
     pub fn insert_tab_for_session(
         &self,

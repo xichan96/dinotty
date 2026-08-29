@@ -141,7 +141,9 @@ export function useSyncWebSocket(opts: {
   }
 
   let syncWs: WebSocket | null = null
-  let suppressSync = false
+  // Suppression is a counter, not a boolean: a region may nest or run async
+  // work, and an exception on any exit path must not leave the flag stuck.
+  let suppressDepth = 0
   let syncReconnectDelay = 1000
 
   // Grace period: tabs created within the last 5s are protected from tab_list pruning.
@@ -161,9 +163,20 @@ export function useSyncWebSocket(opts: {
   }
 
   function sendSync(msg: SyncClientMsg) {
-    if (suppressSync) return
+    if (suppressDepth > 0) return
     if (syncWs && syncWs.readyState === WebSocket.OPEN) {
       syncWs.send(JSON.stringify(msg))
+    }
+  }
+
+  // Runs fn with sync sends suppressed, restoring the counter even when fn
+  // throws or its promise rejects after an await.
+  async function withSuppressed<T>(fn: () => T | Promise<T>): Promise<T> {
+    suppressDepth++
+    try {
+      return await fn()
+    } finally {
+      suppressDepth--
     }
   }
 
@@ -357,10 +370,11 @@ export function useSyncWebSocket(opts: {
               return !!findLeaf(t.layout, msg.active_pane_id!)
             }) as TerminalTab | undefined
             if (targetTab) {
-              suppressSync = true
-              targetTab.activePaneId = msg.active_pane_id
-              activePaneId.value = targetTab.paneId
-              suppressSync = false
+              const remoteActivePaneId = msg.active_pane_id
+              await withSuppressed(async () => {
+                targetTab.activePaneId = remoteActivePaneId
+                activePaneId.value = targetTab.paneId
+              })
             }
           }
         }
@@ -519,11 +533,11 @@ export function useSyncWebSocket(opts: {
             return !!findLeaf(t.layout, msg.pane_id)
           }) as TerminalTab | undefined
           if (targetTab) {
-            suppressSync = true
-            targetTab.paneMru = touchPaneMru(targetTab.paneMru, msg.pane_id)
-            targetTab.activePaneId = msg.pane_id
-            activePaneId.value = targetTab.paneId
-            suppressSync = false
+            await withSuppressed(async () => {
+              targetTab.paneMru = touchPaneMru(targetTab.paneMru, msg.pane_id)
+              targetTab.activePaneId = msg.pane_id
+              activePaneId.value = targetTab.paneId
+            })
           }
         }
       } else if (msg.type === 'tab_renamed') {
@@ -531,6 +545,21 @@ export function useSyncWebSocket(opts: {
         if (targetTab) {
           ;(targetTab as TerminalTab).customTitle = msg.title
         }
+      } else if (msg.type === 'tab_reordered') {
+        // Apply the server's canonical order to the tabs we have. Tabs not in
+        // the list (e.g. local-only plugin tabs) keep their slots; only the
+        // listed tabs are rearranged into the given sequence. withSuppressed
+        // guards against re-broadcasting while the local array is being moved.
+        const orderSet = new Set(msg.tab_ids)
+        const listed = msg.tab_ids
+          .map((id) => tabs.value.find((t) => t.paneId === id))
+          .filter((t): t is Tab => !!t)
+        if (listed.length === 0) return
+        await withSuppressed(async () => {
+          let k = 0
+          tabs.value = tabs.value.map((t) => (orderSet.has(t.paneId) ? listed[k++]! : t))
+        })
+        persist()
       } else if (msg.type === 'mission_control_toggled') {
         // Backend flipped MC open/close. Update local mirror only - never
         // re-send (the broadcast includes the sender; echo is expected).
@@ -583,28 +612,27 @@ export function useSyncWebSocket(opts: {
           const removedPaneIds = localLeafIds.filter((id) => !incomingLeafIds.includes(id))
           const previousActivePaneId = targetTab.activePaneId
           const activePaneWasRemoved = removedPaneIds.includes(previousActivePaneId)
+          // `targetTab` is a `let`; capture the narrowed value so the async
+          // region body does not widen it back to `TerminalTab | undefined`.
+          const tt = targetTab
 
-          suppressSync = true
-          if (!sameLeaves) {
-            targetTab.layout = ensureSplitRoot(msg.layout)
-          }
-          for (const removedPaneId of removedPaneIds) {
-            targetTab.paneMru = removePaneFromMru(targetTab.paneMru, removedPaneId).paneMru
-          }
-          targetTab.paneMru = reconcilePaneMru(
-            targetTab.paneMru,
-            incomingLeafIds,
-            previousActivePaneId
-          )
-          if (activePaneWasRemoved) {
-            targetTab.activePaneId = targetTab.paneMru[0] ?? msg.active_pane_id
-          } else if (incomingLeafIds.includes(msg.active_pane_id)) {
-            targetTab.activePaneId = msg.active_pane_id
-            targetTab.paneMru = touchPaneMru(targetTab.paneMru, msg.active_pane_id)
-          } else {
-            targetTab.activePaneId = previousActivePaneId
-          }
-          suppressSync = false
+          await withSuppressed(async () => {
+            if (!sameLeaves) {
+              tt.layout = ensureSplitRoot(msg.layout)
+            }
+            for (const removedPaneId of removedPaneIds) {
+              tt.paneMru = removePaneFromMru(tt.paneMru, removedPaneId).paneMru
+            }
+            tt.paneMru = reconcilePaneMru(tt.paneMru, incomingLeafIds, previousActivePaneId)
+            if (activePaneWasRemoved) {
+              tt.activePaneId = tt.paneMru[0] ?? msg.active_pane_id
+            } else if (incomingLeafIds.includes(msg.active_pane_id)) {
+              tt.activePaneId = msg.active_pane_id
+              tt.paneMru = touchPaneMru(tt.paneMru, msg.active_pane_id)
+            } else {
+              tt.activePaneId = previousActivePaneId
+            }
+          })
 
           if (activePaneWasRemoved && targetTab.activePaneId !== msg.active_pane_id) {
             sendLayoutSync(targetTab.paneId, targetTab.layout, targetTab.activePaneId)
@@ -693,7 +721,9 @@ export function useSyncWebSocket(opts: {
     }
 
     syncWs.onmessage = (e) => {
-      void handleMsg(e)
+      handleMsg(e).catch((err) => {
+        console.error('[sync] message handler failed:', err)
+      })
     }
 
     syncWs.onclose = (e) => {
@@ -731,10 +761,7 @@ export function useSyncWebSocket(opts: {
     setSshAuthPromptHandler,
     sendSshAuthResponse,
     get suppressSync() {
-      return suppressSync
-    },
-    set suppressSync(v: boolean) {
-      suppressSync = v
+      return suppressDepth > 0
     },
   }
 }

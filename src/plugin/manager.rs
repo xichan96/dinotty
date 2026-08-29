@@ -102,13 +102,21 @@ pub struct PluginManager {
 
 pub type PluginManagerState = Arc<PluginManager>;
 
+fn instance_root(home: &Path, suffix: &str) -> PathBuf {
+    home.join(format!(".dinotty{suffix}"))
+}
+
 impl PluginManager {
     #[must_use]
     pub fn new(host_origin: String, host_mode: String) -> Self {
         let home = dirs::home_dir().unwrap_or_default();
+        let root = instance_root(&home, &crate::settings::instance_suffix());
+        let plugin_dir = root.join("plugins");
+        let data_dir = root.join("plugin-data");
+        tracing::info!(plugin_dir = %plugin_dir.display(), "Resolved plugin directory");
         Self {
-            plugin_dir: home.join(".dinotty/plugins"),
-            data_dir: home.join(".dinotty/plugin-data"),
+            plugin_dir,
+            data_dir,
             registry: DashMap::new(),
             processes: DashMap::new(),
             operation_locks: DashMap::new(),
@@ -817,5 +825,103 @@ impl PluginManager {
 
         self.registry.remove(id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{instance_root, PluginManager};
+    use std::ffi::OsString;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    const COMPILE_TIME_SUFFIX: Option<&str> = option_env!("DINOTTY_CONFIG_SUFFIX");
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(name);
+            std::env::set_var(name, value);
+            Self { name, previous }
+        }
+
+        fn unset(name: &'static str) -> Self {
+            let previous = std::env::var_os(name);
+            std::env::remove_var(name);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.name, previous);
+            } else {
+                std::env::remove_var(self.name);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_suffix_keeps_default_plugin_directories() {
+        let home = Path::new("/home/example");
+        let root = instance_root(home, "");
+
+        assert_eq!(root.join("plugins"), home.join(".dinotty/plugins"));
+        assert_eq!(root.join("plugin-data"), home.join(".dinotty/plugin-data"));
+    }
+
+    #[test]
+    fn non_empty_suffix_moves_both_plugin_directories() {
+        let home = Path::new("/home/example");
+        let root = instance_root(home, "-test");
+
+        assert_eq!(root.join("plugins"), home.join(".dinotty-test/plugins"));
+        assert_eq!(root.join("plugin-data"), home.join(".dinotty-test/plugin-data"));
+    }
+
+    #[test]
+    fn new_resolves_both_directories_through_the_instance_suffix() {
+        let _env_lock = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // This env var is process-global, so its directory must not be used by any live instance.
+        let _suffix = EnvVarGuard::set("DINOTTY_CONFIG_SUFFIX", "-plugin-manager-wiring-test");
+
+        let manager = PluginManager::new("http://localhost:8998".into(), "test".into());
+        let suffix = crate::settings::instance_suffix();
+
+        assert!(manager.plugin_dir.ends_with(format!(".dinotty{suffix}/plugins")));
+        assert!(manager.data_dir.ends_with(format!(".dinotty{suffix}/plugin-data")));
+    }
+
+    #[test]
+    fn instance_suffix_uses_runtime_environment_value() {
+        // The runtime fallback is unreachable when this value was embedded at compile time.
+        if COMPILE_TIME_SUFFIX.is_some() {
+            return;
+        }
+
+        let _env_lock = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _suffix = EnvVarGuard::set("DINOTTY_CONFIG_SUFFIX", "-plugin-manager-wiring-test");
+
+        assert_eq!(crate::settings::instance_suffix(), "-plugin-manager-wiring-test");
+    }
+
+    #[test]
+    fn instance_suffix_defaults_to_empty_when_runtime_environment_is_absent() {
+        // The runtime fallback is unreachable when this value was embedded at compile time.
+        if COMPILE_TIME_SUFFIX.is_some() {
+            return;
+        }
+
+        let _env_lock = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _suffix = EnvVarGuard::unset("DINOTTY_CONFIG_SUFFIX");
+
+        assert_eq!(crate::settings::instance_suffix(), "");
     }
 }

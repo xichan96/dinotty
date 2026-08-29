@@ -1,22 +1,10 @@
 /// Session regressions that use a stub with `SessionBackend::Exited` to avoid
 /// spawning a real PTY/child process.
-use super::test_support::stub_session;
+use super::test_support::{add_ready_client, stub_session};
 use super::*;
 use crate::notification::NotificationBroadcast;
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
-
-fn add_ready_client(session: &Session) -> mpsc::Receiver<SessionClientEvent> {
-    let (client_id, rx) = session.add_client();
-    let clients = session.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    clients
-        .iter()
-        .find(|client| client.id == client_id)
-        .expect("newly added client must exist")
-        .snapshot_pending
-        .store(false, Ordering::Relaxed);
-    rx
-}
 
 fn assert_output(event: SessionClientEvent, expected: &str) {
     match event {
@@ -174,7 +162,7 @@ fn stale_generation_cannot_replace_or_close_current_session() {
 #[test]
 fn flush_sync_buffer_preserves_multibyte_across_chunk_boundary() {
     let session = stub_session();
-    let mut rx = add_ready_client(&session);
+    let (_id, mut rx) = add_ready_client(&session);
 
     // 65535 'a's + `界` (3 bytes) + "tail" = 65542 bytes.
     // FLUSH_CHUNK_SIZE (65536) splits `界` mid-character.
@@ -200,7 +188,7 @@ fn flush_sync_buffer_preserves_multibyte_across_chunk_boundary() {
 #[test]
 fn sync_wire_order_is_begin_buffer_end_live() {
     let session = stub_session();
-    let mut rx = add_ready_client(&session);
+    let (_id, mut rx) = add_ready_client(&session);
 
     session.set_sync_mode(true);
     session.broadcast("BUF");
@@ -217,7 +205,7 @@ fn sync_wire_order_is_begin_buffer_end_live() {
 #[test]
 fn sync_teardown_blocks_concurrent_broadcast_until_after_sync_end() {
     let session = stub_session();
-    let mut rx = add_ready_client(&session);
+    let (_id, mut rx) = add_ready_client(&session);
     session.set_sync_mode(true);
     session.broadcast("BUF");
 
@@ -268,7 +256,7 @@ fn sync_teardown_blocks_concurrent_broadcast_until_after_sync_end() {
 #[test]
 fn double_sync_disable_emits_exactly_one_sync_end() {
     let session = stub_session();
-    let mut rx = add_ready_client(&session);
+    let (_id, mut rx) = add_ready_client(&session);
 
     session.set_sync_mode(true);
     session.set_sync_mode(false);

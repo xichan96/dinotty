@@ -158,6 +158,9 @@ pub enum SyncMsg {
         tab_id: String,
         title: String,
     },
+    TabReordered {
+        tab_ids: Vec<String>,
+    },
     /// Mission Control open/close flipped. Contains the full snapshot so
     /// receivers can refresh both `open` and the selected card atomically.
     /// Broadcast includes the sender - frontend treats it as the authoritative

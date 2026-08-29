@@ -58,6 +58,15 @@ pub async fn workspace_list(
     if let Some(session) = ssh_session(&manager, &q.pane_id) {
         return remote::remote_list(session, q.clone()).await;
     }
+    // The directory scan (read_dir + per-entry canonicalize/metadata) is
+    // blocking syscall I/O; run it on the blocking pool so a slow filesystem
+    // (e.g. a mounted NAS volume) cannot stall a tokio worker thread.
+    tokio::task::spawn_blocking(move || list_dirs_blocking(&manager, &q))
+        .await
+        .unwrap_or_else(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "listing task panicked"))
+}
+
+fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Response {
     let outside_pane_jail = q.free || q.root.as_deref() == Some("/");
     let (raw_target, target, cwd_display) = if q.free {
         let requested = Path::new(q.path.trim());
@@ -74,7 +83,7 @@ pub async fn workspace_list(
         let root = match q.root.as_deref() {
             Some("/") => PathBuf::from("/"),
             Some("~") => dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
-            _ => try_res!(get_root(&manager, &q.pane_id)),
+            _ => try_res!(get_root(manager, &q.pane_id)),
         };
         let raw_target = try_res!(normalize_join(&root, &q.path));
         if !raw_target.exists() {

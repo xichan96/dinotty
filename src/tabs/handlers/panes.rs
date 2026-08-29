@@ -7,186 +7,55 @@ use axum::{
     Json,
 };
 
-use crate::platform::{shell::ShellPreference, shell_probe::ShellProbeService};
-use crate::pty;
+use crate::platform::shell_probe::ShellProbeService;
 use crate::session::{self, SessionManager, SyncMsg};
 use crate::settings::SettingsState;
 
+use super::super::service;
 use super::super::types::{
     ExtractPaneRequest, MovePaneRequest, SplitPaneRequest, UpdateLayoutRequest,
 };
 use super::shell_error_response;
 
-#[allow(clippy::unused_async, clippy::too_many_lines)]
 pub async fn split_pane(
     State((manager, settings)): State<(Arc<SessionManager>, SettingsState)>,
     State(shell_probe): State<Arc<ShellProbeService>>,
     Path(tab_id): Path<String>,
     Json(req): Json<SplitPaneRequest>,
 ) -> impl IntoResponse {
-    // Verify tab exists
-    let tab_val = match manager.tab_layouts.get(&tab_id) {
-        Some(v) => v.value().clone(),
-        None => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
-                .into_response();
-        }
-    };
-
-    let layout = match tab_val.get("layout") {
-        Some(l) => l.clone(),
-        None => {
-            return (
+    match super::super::service::split_pane(&manager, &settings, &shell_probe, &tab_id, req).await {
+        Ok(outcome) => Json(serde_json::json!({
+            "new_pane_id": outcome.new_pane_id,
+            "layout": outcome.layout,
+        }))
+        .into_response(),
+        Err(err) => match err {
+            service::SplitPaneError::TabNotFound => {
+                (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
+                    .into_response()
+            }
+            service::SplitPaneError::TabHasNoLayout => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "tab has no layout" })),
             )
-                .into_response();
-        }
-    };
-
-    // Verify target pane exists in layout
-    let leaf_ids = session::collect_leaf_pane_ids(&layout);
-    if !leaf_ids.contains(&req.pane_id) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "pane not found in tab" })),
-        )
-            .into_response();
-    }
-
-    let new_pane_id = uuid::Uuid::new_v4().to_string();
-
-    // Check if source pane is an SSH session
-    let ssh_params = manager.sessions.get(&req.pane_id).and_then(|s| s.ssh_params.clone());
-
-    // Create session for new pane (SSH or local PTY)
-    let source_cwd = manager.sessions.get(&req.pane_id).and_then(|session| session.host_cwd());
-
-    let shell_preference = {
-        let s = settings.read().await;
-        ShellPreference::new(s.shell.clone(), s.shell_path.clone(), s.wsl_distro.clone())
-    };
-    let shell_spec = if req.force_local || ssh_params.is_none() {
-        match shell_probe.resolve(&shell_preference).await {
-            Ok(spec) => Some(spec),
-            Err(error) => return shell_error_response(&error),
-        }
-    } else {
-        None
-    };
-
-    let (session, _shell_type) = if req.force_local {
-        // Force local PTY - use explicit cwd if provided, otherwise inherit from source
-        let local_cwd = req.cwd.map(std::path::PathBuf::from).or(source_cwd);
-        match pty::create_session(
-            &manager,
-            &new_pane_id,
-            Some(&tab_id),
-            None,
-            local_cwd.map(pty::LaunchCwd::Host),
-            None,
-            shell_spec.clone(),
-        ) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!("Failed to create PTY for force-local split: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e })),
-                )
-                    .into_response();
-            }
-        }
-    } else if let Some(params) = ssh_params {
-        // Source is an SSH session - create a new SSH connection to the same host
-        match crate::ssh::create_ssh_session(&manager, &new_pane_id, params, None).await {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!("Failed to create SSH session for split: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e })),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        // Local PTY - honor explicit cwd override, otherwise inherit from source pane
-        let local_cwd = req.cwd.map(std::path::PathBuf::from).or(source_cwd);
-        match pty::create_session(
-            &manager,
-            &new_pane_id,
-            Some(&tab_id),
-            None,
-            local_cwd.map(pty::LaunchCwd::Host),
-            None,
-            shell_spec,
-        ) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!("Failed to create PTY for split: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e })),
-                )
-                    .into_response();
-            }
-        }
-    };
-
-    // Update layout tree
-    let is_ssh = manager.sessions.get(&new_pane_id).is_some_and(|s| s.is_ssh());
-    let new_layout =
-        if let Some(session) = is_ssh.then(|| manager.sessions.get(&new_pane_id)).flatten() {
-            let title = format!(
-                "{}@{}",
-                session.ssh_params.as_ref().map_or("ssh", |p| p.username.as_str()),
-                session.ssh_params.as_ref().map_or("", |p| p.host.as_str()),
-            );
-            session::insert_pane_into_layout_with_info(
-                &layout,
-                &req.pane_id,
-                &req.direction,
-                &new_pane_id,
-                &title,
-                "ssh",
+                .into_response(),
+            service::SplitPaneError::PaneNotFoundInTab => (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "pane not found in tab" })),
             )
-        } else {
-            session::insert_pane_into_layout(&layout, &req.pane_id, &req.direction, &new_pane_id)
-        };
-    let Some(new_layout) = new_layout else {
-        // Clean up PTY if layout update fails
-        manager.kill_and_remove(&new_pane_id);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "failed to update layout" })),
-        )
-            .into_response();
-    };
-
-    // Store updated layout
-    let active_pane_id = new_pane_id.clone();
-    manager.insert_tab(
-        tab_id.clone(),
-        serde_json::json!({
-            "layout": new_layout.clone(),
-            "active_pane_id": active_pane_id.clone(),
-        }),
-    );
-
-    // Broadcast to all sync clients
-    manager.broadcast_sync(&SyncMsg::LayoutUpdated {
-        pane_id: tab_id,
-        layout: new_layout.clone(),
-        active_pane_id,
-    });
-    manager.recheck_publish_or_correct(&new_pane_id, &session);
-
-    Json(serde_json::json!({
-        "new_pane_id": new_pane_id,
-        "layout": new_layout,
-    }))
-    .into_response()
+                .into_response(),
+            service::SplitPaneError::ShellResolve(e) => shell_error_response(&e),
+            service::SplitPaneError::SessionCreate(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+                    .into_response()
+            }
+            service::SplitPaneError::LayoutUpdateFailed => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "failed to update layout" })),
+            )
+                .into_response(),
+        },
+    }
 }
 
 #[allow(clippy::unused_async, clippy::too_many_lines)]

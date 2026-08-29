@@ -185,8 +185,11 @@ pub fn run_server(
             audit: audit_logger.clone(),
             run_limiter: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         };
-        let mcp_server =
-            Arc::new(mcp::server::McpServer::new(manager.clone(), settings_state.clone()));
+        let mcp_server = Arc::new(mcp::server::McpServer::new(
+            manager.clone(),
+            settings_state.clone(),
+            Arc::clone(&shell_probe),
+        ));
         let mcp_sse = Arc::new(mcp::transport::SseState::new());
 
         let state = state::AppState {

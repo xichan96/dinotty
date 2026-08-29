@@ -187,10 +187,13 @@ async fn handle_sync_socket(
         }
     });
 
-    // Monitor SSH keyboard-interactive auth prompts and forward to frontend
+    // Monitor SSH keyboard-interactive auth prompts and forward to frontend.
+    // The outer loop has no exit condition of its own - it MUST be aborted when
+    // the socket closes (see cleanup below), or it leaks a 100ms poller per
+    // connection (and per reconnect).
     let auth_mgr = Arc::clone(&manager);
     let auth_ws_out = ws_out_tx.clone();
-    tokio::spawn(async move {
+    let ssh_auth_monitor = tokio::spawn(async move {
         let mut known_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -246,17 +249,16 @@ async fn handle_sync_socket(
                 if let Ok(sync_msg) = serde_json::from_str::<SyncClientMsg>(&text) {
                     match sync_msg {
                         SyncClientMsg::ActivateTab { pane_id } => {
-                            // Resolve leaf pane ID: pane_id may be a tab ID;
-                            // look up the tab's stored active_pane_id for the actual leaf.
-                            let leaf_id = manager
-                                .tab_layouts
-                                .get(&pane_id)
-                                .and_then(|v| {
-                                    v.get("active_pane_id")
-                                        .and_then(|a| a.as_str())
-                                        .map(String::from)
-                                })
-                                .unwrap_or(pane_id.clone());
+                            // pane_id may be a tab ID or a leaf pane ID. Resolve
+                            // to a real leaf and reject unknown panes instead of
+                            // letting a sync client set an arbitrary
+                            // active_pane_id on the server.
+                            let Some(leaf_id) = resolve_activate_leaf(&manager, &pane_id) else {
+                                tracing::warn!(
+                                    "sync: reject activate_tab for unknown pane {pane_id}"
+                                );
+                                continue;
+                            };
                             manager.set_active_pane_id(Some(leaf_id));
                             manager.broadcast_sync_others(
                                 &SyncMsg::TabActivated { pane_id },
@@ -374,6 +376,14 @@ async fn handle_sync_socket(
                                 );
                             }
                         }
+                        SyncClientMsg::TabReordered { tab_ids } => {
+                            if let Some(order) = manager.reorder_tabs(&tab_ids) {
+                                manager.broadcast_sync_others(
+                                    &SyncMsg::TabReordered { tab_ids: order },
+                                    &client_id,
+                                );
+                            }
+                        }
                         SyncClientMsg::MissionControlOp { op } => {
                             handle_mission_control_op(op, &manager, &workspaces, &mc).await;
                         }
@@ -401,6 +411,12 @@ async fn handle_sync_socket(
                             });
                         }
                     }
+                } else {
+                    tracing::warn!(
+                        "Ignoring malformed sync message (len={}): {:.80}",
+                        text.len(),
+                        text
+                    );
                 }
             }
             Message::Ping(data) => {
@@ -416,6 +432,7 @@ async fn handle_sync_socket(
     fwd.abort();
     writer_task.abort();
     ping_task.abort();
+    ssh_auth_monitor.abort();
     notifier.unregister_client(&client_id);
 }
 
@@ -437,6 +454,17 @@ fn tab_leaf_for(manager: &SessionManager, tab_id: &str) -> Option<String> {
             .map(String::from)
             .or_else(|| v.get("layout").and_then(crate::session::first_leaf_id))
     })
+}
+
+/// Resolve the pane an `ActivateTab` message should focus and verify it exists
+/// in a registered tab layout. `pane_id` may be a tab ID (resolved to the tab's
+/// active leaf) or a leaf pane ID directly. Returns `None` when the pane - or a
+/// tab's stored active pane, which can go stale after a pane is closed - is
+/// unknown; the caller must reject instead of setting an arbitrary
+/// `active_pane_id` on the server.
+fn resolve_activate_leaf(manager: &SessionManager, pane_id: &str) -> Option<String> {
+    let leaf_id = tab_leaf_for(manager, pane_id).unwrap_or_else(|| pane_id.to_string());
+    manager.is_pane_in_any_tab(&leaf_id).then_some(leaf_id)
 }
 
 /// Pure tab navigation within a workspace. Filters `tabs` to those belonging
@@ -872,5 +900,61 @@ mod tests {
             NavDir::Right,
         );
         assert_eq!(new_id.as_deref(), Some("tab1"));
+    }
+
+    /// `activate_tab` must not let a sync client set an arbitrary
+    /// `active_pane_id`: an unknown pane is rejected, a registered leaf and a
+    /// tab id both resolve to a real leaf.
+    #[test]
+    fn resolve_activate_leaf_resolves_known_panes_and_rejects_unknown() {
+        let manager = SessionManager::new();
+        manager.update_layout(
+            "tab-1".to_string(),
+            serde_json::json!({
+                "layout": { "type": "leaf", "paneId": "pane-a" },
+                "active_pane_id": "pane-a",
+            }),
+            Some("pane-a".to_string()),
+        );
+        assert_eq!(resolve_activate_leaf(&manager, "nope"), None);
+        assert_eq!(resolve_activate_leaf(&manager, "pane-a").as_deref(), Some("pane-a"));
+        assert_eq!(resolve_activate_leaf(&manager, "tab-1").as_deref(), Some("pane-a"));
+    }
+
+    /// A tab whose stored `active_pane_id` points at a pane that was closed
+    /// (stale) must be rejected rather than focused.
+    #[test]
+    fn resolve_activate_leaf_rejects_stale_active_pane() {
+        let manager = SessionManager::new();
+        manager.update_layout(
+            "tab-1".to_string(),
+            serde_json::json!({
+                "layout": { "type": "leaf", "paneId": "pane-a" },
+                "active_pane_id": "pane-gone",
+            }),
+            Some("pane-gone".to_string()),
+        );
+        assert_eq!(resolve_activate_leaf(&manager, "tab-1"), None);
+        assert_eq!(resolve_activate_leaf(&manager, "pane-gone"), None);
+    }
+
+    /// A tab id with no stored active pane falls back to its first layout leaf.
+    #[test]
+    fn resolve_activate_leaf_falls_back_to_first_leaf() {
+        let manager = SessionManager::new();
+        manager.update_layout(
+            "tab-1".to_string(),
+            serde_json::json!({
+                "layout": {
+                    "type": "split",
+                    "children": [
+                        { "type": "leaf", "paneId": "pane-a" },
+                        { "type": "leaf", "paneId": "pane-b" },
+                    ],
+                },
+            }),
+            None,
+        );
+        assert_eq!(resolve_activate_leaf(&manager, "tab-1").as_deref(), Some("pane-a"));
     }
 }

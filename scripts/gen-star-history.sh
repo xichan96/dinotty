@@ -56,9 +56,11 @@ else
   SKIP=$((CACHED_COUNT - (START_PAGE - 1) * PER_PAGE))
 
   echo "Fetching $DELTA new stars from page $START_PAGE (skip $SKIP)..."
+  # Stargazers are returned oldest-first, so new stars trail across pages
+  # from START_PAGE to the end; --paginate fetches all of them.
   RAW=$(gh api "repos/$REPO/stargazers?per_page=$PER_PAGE&page=$START_PAGE" \
     --header 'Accept: application/vnd.github.v3.star+json' \
-    -q '.[].starred_at' 2>/dev/null | cut -dT -f1)
+    --paginate -q '.[].starred_at' 2>/dev/null | cut -dT -f1)
 
   if [ -n "$RAW" ]; then
     # Trim: skip already-cached entries on first page, keep exactly DELTA new ones

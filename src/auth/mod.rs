@@ -143,6 +143,7 @@ pub fn check_lockout(
 
 /// # Panics
 /// Panics if the response builder fails (which should not happen with valid status codes and bodies).
+#[allow(clippy::too_many_lines)]
 pub async fn auth_middleware(
     request: Request,
     next: Next,
@@ -192,17 +193,36 @@ pub async fn auth_middleware(
     };
 
     // /api/auto-token exposes the raw auth token — loopback only.
-    if path == "/api/auto-token" && !real_ip.is_loopback() {
-        return Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(Body::from(r#"{"error":"auto-token is only available from localhost"}"#))
-            .unwrap();
+    if path == "/api/auto-token" {
+        let cross_site = is_cross_site_browser_request(request.headers());
+        if !real_ip.is_loopback() || cross_site {
+            tracing::warn!(
+                "auth: reject {path} from {real_ip} (loopback-only, cross_site_browser={cross_site})"
+            );
+            return Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(Body::from(r#"{"error":"auto-token is only available from localhost"}"#))
+                .unwrap();
+        }
     }
 
     // IP whitelist (loopback bypass) check - uses real IP, not direct peer.
+    // Cross-site browser requests are rejected even from whitelisted peers
+    // (see is_cross_site_browser_request).
     if is_ip_whitelisted(real_ip, &ip_whitelist) {
+        if is_cross_site_browser_request(request.headers()) {
+            tracing::warn!(
+                "auth: reject cross-site browser request to {path} via whitelisted {real_ip} (origin {:?})",
+                request.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok())
+            );
+            return Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"error":"cross-site requests are not allowed"}"#))
+                .unwrap();
+        }
         return next.run(request).await;
     }
 
@@ -365,6 +385,64 @@ pub fn check_ws_origin(
     _trusted_proxies: &[String],
 ) -> bool {
     true
+}
+
+/// True when the request looks like a browser-originated cross-site call.
+///
+/// Loopback/whitelisted peers are trusted without a session, but that trust
+/// must not extend to requests scripted by a random website in the local
+/// user's browser - the browser connects from 127.0.0.1 yet is controlled by
+/// the site that opened the connection. Browsers always send `Sec-Fetch-Site`
+/// on such calls, and `Origin` on cross-origin fetch/WS handshakes; native
+/// clients (curl, the Tauri shell) send neither and are unaffected.
+///
+/// Decision order: local origins (localhost / 127.0.0.1 / tauri.localhost,
+/// e.g. the Tauri webview and localhost dev servers) are exempt first because
+/// their calls to the embedded server are legitimately cross-origin and are
+/// labeled `Sec-Fetch-Site: cross-site`; `Sec-Fetch-Site` then decides when
+/// present (browser-set, stays `same-origin` behind Host-rewriting reverse
+/// proxies); the Origin-vs-Host comparison is only the legacy fallback.
+#[must_use]
+pub fn is_cross_site_browser_request(headers: &HeaderMap) -> bool {
+    let origin_authority = headers.get("origin").and_then(|v| v.to_str().ok()).map(|o| {
+        o.strip_prefix("https://")
+            .or_else(|| o.strip_prefix("http://"))
+            .or_else(|| o.strip_prefix("tauri://"))
+            .or_else(|| o.strip_prefix("asset://"))
+            .unwrap_or(o)
+    });
+
+    // 1. Local-origin exemption, checked FIRST. The Tauri webview
+    // (tauri://localhost, http://tauri.localhost) and localhost dev servers
+    // call the embedded server cross-origin by design, so they legitimately
+    // pair a local Origin with `Sec-Fetch-Site: cross-site`. A remote page
+    // cannot forge any of these origins.
+    if let Some(authority) = &origin_authority {
+        let origin_host = authority.rsplit(':').next_back().unwrap_or(authority);
+        if origin_host.eq_ignore_ascii_case("localhost")
+            || origin_host.eq_ignore_ascii_case("127.0.0.1")
+            || origin_host.eq_ignore_ascii_case("tauri.localhost")
+        {
+            return false;
+        }
+    }
+
+    // 2. Sec-Fetch-Site is browser-set and labels scripted requests honestly:
+    // a website scripting the local browser says `cross-site`, while a
+    // same-origin call through a Host-rewriting reverse proxy still says
+    // `same-origin` and must pass.
+    if let Some(s) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        return s.eq_ignore_ascii_case("cross-site");
+    }
+
+    // 3. Legacy fallback without fetch metadata: an Origin authority that
+    // disagrees with Host means cross-site.
+    if let (Some(authority), Some(host)) =
+        (&origin_authority, headers.get("host").and_then(|v| v.to_str().ok()))
+    {
+        return !authority.eq_ignore_ascii_case(host);
+    }
+    false
 }
 
 fn is_ip_whitelisted(ip: IpAddr, whitelist: &[String]) -> bool {

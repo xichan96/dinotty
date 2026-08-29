@@ -10,12 +10,7 @@ use axum::{
 use futures_util::StreamExt;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info};
 
@@ -231,16 +226,14 @@ async fn handle_watch_socket(
     };
     let root = cwd.canonicalize().unwrap_or(cwd);
 
-    let watch_path = if Path::new(&path).is_absolute() {
-        PathBuf::from(&path)
-    } else {
-        let rel = path.trim().trim_start_matches('/');
-        let mut out = root.clone();
-        for seg in rel.split('/').filter(|s| !s.is_empty() && *s != ".") {
-            out.push(seg);
-        }
-        out
-    };
+    // Only allow paths relative to (and staying under) the pane's workspace
+    // root - same contract as the /api/workspace handlers. Absolute paths and
+    // `..` segments would let a client watch arbitrary system directories.
+    let rel = path.trim().trim_start_matches('/');
+    let mut watch_path = root.clone();
+    for seg in rel.split('/').filter(|s| !s.is_empty() && *s != "." && *s != "..") {
+        watch_path.push(seg);
+    }
 
     if !watch_path.exists() {
         let _ = socket

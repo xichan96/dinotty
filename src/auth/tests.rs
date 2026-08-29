@@ -376,3 +376,94 @@ fn ws_origin_x_forwarded_host_comma_separated() {
     let trusted = vec!["192.168.1.0/24".to_string()];
     assert!(check_ws_origin(&headers, &[], ip, &trusted));
 }
+
+#[test]
+fn cross_site_browser_request_detection() {
+    let mk = |pairs: &[(&str, &str)]| {
+        use axum::http::{HeaderName, HeaderValue};
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        h
+    };
+
+    // Non-browser clients: no Origin, no Sec-Fetch-Site.
+    assert!(!is_cross_site_browser_request(&mk(&[])));
+    assert!(!is_cross_site_browser_request(&mk(&[("user-agent", "curl/8.7.1")])));
+
+    // Same-origin browser fetch: Origin authority matches Host.
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "http://127.0.0.1:58999"),
+        ("host", "127.0.0.1:58999"),
+    ])));
+
+    // Cross-site fetch from evil.com via the local browser.
+    assert!(is_cross_site_browser_request(&mk(&[
+        ("origin", "http://evil.com"),
+        ("host", "127.0.0.1:58999"),
+    ])));
+    // Origin "null" (sandboxed iframe) is treated as cross-site.
+    assert!(is_cross_site_browser_request(&mk(
+        &[("origin", "null"), ("host", "127.0.0.1:58999"),]
+    )));
+
+    // Sec-Fetch-Site: cross-site without Origin (older/Safari variants).
+    assert!(is_cross_site_browser_request(&mk(&[
+        ("sec-fetch-site", "cross-site"),
+        ("host", "127.0.0.1:58999"),
+    ])));
+    // Address-bar navigation sends sec-fetch-site: none and no Origin.
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("sec-fetch-site", "none"),
+        ("host", "127.0.0.1:58999"),
+    ])));
+
+    // Tauri webview origins talk to the embedded server cross-origin by design.
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "tauri://localhost"),
+        ("host", "127.0.0.1:48999"),
+    ])));
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "http://tauri.localhost"),
+        ("host", "127.0.0.1:48999"),
+    ])));
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "http://localhost:5173"),
+        ("host", "127.0.0.1:48999"),
+    ])));
+
+    // The desktop-app regression: WKWebView sends BOTH `Origin:
+    // tauri://localhost` and `Sec-Fetch-Site: cross-site` on its cross-origin
+    // calls to the embedded server. The local-origin exemption must win over
+    // the fetch-metadata label.
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "tauri://localhost"),
+        ("sec-fetch-site", "cross-site"),
+        ("host", "127.0.0.1:48999"),
+    ])));
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "http://localhost:5173"),
+        ("sec-fetch-site", "cross-site"),
+        ("host", "127.0.0.1:8999"),
+    ])));
+
+    // A same-origin call through a Host-rewriting reverse proxy: the browser
+    // honestly labels it `same-origin`, which must override the Origin/Host
+    // mismatch dinotty sees.
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("origin", "https://nas.example.com"),
+        ("sec-fetch-site", "same-origin"),
+        ("host", "192.168.1.100:8999"),
+    ])));
+
+    // Remote sites stay blocked with either signal.
+    assert!(is_cross_site_browser_request(&mk(&[
+        ("origin", "http://evil.com"),
+        ("sec-fetch-site", "cross-site"),
+        ("host", "127.0.0.1:58999"),
+    ])));
+}

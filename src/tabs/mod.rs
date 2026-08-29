@@ -1,6 +1,7 @@
 #![allow(clippy::items_after_test_module)]
 
 mod handlers;
+pub(crate) mod service;
 mod ssh;
 mod types;
 

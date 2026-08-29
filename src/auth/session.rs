@@ -10,7 +10,9 @@ use std::{
 };
 
 const DEFAULT_SESSION_TTL_DAYS: u64 = 7;
+const SECS_PER_DAY: u64 = 86_400;
 const CLEANUP_INTERVAL_SECS: u64 = 3600;
+const LAST_USED_WRITE_THROTTLE: Duration = Duration::from_mins(1);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SessionInfo {
@@ -52,33 +54,43 @@ fn instant_to_unix(t: Instant) -> u64 {
     base.1.saturating_add(elapsed)
 }
 
-fn ttl_duration(days: u64) -> Duration {
-    let days = if days == 0 { DEFAULT_SESSION_TTL_DAYS } else { days };
-    Duration::from_secs(days * 86_400)
+fn ttl_from_days(days: u64) -> u64 {
+    if days == 0 { DEFAULT_SESSION_TTL_DAYS } else { days }.saturating_mul(SECS_PER_DAY)
 }
 
 #[derive(Clone)]
 pub struct SessionStore {
     sessions: Arc<DashMap<String, Entry>>,
-    ttl_days: Arc<AtomicU64>,
+    ttl_secs: Arc<AtomicU64>,
+    last_used_throttle: Duration,
 }
 
 impl SessionStore {
     #[must_use]
     pub fn new(initial_ttl_days: u64) -> Self {
+        Self::with_throttle(ttl_from_days(initial_ttl_days), LAST_USED_WRITE_THROTTLE)
+    }
+
+    fn with_throttle(ttl_secs: u64, last_used_throttle: Duration) -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
-            ttl_days: Arc::new(AtomicU64::new(initial_ttl_days)),
+            ttl_secs: Arc::new(AtomicU64::new(ttl_secs)),
+            last_used_throttle,
         }
     }
 
     /// Update the TTL from settings. Called when settings change.
     pub fn update_ttl_days(&self, days: u64) {
-        self.ttl_days.store(days, Ordering::Relaxed);
+        self.ttl_secs.store(ttl_from_days(days), Ordering::Relaxed);
     }
 
-    fn current_ttl_days(&self) -> u64 {
-        self.ttl_days.load(Ordering::Relaxed)
+    fn current_ttl(&self) -> Duration {
+        let secs = self.ttl_secs.load(Ordering::Relaxed);
+        if secs == 0 {
+            Duration::from_secs(DEFAULT_SESSION_TTL_DAYS * SECS_PER_DAY)
+        } else {
+            Duration::from_secs(secs)
+        }
     }
 
     #[must_use]
@@ -94,7 +106,21 @@ impl SessionStore {
 
     #[must_use]
     pub fn validate(&self, session_id: &str) -> bool {
-        let ttl = ttl_duration(self.current_ttl_days());
+        let ttl = self.current_ttl();
+        let Some(entry) = self.sessions.get(session_id) else {
+            return false;
+        };
+        let elapsed = entry.last_used.elapsed();
+        drop(entry);
+        if elapsed > ttl {
+            self.sessions.remove(session_id);
+            return false;
+        }
+        // Fast path: skip the shard write lock while last_used is fresh; the
+        // refresh lag is bounded by the throttle window, so TTL holds.
+        if elapsed < self.last_used_throttle {
+            return true;
+        }
         let Some(mut entry) = self.sessions.get_mut(session_id) else {
             return false;
         };
@@ -122,7 +148,7 @@ impl SessionStore {
 
     #[must_use]
     pub fn list(&self) -> Vec<SessionInfo> {
-        let ttl = ttl_duration(self.current_ttl_days());
+        let ttl = self.current_ttl();
         let now = Instant::now();
         self.sessions
             .iter()
@@ -135,7 +161,7 @@ impl SessionStore {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(CLEANUP_INTERVAL_SECS)).await;
-                let ttl = ttl_duration(self.current_ttl_days());
+                let ttl = self.current_ttl();
                 let now = Instant::now();
                 self.sessions.retain(|_, e| now.duration_since(e.last_used) <= ttl);
             }
@@ -146,6 +172,15 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry_last_used(store: &SessionStore, id: &str) -> Instant {
+        store.sessions.get(id).map(|e| e.last_used).expect("session exists")
+    }
+
+    fn backdate_last_used(store: &SessionStore, id: &str, age: Duration) {
+        let mut entry = store.sessions.get_mut(id).expect("session exists");
+        entry.last_used = Instant::now().checked_sub(age).expect("host uptime exceeds age");
+    }
 
     #[test]
     fn create_and_validate_session() {
@@ -205,6 +240,43 @@ mod tests {
     fn update_ttl_days() {
         let store = SessionStore::new(7);
         store.update_ttl_days(1);
-        assert_eq!(store.current_ttl_days(), 1);
+        assert_eq!(store.current_ttl(), Duration::from_secs(SECS_PER_DAY));
+        store.update_ttl_days(0);
+        assert_eq!(
+            store.current_ttl(),
+            Duration::from_secs(DEFAULT_SESSION_TTL_DAYS * SECS_PER_DAY)
+        );
+    }
+
+    #[test]
+    fn validate_within_throttle_window_skips_last_used_write() {
+        let store = SessionStore::new(7);
+        let id = store.create(None, None);
+        let before = entry_last_used(&store, &id);
+        assert!(store.validate(&id));
+        assert_eq!(entry_last_used(&store, &id), before);
+    }
+
+    #[test]
+    fn validate_beyond_throttle_window_updates_last_used() {
+        let store = SessionStore::with_throttle(
+            DEFAULT_SESSION_TTL_DAYS * SECS_PER_DAY,
+            Duration::from_millis(100),
+        );
+        let id = store.create(None, None);
+        backdate_last_used(&store, &id, Duration::from_millis(500));
+        let stale = entry_last_used(&store, &id);
+        assert!(store.validate(&id));
+        assert!(entry_last_used(&store, &id) > stale);
+    }
+
+    #[test]
+    fn validate_removes_expired_session_even_within_throttle_window() {
+        let store = SessionStore::with_throttle(1, Duration::from_mins(1));
+        let id = store.create(None, None);
+        backdate_last_used(&store, &id, Duration::from_secs(2));
+        assert!(!store.validate(&id));
+        assert!(store.sessions.get(&id).is_none());
+        assert!(!store.validate(&id));
     }
 }

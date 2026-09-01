@@ -40,6 +40,9 @@
 
   /* Tab bar */
   --tab-height: 36px;
+  /* Vertical placements pack the controls into a wrapped grid rather than one
+     full-width row each, so they use a tighter square than --tab-height. */
+  --tab-sidebar-btn: 30px;
   --tab-bg: #181818;
   --tab-active-bg: #1e1e1e;
   --tab-hover-bg: #2a2a2c;

@@ -12,6 +12,11 @@ import {
   resetAllOverrides,
   setOverride,
 } from '../composables/useDeviceTextSettings'
+import {
+  getEffectivePlacement,
+  reloadPlacement,
+  resetPlacement,
+} from '../composables/useTabPlacement'
 
 const appearanceMocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -63,6 +68,8 @@ describe('AppearanceTab device text overrides', () => {
     appearanceMocks.isFontAvailable.mockClear()
     appearanceMocks.authFetch.mockImplementation(async () => new Response('{}', { status: 200 }))
     resetAllOverrides()
+    resetPlacement()
+    reloadPlacement()
     settings.text.font_size = 14
     settings.text.font_family = 'server-font'
     settings.text.line_height = 1.2
@@ -159,6 +166,58 @@ describe('AppearanceTab device text overrides', () => {
     })
   })
 
+  it('offers the four tab placements and defaults to top', () => {
+    const wrapper = mount(AppearanceTab)
+    const select = wrapper.find<HTMLSelectElement>('select.tab-placement-select')
+    expect(select.findAll('option').map((o) => o.attributes('value'))).toEqual([
+      'top',
+      'bottom',
+      'left',
+      'right',
+    ])
+    expect(select.element.value).toBe('top')
+  })
+
+  it('stores the tab placement per device without any settings PUT', async () => {
+    const wrapper = mount(AppearanceTab)
+    await wrapper.find('select.tab-placement-select').setValue('left')
+    vi.runAllTimers()
+    await Promise.resolve()
+
+    expect(getEffectivePlacement().mode).toBe('left')
+    expect(localStorage.getItem('dinotty_device_tab_placement_v1')).toContain('left')
+    expect(settings.text.font_family).toBe('server-font')
+    expect(appearanceMocks.authFetch).not.toHaveBeenCalled()
+  })
+
+  it('shows the resize hint only for the vertical placements', async () => {
+    const wrapper = mount(AppearanceTab)
+    const resizeHint = 'Drag the sidebar edge to resize.'
+    const hintOf = () => wrapper.find('p.settings-hint').text()
+    expect(hintOf()).not.toContain(resizeHint)
+
+    await wrapper.find('select.tab-placement-select').setValue('right')
+    expect(hintOf()).toContain(resizeHint)
+  })
+
+  it('reveals a reset control once a placement override exists and clears it', async () => {
+    const wrapper = mount(AppearanceTab)
+    const resetButtons = () =>
+      wrapper
+        .findAll('button.setting-reset')
+        .filter((b) => b.attributes('title') === 'reset to default')
+    const before = resetButtons().length
+
+    await wrapper.find('select.tab-placement-select').setValue('bottom')
+    const withOverride = resetButtons()
+    expect(withOverride.length).toBe(before + 1)
+
+    await withOverride[0].trigger('click')
+    expect(getEffectivePlacement().mode).toBe('top')
+    expect(localStorage.getItem('dinotty_device_tab_placement_v1')).toBeNull()
+    expect(appearanceMocks.authFetch).not.toHaveBeenCalled()
+  })
+
   it('reset links return to the current server default and cursor_style still PUTs', async () => {
     setOverride('font_size', 30)
     const wrapper = mount(AppearanceTab)
@@ -169,7 +228,8 @@ describe('AppearanceTab device text overrides', () => {
     await reset.trigger('click')
     expect(getEffectiveText().font_size).toBe(18)
 
-    const cursorSelect = wrapper.find<HTMLSelectElement>('select')
+    // The tab-placement dropdown is also a <select>, so target cursor_style directly.
+    const cursorSelect = wrapper.find<HTMLSelectElement>('select:not(.tab-placement-select)')
     await cursorSelect.setValue('underline')
     vi.advanceTimersByTime(100)
     await Promise.resolve()

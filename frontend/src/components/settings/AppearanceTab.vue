@@ -6,6 +6,38 @@
       <h3 class="settings-group-title">{{ t('settings.text') }}</h3>
 
       <div class="settings-row">
+        <label>{{ t('settings.tabPlacement') }}</label>
+        <div class="range-wrap">
+          <select
+            v-model="tabPlacementMode"
+            class="shortcut-input tab-placement-select"
+            :aria-label="t('settings.tabPlacement')"
+            style="flex: 1"
+          >
+            <option v-for="option in TAB_PLACEMENT_MODES" :key="option" :value="option">
+              {{ t(`settings.tabPlacement.${option}`) }}
+            </option>
+          </select>
+          <button
+            v-if="hasPlacementOverride()"
+            type="button"
+            class="setting-reset"
+            title="reset to default"
+            aria-label="reset to default"
+            @click="resetPlacement()"
+          >
+            <RotateCcw :size="14" />
+          </button>
+        </div>
+      </div>
+      <p class="settings-hint">
+        {{ t('settings.tabPlacement.deviceHint') }}
+        <template v-if="isVerticalPlacementMode">
+          {{ t('settings.tabPlacement.resizeHint') }}
+        </template>
+      </p>
+
+      <div class="settings-row">
         <label>{{ t('settings.text.fontSize') }}</label>
         <div class="range-wrap">
           <input
@@ -263,11 +295,22 @@ import {
   FONT_SIZE_MIN,
   useDeviceTextSettings,
 } from '../../composables/useDeviceTextSettings'
+import { TAB_PLACEMENT_MODES, useTabPlacement } from '../../composables/useTabPlacement'
 
 const { settings, saveSettings } = useSettings()
 const { fontSize, fontFamily, lineHeight, letterSpacing, hasOverride, resetOverride } =
   useDeviceTextSettings()
 const { t } = useI18n()
+
+// ── Tab bar placement ──
+// Device-scoped like the font settings above: writing it must never trigger a
+// settings PUT, so this deliberately does not call saveSettings().
+const {
+  mode: tabPlacementMode,
+  isVertical: isVerticalPlacementMode,
+  hasPlacementOverride,
+  resetPlacement,
+} = useTabPlacement()
 
 // ── Text / Font ──
 

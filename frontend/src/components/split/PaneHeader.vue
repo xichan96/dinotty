@@ -283,10 +283,14 @@ function onPointerMove(e: MouseEvent | TouchEvent) {
     const tabId = tabLabelTarget.dataset.tabId!
     scheduleHoverSwitch(tabId)
 
-    // Determine position based on cursor X relative to tab center
+    // Determine position based on the cursor's offset along the tab strip's
+    // own axis: X for a horizontal bar, Y once the tabs are stacked.
     const rect = tabLabelTarget.getBoundingClientRect()
-    const relX = (pos.clientX - rect.left) / rect.width
-    const zone: DropPosition = relX < 0.5 ? 'left' : 'right'
+    const vertical = !!tabLabelTarget.closest('#tabs-list.is-vertical')
+    const rel = vertical
+      ? (pos.clientY - rect.top) / rect.height
+      : (pos.clientX - rect.left) / rect.width
+    const zone: DropPosition = rel < 0.5 ? 'left' : 'right'
 
     currentTargetId = tabId
     currentZone = zone

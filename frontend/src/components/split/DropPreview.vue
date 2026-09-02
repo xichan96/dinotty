@@ -37,6 +37,21 @@ const previewStyle = computed(() => {
     const listRect = list.getBoundingClientRect()
     const tabs = list.querySelectorAll('.tab')
     const lastTab = tabs.length > 0 ? (tabs[tabs.length - 1] as HTMLElement) : null
+
+    // A vertical list grows downward, so "after the last tab" is below it
+    // rather than to its right, and the slot spans the sidebar's full width.
+    if (list.classList.contains('is-vertical')) {
+      const top = lastTab ? lastTab.getBoundingClientRect().bottom : listRect.top
+      const height = Math.min(lastTab?.getBoundingClientRect().height || 36, listRect.bottom - top)
+      if (height <= 0) return null
+      return {
+        left: `${listRect.left}px`,
+        top: `${top}px`,
+        width: `${listRect.width}px`,
+        height: `${height}px`,
+      }
+    }
+
     const left = lastTab ? lastTab.getBoundingClientRect().right : listRect.left
     const maxWidth = listRect.right - left
     const width = Math.min(80, maxWidth)

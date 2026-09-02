@@ -1,5 +1,5 @@
 <template>
-  <div id="tab-bar" class="tab-bar">
+  <div id="tab-bar" class="tab-bar" :class="placementClass">
     <!-- Mobile compact mode -->
     <template v-if="isMobile">
       <button class="mc-trigger" @click="$emit('open-overview')">
@@ -44,7 +44,7 @@
       <div
         id="tabs-list"
         ref="tabsListRef"
-        :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd }"
+        :class="{ 'fade-start': fadeStart, 'fade-end': fadeEnd, 'is-vertical': isVertical }"
       >
         <div
           v-for="tab in tabs"
@@ -105,120 +105,139 @@
         </div>
       </div>
     </template>
-    <slot name="left" />
-    <div ref="newMenuWrapRef" class="new-tab-split">
-      <button
-        id="tab-new-btn"
-        :title="`${t('keybinding.newTab')} (${kbdNewTab})`"
-        @click="newMenuOpen = !newMenuOpen"
-        @touchend.prevent="newMenuOpen = !newMenuOpen"
-      >
-        <Terminal :size="16" />
-      </button>
-      <div
-        v-if="newMenuOpen"
-        class="new-menu-dropdown"
-        :class="{ 'align-right': newMenuAlignRight }"
-      >
-        <div
-          class="new-menu-item"
-          @click="emitAction('new-tab')"
-          @touchend.prevent="emitAction('new-tab')"
+    <div class="tab-bar-tools">
+      <slot name="left" />
+      <div ref="newMenuWrapRef" class="new-tab-split">
+        <button
+          id="tab-new-btn"
+          :title="`${t('keybinding.newTab')} (${kbdNewTab})`"
+          @click="newMenuOpen = !newMenuOpen"
+          @touchend.prevent="newMenuOpen = !newMenuOpen"
         >
-          <Terminal :size="14" class="new-menu-icon" />
-          <span class="new-menu-label">{{ t('keybinding.newTab') }}</span>
-          <kbd class="new-menu-kbd">{{ kbdNewTab }}</kbd>
-        </div>
-        <div class="new-menu-sep" />
+          <Terminal :size="16" />
+        </button>
         <div
-          class="new-menu-item"
-          @click="emitAction('split-h')"
-          @touchend.prevent="emitAction('split-h')"
+          v-if="newMenuOpen"
+          class="new-menu-dropdown"
+          :class="{ 'align-right': newMenuAlignRight, 'overflow-flip': newMenuOverflowFlip }"
         >
-          <Columns2 :size="14" class="new-menu-icon" />
-          <span class="new-menu-label">{{ t('keybinding.splitHorizontal') }}</span>
-          <kbd class="new-menu-kbd">{{ kbdSplitH }}</kbd>
-        </div>
-        <div
-          class="new-menu-item"
-          @click="emitAction('split-v')"
-          @touchend.prevent="emitAction('split-v')"
-        >
-          <Rows2 :size="14" class="new-menu-icon" />
-          <span class="new-menu-label">{{ t('keybinding.splitVertical') }}</span>
-          <kbd class="new-menu-kbd">{{ kbdSplitV }}</kbd>
-        </div>
-        <template v-if="canBroadcast">
+          <div
+            class="new-menu-item"
+            @click="emitAction('new-tab')"
+            @touchend.prevent="emitAction('new-tab')"
+          >
+            <Terminal :size="14" class="new-menu-icon" />
+            <span class="new-menu-label">{{ t('keybinding.newTab') }}</span>
+            <kbd class="new-menu-kbd">{{ kbdNewTab }}</kbd>
+          </div>
           <div class="new-menu-sep" />
           <div
             class="new-menu-item"
-            @click="emitAction('broadcast')"
-            @touchend.prevent="emitAction('broadcast')"
+            @click="emitAction('split-h')"
+            @touchend.prevent="emitAction('split-h')"
           >
-            <Radio :size="14" class="new-menu-icon" />
-            <span class="new-menu-label">{{ t('split.toggleBroadcast') }}</span>
-            <kbd class="new-menu-kbd">{{ kbdBroadcast }}</kbd>
+            <Columns2 :size="14" class="new-menu-icon" />
+            <span class="new-menu-label">{{ t('keybinding.splitHorizontal') }}</span>
+            <kbd class="new-menu-kbd">{{ kbdSplitH }}</kbd>
           </div>
-          <div v-if="broadcastActive" class="new-menu-status">{{ t('split.broadcastActive') }}</div>
-        </template>
-        <div class="new-menu-sep" />
-        <div
-          class="new-menu-item"
-          @click="emitAction('ssh-connect')"
-          @touchend.prevent="emitAction('ssh-connect')"
-        >
-          <Globe :size="14" class="new-menu-icon" />
-          <span class="new-menu-label">{{ t('palette.sshConnect') }}</span>
-          <kbd class="new-menu-kbd">{{ kbdSshConnect }}</kbd>
-        </div>
-        <div class="new-menu-sep" />
-        <div
-          class="new-menu-item"
-          @click="$emit('apply-template')"
-          @touchend.prevent="$emit('apply-template')"
-        >
-          <LayoutTemplate :size="14" class="new-menu-icon" />
-          <span class="new-menu-label">{{ t('palette.fromTemplate') }}</span>
-          <kbd class="new-menu-kbd">{{ kbdApplyTemplate }}</kbd>
+          <div
+            class="new-menu-item"
+            @click="emitAction('split-v')"
+            @touchend.prevent="emitAction('split-v')"
+          >
+            <Rows2 :size="14" class="new-menu-icon" />
+            <span class="new-menu-label">{{ t('keybinding.splitVertical') }}</span>
+            <kbd class="new-menu-kbd">{{ kbdSplitV }}</kbd>
+          </div>
+          <template v-if="canBroadcast">
+            <div class="new-menu-sep" />
+            <div
+              class="new-menu-item"
+              @click="emitAction('broadcast')"
+              @touchend.prevent="emitAction('broadcast')"
+            >
+              <Radio :size="14" class="new-menu-icon" />
+              <span class="new-menu-label">{{ t('split.toggleBroadcast') }}</span>
+              <kbd class="new-menu-kbd">{{ kbdBroadcast }}</kbd>
+            </div>
+            <div v-if="broadcastActive" class="new-menu-status">
+              {{ t('split.broadcastActive') }}
+            </div>
+          </template>
+          <div class="new-menu-sep" />
+          <div
+            class="new-menu-item"
+            @click="emitAction('ssh-connect')"
+            @touchend.prevent="emitAction('ssh-connect')"
+          >
+            <Globe :size="14" class="new-menu-icon" />
+            <span class="new-menu-label">{{ t('palette.sshConnect') }}</span>
+            <kbd class="new-menu-kbd">{{ kbdSshConnect }}</kbd>
+          </div>
+          <div class="new-menu-sep" />
+          <div
+            class="new-menu-item"
+            @click="$emit('apply-template')"
+            @touchend.prevent="$emit('apply-template')"
+          >
+            <LayoutTemplate :size="14" class="new-menu-icon" />
+            <span class="new-menu-label">{{ t('palette.fromTemplate') }}</span>
+            <kbd class="new-menu-kbd">{{ kbdApplyTemplate }}</kbd>
+          </div>
         </div>
       </div>
+      <div
+        v-if="plugins.length > 0 && toolbarPlugins.length > 0"
+        ref="pluginWrapRef"
+        class="tab-bar-plugin-wrap"
+      >
+        <button
+          type="button"
+          class="tab-bar-icon-btn"
+          title="Plugins"
+          @click="pluginMenuOpen = !pluginMenuOpen"
+          @touchend.prevent="pluginMenuOpen = !pluginMenuOpen"
+        >
+          <Puzzle :size="16" />
+        </button>
+        <div
+          v-if="pluginMenuOpen"
+          class="plugin-dropdown"
+          :class="{ 'overflow-flip': pluginMenuOverflowFlip }"
+        >
+          <div v-if="toolbarPlugins.length === 0" class="plugin-dropdown-empty">
+            {{ t('plugin.toolbarEmpty') }}
+          </div>
+          <template v-for="group in toolbarPluginGroups" :key="group.category">
+            <div v-if="group.items.length > 0" class="plugin-dropdown-group">
+              <div class="plugin-dropdown-group-title">{{ group.label }}</div>
+              <div
+                v-for="p in group.items"
+                :key="p.id"
+                class="plugin-dropdown-item"
+                @click="openPlugin(p.id)"
+                @touchend.prevent="openPlugin(p.id)"
+              >
+                <span class="plugin-dropdown-name">{{ p.name }}</span>
+                <span v-if="p.description" class="plugin-dropdown-desc">{{ p.description }}</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <slot name="right"></slot>
     </div>
     <div
-      v-if="plugins.length > 0 && toolbarPlugins.length > 0"
-      ref="pluginWrapRef"
-      class="tab-bar-plugin-wrap"
-    >
-      <button
-        type="button"
-        class="tab-bar-icon-btn"
-        title="Plugins"
-        @click="pluginMenuOpen = !pluginMenuOpen"
-        @touchend.prevent="pluginMenuOpen = !pluginMenuOpen"
-      >
-        <Puzzle :size="16" />
-      </button>
-      <div v-if="pluginMenuOpen" class="plugin-dropdown">
-        <div v-if="toolbarPlugins.length === 0" class="plugin-dropdown-empty">
-          {{ t('plugin.toolbarEmpty') }}
-        </div>
-        <template v-for="group in toolbarPluginGroups" :key="group.category">
-          <div v-if="group.items.length > 0" class="plugin-dropdown-group">
-            <div class="plugin-dropdown-group-title">{{ group.label }}</div>
-            <div
-              v-for="p in group.items"
-              :key="p.id"
-              class="plugin-dropdown-item"
-              @click="openPlugin(p.id)"
-              @touchend.prevent="openPlugin(p.id)"
-            >
-              <span class="plugin-dropdown-name">{{ p.name }}</span>
-              <span v-if="p.description" class="plugin-dropdown-desc">{{ p.description }}</span>
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-    <slot name="right"></slot>
+      v-if="isVertical"
+      class="tab-sidebar-resizer"
+      :class="{ 'is-dragging': resizing }"
+      role="separator"
+      aria-orientation="vertical"
+      :title="t('settings.tabPlacement.resizeHint')"
+      @mousedown.prevent="onResizeMouseDown"
+      @touchstart.prevent="onResizeTouchStart"
+      @dblclick="resetSidebarWidth"
+    ></div>
   </div>
   <ContextMenu
     :visible="ctxVisible"
@@ -261,6 +280,7 @@ import WorkspaceBadge from '../WorkspaceBadge.vue'
 import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 import { useTabDrag } from '../../composables/useTabDrag'
+import { SIDEBAR_WIDTH_DEFAULT, useTabPlacement } from '../../composables/useTabPlacement'
 import { copyToClipboard } from '../../utils/clipboard'
 import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
@@ -392,18 +412,35 @@ const ctxX = ref(0)
 const ctxY = ref(0)
 const ctxItems = ref<ContextMenuItem[]>([])
 
+// ── Placement (device-scoped) ────────────────────────────────
+const placementState = useTabPlacement()
+const isVertical = placementState.isVertical
+const placementClass = computed(() => [
+  `placement-${placementState.mode.value}`,
+  { 'is-vertical': isVertical.value },
+])
+
 function updateFades() {
   const tabsList = tabsListRef.value
   if (!tabsList) return
 
-  const { scrollLeft, scrollWidth, clientWidth } = tabsList
-  fadeStart.value = scrollLeft > 1
-  fadeEnd.value = scrollLeft + clientWidth < scrollWidth - 1
+  const [offset, total, viewport] = isVertical.value
+    ? [tabsList.scrollTop, tabsList.scrollHeight, tabsList.clientHeight]
+    : [tabsList.scrollLeft, tabsList.scrollWidth, tabsList.clientWidth]
+  fadeStart.value = offset > 1
+  fadeEnd.value = offset + viewport < total - 1
 }
 
 function onTabsWheel(e: WheelEvent) {
   const tabsList = tabsListRef.value
   if (!tabsList) return
+  const vertical = isVertical.value
+  // Vertical mode already scrolls natively on the wheel axis; only the
+  // horizontal bar needs the cross-axis remap.
+  if (vertical) {
+    updateFades()
+    return
+  }
   if (tabsList.scrollWidth <= tabsList.clientWidth) return
   let deltaX = e.deltaX
   let deltaY = e.deltaY
@@ -427,6 +464,19 @@ watch(
     nextTick(updateFades)
   }
 )
+
+// Switching the axis changes which scroll metrics matter, and the browser
+// keeps the old scroll offset on the now-unused axis.
+watch(isVertical, () => {
+  nextTick(() => {
+    const tabsList = tabsListRef.value
+    if (tabsList) {
+      tabsList.scrollLeft = 0
+      tabsList.scrollTop = 0
+    }
+    updateFades()
+  })
+})
 
 watch(
   tabsListRef,
@@ -613,6 +663,27 @@ const pluginWrapRef = ref<HTMLElement>()
 const newMenuOpen = ref(false)
 const newMenuAlignRight = ref(false)
 const newMenuWrapRef = ref<HTMLElement>()
+// Vertical only: true when the sideways menu has no room outside the sidebar
+// and must overlap it instead of hanging off the viewport edge.
+const newMenuOverflowFlip = ref(false)
+const pluginMenuOverflowFlip = ref(false)
+
+const NEW_MENU_WIDTH = 220
+const PLUGIN_MENU_WIDTH = 260
+
+/**
+ * Decides whether a sideways-opening menu fits outside the sidebar. The menu is
+ * anchored to the bar, not to its 30px button, so the bar's inner edge is what
+ * decides: left-docked menus grow rightward from it, right-docked ones grow
+ * leftward, and each checks the viewport edge it is heading toward.
+ */
+function sideMenuOverflows(wrap: HTMLElement, width: number): boolean {
+  const bar = wrap.closest('#tab-bar')
+  const rect = (bar ?? wrap).getBoundingClientRect()
+  return placementState.mode.value === 'right'
+    ? rect.left - width < 0
+    : rect.right + width > window.innerWidth
+}
 
 function emitAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' | 'ssh-connect') {
   emit('action', type)
@@ -653,13 +724,102 @@ watch([pluginMenuOpen, newMenuOpen], ([pluginOpen, newOpen]) => {
   if (newOpen) {
     nextTick(() => {
       const wrap = newMenuWrapRef.value
-      if (wrap) {
-        const rect = wrap.getBoundingClientRect()
-        newMenuAlignRight.value = rect.right + 220 > window.innerWidth
-      }
+      if (!wrap) return
+      const rect = wrap.getBoundingClientRect()
+      newMenuAlignRight.value = rect.right + NEW_MENU_WIDTH > window.innerWidth
+      newMenuOverflowFlip.value = isVertical.value && sideMenuOverflows(wrap, NEW_MENU_WIDTH)
+    })
+  }
+  if (pluginOpen) {
+    nextTick(() => {
+      const wrap = pluginWrapRef.value
+      if (!wrap) return
+      pluginMenuOverflowFlip.value = isVertical.value && sideMenuOverflows(wrap, PLUGIN_MENU_WIDTH)
     })
   }
 })
+
+// ── Sidebar width drag (vertical placements only) ────────────
+const resizing = ref(false)
+let stopResize: (() => void) | null = null
+
+function pointerX(e: MouseEvent | TouchEvent): number | null {
+  if ('touches' in e) return e.touches[0]?.clientX ?? null
+  return e.clientX
+}
+
+/**
+ * Drives --tab-sidebar-width live while dragging. The width is measured from
+ * the viewport edge the bar is docked to, so `right` placement mirrors the
+ * delta. Clamping lives in useTabPlacement so a stored value and a dragged one
+ * settle on the same bounds.
+ */
+function startSidebarResize(e: MouseEvent | TouchEvent) {
+  if (!isVertical.value || resizing.value) return
+  const bar = (e.currentTarget as HTMLElement | null)?.closest('#tab-bar') as HTMLElement | null
+  if (!bar) return
+
+  const isTouch = 'touches' in e
+  const dockRight = placementState.mode.value === 'right'
+  resizing.value = true
+
+  // A full-screen overlay keeps the pointer stream from being stolen by the
+  // terminal or a plugin iframe mid-drag.
+  const overlay = isTouch
+    ? null
+    : (() => {
+        const d = document.createElement('div')
+        d.style.cssText = 'position:fixed;inset:0;z-index:9999;cursor:col-resize;'
+        document.body.appendChild(d)
+        return d
+      })()
+
+  const onMove = (ev: MouseEvent | TouchEvent) => {
+    if ('touches' in ev) ev.preventDefault()
+    const x = pointerX(ev)
+    if (x === null) return
+    const rect = bar.getBoundingClientRect()
+    placementState.setSidebarWidth(dockRight ? rect.right - x : x - rect.left)
+  }
+
+  const moveEvent = isTouch ? 'touchmove' : 'mousemove'
+  const endEvent = isTouch ? 'touchend' : 'mouseup'
+
+  const onEnd = () => {
+    if (!resizing.value) return
+    resizing.value = false
+    overlay?.remove()
+    window.removeEventListener(moveEvent, onMove as EventListener)
+    window.removeEventListener(endEvent, onEnd)
+    window.removeEventListener('touchcancel', onEnd)
+    stopResize = null
+    // Nudge xterm's ResizeObserver in case the flex reflow landed in the same frame.
+    window.dispatchEvent(new Event('resize'))
+    updateFades()
+  }
+
+  stopResize = onEnd
+  window.addEventListener(
+    moveEvent,
+    onMove as EventListener,
+    { passive: !isTouch } as AddEventListenerOptions
+  )
+  window.addEventListener(endEvent, onEnd)
+  window.addEventListener('touchcancel', onEnd)
+}
+
+function onResizeMouseDown(e: MouseEvent) {
+  startSidebarResize(e)
+}
+
+function onResizeTouchStart(e: TouchEvent) {
+  startSidebarResize(e)
+}
+
+function resetSidebarWidth() {
+  placementState.setSidebarWidth(SIDEBAR_WIDTH_DEFAULT)
+  window.dispatchEvent(new Event('resize'))
+}
 
 const drag = usePaneDrag()
 
@@ -685,6 +845,7 @@ defineExpose({ hasTab, scrollTabIntoView })
 
 onBeforeUnmount(() => {
   cleanupDrag()
+  stopResize?.()
   tabsListRef.value?.removeEventListener('scroll', updateFades)
   tabsListRef.value?.removeEventListener('wheel', onTabsWheel)
   window.removeEventListener('resize', updateFades)
@@ -770,6 +931,14 @@ onBeforeUnmount(() => {
 .tab.drag-over {
   border-left: 2px solid var(--accent, #8a8a8a);
 }
+/* Stacked rows insert above, not to the left. */
+.is-vertical .tab.drag-over {
+  border-left: none;
+  border-top: 2px solid var(--accent, #8a8a8a);
+}
+.is-vertical .tab-title-input {
+  max-width: none;
+}
 .tab-notif-dot {
   width: 7px;
   height: 7px;
@@ -806,6 +975,12 @@ onBeforeUnmount(() => {
   position: relative;
   flex-shrink: 0;
 }
+/* Vertically the wrapper is a 30px square in the control grid, so anchoring the
+ * menu to it would open it mid-sidebar. Going static hands the containing block
+ * to #tab-bar (already position: relative), i.e. the sidebar's own edges. */
+.is-vertical .tab-bar-plugin-wrap {
+  position: static;
+}
 .plugin-dropdown {
   position: absolute;
   top: 100%;
@@ -819,6 +994,35 @@ onBeforeUnmount(() => {
   padding: 4px 0;
   z-index: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+/* Both menus hang downward from the bar by default. In the other three
+ * placements that puts them past the viewport edge, so flip them against
+ * whichever edge the bar is docked to. */
+.placement-bottom .plugin-dropdown {
+  top: auto;
+  bottom: 100%;
+}
+/* The vertical controls live at the very bottom of the sidebar, so a menu that
+ * grows downward from its button falls off screen. Pin it to the bar's bottom
+ * edge and let it grow upward, capped at the viewport on both axes. */
+.is-vertical .plugin-dropdown {
+  top: auto;
+  bottom: 0;
+  /* The containing block is the sidebar, so 100% is exactly the room above the
+   * anchored bottom edge — the menu can never exceed the bar's own height. */
+  max-height: 100%;
+  overflow-y: auto;
+  /* min-width would win over max-width and reintroduce the overflow. */
+  min-width: 0;
+  max-width: min(260px, calc(100vw - var(--tab-sidebar-width, 180px) - 16px));
+}
+.placement-left .plugin-dropdown {
+  left: 100%;
+  right: auto;
+}
+.placement-right .plugin-dropdown {
+  right: 100%;
+  left: auto;
 }
 .plugin-dropdown-empty {
   padding: 8px 12px;
@@ -863,6 +1067,10 @@ onBeforeUnmount(() => {
   position: relative;
   flex-shrink: 0;
 }
+/* Same reason as .tab-bar-plugin-wrap: anchor to the sidebar, not the square. */
+.is-vertical .new-tab-split {
+  position: static;
+}
 .new-menu-dropdown {
   position: absolute;
   top: 100%;
@@ -878,6 +1086,51 @@ onBeforeUnmount(() => {
 .new-menu-dropdown.align-right {
   left: auto;
   right: 0;
+}
+.placement-bottom .new-menu-dropdown {
+  top: auto;
+  bottom: 100%;
+}
+/* Same containment as the plugin menu: anchored to the sidebar's bottom edge,
+ * growing upward, capped at the viewport rather than running past it. */
+.is-vertical .new-menu-dropdown {
+  top: auto;
+  bottom: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  min-width: 0;
+  max-width: min(220px, calc(100vw - var(--tab-sidebar-width, 180px) - 16px));
+}
+/* The sideways flip wins over .align-right, whose viewport probe only knows
+   about the horizontal bar. */
+.placement-left .new-menu-dropdown,
+.placement-left .new-menu-dropdown.align-right {
+  left: 100%;
+  right: auto;
+}
+.placement-right .new-menu-dropdown,
+.placement-right .new-menu-dropdown.align-right {
+  right: 100%;
+  left: auto;
+}
+/* No room on the outside of the sidebar (narrow window, wide sidebar): overlap
+ * the sidebar instead of hanging off the screen. Last in the cascade so it
+ * beats the sideways rules above at equal specificity. */
+.placement-left .new-menu-dropdown.overflow-flip {
+  left: auto;
+  right: 0;
+}
+.placement-right .new-menu-dropdown.overflow-flip {
+  right: auto;
+  left: 0;
+}
+.placement-left .plugin-dropdown.overflow-flip {
+  left: auto;
+  right: 0;
+}
+.placement-right .plugin-dropdown.overflow-flip {
+  right: auto;
+  left: 0;
 }
 .new-menu-item {
   display: flex;

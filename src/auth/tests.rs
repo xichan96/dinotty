@@ -411,8 +411,11 @@ fn cross_site_browser_request_detection() {
         &[("origin", "null"), ("host", "127.0.0.1:58999"),]
     )));
 
-    // Sec-Fetch-Site: cross-site without Origin (older/Safari variants).
-    assert!(is_cross_site_browser_request(&mk(&[
+    // No-cors subresource loads (`<img>`, `<script>`, `<link>`) send
+    // Sec-Fetch-Site but no Origin; their response body is unreadable by the
+    // initiating page, so they must pass. This is exactly how the Tauri
+    // webview loads preview images from the embedded server.
+    assert!(!is_cross_site_browser_request(&mk(&[
         ("sec-fetch-site", "cross-site"),
         ("host", "127.0.0.1:58999"),
     ])));
@@ -465,5 +468,14 @@ fn cross_site_browser_request_detection() {
         ("origin", "http://evil.com"),
         ("sec-fetch-site", "cross-site"),
         ("host", "127.0.0.1:58999"),
+    ])));
+
+    // The desktop-app `<img>` regression: WKWebView loads subresources from
+    // the embedded server with `Sec-Fetch-Site: cross-site` and NO Origin
+    // header. These are no-cors loads and must not be rejected.
+    assert!(!is_cross_site_browser_request(&mk(&[
+        ("sec-fetch-site", "cross-site"),
+        ("accept", "image/avif,image/webp,image/png,image/svg+xml,*/*"),
+        ("host", "127.0.0.1:8999"),
     ])));
 }

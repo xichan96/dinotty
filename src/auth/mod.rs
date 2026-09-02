@@ -387,14 +387,21 @@ pub fn check_ws_origin(
     true
 }
 
-/// True when the request looks like a browser-originated cross-site call.
+/// True when the request looks like a script-readable cross-site browser call.
 ///
 /// Loopback/whitelisted peers are trusted without a session, but that trust
 /// must not extend to requests scripted by a random website in the local
 /// user's browser - the browser connects from 127.0.0.1 yet is controlled by
-/// the site that opened the connection. Browsers always send `Sec-Fetch-Site`
-/// on such calls, and `Origin` on cross-origin fetch/WS handshakes; native
-/// clients (curl, the Tauri shell) send neither and are unaffected.
+/// the site that opened the connection. Cross-origin fetch/XHR, WS handshakes
+/// and cross-site form POSTs always carry `Origin`, so only requests WITH an
+/// `Origin` header are examined here.
+///
+/// Requests WITHOUT `Origin` are never blocked: they are either native
+/// clients (curl, the Tauri shell) or no-cors subresource loads (`<img>`,
+/// `<script>`, `<link>`), whose response body the initiating page cannot
+/// read. Blocking those broke every `<img>` from the Tauri webview
+/// (`tauri://localhost` page -> `http://127.0.0.1:port` server), whose loads
+/// send `Sec-Fetch-Site: cross-site` but no `Origin`.
 ///
 /// Decision order: local origins (localhost / 127.0.0.1 / tauri.localhost,
 /// e.g. the Tauri webview and localhost dev servers) are exempt first because
@@ -412,19 +419,24 @@ pub fn is_cross_site_browser_request(headers: &HeaderMap) -> bool {
             .unwrap_or(o)
     });
 
+    // No Origin means not script-readable: cross-origin fetch/XHR/WS and
+    // cross-site form POSTs always send it. Everything else (native clients,
+    // no-cors subresource loads) cannot have its response read by a page.
+    let Some(authority) = &origin_authority else {
+        return false;
+    };
+
     // 1. Local-origin exemption, checked FIRST. The Tauri webview
     // (tauri://localhost, http://tauri.localhost) and localhost dev servers
     // call the embedded server cross-origin by design, so they legitimately
     // pair a local Origin with `Sec-Fetch-Site: cross-site`. A remote page
     // cannot forge any of these origins.
-    if let Some(authority) = &origin_authority {
-        let origin_host = authority.rsplit(':').next_back().unwrap_or(authority);
-        if origin_host.eq_ignore_ascii_case("localhost")
-            || origin_host.eq_ignore_ascii_case("127.0.0.1")
-            || origin_host.eq_ignore_ascii_case("tauri.localhost")
-        {
-            return false;
-        }
+    let origin_host = authority.rsplit(':').next_back().unwrap_or(authority);
+    if origin_host.eq_ignore_ascii_case("localhost")
+        || origin_host.eq_ignore_ascii_case("127.0.0.1")
+        || origin_host.eq_ignore_ascii_case("tauri.localhost")
+    {
+        return false;
     }
 
     // 2. Sec-Fetch-Site is browser-set and labels scripted requests honestly:
@@ -437,9 +449,7 @@ pub fn is_cross_site_browser_request(headers: &HeaderMap) -> bool {
 
     // 3. Legacy fallback without fetch metadata: an Origin authority that
     // disagrees with Host means cross-site.
-    if let (Some(authority), Some(host)) =
-        (&origin_authority, headers.get("host").and_then(|v| v.to_str().ok()))
-    {
+    if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
         return !authority.eq_ignore_ascii_case(host);
     }
     false

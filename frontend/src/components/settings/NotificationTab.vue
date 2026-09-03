@@ -1,6 +1,7 @@
 <template>
   <div>
     <div class="settings-group">
+      <h3 class="settings-group-title">{{ t('notification.general') }}</h3>
       <div class="settings-row">
         <label>{{ t('notification.enabled') }}</label>
         <label class="toggle">
@@ -10,7 +11,8 @@
       </div>
     </div>
 
-    <CollapsibleSection :title="t('notification.triggers')" level="group">
+    <div class="settings-group">
+      <h3 class="settings-group-title">{{ t('notification.triggers') }}</h3>
       <div class="settings-row">
         <label>{{ t('notification.bellTrigger') }}</label>
         <label class="toggle">
@@ -58,7 +60,7 @@
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
-    </CollapsibleSection>
+    </div>
 
     <div class="settings-group">
       <h3 class="settings-group-title">{{ t('notification.channels') }}</h3>

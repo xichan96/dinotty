@@ -5,7 +5,7 @@
       <span>{{ t('settings.monitor.localHint') }}</span>
     </div>
     <div class="settings-group">
-      <div class="chart-header">
+      <div class="chart-header settings-section">
         <h3>{{ t('settings.monitor.cpuChart') }}</h3>
         <label class="toggle">
           <input v-model="settings.monitor.cpu" type="checkbox" @change="saveSettings()" />
@@ -18,7 +18,7 @@
     </div>
 
     <div class="settings-group">
-      <div class="chart-header">
+      <div class="chart-header settings-section">
         <h3>{{ t('settings.monitor.memChart') }}</h3>
         <label class="toggle">
           <input v-model="settings.monitor.memory" type="checkbox" @change="saveSettings()" />
@@ -31,7 +31,7 @@
     </div>
 
     <div class="settings-group">
-      <div class="chart-header">
+      <div class="chart-header settings-section">
         <h3>{{ t('settings.monitor.diskLabel') }}</h3>
         <label class="toggle">
           <input v-model="settings.monitor.disk" type="checkbox" @change="saveSettings()" />
@@ -50,7 +50,7 @@
     </div>
 
     <div class="settings-group">
-      <div class="chart-header">
+      <div class="chart-header settings-section">
         <h3>{{ t('settings.monitor.netChart') }}</h3>
         <label class="toggle">
           <input v-model="settings.monitor.network" type="checkbox" @change="saveSettings()" />
@@ -63,7 +63,7 @@
     </div>
 
     <div class="settings-group">
-      <div class="chart-header">
+      <div class="chart-header settings-section">
         <h3>{{ t('settings.monitor.gpuChart') }}</h3>
         <label class="toggle">
           <input v-model="settings.monitor.gpu" type="checkbox" @change="saveSettings()" />
@@ -73,7 +73,7 @@
       <div v-if="settings.monitor.gpu && hasGpu" class="chart-wrap">
         <Line :data="gpuChartData" :options="pctChartOptions" />
       </div>
-      <div v-if="settings.monitor.gpu && hasGpu" class="chart-header">
+      <div v-if="settings.monitor.gpu && hasGpu" class="chart-header settings-section">
         <h3>{{ t('settings.monitor.gpuMemChart') }}</h3>
       </div>
       <div v-if="settings.monitor.gpu && hasGpu" class="chart-wrap">
@@ -95,11 +95,11 @@
     </div>
 
     <div v-if="visiblePluginSeries.length" class="settings-group">
-      <div class="chart-header">
+      <div class="chart-header settings-section">
         <h3>{{ t('settings.monitor.pluginMetrics') }}</h3>
       </div>
       <div v-for="s in visiblePluginSeries" :key="s.id" class="plugin-series-block">
-        <div class="chart-header">
+        <div class="chart-header settings-section">
           <h3 class="plugin-series-title">{{ s.label }}</h3>
           <label class="toggle">
             <input
@@ -300,19 +300,14 @@ function pluginChartOptions(s: RegisteredSeries) {
   margin-bottom: 16px;
   padding: 0 2px;
 }
-.chart-header {
+.chart-header.settings-section {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
 }
-.chart-header h3 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin: 0;
+.chart-header.settings-section h3 {
+  margin-bottom: 0;
 }
 .chart-wrap {
   height: 120px;

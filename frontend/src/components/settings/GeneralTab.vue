@@ -158,7 +158,7 @@
               <X :size="14" />
             </button>
           </div>
-          <div class="ip-row" style="margin-top: 8px">
+          <div class="ip-row mt-8">
             <input
               v-model="newIp"
               type="text"
@@ -213,7 +213,7 @@
             </div>
           </div>
 
-          <div class="settings-row" style="margin-top: 12px">
+          <div class="settings-row mt-12">
             <label>{{ t('security.lockoutStrategy') }}</label>
             <select v-model="settings.auth.lockout_strategy" @change="saveSettings()">
               <option value="ip">IP</option>
@@ -272,7 +272,7 @@
             </div>
           </template>
 
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('security.allowedOrigins') }}</label>
           </div>
           <textarea
@@ -284,7 +284,7 @@
           ></textarea>
           <p class="settings-hint">{{ t('security.allowedOriginsHint') }}</p>
 
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('security.trustedProxies') }}</label>
           </div>
           <textarea
@@ -296,7 +296,7 @@
           ></textarea>
           <p class="settings-hint">{{ t('security.trustedProxiesHint') }}</p>
 
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('security.previewAllowExternal') }}</label>
             <label class="toggle">
               <input
@@ -507,7 +507,6 @@
       </section>
 
       <section class="settings-section">
-        <h3>{{ t('settings.behavior') }}</h3>
         <div class="settings-row">
           <label>{{ t('settings.confirmBeforeCloseTab') }}</label>
           <label class="toggle">
@@ -568,7 +567,7 @@
         <p class="settings-hint">{{ t('settings.log.hint') }}</p>
 
         <template v-if="settings.log.enabled">
-          <div class="settings-row" style="margin-top: 12px">
+          <div class="settings-row mt-12">
             <label>{{ t('settings.log.path') }}</label>
             <input
               v-model="settings.log.path"
@@ -577,7 +576,7 @@
               @change="saveSettings()"
             />
           </div>
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('settings.log.maxSize') }}</label>
             <input
               v-model.number="settings.log.max_size_mb"
@@ -588,7 +587,7 @@
               @change="saveSettings()"
             />
           </div>
-          <div style="margin-top: 12px">
+          <div class="mt-12">
             <button class="icon-btn" @click="viewLog()">{{ t('settings.log.view') }}</button>
           </div>
         </template>
@@ -873,6 +872,13 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.mt-8 {
+  margin-top: 8px;
+}
+.mt-12 {
+  margin-top: 12px;
+}
+
 .token-row {
   display: flex;
   gap: 6px;

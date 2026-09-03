@@ -85,8 +85,6 @@ const bodyId = useId()
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   margin-bottom: 12px;
 }
 

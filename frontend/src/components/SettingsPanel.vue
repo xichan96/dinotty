@@ -6,27 +6,79 @@
         <button class="settings-close" @click="$emit('close')"><X :size="14" /></button>
       </div>
 
-      <div class="settings-tabs">
-        <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          class="settings-tab"
-          :class="{ active: activeTab === tab.id }"
-          @click="activeTab = tab.id"
+      <div class="settings-tabs-wrap" :class="{ 'has-overflow': tabsOverflow }">
+        <div
+          ref="tabsRef"
+          class="settings-tabs"
+          :class="{ 'tabs-compact': isMobile }"
+          role="tablist"
+          @scroll="updateTabsOverflow"
         >
-          <span class="settings-tab-icon"><component :is="tab.icon" :size="20" /></span
-          ><span class="settings-tab-label">{{ tab.label }}</span>
-        </button>
+          <button
+            v-for="tab in tabs"
+            :id="`settings-tab-${tab.id}`"
+            :key="tab.id"
+            role="tab"
+            class="settings-tab"
+            :class="{ active: activeTab === tab.id }"
+            :aria-selected="activeTab === tab.id"
+            :aria-controls="`settings-tabpanel-${tab.id}`"
+            :tabindex="activeTab === tab.id ? 0 : -1"
+            @click="activeTab = tab.id"
+            @keydown="onTabKeydown"
+          >
+            <span class="settings-tab-icon"><component :is="tab.icon" :size="20" /></span
+            ><span class="settings-tab-label">{{ tab.label }}</span>
+          </button>
+        </div>
       </div>
 
       <div class="settings-body">
-        <GeneralTab v-show="activeTab === 'general'" @token-changed="emit('token-changed')" />
-        <AppearanceTab v-show="activeTab === 'appearance'" />
-        <KeyboardTab v-show="activeTab === 'keyboard'" />
-        <MonitorTab v-show="activeTab === 'monitor'" />
-        <NotificationTab v-show="activeTab === 'notification'" />
-        <PluginsTab v-show="activeTab === 'plugins'" @open-plugin="openPlugin" />
-        <AboutTab v-show="activeTab === 'about'" @open-about="openAbout" />
+        <GeneralTab
+          v-show="activeTab === 'general'"
+          role="tabpanel"
+          id="settings-tabpanel-general"
+          :aria-labelledby="`settings-tab-general`"
+          @token-changed="emit('token-changed')"
+        />
+        <AppearanceTab
+          v-show="activeTab === 'appearance'"
+          role="tabpanel"
+          id="settings-tabpanel-appearance"
+          :aria-labelledby="`settings-tab-appearance`"
+        />
+        <KeyboardTab
+          v-show="activeTab === 'keyboard'"
+          role="tabpanel"
+          id="settings-tabpanel-keyboard"
+          :aria-labelledby="`settings-tab-keyboard`"
+        />
+        <MonitorTab
+          v-show="activeTab === 'monitor'"
+          role="tabpanel"
+          id="settings-tabpanel-monitor"
+          :aria-labelledby="`settings-tab-monitor`"
+        />
+        <NotificationTab
+          v-show="activeTab === 'notification'"
+          role="tabpanel"
+          id="settings-tabpanel-notification"
+          :aria-labelledby="`settings-tab-notification`"
+        />
+        <PluginsTab
+          v-show="activeTab === 'plugins'"
+          role="tabpanel"
+          id="settings-tabpanel-plugins"
+          :aria-labelledby="`settings-tab-plugins`"
+          @open-plugin="openPlugin"
+        />
+        <AboutTab
+          v-show="activeTab === 'about'"
+          role="tabpanel"
+          id="settings-tabpanel-about"
+          :aria-labelledby="`settings-tab-about`"
+          @open-about="openAbout"
+        />
       </div>
     </div>
   </div>
@@ -45,6 +97,7 @@ import {
 import { useSettings, notifyTextChange } from '../composables/useSettings'
 import { effectiveTheme } from '../composables/useDeviceThemeSelection'
 import { useI18n } from '../composables/useI18n'
+import { useIsMobile } from '../composables/useIsMobile'
 import { useUiStore } from '../stores/uiStore'
 import {
   Settings as SettingsIcon,
@@ -74,6 +127,7 @@ const emit = defineEmits<{
 
 const { settings, saveSettings, loadSettings, applyCurrentTheme } = useSettings()
 const { t } = useI18n()
+const { isMobile } = useIsMobile()
 const ui = useUiStore()
 
 function openPlugin(pluginId: string) {
@@ -84,6 +138,29 @@ function openPlugin(pluginId: string) {
 const activeTab = ref<
   'general' | 'appearance' | 'keyboard' | 'monitor' | 'notification' | 'plugins' | 'about'
 >('general')
+
+const tabsRef = ref<HTMLElement | null>(null)
+const tabsOverflow = ref(false)
+
+function updateTabsOverflow() {
+  const el = tabsRef.value
+  if (!el) return
+  tabsOverflow.value =
+    el.scrollWidth > el.clientWidth && el.scrollLeft + el.clientWidth < el.scrollWidth
+}
+
+function onTabKeydown(e: KeyboardEvent) {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+  e.preventDefault()
+  const ids = tabs.value.map((tab) => tab.id)
+  const idx = ids.indexOf(activeTab.value)
+  const next = e.key === 'ArrowRight' ? (idx + 1) % ids.length : (idx - 1 + ids.length) % ids.length
+  activeTab.value = ids[next]
+  nextTick(() => {
+    document.getElementById(`settings-tab-${ids[next]}`)?.focus()
+    updateTabsOverflow()
+  })
+}
 
 function openAbout() {
   activeTab.value = 'about'
@@ -100,9 +177,12 @@ function onOpenSettingsKeyboard() {
 
 onMounted(() => {
   window.addEventListener('dinotty:open-settings-keyboard', onOpenSettingsKeyboard)
+  window.addEventListener('resize', updateTabsOverflow)
+  nextTick(updateTabsOverflow)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('dinotty:open-settings-keyboard', onOpenSettingsKeyboard)
+  window.removeEventListener('resize', updateTabsOverflow)
 })
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -115,6 +195,9 @@ function scheduleSave() {
 
 // Only trigger DOM-heavy theme application when theme fields actually change
 watch(effectiveTheme, applyCurrentTheme)
+
+// Compact (icon-only) tabs change tab widths — re-check overflow affordance
+watch(isMobile, () => nextTick(updateTabsOverflow))
 
 // Only notify terminal text changes when text settings change
 watch(() => ({ ...settings.text }), notifyTextChange)
@@ -130,6 +213,7 @@ watch(
   () => props.open,
   (v) => {
     if (!v) return
+    nextTick(updateTabsOverflow)
     if (saveTimer) {
       clearTimeout(saveTimer)
       saveTimer = null
@@ -216,15 +300,42 @@ const tabs = computed(() => [
   color: var(--fg-bright);
 }
 
+.settings-tabs-wrap {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+}
+.settings-tabs-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 28px;
+  background: linear-gradient(to right, transparent, var(--bg-surface));
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.settings-tabs-wrap.has-overflow::after {
+  opacity: 1;
+}
 .settings-tabs {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid var(--border);
   padding: 0 20px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .settings-tabs::-webkit-scrollbar {
+  display: none;
+}
+.settings-tabs.tabs-compact {
+  padding: 0 12px;
+}
+.settings-tabs.tabs-compact .settings-tab {
+  padding: 12px 12px 10px;
+}
+.settings-tabs.tabs-compact .settings-tab-label {
   display: none;
 }
 .settings-tab {

@@ -2,18 +2,12 @@
   <div class="settings-backdrop" :class="{ open }" @click.self="$emit('close')">
     <div class="settings-panel" :class="{ open }">
       <div class="settings-header">
-        <h2>{{ t('settings.title') }}</h2>
+        <h2>{{ activeHeaderTitle }}</h2>
         <button class="settings-close" @click="$emit('close')"><X :size="14" /></button>
       </div>
 
       <div class="settings-tabs-wrap" :class="{ 'has-overflow': tabsOverflow }">
-        <div
-          ref="tabsRef"
-          class="settings-tabs"
-          :class="{ 'tabs-compact': isMobile }"
-          role="tablist"
-          @scroll="updateTabsOverflow"
-        >
+        <div ref="tabsRef" class="settings-tabs" role="tablist" @scroll="updateTabsOverflow">
           <button
             v-for="tab in tabs"
             :id="`settings-tab-${tab.id}`"
@@ -22,13 +16,14 @@
             class="settings-tab"
             :class="{ active: activeTab === tab.id }"
             :aria-selected="activeTab === tab.id"
+            :aria-label="tab.label"
+            :title="tab.label"
             :aria-controls="`settings-tabpanel-${tab.id}`"
             :tabindex="activeTab === tab.id ? 0 : -1"
             @click="activeTab = tab.id"
             @keydown="onTabKeydown"
           >
-            <span class="settings-tab-icon"><component :is="tab.icon" :size="20" /></span
-            ><span class="settings-tab-label">{{ tab.label }}</span>
+            <span class="settings-tab-icon"><component :is="tab.icon" :size="24" /></span>
           </button>
         </div>
       </div>
@@ -36,46 +31,46 @@
       <div class="settings-body">
         <GeneralTab
           v-show="activeTab === 'general'"
-          role="tabpanel"
           id="settings-tabpanel-general"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-general`"
           @token-changed="emit('token-changed')"
         />
         <AppearanceTab
           v-show="activeTab === 'appearance'"
-          role="tabpanel"
           id="settings-tabpanel-appearance"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-appearance`"
         />
         <KeyboardTab
           v-show="activeTab === 'keyboard'"
-          role="tabpanel"
           id="settings-tabpanel-keyboard"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-keyboard`"
         />
         <MonitorTab
           v-show="activeTab === 'monitor'"
-          role="tabpanel"
           id="settings-tabpanel-monitor"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-monitor`"
         />
         <NotificationTab
           v-show="activeTab === 'notification'"
-          role="tabpanel"
           id="settings-tabpanel-notification"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-notification`"
         />
         <PluginsTab
           v-show="activeTab === 'plugins'"
-          role="tabpanel"
           id="settings-tabpanel-plugins"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-plugins`"
           @open-plugin="openPlugin"
         />
         <AboutTab
           v-show="activeTab === 'about'"
-          role="tabpanel"
           id="settings-tabpanel-about"
+          role="tabpanel"
           :aria-labelledby="`settings-tab-about`"
           @open-about="openAbout"
         />
@@ -97,7 +92,6 @@ import {
 import { useSettings, notifyTextChange } from '../composables/useSettings'
 import { effectiveTheme } from '../composables/useDeviceThemeSelection'
 import { useI18n } from '../composables/useI18n'
-import { useIsMobile } from '../composables/useIsMobile'
 import { useUiStore } from '../stores/uiStore'
 import {
   Settings as SettingsIcon,
@@ -127,7 +121,6 @@ const emit = defineEmits<{
 
 const { settings, saveSettings, loadSettings, applyCurrentTheme } = useSettings()
 const { t } = useI18n()
-const { isMobile } = useIsMobile()
 const ui = useUiStore()
 
 function openPlugin(pluginId: string) {
@@ -196,9 +189,6 @@ function scheduleSave() {
 // Only trigger DOM-heavy theme application when theme fields actually change
 watch(effectiveTheme, applyCurrentTheme)
 
-// Compact (icon-only) tabs change tab widths — re-check overflow affordance
-watch(isMobile, () => nextTick(updateTabsOverflow))
-
 // Only notify terminal text changes when text settings change
 watch(() => ({ ...settings.text }), notifyTextChange)
 
@@ -228,14 +218,53 @@ watch(
 )
 
 const tabs = computed(() => [
-  { id: 'general' as const, label: t('settings.tab.general'), icon: SettingsIcon },
-  { id: 'appearance' as const, label: t('settings.tab.appearance'), icon: Palette },
-  { id: 'keyboard' as const, label: t('settings.tab.keyboard'), icon: Keyboard },
-  { id: 'plugins' as const, label: t('settings.tab.plugins'), icon: Puzzle },
-  { id: 'monitor' as const, label: t('settings.tab.monitor'), icon: Activity },
-  { id: 'notification' as const, label: t('settings.tab.notification'), icon: Bell },
-  { id: 'about' as const, label: t('settings.tab.about'), icon: Info },
+  {
+    id: 'general' as const,
+    label: t('settings.tab.general'),
+    header: t('settings.header.general'),
+    icon: SettingsIcon,
+  },
+  {
+    id: 'appearance' as const,
+    label: t('settings.tab.appearance'),
+    header: t('settings.header.appearance'),
+    icon: Palette,
+  },
+  {
+    id: 'keyboard' as const,
+    label: t('settings.tab.keyboard'),
+    header: t('settings.header.keyboard'),
+    icon: Keyboard,
+  },
+  {
+    id: 'plugins' as const,
+    label: t('settings.tab.plugins'),
+    header: t('settings.header.plugins'),
+    icon: Puzzle,
+  },
+  {
+    id: 'monitor' as const,
+    label: t('settings.tab.monitor'),
+    header: t('settings.header.monitor'),
+    icon: Activity,
+  },
+  {
+    id: 'notification' as const,
+    label: t('settings.tab.notification'),
+    header: t('settings.header.notification'),
+    icon: Bell,
+  },
+  {
+    id: 'about' as const,
+    label: t('settings.tab.about'),
+    header: t('settings.header.about'),
+    icon: Info,
+  },
 ])
+
+const activeHeaderTitle = computed(
+  () => tabs.value.find((tab) => tab.id === activeTab.value)?.header ?? t('settings.title')
+)
 </script>
 
 <style>
@@ -322,24 +351,15 @@ const tabs = computed(() => [
 .settings-tabs {
   display: flex;
   gap: 0;
-  padding: 0 20px;
+  padding: 0 12px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .settings-tabs::-webkit-scrollbar {
   display: none;
 }
-.settings-tabs.tabs-compact {
-  padding: 0 12px;
-}
-.settings-tabs.tabs-compact .settings-tab {
-  padding: 12px 12px 10px;
-}
-.settings-tabs.tabs-compact .settings-tab-label {
-  display: none;
-}
 .settings-tab {
-  padding: 12px 16px 10px;
+  padding: 12px 10px 10px;
   font-size: 13px;
   font-weight: 500;
   color: var(--fg-muted);
@@ -359,10 +379,6 @@ const tabs = computed(() => [
   justify-content: center;
   opacity: 0.6;
   transition: opacity 0.15s;
-}
-.settings-tab-label {
-  font-size: 10px;
-  letter-spacing: 0.3px;
 }
 .settings-tab:hover .settings-tab-icon,
 .settings-tab.active .settings-tab-icon {

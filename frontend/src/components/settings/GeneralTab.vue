@@ -78,8 +78,12 @@
         <div class="access-url-row">
           <div class="access-url-display">
             <span class="access-url-text">{{ accessUrl }}</span>
-            <button class="access-url-copy" :title="t('settings.copyUrl')" @click="copyAccessUrl()">
-              {{ copied ? '✓' : '⧉' }}
+            <button
+              class="access-url-copy"
+              :title="t('settings.copyUrl')"
+              @click="copyAccessUrl()"
+            >
+              <Check v-if="copied" :size="14" /><Copy v-else :size="14" />
             </button>
           </div>
           <div v-if="accessUrl" class="qr-code-wrap">
@@ -146,9 +150,15 @@
           <h3>{{ t('settings.ipWhitelist') }}</h3>
           <div v-for="(ip, idx) in settings.ip_whitelist" :key="idx" class="ip-row">
             <span class="ip-text">{{ ip }}</span>
-            <button class="icon-btn danger" @click="removeIp(idx)">✕</button>
+            <button
+              class="icon-btn danger"
+              :aria-label="t('settings.ipWhitelist.remove')"
+              @click="removeIp(idx)"
+            >
+              <X :size="14" />
+            </button>
           </div>
-          <div class="ip-row" style="margin-top: 8px">
+          <div class="ip-row mt-8">
             <input
               v-model="newIp"
               type="text"
@@ -203,7 +213,7 @@
             </div>
           </div>
 
-          <div class="settings-row" style="margin-top: 12px">
+          <div class="settings-row mt-12">
             <label>{{ t('security.lockoutStrategy') }}</label>
             <select v-model="settings.auth.lockout_strategy" @change="saveSettings()">
               <option value="ip">IP</option>
@@ -262,7 +272,7 @@
             </div>
           </template>
 
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('security.allowedOrigins') }}</label>
           </div>
           <textarea
@@ -274,7 +284,7 @@
           ></textarea>
           <p class="settings-hint">{{ t('security.allowedOriginsHint') }}</p>
 
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('security.trustedProxies') }}</label>
           </div>
           <textarea
@@ -286,7 +296,7 @@
           ></textarea>
           <p class="settings-hint">{{ t('security.trustedProxiesHint') }}</p>
 
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('security.previewAllowExternal') }}</label>
             <label class="toggle">
               <input
@@ -497,7 +507,6 @@
       </section>
 
       <section class="settings-section">
-        <h3>{{ t('settings.behavior') }}</h3>
         <div class="settings-row">
           <label>{{ t('settings.confirmBeforeCloseTab') }}</label>
           <label class="toggle">
@@ -558,7 +567,7 @@
         <p class="settings-hint">{{ t('settings.log.hint') }}</p>
 
         <template v-if="settings.log.enabled">
-          <div class="settings-row" style="margin-top: 12px">
+          <div class="settings-row mt-12">
             <label>{{ t('settings.log.path') }}</label>
             <input
               v-model="settings.log.path"
@@ -567,7 +576,7 @@
               @change="saveSettings()"
             />
           </div>
-          <div class="settings-row" style="margin-top: 8px">
+          <div class="settings-row mt-8">
             <label>{{ t('settings.log.maxSize') }}</label>
             <input
               v-model.number="settings.log.max_size_mb"
@@ -578,7 +587,7 @@
               @change="saveSettings()"
             />
           </div>
-          <div style="margin-top: 12px">
+          <div class="mt-12">
             <button class="icon-btn" @click="viewLog()">{{ t('settings.log.view') }}</button>
           </div>
         </template>
@@ -863,6 +872,13 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.mt-8 {
+  margin-top: 8px;
+}
+.mt-12 {
+  margin-top: 12px;
+}
+
 .token-row {
   display: flex;
   gap: 6px;
@@ -899,7 +915,7 @@ onMounted(async () => {
 }
 
 .icon-btn:hover {
-  background: #3a3a3c;
+  background: var(--bg-hover);
 }
 
 .icon-btn:disabled {
@@ -908,12 +924,12 @@ onMounted(async () => {
 }
 
 .icon-btn.danger {
-  color: #f44747;
-  border-color: #4a2020;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .icon-btn.danger:hover {
-  background: #3a1e1e;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
 .ip-row {
@@ -926,7 +942,7 @@ onMounted(async () => {
 .ip-text {
   flex: 1;
   font-size: 13px;
-  color: #c8c8c8;
+  color: var(--fg);
   font-family: monospace;
   padding: 4px 2px;
 }
@@ -965,7 +981,7 @@ onMounted(async () => {
 
 .token-error,
 .settings-error {
-  color: #f44747;
+  color: var(--danger);
   font-size: 14px;
   font-weight: 600;
   margin: 4px 0 0;
@@ -990,7 +1006,7 @@ onMounted(async () => {
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 6px;
   display: flex;
@@ -1002,8 +1018,8 @@ onMounted(async () => {
 }
 
 .qr-refresh-btn:hover {
-  color: var(--text-primary, #fff);
-  border-color: var(--text-secondary, #888);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 .log-modal-overlay {
@@ -1020,7 +1036,7 @@ onMounted(async () => {
 }
 
 .log-modal {
-  background: var(--bg, #1a1a1a);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
   width: 90vw;
@@ -1042,7 +1058,7 @@ onMounted(async () => {
 .log-modal-header h3 {
   margin: 0;
   font-size: 16px;
-  color: var(--text-primary, #e8e8e8);
+  color: var(--text-primary);
 }
 
 .log-modal-actions {
@@ -1058,7 +1074,7 @@ onMounted(async () => {
   font-family: monospace;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-secondary, #aaa);
+  color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
 }

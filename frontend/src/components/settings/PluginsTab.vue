@@ -758,7 +758,7 @@ async function onRefresh() {
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -768,11 +768,11 @@ async function onRefresh() {
     border-color 0.15s;
 }
 .plugin-tab:hover {
-  color: var(--text-primary, #ddd);
+  color: var(--text-primary);
 }
 .plugin-tab.active {
-  color: var(--fg-bright, #d0d0d0);
-  border-bottom-color: var(--accent, #8a8a8a);
+  color: var(--fg-bright);
+  border-bottom-color: var(--accent);
 }
 .plugin-toolbar {
   display: flex;
@@ -792,15 +792,15 @@ async function onRefresh() {
   min-width: 160px;
   padding: 6px 10px;
   font-size: 13px;
-  color: var(--fg, #ccc);
+  color: var(--fg);
   background: var(--bg-input);
-  border: 1px solid var(--border, #444);
+  border: 1px solid var(--border);
   border-radius: 5px;
   outline: none;
   transition: border-color 0.15s;
 }
 .plugin-search-input:focus {
-  border-color: var(--fg-muted, #858585);
+  border-color: var(--fg-muted);
 }
 .plugin-category-chips {
   display: flex;
@@ -810,9 +810,9 @@ async function onRefresh() {
 .plugin-category-chip {
   padding: 3px 10px;
   font-size: 11px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   background: none;
-  border: 1px solid var(--border, #444);
+  border: 1px solid var(--border);
   border-radius: 12px;
   cursor: pointer;
   transition:
@@ -821,34 +821,34 @@ async function onRefresh() {
     background 0.15s;
 }
 .plugin-category-chip:hover {
-  color: var(--fg, #ccc);
-  border-color: var(--fg-muted, #858585);
+  color: var(--fg);
+  border-color: var(--fg-muted);
 }
 .plugin-category-chip.active {
-  color: var(--bg, #1e1e1e);
-  background: var(--fg-muted, #858585);
-  border-color: var(--fg-muted, #858585);
+  color: var(--bg);
+  background: var(--fg-muted);
+  border-color: var(--fg-muted);
 }
 .plugin-toggle-inline {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
 .plugin-toggle-inline input[type='checkbox'] {
-  accent-color: var(--accent, #8a8a8a);
+  accent-color: var(--accent);
 }
 .plugin-badge.category {
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   background: var(--bg-hover);
 }
 .plugin-badge.incompatible {
-  color: var(--color-red, #ef4444);
-  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 .plugin-card-incompatible {
   opacity: 0.7;
@@ -870,9 +870,9 @@ async function onRefresh() {
   min-width: 0;
   padding: 5px 10px;
   font-size: 12px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   background: var(--bg-input);
-  border: 1px solid var(--border, #444);
+  border: 1px solid var(--border);
   border-radius: 5px;
   cursor: pointer;
   text-align: left;
@@ -884,21 +884,21 @@ async function onRefresh() {
     border-color 0.15s;
 }
 .plugin-browse-btn:hover {
-  color: var(--fg, #cccccc);
-  border-color: var(--fg-muted, #858585);
+  color: var(--fg);
+  border-color: var(--fg-muted);
 }
 .plugin-dev-toggle {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
 }
 .plugin-dev-toggle input[type='checkbox'] {
-  accent-color: var(--accent, #8a8a8a);
+  accent-color: var(--accent);
 }
 .plugin-install-btn {
   display: inline-flex;
@@ -906,18 +906,18 @@ async function onRefresh() {
   padding: 5px 12px;
   border-radius: 5px;
   background: var(--bg-input);
-  color: var(--fg-bright, #d0d0d0);
+  color: var(--fg-bright);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  border: 1px solid var(--border, #444);
+  border: 1px solid var(--border);
   transition:
     background 0.15s,
     border-color 0.15s;
 }
 .plugin-install-btn:hover {
   background: var(--bg-hover);
-  border-color: var(--fg-muted, #858585);
+  border-color: var(--fg-muted);
 }
 .plugin-action-btn {
   display: inline-flex;
@@ -925,7 +925,7 @@ async function onRefresh() {
   padding: 5px 12px;
   border-radius: 5px;
   background: none;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   font-size: 12px;
   cursor: pointer;
   border: none;
@@ -935,27 +935,27 @@ async function onRefresh() {
 }
 .plugin-action-btn:hover {
   background: var(--bg-hover);
-  color: var(--fg, #cccccc);
+  color: var(--fg);
 }
 .plugin-danger {
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
 }
 .plugin-danger:hover {
-  color: var(--color-red, #ef4444);
-  background: rgba(239, 68, 68, 0.08);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 .plugin-error-msg {
   margin: 8px 0;
-  color: var(--color-red, #ef4444);
+  color: var(--danger);
   font-size: 13px;
 }
 .plugin-retry-btn {
   margin-left: 8px;
   padding: 3px 10px;
   font-size: 12px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   background: none;
-  border: 1px solid var(--border, #444);
+  border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   transition:
@@ -963,17 +963,17 @@ async function onRefresh() {
     border-color 0.15s;
 }
 .plugin-retry-btn:hover {
-  color: var(--fg-bright, #d0d0d0);
-  border-color: var(--fg-muted, #858585);
+  color: var(--fg-bright);
+  border-color: var(--fg-muted);
 }
 .plugin-success-msg {
   margin: 8px 0;
-  color: var(--color-green, #34d399);
+  color: var(--success);
   font-size: 13px;
 }
 .plugin-empty {
   padding: 12px 0;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   font-size: 13px;
 }
 .plugin-card {
@@ -981,7 +981,7 @@ async function onRefresh() {
   margin-bottom: 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elevated, #222);
+  background: var(--bg-elevated);
 }
 .plugin-card-clickable {
   cursor: pointer;
@@ -990,8 +990,8 @@ async function onRefresh() {
     background 0.15s;
 }
 .plugin-card-clickable:hover {
-  border-color: var(--fg-muted, #858585);
-  background: var(--bg-surface-hover, #2a2a2a);
+  border-color: var(--fg-muted);
+  background: var(--bg-surface-hover);
 }
 .plugin-card-header {
   display: flex;
@@ -1006,7 +1006,7 @@ async function onRefresh() {
 }
 .plugin-card-version {
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   line-height: 1.4;
 }
 .plugin-badge {
@@ -1017,31 +1017,31 @@ async function onRefresh() {
   line-height: 1.4;
 }
 .plugin-badge.installed {
-  color: var(--color-green, #34d399);
-  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
 }
 .plugin-badge.update {
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   background: var(--bg-hover);
 }
 .plugin-badge.error {
-  color: var(--color-red, #ef4444);
-  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 .plugin-badge.dev {
-  color: var(--color-orange, #f59e0b);
-  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
 }
 .plugin-card-desc {
   margin: 6px 0 10px;
   font-size: 12px;
-  color: var(--text-secondary, #aaa);
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 .plugin-card-error {
   margin: 6px 0 10px;
   font-size: 12px;
-  color: var(--color-red, #ef4444);
+  color: var(--danger);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -1052,7 +1052,7 @@ async function onRefresh() {
   gap: 6px;
   margin: 6px 0 10px;
   font-size: 11px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
 }
 .plugin-permissions code {
   padding: 2px 6px;
@@ -1070,18 +1070,18 @@ async function onRefresh() {
 }
 .plugin-link {
   font-size: 12px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   text-decoration: none;
   transition: color 0.15s;
 }
 .plugin-link:hover {
-  color: var(--fg-bright, #d0d0d0);
+  color: var(--fg-bright);
 }
 .plugin-spinner {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--text-muted, #888);
+  border: 2px solid var(--text-muted);
   border-top-color: transparent;
   border-radius: 50%;
   animation: plugin-spin 0.6s linear infinite;
@@ -1089,7 +1089,7 @@ async function onRefresh() {
   vertical-align: middle;
 }
 .plugin-install-btn .plugin-spinner {
-  border-color: var(--fg-muted, #858585);
+  border-color: var(--fg-muted);
   border-top-color: transparent;
 }
 @keyframes plugin-spin {
@@ -1112,14 +1112,14 @@ async function onRefresh() {
   gap: 6px;
   padding: 4px 0;
   font-size: 13px;
-  color: var(--fg-muted, #858585);
+  color: var(--fg-muted);
   background: none;
   border: none;
   cursor: pointer;
   transition: color 0.15s;
 }
 .plugin-back-btn:hover {
-  color: var(--fg-bright, #d0d0d0);
+  color: var(--fg-bright);
 }
 .plugin-back-arrow {
   font-size: 16px;
@@ -1129,7 +1129,7 @@ async function onRefresh() {
   padding: 14px 16px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elevated, #222);
+  background: var(--bg-elevated);
   margin-bottom: 12px;
 }
 .plugin-detail-title-row {
@@ -1146,12 +1146,12 @@ async function onRefresh() {
 .plugin-detail-author {
   margin: 4px 0 0;
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
 }
 .plugin-detail-desc {
   margin: 8px 0 12px;
   font-size: 13px;
-  color: var(--text-secondary, #aaa);
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 .plugin-detail-actions {
@@ -1163,24 +1163,24 @@ async function onRefresh() {
   padding: 14px 16px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elevated, #222);
+  background: var(--bg-elevated);
 }
 .plugin-readme-loading {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   padding: 8px 0;
 }
 .plugin-readme-empty {
   font-size: 12px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   padding: 8px 0;
 }
 .plugin-readme-body {
   font-size: 13px;
-  color: var(--text-primary, #ddd);
+  color: var(--text-primary);
   line-height: 1.6;
   max-height: 500px;
   overflow-y: auto;
@@ -1188,7 +1188,7 @@ async function onRefresh() {
 .plugin-readme-body :deep(h1),
 .plugin-readme-body :deep(h2),
 .plugin-readme-body :deep(h3) {
-  color: var(--text-primary, #ddd);
+  color: var(--text-primary);
   margin: 16px 0 8px;
   font-weight: 600;
 }
@@ -1233,7 +1233,7 @@ async function onRefresh() {
   margin: 8px 0;
 }
 .plugin-readme-body :deep(a) {
-  color: var(--accent, #8a8a8a);
+  color: var(--accent);
   text-decoration: none;
 }
 .plugin-readme-body :deep(a:hover) {
@@ -1243,7 +1243,7 @@ async function onRefresh() {
   border-left: 3px solid var(--border);
   padding-left: 12px;
   margin: 8px 0;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
 }
 .plugin-readme-body :deep(table) {
   border-collapse: collapse;

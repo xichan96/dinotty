@@ -270,6 +270,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'settings.ipWhitelist.hint':
       'IPs in this list bypass token authentication. Supports exact IP (192.168.1.5), wildcard (192.168.0.*), or CIDR (192.168.0.0/24).',
     'settings.ipWhitelist.add': 'Add IP',
+    'settings.ipWhitelist.remove': 'Remove IP',
     'settings.ipWhitelist.placeholder': 'e.g. 192.168.0.*',
     'settings.port': 'Port',
     'settings.portHint': 'Default: current port (restart required)',
@@ -507,6 +508,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'notification.goTo': 'Go',
     'notification.viewAll': 'View All',
     'notification.enabled': 'Enable Notifications',
+    'notification.general': 'General',
     'notification.triggers': 'Triggers',
     'notification.bellTrigger': 'Terminal bell',
     'notification.debounce': 'Debounce',
@@ -548,6 +550,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     'notification.hookCommand': 'Command',
     'notification.hookType': 'Type',
     'notification.hookAdd': 'Add Hook',
+    'notification.hookDelete': 'Delete hook',
+    'notification.soundPreview': 'Preview sound',
     'notification.hookAll': 'All',
     'notification.hookEnvHint':
       'Environment variables: DINOTTY_NOTIFICATION_TYPE, DINOTTY_PANE_ID, DINOTTY_TITLE, DINOTTY_BODY',
@@ -1262,6 +1266,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'settings.ipWhitelist.hint':
       '白名单内的 IP 无需令牌即可访问。支持精确 IP（192.168.1.5）、通配符（192.168.0.*）或 CIDR（192.168.0.0/24）。',
     'settings.ipWhitelist.add': '添加 IP',
+    'settings.ipWhitelist.remove': '删除 IP',
     'settings.ipWhitelist.placeholder': '如 192.168.0.*',
     'settings.port': '端口',
     'settings.portHint': '默认：当前端口（需重启生效）',
@@ -1485,6 +1490,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     'notification.goTo': '跳转',
     'notification.viewAll': '查看全部',
     'notification.enabled': '启用通知',
+    'notification.general': '常规',
     'notification.triggers': '触发源',
     'notification.bellTrigger': '终端响铃',
     'notification.debounce': '防抖间隔',
@@ -1525,6 +1531,8 @@ export const messages: Record<Locale, Record<string, string>> = {
     'notification.hookCommand': '命令',
     'notification.hookType': '类型',
     'notification.hookAdd': '添加钩子',
+    'notification.hookDelete': '删除钩子',
+    'notification.soundPreview': '试听',
     'notification.hookAll': '全部',
     'notification.hookEnvHint':
       '可用环境变量：DINOTTY_NOTIFICATION_TYPE, DINOTTY_PANE_ID, DINOTTY_TITLE, DINOTTY_BODY',

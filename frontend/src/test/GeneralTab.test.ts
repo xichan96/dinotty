@@ -125,19 +125,21 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     expect(settings.shell_path).toBeNull()
   })
 
-  it('renders the behavior section header with a settings.behavior i18n key', () => {
+  it('renders the behavior group title with a settings.group.behavior i18n key', () => {
     const wrapper = mount(GeneralTab)
     const input = wrapper.find<HTMLInputElement>(
       'input[type="checkbox"][data-setting="confirm-before-close-tab"]'
     )
-    const section = input.element.closest('section.settings-section')
-    expect(section).not.toBeNull()
-    const header = section!.querySelector('h3')
+    // The section-level "Behavior" header was redundant with the group
+    // title and removed; the group title is the remaining heading.
+    const group = input.element.closest('div.settings-group')
+    expect(group).not.toBeNull()
+    const header = group!.querySelector('.settings-group-title')
     expect(header).not.toBeNull()
     // The text should be one of the known translations (either zh or en),
     // not the raw key.
     const headerText = header!.textContent?.trim() ?? ''
-    expect(headerText).not.toBe('settings.behavior')
+    expect(headerText).not.toBe('settings.group.behavior')
     expect(headerText.length).toBeGreaterThan(0)
   })
 

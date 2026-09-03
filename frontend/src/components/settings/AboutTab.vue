@@ -188,7 +188,7 @@ onUnmounted(() => {
 }
 .about-link {
   font-size: 13px;
-  color: var(--accent, #8a8a8a);
+  color: var(--accent);
   text-decoration: none;
   word-break: break-all;
 }
@@ -198,12 +198,12 @@ onUnmounted(() => {
 .update-card {
   margin: 2px 0 14px;
   padding: 13px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent, #8a8a8a) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   border-radius: 8px;
   background:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--accent, #8a8a8a) 12%, transparent),
+      color-mix(in srgb, var(--accent) 12%, transparent),
       transparent 68%
     ),
     var(--bg-surface);
@@ -226,15 +226,15 @@ onUnmounted(() => {
 .update-release-button {
   margin-top: 11px;
   padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent, #8a8a8a) 55%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
   border-radius: 6px;
   color: var(--fg-bright);
-  background: color-mix(in srgb, var(--accent, #8a8a8a) 15%, var(--bg-input));
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg-input));
   font-size: 12px;
   font-weight: 600;
 }
 .update-release-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent, #8a8a8a) 24%, var(--bg-input));
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-input));
 }
 .update-release-button:disabled {
   cursor: wait;
@@ -242,7 +242,7 @@ onUnmounted(() => {
 }
 .update-open-error {
   margin: 8px 0 0;
-  color: var(--danger, #e45d5d);
+  color: var(--danger);
   font-size: 11px;
 }
 .auto-update-row {

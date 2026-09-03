@@ -103,16 +103,13 @@
       <h3 class="settings-group-title">{{ t('notification.presentationBehavior') }}</h3>
       <div class="settings-row">
         <label>{{ t('notification.dndLevel') }}</label>
-        <div class="segmented-control">
-          <button
-            v-for="level in dndLevels"
-            :key="level.value"
-            :class="{ active: presentation.dnd_level === level.value }"
-            @click="presentation.dnd_level = level.value"
-          >
-            {{ t(level.labelKey) }}
-          </button>
-        </div>
+        <SegmentedControl
+          class="dnd-control"
+          :model-value="presentation.dnd_level"
+          :options="dndLevelOptions"
+          :aria-label="t('notification.dndLevel')"
+          @update:model-value="(v) => (presentation.dnd_level = v as DndLevel)"
+        />
       </div>
       <div class="settings-row">
         <label>{{ t('notification.ignoreCurrentTab') }}</label>
@@ -162,7 +159,13 @@
               (presentation.sounds[key].volume = (e.target as HTMLInputElement).valueAsNumber / 100)
           "
         />
-        <button class="preview-btn" @click="previewSound(key)">▶</button>
+        <button
+          class="preview-btn"
+          :aria-label="t('notification.soundPreview')"
+          @click="previewSound(key)"
+        >
+          <Play :size="12" />
+        </button>
       </div>
     </div>
 
@@ -186,13 +189,19 @@
           :placeholder="t('notification.hookCommand')"
           @change="saveSettings()"
         />
-        <button class="hook-del-btn" @click="cfg.hooks.splice(idx, 1)">&times;</button>
+        <button
+          class="hook-del-btn"
+          :aria-label="t('notification.hookDelete')"
+          @click="cfg.hooks.splice(idx, 1)"
+        >
+          <X :size="14" />
+        </button>
       </div>
       <button
         class="hook-add-btn"
         @click="cfg.hooks.push({ enabled: true, notification_type: null, command: '' })"
       >
-        + {{ t('notification.hookAdd') }}
+        <Plus :size="12" /> {{ t('notification.hookAdd') }}
       </button>
     </CollapsibleSection>
 
@@ -247,7 +256,8 @@
 
         <div class="api-actions">
           <button class="send-btn" :disabled="!canSend || sending" @click="sendTest">
-            {{ sending ? '...' : `▶ ${t('notification.testSend')}` }}
+            <Play v-if="!sending" :size="12" />
+            {{ sending ? '...' : t('notification.testSend') }}
           </button>
           <span v-if="testResult" class="api-result" :class="testResult.ok ? 'ok' : 'err'">{{
             testResult.text
@@ -260,8 +270,10 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { Play, Plus, X } from 'lucide-vue-next'
 import { useSettings } from '../../composables/useSettings'
 import CollapsibleSection from './CollapsibleSection.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import { useI18n } from '../../composables/useI18n'
 import {
   playSound,
@@ -282,11 +294,11 @@ const { settings: presentation, isEphemeral } = useNotificationPresentation()
 const builtinNames = getBuiltinSoundNames()
 const soundTypes: NotificationType[] = ['info', 'success', 'warning', 'error', 'urgent']
 const notifTypes = ['info', 'success', 'warning', 'error', 'urgent']
-const dndLevels: Array<{ value: DndLevel; labelKey: string }> = [
-  { value: 'normal', labelKey: 'notification.dnd.normal' },
-  { value: 'dot_sound', labelKey: 'notification.dnd.dotSound' },
-  { value: 'silent', labelKey: 'notification.dnd.silent' },
-]
+const dndLevelOptions = computed<Array<{ value: string; label: string }>>(() => [
+  { value: 'normal', label: t('notification.dnd.normal') },
+  { value: 'dot_sound', label: t('notification.dnd.dotSound') },
+  { value: 'silent', label: t('notification.dnd.silent') },
+])
 
 const testMode = ref<'form' | 'raw'>('form')
 const testForm = reactive({
@@ -399,28 +411,9 @@ async function sendTest() {
 .coalesce-input {
   margin-left: auto;
 }
-.segmented-control {
-  display: flex;
-  margin-left: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.segmented-control button {
-  border: 0;
-  border-right: 1px solid var(--border);
-  padding: 3px 8px;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  font-size: 11px;
-}
-.segmented-control button:last-child {
-  border-right: 0;
-}
-.segmented-control button.active {
-  background: var(--fg-muted);
-  color: var(--bg);
+.dnd-control {
+  flex: 1;
+  min-width: 0;
 }
 .quiet-hours-row input[type='time'] {
   padding: 2px 4px;
@@ -435,7 +428,7 @@ async function sendTest() {
 }
 .ephemeral-note {
   margin: 6px 0 0;
-  color: var(--warning, #d9a441);
+  color: var(--warning);
   font-size: 11px;
 }
 .sound-row {
@@ -468,6 +461,8 @@ async function sendTest() {
   cursor: pointer;
   padding: 3px 8px;
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
 }
 .preview-btn:hover {
   border-color: var(--fg-muted);
@@ -479,7 +474,7 @@ async function sendTest() {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: var(--bg-secondary, var(--bg-surface)));
+  background: var(--bg-surface);
 }
 .api-method-row {
   display: flex;
@@ -504,7 +499,7 @@ async function sendTest() {
   cursor: pointer;
 }
 .mode-tabs button.active {
-  background: var(--fg-muted, #555);
+  background: var(--fg-muted);
   color: var(--bg);
 }
 .raw-editor {
@@ -561,7 +556,7 @@ async function sendTest() {
   font-family: monospace;
 }
 .api-field input::placeholder {
-  color: var(--fg-muted, #555);
+  color: var(--fg-muted);
 }
 .api-actions {
   display: flex;
@@ -578,6 +573,9 @@ async function sendTest() {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .send-btn:hover {
   opacity: 0.85;
@@ -646,9 +644,10 @@ async function sendTest() {
   background: none;
   border: none;
   color: var(--fg-muted);
-  font-size: 16px;
   cursor: pointer;
   padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
 }
 .hook-del-btn:hover {
   color: var(--danger);
@@ -662,6 +661,10 @@ async function sendTest() {
   padding: 4px 12px;
   cursor: pointer;
   width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 .hook-add-btn:hover {
   border-color: var(--fg-muted);

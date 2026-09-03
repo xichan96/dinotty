@@ -78,8 +78,12 @@
         <div class="access-url-row">
           <div class="access-url-display">
             <span class="access-url-text">{{ accessUrl }}</span>
-            <button class="access-url-copy" :title="t('settings.copyUrl')" @click="copyAccessUrl()">
-              {{ copied ? '✓' : '⧉' }}
+            <button
+              class="access-url-copy"
+              :title="t('settings.copyUrl')"
+              @click="copyAccessUrl()"
+            >
+              <Check v-if="copied" :size="14" /><Copy v-else :size="14" />
             </button>
           </div>
           <div v-if="accessUrl" class="qr-code-wrap">
@@ -146,7 +150,13 @@
           <h3>{{ t('settings.ipWhitelist') }}</h3>
           <div v-for="(ip, idx) in settings.ip_whitelist" :key="idx" class="ip-row">
             <span class="ip-text">{{ ip }}</span>
-            <button class="icon-btn danger" @click="removeIp(idx)">✕</button>
+            <button
+              class="icon-btn danger"
+              :aria-label="t('settings.ipWhitelist.remove')"
+              @click="removeIp(idx)"
+            >
+              <X :size="14" />
+            </button>
           </div>
           <div class="ip-row" style="margin-top: 8px">
             <input
@@ -899,7 +909,7 @@ onMounted(async () => {
 }
 
 .icon-btn:hover {
-  background: #3a3a3c;
+  background: var(--bg-hover);
 }
 
 .icon-btn:disabled {
@@ -908,12 +918,12 @@ onMounted(async () => {
 }
 
 .icon-btn.danger {
-  color: #f44747;
-  border-color: #4a2020;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .icon-btn.danger:hover {
-  background: #3a1e1e;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
 .ip-row {
@@ -926,7 +936,7 @@ onMounted(async () => {
 .ip-text {
   flex: 1;
   font-size: 13px;
-  color: #c8c8c8;
+  color: var(--fg);
   font-family: monospace;
   padding: 4px 2px;
 }
@@ -965,7 +975,7 @@ onMounted(async () => {
 
 .token-error,
 .settings-error {
-  color: #f44747;
+  color: var(--danger);
   font-size: 14px;
   font-weight: 600;
   margin: 4px 0 0;
@@ -990,7 +1000,7 @@ onMounted(async () => {
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 6px;
   display: flex;
@@ -1002,8 +1012,8 @@ onMounted(async () => {
 }
 
 .qr-refresh-btn:hover {
-  color: var(--text-primary, #fff);
-  border-color: var(--text-secondary, #888);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 .log-modal-overlay {
@@ -1020,7 +1030,7 @@ onMounted(async () => {
 }
 
 .log-modal {
-  background: var(--bg, #1a1a1a);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
   width: 90vw;
@@ -1042,7 +1052,7 @@ onMounted(async () => {
 .log-modal-header h3 {
   margin: 0;
   font-size: 16px;
-  color: var(--text-primary, #e8e8e8);
+  color: var(--text-primary);
 }
 
 .log-modal-actions {
@@ -1058,7 +1068,7 @@ onMounted(async () => {
   font-family: monospace;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--text-secondary, #aaa);
+  color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
 }

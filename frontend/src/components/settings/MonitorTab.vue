@@ -177,7 +177,7 @@ const cpuChartData = computed(() => ({
     {
       data: [...cpuHistory.value],
       borderColor: '#8A8A8A',
-      backgroundColor: 'rgba(77,127,255,0.1)',
+      backgroundColor: 'rgba(138,138,138,0.1)',
       fill: true,
     },
   ],
@@ -188,8 +188,8 @@ const memChartData = computed(() => ({
   datasets: [
     {
       data: [...memHistory.value],
-      borderColor: '#34d399',
-      backgroundColor: 'rgba(52,211,153,0.1)',
+      borderColor: '#98C379',
+      backgroundColor: 'rgba(152,195,121,0.1)',
       fill: true,
     },
   ],
@@ -200,14 +200,14 @@ const netChartData = computed(() => ({
   datasets: [
     {
       data: [...netTxHistory.value],
-      borderColor: '#f59e0b',
-      backgroundColor: 'rgba(245,158,11,0.05)',
+      borderColor: '#E5C07B',
+      backgroundColor: 'rgba(229,192,123,0.05)',
       fill: true,
     },
     {
       data: [...netRxHistory.value],
-      borderColor: '#8b5cf6',
-      backgroundColor: 'rgba(139,92,246,0.05)',
+      borderColor: '#C678DD',
+      backgroundColor: 'rgba(198,120,221,0.05)',
       fill: true,
     },
   ],

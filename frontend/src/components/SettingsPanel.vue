@@ -372,8 +372,8 @@ const tabs = computed(() => [
   color: var(--fg);
 }
 .settings-tab.active {
-  color: var(--accent, #8a8a8a);
-  border-bottom-color: var(--accent, #8a8a8a);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .settings-body {
@@ -433,11 +433,11 @@ const tabs = computed(() => [
   text-align: left;
 }
 .theme-card.active {
-  border-color: var(--accent, #8a8a8a);
-  box-shadow: 0 0 0 1px var(--accent, #8a8a8a);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .theme-card:hover {
-  border-color: var(--accent-hover, #9e9e9e);
+  border-color: var(--accent-hover);
   transform: translateY(-1px);
 }
 .theme-preview {
@@ -500,7 +500,7 @@ const tabs = computed(() => [
   flex: 1;
   font-family: var(--font-mono);
   font-size: 13px;
-  color: var(--accent, #8a8a8a);
+  color: var(--accent);
   word-break: break-all;
 }
 .access-url-copy {
@@ -638,7 +638,7 @@ const tabs = computed(() => [
 }
 .settings-row input[type='range'] {
   flex: 1;
-  accent-color: var(--accent, #8a8a8a);
+  accent-color: var(--accent);
 }
 .settings-row input[type='file'] {
   font-size: 12px;
@@ -661,7 +661,7 @@ const tabs = computed(() => [
   min-height: 28px;
 }
 .font-dropdown-trigger:hover {
-  border-color: var(--accent, #8a8a8a);
+  border-color: var(--accent);
 }
 .font-dropdown-arrow {
   font-size: 10px;
@@ -706,8 +706,8 @@ const tabs = computed(() => [
   background: var(--bg-hover);
 }
 .font-dropdown-item.active {
-  background: rgba(77, 127, 255, 0.15);
-  color: var(--accent, #8a8a8a);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
 }
 .font-item-label {
   flex: 1;
@@ -754,7 +754,7 @@ const tabs = computed(() => [
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--accent, #8a8a8a);
+  background: var(--accent);
   cursor: pointer;
 }
 .range-val {
@@ -805,7 +805,7 @@ const tabs = computed(() => [
   transition: background 0.2s;
 }
 .toggle input:checked + .toggle-track {
-  background: var(--accent, #8a8a8a);
+  background: var(--accent);
 }
 .toggle-thumb {
   position: absolute;
@@ -849,12 +849,12 @@ const tabs = computed(() => [
   justify-content: center;
 }
 .shortcut-del:hover {
-  background: rgba(255, 100, 100, 0.2);
-  color: #ff6b6b;
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  color: var(--danger);
 }
 .shortcut-add {
   font-size: 12px;
-  color: var(--accent, #8a8a8a);
+  color: var(--accent);
   padding: 4px 0;
 }
 
@@ -993,8 +993,8 @@ const tabs = computed(() => [
 }
 
 .ak-key-del:hover {
-  background: rgba(255, 100, 100, 0.35);
-  color: #ff6b6b;
+  background: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
 }
 
 .ak-key-resize {
@@ -1011,7 +1011,7 @@ const tabs = computed(() => [
 }
 
 .ak-key-resize:hover {
-  background: rgba(77, 127, 255, 0.4);
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .ak-wyg-add-key {
@@ -1020,7 +1020,7 @@ const tabs = computed(() => [
   min-width: 40px !important;
   font-size: 18px !important;
   font-weight: 300;
-  color: #8e8e93 !important;
+  color: var(--fg-muted) !important;
 }
 
 .ak-wyg-remove-row {
@@ -1031,14 +1031,14 @@ const tabs = computed(() => [
   border-radius: 6px;
   font-size: 12px;
   color: var(--fg-muted);
-  border: 1px solid var(--border, #444);
+  border: 1px solid var(--border);
   background: var(--bg-input);
 }
 
 .ak-wyg-remove-row:hover {
-  background: rgba(255, 100, 100, 0.15);
-  color: #ff6b6b;
-  border-color: rgba(255, 100, 100, 0.4);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .ak-wyg-bottom-cluster {
@@ -1075,7 +1075,7 @@ const tabs = computed(() => [
 }
 
 .ak-enter-resize:hover {
-  background: rgba(77, 127, 255, 0.4);
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .ak-actions {
@@ -1178,14 +1178,14 @@ const tabs = computed(() => [
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 11px;
-  background: #2c2c2e;
+  background: var(--bg-hover);
   color: var(--fg);
   border: 1px solid var(--border);
 }
 .ak-record-btn.recording {
-  background: #ff3b30;
+  background: var(--danger);
   color: #fff;
-  border-color: #ff3b30;
+  border-color: var(--danger);
 }
 
 .ak-modal-actions {
@@ -1209,7 +1209,7 @@ const tabs = computed(() => [
   padding: 8px;
   border-radius: 5px;
   background: none;
-  color: var(--fg-bright, #d0d0d0);
+  color: var(--fg-bright);
   font-size: 13px;
   font-weight: 500;
   border: none;

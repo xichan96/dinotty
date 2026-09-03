@@ -368,7 +368,7 @@ onBeforeUnmount(() => stopKbRecord())
   padding: 4px 0;
   font-size: 11px;
   font-weight: 500;
-  color: var(--fg-muted, #777);
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border);
@@ -393,9 +393,9 @@ onBeforeUnmount(() => stopKbRecord())
   font-size: 11px;
   font-family: inherit;
   line-height: 1.4;
-  color: var(--fg, #e0e0e0);
-  background: var(--bg-secondary, var(--bg-surface));
-  border: 1px solid var(--border, #444);
+  color: var(--fg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
   min-width: 18px;
   text-align: center;
@@ -418,13 +418,13 @@ onBeforeUnmount(() => stopKbRecord())
   display: block;
 }
 .kb-stop {
-  color: #ef4444 !important;
-  border-color: #ef4444 !important;
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
 }
 .kb-record-error {
   flex-basis: 100%;
   margin: 4px 0 0 30px;
-  color: #ef4444;
+  color: var(--danger);
   font-size: 12px;
 }
 </style>

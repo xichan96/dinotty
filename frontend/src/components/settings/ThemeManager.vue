@@ -519,7 +519,7 @@ function applyImportedTheme() {
 
 .theme-manager-cap,
 .theme-manager-error {
-  color: var(--color-red, #ef4444);
+  color: var(--danger);
 }
 
 .theme-manager-error {
@@ -551,8 +551,8 @@ function applyImportedTheme() {
 }
 
 .theme-card-actions button.confirm {
-  border-color: var(--color-red, #ef4444);
-  color: var(--color-red, #ef4444);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 @media (max-width: 560px) {

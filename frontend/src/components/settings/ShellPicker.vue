@@ -376,7 +376,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: 12px;
-  background: var(--bg-surface, #252526);
+  background: var(--bg-surface);
   box-shadow: 0 18px 50px color-mix(in srgb, #000 34%, transparent);
 }
 
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
 
 .shell-error,
 .selection-warning {
-  color: var(--warning, #d9a441);
+  color: var(--warning);
 }
 
 .retry-button {

@@ -51,9 +51,9 @@
     </div>
 
     <div class="mc-ws-footer">
-      <button class="mc-ws-add-btn" @click="$emit('add')">
+      <button class="mc-ws-add-btn" :aria-label="t('workspace.add')" @click="$emit('add')">
         <Plus :size="14" />
-        {{ t('workspace.add') }}
+        <span class="mc-ws-add-label">{{ t('workspace.add') }}</span>
       </button>
     </div>
 
@@ -192,6 +192,10 @@ function onHandleTouchStart(e: TouchEvent, id: string) {
 
 function startDrag(e: MouseEvent | TouchEvent, id: string, isTouch: boolean) {
   if (!canDrag()) return
+  // ≤600px 视口渲染为横向 chip 行：竖向拖拽指示器不适用，且原生
+  // pan-x 滚动必须独占触摸手势（非被动 touchmove 会阻断它）。
+  // 与 mission-control.css 的断点保持一致。
+  if (window.matchMedia('(max-width: 600px)').matches) return
   const pos = getPointerPos(e)
   startX = pos.clientX
   startY = pos.clientY

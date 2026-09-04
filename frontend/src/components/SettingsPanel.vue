@@ -89,8 +89,6 @@ import {
   onBeforeUnmount,
   defineAsyncComponent,
 } from 'vue'
-import { useSettings, notifyTextChange } from '../composables/useSettings'
-import { effectiveTheme } from '../composables/useDeviceThemeSelection'
 import { useI18n } from '../composables/useI18n'
 import { useUiStore } from '../stores/uiStore'
 import {
@@ -119,7 +117,6 @@ const emit = defineEmits<{
   'open-about': []
 }>()
 
-const { settings, saveSettings, loadSettings, applyCurrentTheme } = useSettings()
 const { t } = useI18n()
 const ui = useUiStore()
 
@@ -178,42 +175,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateTabsOverflow)
 })
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let suppressSave = false
-function scheduleSave() {
-  if (suppressSave) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => saveSettings(), 500)
-}
-
-// Only trigger DOM-heavy theme application when theme fields actually change
-watch(effectiveTheme, applyCurrentTheme)
-
-// Only notify terminal text changes when text settings change
-watch(() => ({ ...settings.text }), notifyTextChange)
-
-// Save on any setting change
-watch(settings, scheduleSave, { deep: true })
-
-// Re-fetch settings from backend when the panel opens (multi-end sync).
-// Cancel any pending debounced save and suppress the autosave that the
-// remote Object.assign would trigger, so we neither PUT back the fetched
-// value nor let a stale pending timer overwrite it.
+// Theme apply / text notify / autosave / refetch-on-open live in
+// useSettingsSync (called from App.vue) so they keep working while this
+// panel is not mounted.
 watch(
   () => props.open,
   (v) => {
     if (!v) return
     nextTick(updateTabsOverflow)
-    if (saveTimer) {
-      clearTimeout(saveTimer)
-      saveTimer = null
-    }
-    suppressSave = true
-    void loadSettings().finally(() =>
-      nextTick(() => {
-        suppressSave = false
-      })
-    )
   }
 )
 

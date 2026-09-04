@@ -13,5 +13,6 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     include: ['src/**/*.{test,spec}.ts'],
+    setupFiles: ['src/test/helpers/i18n-preload.ts'],
   },
 })

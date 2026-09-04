@@ -50,3 +50,15 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(Toast, toastOptions)
 app.mount('#app')
+
+// Monaco lives in a lazy chunk so terminal-only sessions don't pay for it.
+// Prefetch it once the browser is idle so opening the file workspace later
+// (or on a return visit, via the SW cache) doesn't wait on a cold download.
+const prefetchMonaco = () => {
+  import('./components/workspace/MonacoEditor.vue').catch(() => {})
+}
+if ('requestIdleCallback' in window) {
+  requestIdleCallback(() => prefetchMonaco(), { timeout: 3000 })
+} else {
+  setTimeout(prefetchMonaco, 3000)
+}

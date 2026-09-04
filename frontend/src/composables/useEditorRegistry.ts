@@ -1,4 +1,4 @@
-import * as monaco from 'monaco-editor'
+import type * as monaco from 'monaco-editor'
 
 const editors = new Map<string, monaco.editor.IStandaloneCodeEditor>()
 const pending = new Map<string, Array<(e: monaco.editor.IStandaloneCodeEditor) => void>>()

@@ -256,6 +256,8 @@ export interface PluginPrefsConfig {
   /** Overlay ids the user has turned off in the plugin tab (persistent). */
   hidden_overlays: string[]
   show_incompatible: boolean
+  /** Per-plugin open mode for component plugins; absent key = 'tab'. */
+  open_modes?: Record<string, 'tab' | 'floating'>
 }
 
 export interface ActionKey {
@@ -507,7 +509,12 @@ export const settings = reactive<SettingsData>({
   theme: { preset: 'dark', custom: null },
   custom_themes: [],
   hidden_builtins: [],
-  plugin_prefs: { hidden_toolbar: [], hidden_overlays: [], show_incompatible: false },
+  plugin_prefs: {
+    hidden_toolbar: [],
+    hidden_overlays: [],
+    show_incompatible: false,
+    open_modes: {},
+  },
   background: { mode: 'solid', color: null, opacity: 1.0, has_image: false },
   text: {
     font_size: 14,

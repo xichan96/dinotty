@@ -29,22 +29,15 @@ fn plugin_prefs_round_trips_open_modes() {
         hidden_toolbar: vec![],
         hidden_overlays: vec![],
         show_incompatible: false,
-        open_modes: std::collections::HashMap::from([(
-            "json-formatter".into(),
-            "floating".into(),
-        )]),
+        open_modes: std::collections::HashMap::from([("json-formatter".into(), "floating".into())]),
     };
     let json = serde_json::to_string(&prefs).unwrap();
     let back: PluginPrefsConfig = serde_json::from_str(&json).unwrap();
-    assert_eq!(
-        back.open_modes.get("json-formatter").map(String::as_str),
-        Some("floating")
-    );
+    assert_eq!(back.open_modes.get("json-formatter").map(String::as_str), Some("floating"));
 }
 
 #[test]
 fn plugin_prefs_without_open_modes_deserializes_to_empty() {
-    let prefs: PluginPrefsConfig =
-        serde_json::from_str(r#"{"hidden_toolbar":["p1"]}"#).unwrap();
+    let prefs: PluginPrefsConfig = serde_json::from_str(r#"{"hidden_toolbar":["p1"]}"#).unwrap();
     assert!(prefs.open_modes.is_empty());
 }

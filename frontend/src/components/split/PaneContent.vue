@@ -65,6 +65,9 @@ const props = defineProps<{
   leaf: LeafPane
   isVisible: boolean
   isFocused: boolean
+  /** Workspace of the owning terminal tab; overrides pane-id derivation for
+   *  split panes whose uuid pane ids do not encode a workspace. */
+  workspaceId?: string
 }>()
 
 const emit = defineEmits<{
@@ -95,7 +98,7 @@ const plugin = computed(() =>
 const api = computed(() =>
   props.leaf.pluginId ? getPluginContext(props.leaf.pluginId) : undefined
 )
-const workspaceId = computed(() => workspaceIdFromPaneId(props.leaf.paneId))
+const workspaceId = computed(() => props.workspaceId ?? workspaceIdFromPaneId(props.leaf.paneId))
 </script>
 
 <style scoped>

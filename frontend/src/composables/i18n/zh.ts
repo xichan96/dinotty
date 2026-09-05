@@ -972,6 +972,7 @@ export default {
   'plugin.openMode': '打开方式',
   'plugin.openMode.tab': '标签页',
   'plugin.openMode.floating': '浮层窗口',
+  'plugin.openMode.pane': '窗格',
   'plugin.floatWindow.close': '关闭窗口',
   'plugin.incompatible': '当前系统不支持',
   'plugin.showIncompatible': '显示不兼容插件',

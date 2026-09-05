@@ -289,6 +289,7 @@
               >
                 <option value="tab">{{ t('plugin.openMode.tab') }}</option>
                 <option value="floating">{{ t('plugin.openMode.floating') }}</option>
+                <option value="pane">{{ t('plugin.openMode.pane') }}</option>
               </select>
             </label>
           </div>
@@ -534,12 +535,13 @@ async function toggleToolbarVisible(id: string, visible: boolean) {
   await saveSettings()
 }
 
-function openModeOf(pluginId: string): 'tab' | 'floating' {
-  return settings.plugin_prefs?.open_modes?.[pluginId] === 'floating' ? 'floating' : 'tab'
+function openModeOf(pluginId: string): 'tab' | 'floating' | 'pane' {
+  const stored = settings.plugin_prefs?.open_modes?.[pluginId]
+  return stored === 'floating' || stored === 'pane' ? stored : 'tab'
 }
 
 function onOpenModeChange(pluginId: string, value: string): void {
-  const mode: 'tab' | 'floating' = value === 'floating' ? 'floating' : 'tab'
+  const mode: 'tab' | 'floating' | 'pane' = value === 'floating' || value === 'pane' ? value : 'tab'
   settings.plugin_prefs = {
     ...(settings.plugin_prefs ?? {
       hidden_toolbar: [],

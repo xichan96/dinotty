@@ -41,7 +41,8 @@ function setup(pluginState: LoadedPlugin['state'] = 'active', pluginId = 'json-f
   const tabs = ref<Tab[]>([])
   const floatStore = usePluginFloatWindowsStore()
   const openFloat = vi.fn()
-  const openPref = vi.fn<(id: string) => 'tab' | 'floating'>(() => 'tab')
+  const openPref = vi.fn<(id: string) => 'tab' | 'floating' | 'pane'>(() => 'tab')
+  const openPane = vi.fn<() => Promise<boolean>>(async () => true)
   const openPlugin = usePluginLauncher({
     tabs,
     activeWorkspaceId: ref<string | null>('workspace-a'),
@@ -54,25 +55,31 @@ function setup(pluginState: LoadedPlugin['state'] = 'active', pluginId = 'json-f
     focusActive: vi.fn(),
     floatWindows: { open: openFloat },
     openModePref: openPref,
+    openPane,
   }).openPlugin
   window.__dinotty_ui_notify = mocks.notify as never
-  return { openPlugin, openFloat, openPref, floatStore, tabs }
+  return { openPlugin, openFloat, openPref, openPane, floatStore, tabs }
 }
 
 describe('resolvePluginOpenMode', () => {
   it('explicit mode wins over the pref', () => {
     expect(resolvePluginOpenMode('floating', 'tab', false)).toBe('floating')
     expect(resolvePluginOpenMode('tab', 'floating', false)).toBe('tab')
+    expect(resolvePluginOpenMode('pane', 'floating', false)).toBe('pane')
+    expect(resolvePluginOpenMode('tab', 'pane', false)).toBe('tab')
   })
 
   it('falls back to the pref when no explicit mode is given', () => {
     expect(resolvePluginOpenMode(undefined, 'floating', false)).toBe('floating')
     expect(resolvePluginOpenMode(undefined, 'tab', false)).toBe('tab')
+    expect(resolvePluginOpenMode(undefined, 'pane', false)).toBe('pane')
   })
 
   it('forces tab on touch devices regardless of mode or pref', () => {
     expect(resolvePluginOpenMode('floating', 'floating', true)).toBe('tab')
     expect(resolvePluginOpenMode(undefined, 'floating', true)).toBe('tab')
+    expect(resolvePluginOpenMode('pane', 'pane', true)).toBe('tab')
+    expect(resolvePluginOpenMode(undefined, 'pane', true)).toBe('tab')
   })
 })
 
@@ -120,6 +127,48 @@ describe('usePluginLauncher open-mode dispatch', () => {
     const { openPlugin, openFloat } = setup()
     await openPlugin('json-formatter', 'floating')
     expect(openFloat).toHaveBeenCalledWith('json-formatter')
+    expect(mocks.apiCreatePluginTab).not.toHaveBeenCalled()
+  })
+
+  it('routes to a pane when the pref is pane', async () => {
+    const { openPlugin, openPane, openPref } = setup()
+    openPref.mockReturnValue('pane')
+    await openPlugin('json-formatter')
+    expect(openPane).toHaveBeenCalledWith('json-formatter')
+    expect(mocks.apiCreatePluginTab).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a tab when pane has no terminal target', async () => {
+    const { openPlugin, openPane, openPref } = setup()
+    openPref.mockReturnValue('pane')
+    openPane.mockResolvedValue(false)
+    await openPlugin('json-formatter')
+    expect(openPane).toHaveBeenCalledWith('json-formatter')
+    expect(mocks.apiCreatePluginTab).toHaveBeenCalled()
+  })
+
+  it('an explicit pane mode overrides a tab pref', async () => {
+    const { openPlugin, openPane } = setup()
+    await openPlugin('json-formatter', 'pane')
+    expect(openPane).toHaveBeenCalledWith('json-formatter')
+    expect(mocks.apiCreatePluginTab).not.toHaveBeenCalled()
+  })
+
+  it('routes to a tab when the pref is pane but the device is touch', async () => {
+    const { openPlugin, openPane, openPref } = setup()
+    openPref.mockReturnValue('pane')
+    mocks.isTouchDevice.mockReturnValue(true)
+    await openPlugin('json-formatter')
+    expect(openPane).not.toHaveBeenCalled()
+    expect(mocks.apiCreatePluginTab).toHaveBeenCalled()
+  })
+
+  it('does not open a pane for an unloaded/errored plugin and notifies', async () => {
+    const { openPlugin, openPane, openPref } = setup('error')
+    openPref.mockReturnValue('pane')
+    await openPlugin('json-formatter')
+    expect(openPane).not.toHaveBeenCalled()
+    expect(mocks.notify).toHaveBeenCalled()
     expect(mocks.apiCreatePluginTab).not.toHaveBeenCalled()
   })
 

@@ -1003,6 +1003,7 @@ export default {
   'plugin.openMode': 'Open with',
   'plugin.openMode.tab': 'Tab',
   'plugin.openMode.floating': 'Floating window',
+  'plugin.openMode.pane': 'Pane',
   'plugin.floatWindow.close': 'Close window',
   'plugin.incompatible': 'Not supported on this system',
   'plugin.showIncompatible': 'Show incompatible',

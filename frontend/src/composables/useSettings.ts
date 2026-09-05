@@ -257,7 +257,7 @@ export interface PluginPrefsConfig {
   hidden_overlays: string[]
   show_incompatible: boolean
   /** Per-plugin open mode for component plugins; absent key = 'tab'. */
-  open_modes?: Record<string, 'tab' | 'floating'>
+  open_modes?: Record<string, 'tab' | 'floating' | 'pane'>
 }
 
 export interface ActionKey {

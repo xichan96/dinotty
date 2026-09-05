@@ -317,7 +317,7 @@ declare global {
     __dinotty_terminal_api?: PluginContext['terminal']
     __dinotty_ui_notify?: PluginContext['ui']['notify']
     __dinotty_ui_confirm?: PluginContext['ui']['confirm']
-    __dinotty_open_plugin?: (pluginId: string, mode?: 'tab' | 'floating') => void
+    __dinotty_open_plugin?: (pluginId: string, mode?: 'tab' | 'floating' | 'pane') => void
     __dinotty_settings_listener?: PluginContext['settings']['onDidChange']
     // Test hooks for P3 verification (focusActive + isComposing guard).
     __dinotty_test_focus_active?: () => void

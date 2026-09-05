@@ -174,14 +174,16 @@ export function useSplitPane(opts: {
     }
   }
 
-  /** Insert a non-terminal pane (plugin/files/web) by splitting the target pane. */
+  /** Insert a non-terminal pane (plugin/files/web) by splitting the target pane.
+   *  Resolves true when a pane was created, false when there is no active
+   *  terminal tab to split or creation failed. */
   async function insertNonTerminalPane(
     kind: 'plugin' | 'files' | 'web',
     payload: { pluginId?: string; path?: string; url?: string },
     direction: 'horizontal' | 'vertical' = 'horizontal'
-  ) {
+  ): Promise<boolean> {
     const tab = getActiveTerminal()
-    if (!tab) return
+    if (!tab) return false
     const apiDirection = direction === 'horizontal' ? 'right' : 'bottom'
     try {
       let result
@@ -218,8 +220,10 @@ export function useSplitPane(opts: {
       setActivePaneId(result.new_pane_id)
       persist()
       syncTabLayout(tab)
+      return true
     } catch (e) {
       console.error(`Failed to create ${kind} pane:`, e)
+      return false
     }
   }
 

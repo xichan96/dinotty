@@ -4,7 +4,7 @@ import type { LoadedPlugin } from './usePluginLoader'
 import { apiCreatePluginTab } from './useTabApi'
 import { isTouchDevice } from './useIsMobile'
 
-export type PluginOpenMode = 'tab' | 'floating'
+export type PluginOpenMode = 'tab' | 'floating' | 'pane'
 
 export interface PluginLauncherOptions {
   tabs: Ref<Tab[]>
@@ -20,6 +20,9 @@ export interface PluginLauncherOptions {
   floatWindows?: { open: (pluginId: string) => void }
   /** Configured open mode for the plugin; absent/unknown values → 'tab'. */
   openModePref?: (pluginId: string) => PluginOpenMode
+  /** Opens the plugin as a pane in the active terminal tab. Returns false when
+   *  no suitable target exists (caller falls back to a plugin tab). */
+  openPane?: (pluginId: string) => Promise<boolean> | boolean
 }
 
 export interface PluginLauncherState {
@@ -68,6 +71,20 @@ export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherSt
         }
         opts.floatWindows?.open(pluginId)
         return
+      }
+
+      if (resolved === 'pane') {
+        const plugin = loadedPlugins.get(pluginId)
+        if (!plugin || plugin.state !== 'active') {
+          const msg =
+            plugin?.state === 'error'
+              ? `Plugin "${pluginId}" failed to load: ${plugin.error ?? 'unknown'}`
+              : `Plugin "${pluginId}" is not loaded.`
+          console.warn('[openPlugin]', msg)
+          window.__dinotty_ui_notify?.(msg, 'error')
+          return
+        }
+        if (opts.openPane && (await opts.openPane(pluginId))) return
       }
 
       const wsId = activeWorkspaceId.value ?? ''

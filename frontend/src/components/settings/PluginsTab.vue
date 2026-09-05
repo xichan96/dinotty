@@ -259,39 +259,6 @@
             }}</span>
             <span v-if="p.state === 'error'" class="plugin-badge error">error</span>
             <span class="plugin-card-version">v{{ p.version }}</span>
-            <button
-              v-if="p.crowded"
-              class="plugin-gear-btn"
-              :class="{ active: prefsOpen[p.id] }"
-              :title="t('plugin.preferences')"
-              :aria-label="t('plugin.preferences')"
-              :aria-expanded="!!prefsOpen[p.id]"
-              @click="togglePrefs(p.id)"
-            >
-              <SettingsIcon :size="14" />
-            </button>
-          </div>
-          <div v-if="p.crowded && prefsOpen[p.id]" class="plugin-prefs-panel">
-            <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
-              <input
-                type="checkbox"
-                :checked="!hiddenToolbarIncludes(p.id)"
-                @change="toggleToolbarVisible(p.id, ($event.target as HTMLInputElement).checked)"
-              />
-              <span>{{ t('plugin.showInToolbar') }}</span>
-            </label>
-            <label class="plugin-toggle-inline plugin-open-mode">
-              <span>{{ t('plugin.openMode') }}</span>
-              <select
-                class="plugin-open-mode-select"
-                :value="openModeOf(p.id)"
-                @change="onOpenModeChange(p.id, ($event.target as HTMLSelectElement).value)"
-              >
-                <option value="tab">{{ t('plugin.openMode.tab') }}</option>
-                <option value="floating">{{ t('plugin.openMode.floating') }}</option>
-                <option value="pane">{{ t('plugin.openMode.pane') }}</option>
-              </select>
-            </label>
           </div>
           <p v-if="p.description" class="plugin-card-desc">{{ p.description }}</p>
           <p v-if="p.error" class="plugin-card-error">{{ p.error }}</p>
@@ -332,6 +299,15 @@
               {{ t('settings.plugins.openManagement') }}
             </button>
             <button
+              v-if="p.crowded"
+              class="plugin-action-btn plugin-settings-btn"
+              :class="{ active: prefsOpen[p.id] }"
+              :aria-expanded="!!prefsOpen[p.id]"
+              @click="togglePrefs(p.id)"
+            >
+              {{ t('plugin.preferences') }}
+            </button>
+            <button
               v-if="p.marketEntry"
               class="plugin-install-btn"
               :disabled="isBusy(p.id)"
@@ -358,6 +334,28 @@
             >
               {{ t('settings.plugins.uninstall') }}
             </button>
+          </div>
+          <div v-if="p.crowded && prefsOpen[p.id]" class="plugin-prefs-panel">
+            <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
+              <input
+                type="checkbox"
+                :checked="!hiddenToolbarIncludes(p.id)"
+                @change="toggleToolbarVisible(p.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ t('plugin.showInToolbar') }}</span>
+            </label>
+            <label class="plugin-toggle-inline plugin-open-mode">
+              <span>{{ t('plugin.openMode') }}</span>
+              <select
+                class="plugin-open-mode-select"
+                :value="openModeOf(p.id)"
+                @change="onOpenModeChange(p.id, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="tab">{{ t('plugin.openMode.tab') }}</option>
+                <option value="floating">{{ t('plugin.openMode.floating') }}</option>
+                <option value="pane">{{ t('plugin.openMode.pane') }}</option>
+              </select>
+            </label>
           </div>
         </div>
       </template>
@@ -396,7 +394,6 @@ import { describeHttpError, describeRequestError } from '../../utils/httpError'
 import { uiConfirm } from '../../composables/useConfirm'
 import { settings, saveSettings } from '../../composables/useSettings'
 import { isTauri, tauriInvoke } from '../../composables/useTransport'
-import { Settings as SettingsIcon } from 'lucide-vue-next'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
 
@@ -1146,28 +1143,7 @@ async function onRefresh() {
   margin-top: 4px;
   align-items: center;
 }
-.plugin-gear-btn {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-.plugin-gear-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg-bright);
-}
-.plugin-gear-btn.active {
+.plugin-settings-btn.active {
   color: var(--accent);
 }
 .plugin-prefs-panel {

@@ -152,7 +152,7 @@ describe('PluginsTab folder picker', () => {
     seedComponentPlugin('json-formatter', 'JSON Formatter')
     const wrapper = await mountInstalled()
 
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     const select = wrapper.get('.plugin-open-mode-select')
     await select.setValue('floating')
     expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('floating')
@@ -165,7 +165,7 @@ describe('PluginsTab folder picker', () => {
   it('offers a pane option in the open-mode select', async () => {
     seedComponentPlugin('json-formatter', 'JSON Formatter')
     const wrapper = await mountInstalled()
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     const paneOption = wrapper
       .get('.plugin-open-mode-select')
       .findAll('option')
@@ -178,7 +178,7 @@ describe('PluginsTab folder picker', () => {
     seedComponentPlugin('json-formatter', 'JSON Formatter')
     const wrapper = await mountInstalled()
 
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     const select = wrapper.get('.plugin-open-mode-select')
     await select.setValue('pane')
     expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('pane')
@@ -197,7 +197,7 @@ describe('PluginsTab folder picker', () => {
       open_modes: { 'json-formatter': 'pane' },
     }
     const wrapper = await mountInstalled()
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     const select = wrapper.get('.plugin-open-mode-select')
     expect((select.element as HTMLSelectElement).value).toBe('pane')
     wrapper.unmount()
@@ -212,13 +212,13 @@ describe('PluginsTab folder picker', () => {
       open_modes: { 'json-formatter': 'floating' },
     }
     const wrapper = await mountInstalled()
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     const select = wrapper.get('.plugin-open-mode-select')
     expect((select.element as HTMLSelectElement).value).toBe('floating')
     wrapper.unmount()
   })
 
-  it('tucks the toolbar/open-mode prefs behind the header gear for component plugins', async () => {
+  it('reveals the toolbar/open-mode prefs below the actions via the 偏好 button for component plugins', async () => {
     seedComponentPlugin('json-formatter', 'JSON Formatter')
     const wrapper = await mountInstalled()
 
@@ -226,12 +226,18 @@ describe('PluginsTab folder picker', () => {
     expect(wrapper.find('.plugin-prefs-panel').exists()).toBe(false)
     expect(wrapper.find('.plugin-open-mode-select').exists()).toBe(false)
 
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     const panel = wrapper.get('.plugin-prefs-panel')
     expect(panel.find('.plugin-open-mode-select').exists()).toBe(true)
     expect(panel.find('input[type="checkbox"]').exists()).toBe(true)
 
-    await wrapper.get('.plugin-gear-btn').trigger('click')
+    // Panel sits below the actions row.
+    const actions = wrapper.get('.plugin-card-actions')
+    expect(actions.element.compareDocumentPosition(panel.element)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+
+    await wrapper.get('.plugin-settings-btn').trigger('click')
     expect(wrapper.find('.plugin-prefs-panel').exists()).toBe(false)
     wrapper.unmount()
   })

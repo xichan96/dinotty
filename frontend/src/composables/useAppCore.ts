@@ -36,6 +36,8 @@ import {
 import { getIsAppForeground, onAppForegroundGain } from './useAppForeground'
 import { usePluginLoader, handlePluginChanged } from './usePluginLoader'
 import { usePluginLauncher } from './usePluginLauncher'
+import { usePluginFloatWindowsStore } from '../stores/pluginFloatWindows'
+import { settings } from './useSettings'
 import { useTabLifecycle } from './useTabLifecycle'
 import { setMcSender } from './useMissionControlState'
 import { useSplitPane } from './useSplitPane'
@@ -759,6 +761,7 @@ export function useAppCore(options: AppCoreOptions) {
   }
 
   // ── Plugin launcher (openPlugin is needed by palette/actions) ─────
+  const floatWindows = usePluginFloatWindowsStore()
   const { openPlugin } = usePluginLauncher({
     tabs,
     activeWorkspaceId,
@@ -769,6 +772,8 @@ export function useAppCore(options: AppCoreOptions) {
     commitLocalActivePane,
     persist,
     focusActive,
+    floatWindows,
+    openModePref: (id) => settings.plugin_prefs?.open_modes?.[id] ?? 'tab',
   })
 
   // ─── Save as Template dialog ───────────────────────────────────────

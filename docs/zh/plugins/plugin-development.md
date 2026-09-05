@@ -178,7 +178,7 @@ export function activate(ctx) {
   // 初始化逻辑...
 
   return {
-    component: { /* Vue 组件，在插件标签页中渲染 */ },
+    component: { /* Vue 组件。宿主可将其渲染为插件标签页，也可由用户在设置中配置为浮层窗口打开 */ },
     dispose() {
       // 插件卸载时的清理逻辑（移除事件监听、定时器等）
     },

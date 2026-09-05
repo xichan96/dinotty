@@ -116,4 +116,62 @@ describe('PluginsTab folder picker', () => {
     expect((input.element as HTMLInputElement).checked).toBe(false)
     wrapper.unmount()
   })
+
+  function seedComponentPlugin(id: string, name: string) {
+    pluginMocks.loadedPlugins.set(id, {
+      id,
+      manifest: { name, version: '1.0.0', description: 'd', permissions: [] },
+      state: 'active',
+      exports: { component: defineComponent({ render: () => null }) },
+      isDevLink: false,
+    })
+  }
+
+  async function mountInstalled() {
+    const wrapper = mount(PluginsTab, {
+      global: { stubs: { ConfirmModal: true } },
+    })
+    await wrapper.findAll('.plugin-tab')[1].trigger('click')
+    return wrapper
+  }
+
+  it('hides the open-mode selector for plugins without a component', async () => {
+    pluginMocks.loadedPlugins.set('overlay-demo', {
+      id: 'overlay-demo',
+      manifest: { name: 'Overlay Demo', version: '0.1.0', description: 'demo', permissions: [] },
+      state: 'active',
+      exports: {},
+      isDevLink: false,
+    })
+    const wrapper = await mountInstalled()
+    expect(wrapper.find('.plugin-open-mode-select').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('persists a floating open mode to the pref on change', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    const wrapper = await mountInstalled()
+
+    const select = wrapper.get('.plugin-open-mode-select')
+    await select.setValue('floating')
+    expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('floating')
+
+    await select.setValue('tab')
+    expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('tab')
+    wrapper.unmount()
+  })
+
+  it('reflects a pre-seeded floating pref on mount', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    settings.plugin_prefs = {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+      open_modes: { 'json-formatter': 'floating' },
+    }
+    const wrapper = await mountInstalled()
+    const select = wrapper.get('.plugin-open-mode-select')
+    expect((select.element as HTMLSelectElement).value).toBe('floating')
+    wrapper.unmount()
+  })
 })

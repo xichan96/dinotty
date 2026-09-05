@@ -2,6 +2,9 @@ import { type Ref, nextTick } from 'vue'
 import type { Tab, TerminalTab } from '../types/pane'
 import type { LoadedPlugin } from './usePluginLoader'
 import { apiCreatePluginTab } from './useTabApi'
+import { isTouchDevice } from './useIsMobile'
+
+export type PluginOpenMode = 'tab' | 'floating'
 
 export interface PluginLauncherOptions {
   tabs: Ref<Tab[]>
@@ -13,10 +16,26 @@ export interface PluginLauncherOptions {
   commitLocalActivePane: (paneId: string) => void
   persist: () => void
   focusActive: () => void
+  /** Floating-window store facade: open() is idempotent and brings to front. */
+  floatWindows?: { open: (pluginId: string) => void }
+  /** Configured open mode for the plugin; absent/unknown values → 'tab'. */
+  openModePref?: (pluginId: string) => PluginOpenMode
 }
 
 export interface PluginLauncherState {
-  openPlugin: (pluginId: string) => Promise<void>
+  openPlugin: (pluginId: string, mode?: PluginOpenMode) => Promise<void>
+}
+
+/** Explicit mode wins over the pref; touch devices force the tab path
+ *  (floating windows are desktop-only). */
+export function resolvePluginOpenMode(
+  explicit: PluginOpenMode | undefined,
+  pref: PluginOpenMode,
+  touch: boolean
+): PluginOpenMode {
+  const mode = explicit ?? pref
+  if (touch) return 'tab'
+  return mode
 }
 
 export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherState {
@@ -32,8 +51,25 @@ export function usePluginLauncher(opts: PluginLauncherOptions): PluginLauncherSt
     focusActive,
   } = opts
 
-  async function openPlugin(pluginId: string) {
+  async function openPlugin(pluginId: string, mode?: PluginOpenMode) {
     try {
+      const pref = opts.openModePref ? opts.openModePref(pluginId) : 'tab'
+      const resolved = resolvePluginOpenMode(mode, pref, isTouchDevice())
+      if (resolved === 'floating') {
+        const plugin = loadedPlugins.get(pluginId)
+        if (!plugin || plugin.state !== 'active') {
+          const msg =
+            plugin?.state === 'error'
+              ? `Plugin "${pluginId}" failed to load: ${plugin.error ?? 'unknown'}`
+              : `Plugin "${pluginId}" is not loaded.`
+          console.warn('[openPlugin]', msg)
+          window.__dinotty_ui_notify?.(msg, 'error')
+          return
+        }
+        opts.floatWindows?.open(pluginId)
+        return
+      }
+
       const wsId = activeWorkspaceId.value ?? ''
       const paneId = `plugin:${pluginId}:${wsId}`
       const existing = tabs.value.find((t) => t.paneId === paneId)

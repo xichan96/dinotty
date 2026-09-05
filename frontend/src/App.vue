@@ -364,6 +364,11 @@
     />
   </div>
   <PluginOverlayHost v-if="authenticated" :get-plugin-context="getPluginContext" />
+  <PluginFloatWindowHost
+    v-if="authenticated"
+    :get-plugin-context="getPluginContext"
+    :workspace-id="activeWorkspaceId ?? undefined"
+  />
 </template>
 
 <script setup lang="ts">
@@ -397,6 +402,7 @@ import MultiSelectPicker from './components/ui/MultiSelectPicker.vue'
 import SaveTemplateDialog from './components/ui/SaveTemplateDialog.vue'
 import TemplatePicker from './components/ui/TemplatePicker.vue'
 import PluginOverlayHost from './components/plugin/PluginOverlayHost.vue'
+import PluginFloatWindowHost from './components/plugin/PluginFloatWindowHost.vue'
 const WorkspaceOverview = defineAsyncComponent(
   () => import('./components/overview/WorkspaceOverview.vue')
 )

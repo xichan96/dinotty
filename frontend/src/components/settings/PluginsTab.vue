@@ -286,6 +286,20 @@
               />
               <span>{{ t('plugin.showInToolbar') }}</span>
             </label>
+            <label
+              v-if="p.state === 'active' && p.hasComponent"
+              class="plugin-toggle-inline plugin-open-mode"
+            >
+              <span>{{ t('plugin.openMode') }}</span>
+              <select
+                class="plugin-open-mode-select"
+                :value="openModeOf(p.id)"
+                @change="onOpenModeChange(p.id, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="tab">{{ t('plugin.openMode.tab') }}</option>
+                <option value="floating">{{ t('plugin.openMode.floating') }}</option>
+              </select>
+            </label>
             <button
               v-if="p.state === 'active' && p.hasComponent"
               class="plugin-install-btn"
@@ -482,6 +496,23 @@ async function toggleToolbarVisible(id: string, visible: boolean) {
     hidden_toolbar: next,
   }
   await saveSettings()
+}
+
+function openModeOf(pluginId: string): 'tab' | 'floating' {
+  return settings.plugin_prefs?.open_modes?.[pluginId] === 'floating' ? 'floating' : 'tab'
+}
+
+function onOpenModeChange(pluginId: string, value: string): void {
+  const mode: 'tab' | 'floating' = value === 'floating' ? 'floating' : 'tab'
+  settings.plugin_prefs = {
+    ...(settings.plugin_prefs ?? {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+    }),
+    open_modes: { ...settings.plugin_prefs?.open_modes, [pluginId]: mode },
+  }
+  void saveSettings()
 }
 
 function hiddenOverlayIncludes(id: string): boolean {
@@ -841,6 +872,15 @@ async function onRefresh() {
 }
 .plugin-toggle-inline input[type='checkbox'] {
   accent-color: var(--accent);
+}
+.plugin-open-mode-select {
+  font-size: 12px;
+  color: var(--text-color);
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px 2px;
+  max-width: 110px;
 }
 .plugin-badge.category {
   color: var(--fg-muted);

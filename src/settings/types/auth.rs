@@ -99,4 +99,9 @@ pub struct PluginPrefsConfig {
     pub hidden_overlays: Vec<String>,
     #[serde(default)]
     pub show_incompatible: bool,
+    /// Per-plugin open mode for component plugins: "tab" (default) or "floating".
+    /// Absent key = "tab". Plain string values tolerate junk instead of failing
+    /// the settings PUT; the frontend normalizes on read.
+    #[serde(default)]
+    pub open_modes: std::collections::HashMap<String, String>,
 }

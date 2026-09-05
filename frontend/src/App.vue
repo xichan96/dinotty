@@ -160,6 +160,7 @@
               :broadcast-activity="tab.broadcastActivity"
               :allow-close="getAllLeaves(tab.layout).length > 1"
               :tab-id="tab.paneId"
+              :workspace-id="tab.workspaceId"
               :is-visible="tab.paneId === activePaneId"
               @register="registerTermRef"
               @title-change="onTitleChange"
@@ -205,6 +206,7 @@
     <CommandPalette ref="paletteRef" :commands="paletteCommands" />
 
     <SettingsPanel
+      v-if="settingsMounted"
       :open="settingsOpen"
       @close="settingsOpen = false"
       @token-changed="onTokenChanged"
@@ -325,6 +327,7 @@
     />
 
     <WorkspaceOverview
+      v-if="overviewMounted"
       :visible="overviewOpen"
       :active-pane-id="activePaneId"
       :term-refs="termRefs"
@@ -362,10 +365,23 @@
     />
   </div>
   <PluginOverlayHost v-if="authenticated" :get-plugin-context="getPluginContext" />
+  <PluginFloatWindowHost
+    v-if="authenticated"
+    :get-plugin-context="getPluginContext"
+    :workspace-id="activeWorkspaceId ?? undefined"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import {
+  ref,
+  computed,
+  watch,
+  defineAsyncComponent,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+} from 'vue'
 import TabBar from './components/terminal/TabBar.vue'
 import CommandPalette from './components/command/CommandPalette.vue'
 import CommandBookmarks from './components/command/CommandBookmarks.vue'
@@ -376,7 +392,7 @@ import NotificationPanel from './components/notification/NotificationPanel.vue'
 import DropPreview from './components/split/DropPreview.vue'
 import SplitContainer from './components/split/SplitContainer.vue'
 import StatusBar from './components/terminal/StatusBar.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
+const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
 import AlertModal from './components/ui/AlertModal.vue'
@@ -387,7 +403,10 @@ import MultiSelectPicker from './components/ui/MultiSelectPicker.vue'
 import SaveTemplateDialog from './components/ui/SaveTemplateDialog.vue'
 import TemplatePicker from './components/ui/TemplatePicker.vue'
 import PluginOverlayHost from './components/plugin/PluginOverlayHost.vue'
-import WorkspaceOverview from './components/overview/WorkspaceOverview.vue'
+import PluginFloatWindowHost from './components/plugin/PluginFloatWindowHost.vue'
+const WorkspaceOverview = defineAsyncComponent(
+  () => import('./components/overview/WorkspaceOverview.vue')
+)
 import MobileKeyboard from './components/keyboard/MobileKeyboard.vue'
 import SystemKeyboardToolbar from './components/keyboard/SystemKeyboardToolbar.vue'
 import MobileInputGuide from './components/keyboard/MobileInputGuide.vue'
@@ -429,6 +448,7 @@ import { useSettingsStore } from './stores/settingsStore'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useDesktopLifecycle } from './composables/useDesktopLifecycle'
 import { useAppCore } from './composables/useAppCore'
+import { useSettingsSync } from './composables/useSettingsSync'
 import { useAppActions } from './composables/useAppActions'
 import { useAppKeyboard } from './composables/useAppKeyboard'
 import { useAppConnectivity } from './composables/useAppConnectivity'
@@ -450,6 +470,20 @@ const desktopLifecycle = useDesktopLifecycle({
 })
 const toast = useToast()
 const notif = useNotification()
+
+// Owns the always-on settings side effects (theme/text/autosave/refetch-on-open)
+// so they survive SettingsPanel being lazy-mounted.
+useSettingsSync()
+
+// Lazy-mount the settings panel on first open; it stays mounted afterwards
+// (close is CSS-driven) so subsequent opens are instant.
+const settingsMounted = ref(false)
+watch(
+  () => ui.settingsOpen,
+  (v) => {
+    if (v) settingsMounted.value = true
+  }
+)
 
 // ── App-layer template refs & local dialog state ────────────────
 const windowCloseConfirmVisible = ref(false)
@@ -625,6 +659,13 @@ const {
   clearActiveReadContext,
   stopForegroundGainSubscription,
 } = core
+
+// Lazy-mount the Mission Control overview on first open; stays mounted
+// afterwards so re-opens are instant.
+const overviewMounted = ref(false)
+watch(overviewOpen, (v) => {
+  if (v) overviewMounted.value = true
+})
 
 const { paletteCommands, onGlobalKeydown, hostClipboardPaste } = actions
 

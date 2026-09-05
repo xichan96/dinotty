@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { workspaceIdFromPaneId } from '../utils/pluginPaneId'
+import { floatPaneId, workspaceIdFromPaneId } from '../utils/pluginPaneId'
 
 describe('workspaceIdFromPaneId', () => {
   it('scenario 1: decodes a new-format plugin pane id', () => {
@@ -14,5 +14,15 @@ describe('workspaceIdFromPaneId', () => {
     ['wrong prefix', 'terminal:session-browser:workspace-a'],
   ])('returns undefined for %s', (_label, paneId) => {
     expect(workspaceIdFromPaneId(paneId)).toBeUndefined()
+  })
+})
+
+describe('floatPaneId', () => {
+  it('builds a 3-part plugin pane id with the float sentinel', () => {
+    expect(floatPaneId('json-formatter')).toBe('plugin:json-formatter:float')
+  })
+
+  it('is stable and parses through workspaceIdFromPaneId as the float sentinel', () => {
+    expect(workspaceIdFromPaneId(floatPaneId('x'))).toBe('float')
   })
 })

@@ -73,7 +73,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
-import * as monaco from 'monaco-editor'
+import type * as monaco from 'monaco-editor'
 import { useI18n } from '../../composables/useI18n'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
 import type { DropPosition } from '../../types/pane'
@@ -283,7 +283,7 @@ onMounted(() => {
         cursorGroup.broadcastChange(props.leafId, e.changes)
       }),
       editor.onKeyDown((e) => {
-        if (e.keyCode !== monaco.KeyCode.KeyZ) return
+        if (e.code !== 'KeyZ') return
         if (!(e.ctrlKey || e.metaKey)) return
         if (!isInActiveGroup.value) return
         e.preventDefault()

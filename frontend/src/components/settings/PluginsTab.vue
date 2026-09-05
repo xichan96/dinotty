@@ -278,7 +278,11 @@
             </label>
           </div>
           <div class="plugin-card-actions">
-            <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
+            <label
+              v-if="!p.crowded"
+              class="plugin-toggle-inline"
+              :title="t('plugin.showInToolbar')"
+            >
               <input
                 type="checkbox"
                 :checked="!hiddenToolbarIncludes(p.id)"
@@ -293,6 +297,15 @@
               @click="emit('open-plugin', p.id)"
             >
               {{ t('settings.plugins.openManagement') }}
+            </button>
+            <button
+              v-if="p.crowded"
+              class="plugin-action-btn plugin-settings-btn"
+              :class="{ active: prefsOpen[p.id] }"
+              :aria-expanded="!!prefsOpen[p.id]"
+              @click="togglePrefs(p.id)"
+            >
+              {{ t('plugin.preferences') }}
             </button>
             <button
               v-if="p.marketEntry"
@@ -321,6 +334,28 @@
             >
               {{ t('settings.plugins.uninstall') }}
             </button>
+          </div>
+          <div v-if="p.crowded && prefsOpen[p.id]" class="plugin-prefs-panel">
+            <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
+              <input
+                type="checkbox"
+                :checked="!hiddenToolbarIncludes(p.id)"
+                @change="toggleToolbarVisible(p.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ t('plugin.showInToolbar') }}</span>
+            </label>
+            <label class="plugin-toggle-inline plugin-open-mode">
+              <span>{{ t('plugin.openMode') }}</span>
+              <select
+                class="plugin-open-mode-select"
+                :value="openModeOf(p.id)"
+                @change="onOpenModeChange(p.id, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="tab">{{ t('plugin.openMode.tab') }}</option>
+                <option value="floating">{{ t('plugin.openMode.floating') }}</option>
+                <option value="pane">{{ t('plugin.openMode.pane') }}</option>
+              </select>
+            </label>
           </div>
         </div>
       </template>
@@ -387,6 +422,13 @@ const busyOps = ref<Set<string>>(new Set())
 const confirmUninstall = ref<string | null>(null)
 const showPicker = ref(false)
 
+// Per-card collapse state for the prefs (toolbar / open mode) behind the header gear.
+const prefsOpen = ref<Record<string, boolean>>({})
+
+function togglePrefs(pluginId: string) {
+  prefsOpen.value = { ...prefsOpen.value, [pluginId]: !prefsOpen.value[pluginId] }
+}
+
 // Detail view state
 const detailPlugin = ref<MarketPlugin | null>(null)
 const readmeCache = ref<Map<string, string | null>>(new Map())
@@ -400,22 +442,28 @@ const readmeHtmlContent = computed(() => {
 
 const settingsPlugins = computed(() =>
   Array.from(loadedPlugins.values())
-    .map((p) => ({
-      id: p.id,
-      name: p.manifest.name,
-      version: p.manifest.version,
-      description: p.manifest.description,
-      state: p.state,
-      error: p.error,
-      hasComponent: !!p.exports?.component || hasHostPluginView(p.id),
-      permissions: p.manifest.permissions ?? [],
-      isDevLink: p.isDevLink,
-      category: p.manifest.category,
-      marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
-      overlays: overlayStore.overlays
-        .filter((o) => o.pluginId === p.id && !o.defaultHidden)
-        .map((o) => o.id),
-    }))
+    .map((p) => {
+      const hasComponent = !!p.exports?.component || hasHostPluginView(p.id)
+      return {
+        id: p.id,
+        name: p.manifest.name,
+        version: p.manifest.version,
+        description: p.manifest.description,
+        state: p.state,
+        error: p.error,
+        hasComponent,
+        // Component plugins keep the toolbar/open-mode prefs behind the header gear
+        // (they also carry the open-mode select, which made the actions row crowded).
+        crowded: p.state === 'active' && hasComponent,
+        permissions: p.manifest.permissions ?? [],
+        isDevLink: p.isDevLink,
+        category: p.manifest.category,
+        marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
+        overlays: overlayStore.overlays
+          .filter((o) => o.pluginId === p.id && !o.defaultHidden)
+          .map((o) => o.id),
+      }
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
 )
 
@@ -482,6 +530,24 @@ async function toggleToolbarVisible(id: string, visible: boolean) {
     hidden_toolbar: next,
   }
   await saveSettings()
+}
+
+function openModeOf(pluginId: string): 'tab' | 'floating' | 'pane' {
+  const stored = settings.plugin_prefs?.open_modes?.[pluginId]
+  return stored === 'floating' || stored === 'pane' ? stored : 'tab'
+}
+
+function onOpenModeChange(pluginId: string, value: string): void {
+  const mode: 'tab' | 'floating' | 'pane' = value === 'floating' || value === 'pane' ? value : 'tab'
+  settings.plugin_prefs = {
+    ...(settings.plugin_prefs ?? {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+    }),
+    open_modes: { ...settings.plugin_prefs?.open_modes, [pluginId]: mode },
+  }
+  void saveSettings()
 }
 
 function hiddenOverlayIncludes(id: string): boolean {
@@ -842,6 +908,15 @@ async function onRefresh() {
 .plugin-toggle-inline input[type='checkbox'] {
   accent-color: var(--accent);
 }
+.plugin-open-mode-select {
+  font-size: 12px;
+  color: var(--text-color);
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px 2px;
+  max-width: 110px;
+}
 .plugin-badge.category {
   color: var(--fg-muted);
   background: var(--bg-hover);
@@ -1067,6 +1142,20 @@ async function onRefresh() {
   gap: 8px;
   margin-top: 4px;
   align-items: center;
+}
+.plugin-settings-btn.active {
+  color: var(--accent);
+}
+.plugin-prefs-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 8px 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-hover);
 }
 .plugin-link {
   font-size: 12px;

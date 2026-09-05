@@ -1,22 +1,23 @@
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { settings } from './useSettings'
-import { messages } from './i18n-messages'
+import { tables, loadLocale, type Locale } from './i18n/tables'
 
-export type Locale = 'en' | 'zh'
+export type { Locale }
+export { loadLocale }
 
 function detectSystemLocale(): Locale {
   const lang = typeof navigator !== 'undefined' ? navigator.language : ''
   return lang.toLowerCase().startsWith('zh') ? 'zh' : 'en'
 }
 
-function normalizeLocale(raw: string | undefined): Locale {
+export function normalizeLocale(raw: string | undefined): Locale {
   if (raw === 'en') return 'en'
   if (raw === 'auto') return detectSystemLocale()
   return 'zh'
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  const table = messages[normalizeLocale(settings.locale)]
+  const table = tables[normalizeLocale(settings.locale)] ?? {}
   let msg = table[key] ?? key
   if (params) {
     for (const [k, v] of Object.entries(params)) {
@@ -25,6 +26,14 @@ export function t(key: string, params?: Record<string, string | number>): string
   }
   return msg
 }
+
+watch(
+  () => normalizeLocale(settings.locale),
+  (locale) => {
+    void loadLocale(locale)
+  },
+  { immediate: true }
+)
 
 export function useI18n() {
   const locale = computed(() => normalizeLocale(settings.locale))

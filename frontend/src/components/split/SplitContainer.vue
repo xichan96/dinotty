@@ -71,6 +71,7 @@
       :leaf="leaf"
       :is-visible="isVisible"
       :is-focused="leaf.paneId === activePaneId"
+      :workspace-id="workspaceId"
       @register="(id: string, el: any) => emit('register', id, el)"
       @title-change="(id: string, title: string) => emit('titleChange', id, title)"
       @shell-info="(id: string, shell: string) => emit('shellInfo', id, shell)"
@@ -102,6 +103,7 @@
         :allow-close="allowClose"
         :parent-direction="split!.direction"
         :tab-id="tabId"
+        :workspace-id="workspaceId"
         :is-visible="isChildVisible(child)"
         :style="getChildStyle(idx)"
         @register="(id: string, el: any) => emit('register', id, el)"
@@ -160,6 +162,9 @@ const props = withDefaults(
     allowClose?: boolean
     parentDirection?: 'horizontal' | 'vertical'
     tabId: string
+    /** Workspace owning this tab, threaded down so split plugin panes can
+     *  resolve their workspace without an encoded workspace id. */
+    workspaceId?: string
     isVisible?: boolean
   }>(),
   {

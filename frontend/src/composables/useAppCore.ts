@@ -36,6 +36,8 @@ import {
 import { getIsAppForeground, onAppForegroundGain } from './useAppForeground'
 import { usePluginLoader, handlePluginChanged } from './usePluginLoader'
 import { usePluginLauncher } from './usePluginLauncher'
+import { usePluginFloatWindowsStore } from '../stores/pluginFloatWindows'
+import { settings } from './useSettings'
 import { useTabLifecycle } from './useTabLifecycle'
 import { setMcSender } from './useMissionControlState'
 import { useSplitPane } from './useSplitPane'
@@ -619,6 +621,22 @@ export function useAppCore(options: AppCoreOptions) {
     void splitPane.insertNonTerminalPane(kind, payload)
   }
 
+  async function openPluginPane(pluginId: string): Promise<boolean> {
+    const tabId = activePaneId.value
+    if (!tabId) return false
+    const tab = tabs.value.find((t) => t.paneId === tabId)
+    if (!tab || tab.type !== 'terminal') return false
+
+    const existing = getAllLeaves(tab.layout).find(
+      (l) => paneKind(l) === 'plugin' && l.pluginId === pluginId
+    )
+    if (existing) {
+      splitPane.focusPane(existing.paneId)
+      return true
+    }
+    return splitPane.insertNonTerminalPane('plugin', { pluginId })
+  }
+
   function onFileClick(path: string) {
     const tabId = activePaneId.value
     if (!tabId) return
@@ -759,6 +777,7 @@ export function useAppCore(options: AppCoreOptions) {
   }
 
   // ── Plugin launcher (openPlugin is needed by palette/actions) ─────
+  const floatWindows = usePluginFloatWindowsStore()
   const { openPlugin } = usePluginLauncher({
     tabs,
     activeWorkspaceId,
@@ -769,6 +788,9 @@ export function useAppCore(options: AppCoreOptions) {
     commitLocalActivePane,
     persist,
     focusActive,
+    floatWindows,
+    openModePref: (id) => settings.plugin_prefs?.open_modes?.[id] ?? 'tab',
+    openPane: openPluginPane,
   })
 
   // ─── Save as Template dialog ───────────────────────────────────────

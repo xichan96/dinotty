@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import * as monaco from 'monaco-editor'
+import type * as monaco from 'monaco-editor'
 import { getEditor, whenEditorReady } from './useEditorRegistry'
 import type { useEditorSplit } from './useEditorSplit'
 

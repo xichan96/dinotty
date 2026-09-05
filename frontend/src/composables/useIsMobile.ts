@@ -35,3 +35,11 @@ if (typeof window !== 'undefined') {
 export function useIsMobile() {
   return { isMobile }
 }
+
+/** Touch-primary device (no hover + coarse pointer). Floating windows are
+ *  desktop-only; openPlugin falls back to a tab on touch devices.
+ *  Evaluated at call time (unlike the reactive isMobile above). */
+export function isTouchDevice(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
+}

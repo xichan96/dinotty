@@ -22,8 +22,10 @@ const itemSource = readFileSync(
 
 describe('overlay host mount + layer contract', () => {
   it('mounts the overlay host as a sibling of #app-root, gated on authenticated', () => {
+    // The float-window host (z-640, above overlays) sits directly after the
+    // overlay host (z-600) in the same sibling block.
     expect(appSource).toMatch(
-      /<\/div>\s*<PluginOverlayHost v-if="authenticated" :get-plugin-context="getPluginContext" \/>\s*<\/template>/
+      /<\/div>\s*<PluginOverlayHost v-if="authenticated" :get-plugin-context="getPluginContext" \/>\s*<PluginFloatWindowHost[\s\S]*?\/>\s*<\/template>/
     )
   })
 

@@ -116,4 +116,129 @@ describe('PluginsTab folder picker', () => {
     expect((input.element as HTMLInputElement).checked).toBe(false)
     wrapper.unmount()
   })
+
+  function seedComponentPlugin(id: string, name: string) {
+    pluginMocks.loadedPlugins.set(id, {
+      id,
+      manifest: { name, version: '1.0.0', description: 'd', permissions: [] },
+      state: 'active',
+      exports: { component: defineComponent({ render: () => null }) },
+      isDevLink: false,
+    })
+  }
+
+  async function mountInstalled() {
+    const wrapper = mount(PluginsTab, {
+      global: { stubs: { ConfirmModal: true } },
+    })
+    await wrapper.findAll('.plugin-tab')[1].trigger('click')
+    return wrapper
+  }
+
+  it('hides the open-mode selector for plugins without a component', async () => {
+    pluginMocks.loadedPlugins.set('overlay-demo', {
+      id: 'overlay-demo',
+      manifest: { name: 'Overlay Demo', version: '0.1.0', description: 'demo', permissions: [] },
+      state: 'active',
+      exports: {},
+      isDevLink: false,
+    })
+    const wrapper = await mountInstalled()
+    expect(wrapper.find('.plugin-open-mode-select').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('persists a floating open mode to the pref on change', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    const wrapper = await mountInstalled()
+
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    const select = wrapper.get('.plugin-open-mode-select')
+    await select.setValue('floating')
+    expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('floating')
+
+    await select.setValue('tab')
+    expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('tab')
+    wrapper.unmount()
+  })
+
+  it('offers a pane option in the open-mode select', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    const wrapper = await mountInstalled()
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    const paneOption = wrapper
+      .get('.plugin-open-mode-select')
+      .findAll('option')
+      .find((o) => o.attributes('value') === 'pane')
+    expect(paneOption).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('persists a pane open mode to the pref on change', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    const wrapper = await mountInstalled()
+
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    const select = wrapper.get('.plugin-open-mode-select')
+    await select.setValue('pane')
+    expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('pane')
+
+    await select.setValue('floating')
+    expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('floating')
+    wrapper.unmount()
+  })
+
+  it('reflects a pre-seeded pane pref on mount', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    settings.plugin_prefs = {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+      open_modes: { 'json-formatter': 'pane' },
+    }
+    const wrapper = await mountInstalled()
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    const select = wrapper.get('.plugin-open-mode-select')
+    expect((select.element as HTMLSelectElement).value).toBe('pane')
+    wrapper.unmount()
+  })
+
+  it('reflects a pre-seeded floating pref on mount', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    settings.plugin_prefs = {
+      hidden_toolbar: [],
+      hidden_overlays: [],
+      show_incompatible: false,
+      open_modes: { 'json-formatter': 'floating' },
+    }
+    const wrapper = await mountInstalled()
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    const select = wrapper.get('.plugin-open-mode-select')
+    expect((select.element as HTMLSelectElement).value).toBe('floating')
+    wrapper.unmount()
+  })
+
+  it('reveals the toolbar/open-mode prefs below the actions via the 偏好 button for component plugins', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    const wrapper = await mountInstalled()
+
+    // Default collapsed: no prefs panel, no open-mode select in the DOM.
+    expect(wrapper.find('.plugin-prefs-panel').exists()).toBe(false)
+    expect(wrapper.find('.plugin-open-mode-select').exists()).toBe(false)
+
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    const panel = wrapper.get('.plugin-prefs-panel')
+    expect(panel.find('.plugin-open-mode-select').exists()).toBe(true)
+    expect(panel.find('input[type="checkbox"]').exists()).toBe(true)
+
+    // Panel sits below the actions row.
+    const actions = wrapper.get('.plugin-card-actions')
+    expect(actions.element.compareDocumentPosition(panel.element)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+
+    await wrapper.get('.plugin-settings-btn').trigger('click')
+    expect(wrapper.find('.plugin-prefs-panel').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

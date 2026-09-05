@@ -108,4 +108,22 @@ describe('PluginView overlay management section', () => {
     expect(btn.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+
+  it('hides the overlay section with showOverlays=false even when overlays exist', () => {
+    const store = usePluginOverlaysStore()
+    store.register('overlay-demo', [overlay('overlay-demo:fab')])
+    const wrapper = mount(PluginView, {
+      props: {
+        plugin: activePlugin('overlay-demo'),
+        api: fakeApi,
+        paneId: 'plugin:overlay-demo:float',
+        workspaceId: undefined,
+        isVisible: true,
+        isFocused: true,
+        showOverlays: false,
+      },
+    })
+    expect(wrapper.find('.plugin-overlays').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })

@@ -21,8 +21,9 @@
         <p>This plugin does not provide a UI component</p>
       </div>
       <!-- Overlay management: every overlay this plugin registered, including
-           defaultHidden ones (re-enable via the checkbox → forcedVisible). -->
-      <div v-if="pluginOverlays.length" class="plugin-overlays">
+           defaultHidden ones (re-enable via the checkbox → forcedVisible).
+           Hidden inside floating windows (showOverlays=false). -->
+      <div v-if="showOverlays && pluginOverlays.length" class="plugin-overlays">
         <h3>{{ t('settings.plugins.overlays') }}</h3>
         <div v-for="o in pluginOverlays" :key="o.id" class="overlay-row">
           <label class="overlay-toggle" :title="o.id">
@@ -57,14 +58,19 @@ import { saveSettings } from '../../composables/useSettings'
 import { usePluginOverlaysStore, type RegisteredOverlay } from '../../stores/pluginOverlays'
 import type { LoadedPlugin, PluginContext } from '../../composables/usePluginLoader'
 
-const props = defineProps<{
-  plugin: LoadedPlugin
-  api: PluginContext
-  paneId: string
-  workspaceId: string | undefined
-  isVisible: boolean
-  isFocused: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    plugin: LoadedPlugin
+    api: PluginContext
+    paneId: string
+    workspaceId: string | undefined
+    isVisible: boolean
+    isFocused: boolean
+    /** Render the overlay-management section (hidden inside floating windows). */
+    showOverlays?: boolean
+  }>(),
+  { showOverlays: true }
+)
 
 const overlayStore = usePluginOverlaysStore()
 const { t } = useI18n()

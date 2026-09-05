@@ -967,6 +967,7 @@ export default {
   'plugin.category.files': '文件',
   'plugin.category.network': '网络',
   'plugin.category.other': '其他',
+  'plugin.preferences': '插件偏好',
   'plugin.showInToolbar': '在工具栏显示',
   'plugin.openMode': '打开方式',
   'plugin.openMode.tab': '标签页',

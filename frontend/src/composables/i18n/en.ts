@@ -998,6 +998,7 @@ export default {
   'plugin.category.files': 'Files',
   'plugin.category.network': 'Network',
   'plugin.category.other': 'Other',
+  'plugin.preferences': 'Plugin preferences',
   'plugin.showInToolbar': 'Show in toolbar',
   'plugin.openMode': 'Open with',
   'plugin.openMode.tab': 'Tab',

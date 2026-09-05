@@ -152,6 +152,7 @@ describe('PluginsTab folder picker', () => {
     seedComponentPlugin('json-formatter', 'JSON Formatter')
     const wrapper = await mountInstalled()
 
+    await wrapper.get('.plugin-gear-btn').trigger('click')
     const select = wrapper.get('.plugin-open-mode-select')
     await select.setValue('floating')
     expect(settings.plugin_prefs?.open_modes?.['json-formatter']).toBe('floating')
@@ -170,8 +171,27 @@ describe('PluginsTab folder picker', () => {
       open_modes: { 'json-formatter': 'floating' },
     }
     const wrapper = await mountInstalled()
+    await wrapper.get('.plugin-gear-btn').trigger('click')
     const select = wrapper.get('.plugin-open-mode-select')
     expect((select.element as HTMLSelectElement).value).toBe('floating')
+    wrapper.unmount()
+  })
+
+  it('tucks the toolbar/open-mode prefs behind the header gear for component plugins', async () => {
+    seedComponentPlugin('json-formatter', 'JSON Formatter')
+    const wrapper = await mountInstalled()
+
+    // Default collapsed: no prefs panel, no open-mode select in the DOM.
+    expect(wrapper.find('.plugin-prefs-panel').exists()).toBe(false)
+    expect(wrapper.find('.plugin-open-mode-select').exists()).toBe(false)
+
+    await wrapper.get('.plugin-gear-btn').trigger('click')
+    const panel = wrapper.get('.plugin-prefs-panel')
+    expect(panel.find('.plugin-open-mode-select').exists()).toBe(true)
+    expect(panel.find('input[type="checkbox"]').exists()).toBe(true)
+
+    await wrapper.get('.plugin-gear-btn').trigger('click')
+    expect(wrapper.find('.plugin-prefs-panel').exists()).toBe(false)
     wrapper.unmount()
   })
 })

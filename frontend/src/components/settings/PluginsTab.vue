@@ -259,6 +259,38 @@
             }}</span>
             <span v-if="p.state === 'error'" class="plugin-badge error">error</span>
             <span class="plugin-card-version">v{{ p.version }}</span>
+            <button
+              v-if="p.crowded"
+              class="plugin-gear-btn"
+              :class="{ active: prefsOpen[p.id] }"
+              :title="t('plugin.preferences')"
+              :aria-label="t('plugin.preferences')"
+              :aria-expanded="!!prefsOpen[p.id]"
+              @click="togglePrefs(p.id)"
+            >
+              <SettingsIcon :size="14" />
+            </button>
+          </div>
+          <div v-if="p.crowded && prefsOpen[p.id]" class="plugin-prefs-panel">
+            <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
+              <input
+                type="checkbox"
+                :checked="!hiddenToolbarIncludes(p.id)"
+                @change="toggleToolbarVisible(p.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ t('plugin.showInToolbar') }}</span>
+            </label>
+            <label class="plugin-toggle-inline plugin-open-mode">
+              <span>{{ t('plugin.openMode') }}</span>
+              <select
+                class="plugin-open-mode-select"
+                :value="openModeOf(p.id)"
+                @change="onOpenModeChange(p.id, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="tab">{{ t('plugin.openMode.tab') }}</option>
+                <option value="floating">{{ t('plugin.openMode.floating') }}</option>
+              </select>
+            </label>
           </div>
           <p v-if="p.description" class="plugin-card-desc">{{ p.description }}</p>
           <p v-if="p.error" class="plugin-card-error">{{ p.error }}</p>
@@ -278,27 +310,17 @@
             </label>
           </div>
           <div class="plugin-card-actions">
-            <label class="plugin-toggle-inline" :title="t('plugin.showInToolbar')">
+            <label
+              v-if="!p.crowded"
+              class="plugin-toggle-inline"
+              :title="t('plugin.showInToolbar')"
+            >
               <input
                 type="checkbox"
                 :checked="!hiddenToolbarIncludes(p.id)"
                 @change="toggleToolbarVisible(p.id, ($event.target as HTMLInputElement).checked)"
               />
               <span>{{ t('plugin.showInToolbar') }}</span>
-            </label>
-            <label
-              v-if="p.state === 'active' && p.hasComponent"
-              class="plugin-toggle-inline plugin-open-mode"
-            >
-              <span>{{ t('plugin.openMode') }}</span>
-              <select
-                class="plugin-open-mode-select"
-                :value="openModeOf(p.id)"
-                @change="onOpenModeChange(p.id, ($event.target as HTMLSelectElement).value)"
-              >
-                <option value="tab">{{ t('plugin.openMode.tab') }}</option>
-                <option value="floating">{{ t('plugin.openMode.floating') }}</option>
-              </select>
             </label>
             <button
               v-if="p.state === 'active' && p.hasComponent"
@@ -373,6 +395,7 @@ import { describeHttpError, describeRequestError } from '../../utils/httpError'
 import { uiConfirm } from '../../composables/useConfirm'
 import { settings, saveSettings } from '../../composables/useSettings'
 import { isTauri, tauriInvoke } from '../../composables/useTransport'
+import { Settings as SettingsIcon } from 'lucide-vue-next'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import FilePickerModal from '../preview/FilePickerModal.vue'
 
@@ -401,6 +424,13 @@ const busyOps = ref<Set<string>>(new Set())
 const confirmUninstall = ref<string | null>(null)
 const showPicker = ref(false)
 
+// Per-card collapse state for the prefs (toolbar / open mode) behind the header gear.
+const prefsOpen = ref<Record<string, boolean>>({})
+
+function togglePrefs(pluginId: string) {
+  prefsOpen.value = { ...prefsOpen.value, [pluginId]: !prefsOpen.value[pluginId] }
+}
+
 // Detail view state
 const detailPlugin = ref<MarketPlugin | null>(null)
 const readmeCache = ref<Map<string, string | null>>(new Map())
@@ -414,22 +444,28 @@ const readmeHtmlContent = computed(() => {
 
 const settingsPlugins = computed(() =>
   Array.from(loadedPlugins.values())
-    .map((p) => ({
-      id: p.id,
-      name: p.manifest.name,
-      version: p.manifest.version,
-      description: p.manifest.description,
-      state: p.state,
-      error: p.error,
-      hasComponent: !!p.exports?.component || hasHostPluginView(p.id),
-      permissions: p.manifest.permissions ?? [],
-      isDevLink: p.isDevLink,
-      category: p.manifest.category,
-      marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
-      overlays: overlayStore.overlays
-        .filter((o) => o.pluginId === p.id && !o.defaultHidden)
-        .map((o) => o.id),
-    }))
+    .map((p) => {
+      const hasComponent = !!p.exports?.component || hasHostPluginView(p.id)
+      return {
+        id: p.id,
+        name: p.manifest.name,
+        version: p.manifest.version,
+        description: p.manifest.description,
+        state: p.state,
+        error: p.error,
+        hasComponent,
+        // Component plugins keep the toolbar/open-mode prefs behind the header gear
+        // (they also carry the open-mode select, which made the actions row crowded).
+        crowded: p.state === 'active' && hasComponent,
+        permissions: p.manifest.permissions ?? [],
+        isDevLink: p.isDevLink,
+        category: p.manifest.category,
+        marketEntry: marketPlugins.value.find((mp) => mp.id === p.id),
+        overlays: overlayStore.overlays
+          .filter((o) => o.pluginId === p.id && !o.defaultHidden)
+          .map((o) => o.id),
+      }
+    })
     .sort((a, b) => a.name.localeCompare(b.name))
 )
 
@@ -1107,6 +1143,41 @@ async function onRefresh() {
   gap: 8px;
   margin-top: 4px;
   align-items: center;
+}
+.plugin-gear-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.plugin-gear-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-bright);
+}
+.plugin-gear-btn.active {
+  color: var(--accent);
+}
+.plugin-prefs-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 8px 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-hover);
 }
 .plugin-link {
   font-size: 12px;

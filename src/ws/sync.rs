@@ -66,8 +66,21 @@ async fn handle_sync_socket(
 ) {
     let (ws_tx, mut ws_rx) = socket.split();
 
-    // Channel for all outbound WS messages
-    let (ws_out_tx, mut ws_out_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
+    // Channel for all outbound WS messages. Bounded so a client that stops
+    // draining (e.g. a desktop view suspended while its screen is off) can at
+    // most buffer MAX_SYNC_OUTBOUND messages. Once full, the forwarding task
+    // signals `shutdown_tx`; the receive loop below breaks, the socket is
+    // dropped and the client reconnects to a fresh snapshot - instead of the
+    // server buffering an unbounded backlog that would be flushed in one burst
+    // on wake. Monitor samples are the steady ~0.5Hz producer, so the cap only
+    // trips for a genuinely stalled client, not in normal operation.
+    const MAX_SYNC_OUTBOUND: usize = 256;
+    let (ws_out_tx, mut ws_out_rx) = tokio::sync::mpsc::channel::<Message>(MAX_SYNC_OUTBOUND);
+
+    // Watch channel: an outbound task that finds the bounded queue full asks
+    // for an orderly disconnect (a.k.a. laggard reset). Breaking the receive
+    // loop drops the socket; the frontend auto-reconnects and re-syncs.
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
     // Writer task: reads from channel, writes to WebSocket sink
     let writer_task = tokio::spawn(async move {
@@ -89,11 +102,11 @@ async fn handle_sync_socket(
         interval.tick().await; // skip first immediate tick
         loop {
             interval.tick().await;
-            if ping_tx.send(Message::Ping(vec![])).is_err() {
+            if ping_tx.try_send(Message::Ping(vec![])).is_err() {
                 break;
             }
             if pong_counter.fetch_add(1, Ordering::Relaxed) >= 2 {
-                let _ = ping_tx.send(Message::Close(None));
+                let _ = ping_tx.try_send(Message::Close(None));
                 break;
             }
         }
@@ -106,7 +119,7 @@ async fn handle_sync_socket(
     // Send client_id to the client first (for echo suppression in HTTP POST emit)
     let hello = serde_json::to_string(&SyncMsg::SyncHello { client_id: client_id.clone() })
         .expect("serialization is infallible");
-    if ws_out_tx.send(Message::Text(hello)).is_err() {
+    if ws_out_tx.try_send(Message::Text(hello)).is_err() {
         return;
     }
 
@@ -119,7 +132,7 @@ async fn handle_sync_socket(
     let (tabs, active_pane_id) = manager.tab_list();
     let tab_list = SyncMsg::TabList { tabs, active_pane_id };
     let msg = serde_json::to_string(&tab_list).expect("serialization is infallible");
-    if ws_out_tx.send(Message::Text(msg)).is_err() {
+    if ws_out_tx.try_send(Message::Text(msg)).is_err() {
         return;
     }
 
@@ -127,7 +140,7 @@ async fn handle_sync_socket(
     let items = history.query(None, 20).await;
     let suggestions_msg = SyncMsg::Suggestions { items };
     let msg = serde_json::to_string(&suggestions_msg).expect("serialization is infallible");
-    if ws_out_tx.send(Message::Text(msg)).is_err() {
+    if ws_out_tx.try_send(Message::Text(msg)).is_err() {
         return;
     }
 
@@ -136,7 +149,7 @@ async fn handle_sync_socket(
     if !history_data.is_empty() {
         let monitor_msg = SyncMsg::MonitorHistory { data: history_data };
         let msg = serde_json::to_string(&monitor_msg).expect("serialization is infallible");
-        if ws_out_tx.send(Message::Text(msg)).is_err() {
+        if ws_out_tx.try_send(Message::Text(msg)).is_err() {
             return;
         }
     }
@@ -147,7 +160,7 @@ async fn handle_sync_socket(
         let active_workspace_id = settings.read().await.active_workspace_id.clone();
         let workspace_list = SyncMsg::WorkspaceList { workspaces: ws.clone(), active_workspace_id };
         let msg = serde_json::to_string(&workspace_list).expect("serialization is infallible");
-        let _ = ws_out_tx.send(Message::Text(msg));
+        let _ = ws_out_tx.try_send(Message::Text(msg));
     }
 
     // Send current Mission Control snapshot. Sent after tab_list/workspace_list
@@ -161,7 +174,7 @@ async fn handle_sync_socket(
             selected_tab_id: mc_snap.selected_tab_id,
         };
         let msg = serde_json::to_string(&snapshot_msg).expect("serialization is infallible");
-        let _ = ws_out_tx.send(Message::Text(msg));
+        let _ = ws_out_tx.try_send(Message::Text(msg));
     }
 
     // Use mpsc channel to bridge broadcast messages and direct responses to the WebSocket
@@ -177,12 +190,21 @@ async fn handle_sync_socket(
         }
     });
 
-    // Forward all messages from the shared channel to the WebSocket
+    // Forward all messages from the shared channel to the WebSocket. When the
+    // bounded outbound queue fills (this client stalled, e.g. a suspended
+    // desktop view), signal `shutdown_tx` for an orderly disconnect instead of
+    // letting the writer block forever on an undrained socket.
     let fwd_ws_out_tx = ws_out_tx.clone();
+    let fwd_shutdown_tx = shutdown_tx.clone();
     let fwd = tokio::spawn(async move {
         while let Some(data) = msg_rx.recv().await {
-            if fwd_ws_out_tx.send(Message::Text(data)).is_err() {
-                break;
+            match fwd_ws_out_tx.try_send(Message::Text(data)) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    let _ = fwd_shutdown_tx.send(true);
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
             }
         }
     });
@@ -230,7 +252,7 @@ async fn handle_sync_socket(
                                     "pane_id": pane_id,
                                     "prompts": prompts,
                                 });
-                                if ws_out.send(Message::Text(msg.to_string())).is_err() {
+                                if ws_out.try_send(Message::Text(msg.to_string())).is_err() {
                                     break;
                                 }
                             }
@@ -242,8 +264,19 @@ async fn handle_sync_socket(
         }
     });
 
-    // Process incoming sync messages from this client
-    while let Some(Ok(msg)) = ws_rx.next().await {
+    // Process incoming sync messages from this client. The loop doubles as the
+    // disconnect point for a laggard reset: when the fwd task fills the bounded
+    // outbound queue it sets `shutdown_tx`, and this select breaks so the socket
+    // drops and the client reconnects to a fresh snapshot instead of draining an
+    // unbounded backlog on wake.
+    loop {
+        let msg = tokio::select! {
+            _ = shutdown_rx.changed() => break,
+            incoming = ws_rx.next() => match incoming {
+                Some(Ok(msg)) => msg,
+                _ => break,
+            },
+        };
         match msg {
             Message::Text(text) => {
                 if let Ok(sync_msg) = serde_json::from_str::<SyncClientMsg>(&text) {
@@ -420,7 +453,7 @@ async fn handle_sync_socket(
                 }
             }
             Message::Ping(data) => {
-                let _ = ws_out_tx.send(Message::Pong(data));
+                let _ = ws_out_tx.try_send(Message::Pong(data));
             }
             Message::Pong(_) => {
                 missed_pongs.store(0, Ordering::Relaxed);
@@ -546,7 +579,7 @@ async fn handle_mission_control_op(
             snap.open = !snap.open;
             // On open, seed selection from the current active tab so the
             // highlight lands where the user expects. On close, leave
-            // selected_* intact so re-opening restores the last position.
+            // selected_* intact.
             if snap.open {
                 let active = manager
                     .active_pane_id
@@ -569,8 +602,23 @@ async fn handle_mission_control_op(
                             break;
                         }
                     }
-                    snap.selected_tab_id = found_tab;
-                    // selected_workspace_id left untouched on toggle-open.
+                    // Seed both the tab and its workspace so the seeded tab is
+                    // visible in the overview's filtered grid (frontend
+                    // `filteredCards` shows only the selected workspace). Same
+                    // attribution as `matchWorkspace` on the frontend.
+                    snap.selected_tab_id.clone_from(&found_tab);
+                    if let Some(tab_id) = &found_tab {
+                        let (tabs, _) = manager.tab_list();
+                        let ws_snapshot = workspaces.read().await.clone();
+                        snap.selected_workspace_id =
+                            tabs.iter().find(|t| &t.tab_id == tab_id).and_then(|t| {
+                                tab_workspace_id(
+                                    &ws_snapshot,
+                                    t.cwd.as_deref(),
+                                    t.connection_id.as_deref(),
+                                )
+                            });
+                    }
                 }
             }
             let open = snap.open;

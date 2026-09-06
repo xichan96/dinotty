@@ -142,7 +142,11 @@ watch(
     } else {
       closing.value = true
     }
-  }
+  },
+  // immediate: the component lazy-mounts with visible already true on the
+  // first open, and a non-immediate watcher never fires for that initial
+  // value - so without this the first-open grid would stay empty.
+  { immediate: true }
 )
 
 // Update cards when tabs change while open (debounced)

@@ -579,7 +579,7 @@ async fn handle_mission_control_op(
             snap.open = !snap.open;
             // On open, seed selection from the current active tab so the
             // highlight lands where the user expects. On close, leave
-            // selected_* intact so re-opening restores the last position.
+            // selected_* intact.
             if snap.open {
                 let active = manager
                     .active_pane_id
@@ -602,8 +602,23 @@ async fn handle_mission_control_op(
                             break;
                         }
                     }
-                    snap.selected_tab_id = found_tab;
-                    // selected_workspace_id left untouched on toggle-open.
+                    // Seed both the tab and its workspace so the seeded tab is
+                    // visible in the overview's filtered grid (frontend
+                    // `filteredCards` shows only the selected workspace). Same
+                    // attribution as `matchWorkspace` on the frontend.
+                    snap.selected_tab_id = found_tab.clone();
+                    if let Some(tab_id) = &found_tab {
+                        let (tabs, _) = manager.tab_list();
+                        let ws_snapshot = workspaces.read().await.clone();
+                        snap.selected_workspace_id =
+                            tabs.iter().find(|t| &t.tab_id == tab_id).and_then(|t| {
+                                tab_workspace_id(
+                                    &ws_snapshot,
+                                    t.cwd.as_deref(),
+                                    t.connection_id.as_deref(),
+                                )
+                            });
+                    }
                 }
             }
             let open = snap.open;

@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { coalesceLatest } from '../utils/coalesceLatest'
 import {
   onMonitorData as onSyncMonitorData,
   onMonitorHistory as onSyncMonitorHistory,
@@ -84,11 +85,27 @@ export function onMonitorHistory(fn: HistoryListener) {
   }
 }
 
+// Monitor is "latest value wins", so collapsing a burst to a bounded cadence
+// is safe and is the single choke point for every consumer (status bar items,
+// history arrays, charts, plugin sampling). Without it, a desktop app whose
+// WebContent process was suspended while its screen was off returns to a
+// backlog of buffered samples that the server flushes at once - each sample
+// triggering a full synchronous chart redraw and starving the main thread.
+// Values spaced > MONITOR_FLUSH_MS apart (the server's 2s cadence) pass
+// through unchanged.
+const MONITOR_FLUSH_MS = 200
+
+const emitMonitor = coalesceLatest(
+  (d: MonitorData) => {
+    monitorData.value = d
+    for (const fn of listeners) fn(d)
+  },
+  { intervalMs: MONITOR_FLUSH_MS }
+)
+
 // Subscribe to sync channel for live monitor data
 onSyncMonitorData((data) => {
-  const d = data as unknown as MonitorData
-  monitorData.value = d
-  for (const fn of listeners) fn(d)
+  emitMonitor(data as unknown as MonitorData)
 })
 
 // Subscribe to sync channel for monitor history

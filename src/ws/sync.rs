@@ -606,7 +606,7 @@ async fn handle_mission_control_op(
                     // visible in the overview's filtered grid (frontend
                     // `filteredCards` shows only the selected workspace). Same
                     // attribution as `matchWorkspace` on the frontend.
-                    snap.selected_tab_id = found_tab.clone();
+                    snap.selected_tab_id.clone_from(&found_tab);
                     if let Some(tab_id) = &found_tab {
                         let (tabs, _) = manager.tab_list();
                         let ws_snapshot = workspaces.read().await.clone();

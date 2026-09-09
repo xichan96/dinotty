@@ -847,6 +847,16 @@ export function useAppCore(options: AppCoreOptions) {
       return
     }
 
+    // Files, web previews, and plugins are view-only panes: closing one does
+    // not terminate a PTY. Do not show the terminal-session confirmation for
+    // these panes, even when the tab-close confirmation preference is enabled.
+    const leaf = findLeaf(tab.layout, paneId)
+    if (leaf && paneKind(leaf) !== 'terminal') {
+      const closed = await splitPane.closePane(paneId)
+      if (!closed) await closeTab(tabId)
+      return
+    }
+
     if (appSettings.confirm_before_close_tab === false) {
       const closed = await splitPane.closePane(paneId)
       if (!closed) await closeTab(tabId)

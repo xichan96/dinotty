@@ -55,6 +55,31 @@ describe('App.vue - onClosePane routes through confirmation gate', () => {
     expect(confirmDialog.attributes('data-visible')).toBe('true')
   })
 
+  it('file workspace pane + setting on → closes immediately without terminal confirmation', async () => {
+    mocks.closePane.mockResolvedValue(true)
+
+    const wrapper = await mountWithTabs()
+    const session = useSessionStore()
+    const tab = session.tabs[0]
+    if (!tab || tab.type !== 'terminal' || tab.layout.type !== 'split') {
+      throw new Error('Expected the test fixture to contain a split terminal tab')
+    }
+    const fileLeaf = tab.layout.children[1]
+    if (fileLeaf.type !== 'leaf') {
+      throw new Error('Expected the second test fixture child to be a leaf pane')
+    }
+    fileLeaf.kind = 'files'
+    fileLeaf.sourcePaneId = 'pane-1'
+
+    const splitContainer = wrapper.findComponent(SplitContainerStub)
+    await splitContainer.vm.$emit('close', 'pane-2')
+    await nextTick()
+
+    expect(mocks.closePane).toHaveBeenCalledWith('pane-2')
+    const confirmDialog = wrapper.findComponent(ConfirmCloseDialogStub)
+    expect(confirmDialog.attributes('data-visible')).toBe('false')
+  })
+
   it('onConfirmClose with pendingClosePaneId → calls splitPane.closePane, not closeTab', async () => {
     mocks.closePane.mockResolvedValue(true)
 

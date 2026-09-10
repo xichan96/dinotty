@@ -34,6 +34,7 @@
           id="settings-tabpanel-general"
           role="tabpanel"
           :aria-labelledby="`settings-tab-general`"
+          :visible="open && activeTab === 'general'"
           @token-changed="emit('token-changed')"
         />
         <AppearanceTab

@@ -15,6 +15,7 @@ export interface AccessUrl {
   copied: Ref<boolean>
   qrCanvasRef: Ref<HTMLCanvasElement | null>
   copyAccessUrl: () => Promise<void>
+  refreshAccessUrl: () => Promise<void>
   viewLog: () => Promise<void>
   refreshLog: () => Promise<void>
 }
@@ -93,7 +94,6 @@ export function useAccessUrl(opts: AccessUrlOptions): AccessUrl {
   }
 
   onMounted(() => {
-    void fetchAccessUrl()
     window.addEventListener('online', onNetworkChange)
     document.addEventListener('visibilitychange', onVisibilityChange)
   })
@@ -111,6 +111,7 @@ export function useAccessUrl(opts: AccessUrlOptions): AccessUrl {
     copied,
     qrCanvasRef,
     copyAccessUrl,
+    refreshAccessUrl: fetchAccessUrl,
     viewLog,
     refreshLog,
   }

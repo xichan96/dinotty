@@ -23,14 +23,28 @@ export function isOfficialDinottyReleaseUrl(rawUrl: string): boolean {
   }
 }
 
+/** Opens an HTTP(S) URL with the desktop OS's default browser. */
+export async function openUrlInSystemBrowser(rawUrl: string): Promise<boolean> {
+  if (!isTauri()) return false
+
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+
+    const { open } = await import('@tauri-apps/plugin-shell')
+    await open(url.href)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function openExternalUrl(rawUrl: string): Promise<boolean> {
   if (!isOfficialDinottyReleaseUrl(rawUrl)) return false
 
   try {
     if (isTauri()) {
-      const { open } = await import('@tauri-apps/plugin-shell')
-      await open(rawUrl)
-      return true
+      return openUrlInSystemBrowser(rawUrl)
     }
     // With opener isolation, browsers may return null even when the tab opened successfully.
     window.open(rawUrl, '_blank', 'noopener,noreferrer')

@@ -74,6 +74,7 @@
     @select-all="onMenuSelectAll"
     @open-file="onMenuOpenFile"
     @open-link="onMenuOpenLink"
+    @open-in-browser="onMenuOpenInBrowser"
     @split-horizontal="emit('splitHorizontal')"
     @split-vertical="emit('splitVertical')"
     @toggle-broadcast="emit('toggleBroadcast')"
@@ -111,6 +112,7 @@ import { useIsMobile } from '../../composables/useIsMobile'
 import { useSettings } from '../../composables/useSettings'
 import { useUploadProgress } from '../../composables/useUploadProgress'
 import { useScrollbarState } from '../../composables/useScrollbarState'
+import { openUrlInSystemBrowser } from '../../utils/openExternalUrl'
 
 const props = defineProps<{
   paneId: string
@@ -386,6 +388,10 @@ function onMenuOpenFile(path: string) {
 
 function onMenuOpenLink(url: string) {
   emit('previewLink', url)
+}
+
+function onMenuOpenInBrowser(url: string) {
+  void openUrlInSystemBrowser(url)
 }
 
 // Cached cell dimensions for touch selection

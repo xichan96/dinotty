@@ -130,6 +130,7 @@ export default {
   'terminal.ctxBookmark': 'Bookmark',
   'terminal.ctxSelectAll': 'Select All',
   'terminal.ctxOpenFile': 'Open in File Browser',
+  'terminal.ctxOpenInBrowser': 'Open in System Browser',
   'terminal.ctxOpenLink': 'Open in Preview',
   'terminal.ctxSaveBookmark': 'Save Bookmark',
   'terminal.ctxName': 'Name',

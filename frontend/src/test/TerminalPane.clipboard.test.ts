@@ -29,6 +29,8 @@ const clipboardMocks = vi.hoisted(() => ({
   readClipboardText: vi.fn(),
 }))
 
+const externalUrlMocks = vi.hoisted(() => ({ openUrlInSystemBrowser: vi.fn() }))
+
 vi.mock('../composables/useTerminal', () => ({
   TerminalInstance: paneMocks.TerminalInstance,
   setKbTypingLock: () => {},
@@ -45,6 +47,9 @@ vi.mock('../utils/clipboard', () => ({
 }))
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   readText: clipboardMocks.readClipboardText,
+}))
+vi.mock('../utils/openExternalUrl', () => ({
+  openUrlInSystemBrowser: externalUrlMocks.openUrlInSystemBrowser,
 }))
 vi.mock('vue-toastification', () => ({
   POSITION: { BOTTOM_CENTER: 'bottom-center' },
@@ -67,12 +72,22 @@ beforeEach(() => {
   clipboardMocks.readHostClipboard.mockReset()
   clipboardMocks.isTauri.mockReturnValue(false)
   clipboardMocks.readClipboardText.mockReset()
+  externalUrlMocks.openUrlInSystemBrowser.mockReset()
   toastMocks.error.mockReset()
   toastMocks.info.mockReset()
   toastMocks.success.mockReset()
 })
 
 describe('TerminalPane host clipboard input path', () => {
+  it('opens a terminal link through the system-browser helper', () => {
+    const wrapper = mountPane()
+
+    ;(wrapper.vm as any).onMenuOpenInBrowser('https://example.com/docs')
+
+    expect(externalUrlMocks.openUrlInSystemBrowser).toHaveBeenCalledWith('https://example.com/docs')
+    wrapper.unmount()
+  })
+
   it('sends single-line text and exactly one Enter through the same input event path', () => {
     const wrapper = mountPane()
     const terminal = paneMocks.instances[0]

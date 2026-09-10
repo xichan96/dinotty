@@ -7,6 +7,15 @@
           <FolderOpen :size="12" class="tcm-icon" />
           <span class="tcm-label">{{ t('terminal.ctxOpenFile') }}</span>
         </button>
+        <button
+          v-if="linkType === 'link' && isTauri()"
+          class="tcm-item"
+          role="menuitem"
+          @click="onOpenInBrowser"
+        >
+          <Globe :size="12" class="tcm-icon" />
+          <span class="tcm-label">{{ t('terminal.ctxOpenInBrowser') }}</span>
+        </button>
         <button v-if="linkType === 'link'" class="tcm-item" role="menuitem" @click="onOpenLink">
           <ExternalLink :size="12" class="tcm-icon" />
           <span class="tcm-label">{{ t('terminal.ctxOpenLink') }}</span>
@@ -122,6 +131,7 @@ import {
   TextSelect,
   FolderOpen,
   ExternalLink,
+  Globe,
   Columns2,
   Rows2,
   Radio,
@@ -134,6 +144,7 @@ import { copyToClipboard } from '../../utils/clipboard'
 import { randomId } from '../../utils/id'
 import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
+import { isTauri } from '../../composables/useTransport'
 
 const props = defineProps<{
   visible: boolean
@@ -153,6 +164,7 @@ const emit = defineEmits<{
   selectAll: []
   openFile: [path: string]
   openLink: [url: string]
+  openInBrowser: [url: string]
   splitHorizontal: []
   splitVertical: []
   toggleBroadcast: []
@@ -261,6 +273,11 @@ function onOpenFile() {
 
 function onOpenLink() {
   if (props.linkTarget) emit('openLink', props.linkTarget)
+  close()
+}
+
+function onOpenInBrowser() {
+  if (props.linkTarget) emit('openInBrowser', props.linkTarget)
   close()
 }
 

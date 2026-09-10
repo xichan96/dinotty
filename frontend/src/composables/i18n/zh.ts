@@ -129,6 +129,7 @@ export default {
   'terminal.ctxBookmark': '收藏',
   'terminal.ctxSelectAll': '全选',
   'terminal.ctxOpenFile': '在文件浏览器中打开',
+  'terminal.ctxOpenInBrowser': '在本机浏览器中打开',
   'terminal.ctxOpenLink': '在预览面板中打开',
   'terminal.ctxSaveBookmark': '保存收藏',
   'terminal.ctxName': '名称',

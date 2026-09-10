@@ -106,126 +106,129 @@
       </div>
     </template>
     <div class="tab-bar-tools">
-      <slot name="left" />
-      <div ref="newMenuWrapRef" class="new-tab-split">
-        <button
-          id="tab-new-btn"
-          :title="`${t('keybinding.newTab')} (${kbdNewTab})`"
-          @click="newMenuOpen = !newMenuOpen"
-          @touchend.prevent="newMenuOpen = !newMenuOpen"
-        >
-          <Terminal :size="16" />
-        </button>
-        <div
-          v-if="newMenuOpen"
-          class="new-menu-dropdown"
-          :class="{ 'align-right': newMenuAlignRight, 'overflow-flip': newMenuOverflowFlip }"
-        >
-          <div
-            class="new-menu-item"
-            @click="emitAction('new-tab')"
-            @touchend.prevent="emitAction('new-tab')"
+      <template v-for="itemId in toolbarOrder" :key="itemId">
+        <slot v-if="itemId === 'broadcast'" name="toolbar-item" :item-id="itemId" />
+        <div v-else-if="itemId === 'new_tab'" ref="newMenuWrapRef" class="new-tab-split">
+          <button
+            id="tab-new-btn"
+            :title="`${t('keybinding.newTab')} (${kbdNewTab})`"
+            @click="newMenuOpen = !newMenuOpen"
+            @touchend.prevent="newMenuOpen = !newMenuOpen"
           >
-            <Terminal :size="14" class="new-menu-icon" />
-            <span class="new-menu-label">{{ t('keybinding.newTab') }}</span>
-            <kbd class="new-menu-kbd">{{ kbdNewTab }}</kbd>
-          </div>
-          <div class="new-menu-sep" />
+            <Terminal :size="16" />
+          </button>
           <div
-            class="new-menu-item"
-            @click="emitAction('split-h')"
-            @touchend.prevent="emitAction('split-h')"
+            v-if="newMenuOpen"
+            class="new-menu-dropdown"
+            :class="{ 'align-right': newMenuAlignRight, 'overflow-flip': newMenuOverflowFlip }"
           >
-            <Columns2 :size="14" class="new-menu-icon" />
-            <span class="new-menu-label">{{ t('keybinding.splitHorizontal') }}</span>
-            <kbd class="new-menu-kbd">{{ kbdSplitH }}</kbd>
-          </div>
-          <div
-            class="new-menu-item"
-            @click="emitAction('split-v')"
-            @touchend.prevent="emitAction('split-v')"
-          >
-            <Rows2 :size="14" class="new-menu-icon" />
-            <span class="new-menu-label">{{ t('keybinding.splitVertical') }}</span>
-            <kbd class="new-menu-kbd">{{ kbdSplitV }}</kbd>
-          </div>
-          <template v-if="canBroadcast">
+            <div
+              class="new-menu-item"
+              @click="emitAction('new-tab')"
+              @touchend.prevent="emitAction('new-tab')"
+            >
+              <Terminal :size="14" class="new-menu-icon" />
+              <span class="new-menu-label">{{ t('keybinding.newTab') }}</span>
+              <kbd class="new-menu-kbd">{{ kbdNewTab }}</kbd>
+            </div>
             <div class="new-menu-sep" />
             <div
               class="new-menu-item"
-              @click="emitAction('broadcast')"
-              @touchend.prevent="emitAction('broadcast')"
+              @click="emitAction('split-h')"
+              @touchend.prevent="emitAction('split-h')"
             >
-              <Radio :size="14" class="new-menu-icon" />
-              <span class="new-menu-label">{{ t('split.toggleBroadcast') }}</span>
-              <kbd class="new-menu-kbd">{{ kbdBroadcast }}</kbd>
+              <Columns2 :size="14" class="new-menu-icon" />
+              <span class="new-menu-label">{{ t('keybinding.splitHorizontal') }}</span>
+              <kbd class="new-menu-kbd">{{ kbdSplitH }}</kbd>
             </div>
-            <div v-if="broadcastActive" class="new-menu-status">
-              {{ t('split.broadcastActive') }}
+            <div
+              class="new-menu-item"
+              @click="emitAction('split-v')"
+              @touchend.prevent="emitAction('split-v')"
+            >
+              <Rows2 :size="14" class="new-menu-icon" />
+              <span class="new-menu-label">{{ t('keybinding.splitVertical') }}</span>
+              <kbd class="new-menu-kbd">{{ kbdSplitV }}</kbd>
             </div>
-          </template>
-          <div class="new-menu-sep" />
-          <div
-            class="new-menu-item"
-            @click="emitAction('ssh-connect')"
-            @touchend.prevent="emitAction('ssh-connect')"
-          >
-            <Globe :size="14" class="new-menu-icon" />
-            <span class="new-menu-label">{{ t('palette.sshConnect') }}</span>
-            <kbd class="new-menu-kbd">{{ kbdSshConnect }}</kbd>
-          </div>
-          <div class="new-menu-sep" />
-          <div
-            class="new-menu-item"
-            @click="$emit('apply-template')"
-            @touchend.prevent="$emit('apply-template')"
-          >
-            <LayoutTemplate :size="14" class="new-menu-icon" />
-            <span class="new-menu-label">{{ t('palette.fromTemplate') }}</span>
-            <kbd class="new-menu-kbd">{{ kbdApplyTemplate }}</kbd>
-          </div>
-        </div>
-      </div>
-      <div
-        v-if="plugins.length > 0 && toolbarPlugins.length > 0"
-        ref="pluginWrapRef"
-        class="tab-bar-plugin-wrap"
-      >
-        <button
-          type="button"
-          class="tab-bar-icon-btn"
-          title="Plugins"
-          @click="pluginMenuOpen = !pluginMenuOpen"
-          @touchend.prevent="pluginMenuOpen = !pluginMenuOpen"
-        >
-          <Puzzle :size="16" />
-        </button>
-        <div
-          v-if="pluginMenuOpen"
-          class="plugin-dropdown"
-          :class="{ 'overflow-flip': pluginMenuOverflowFlip }"
-        >
-          <div v-if="toolbarPlugins.length === 0" class="plugin-dropdown-empty">
-            {{ t('plugin.toolbarEmpty') }}
-          </div>
-          <template v-for="group in toolbarPluginGroups" :key="group.category">
-            <div v-if="group.items.length > 0" class="plugin-dropdown-group">
-              <div class="plugin-dropdown-group-title">{{ group.label }}</div>
+            <template v-if="canBroadcast">
+              <div class="new-menu-sep" />
               <div
-                v-for="p in group.items"
-                :key="p.id"
-                class="plugin-dropdown-item"
-                @click="openPlugin(p.id)"
-                @touchend.prevent="openPlugin(p.id)"
+                class="new-menu-item"
+                @click="emitAction('broadcast')"
+                @touchend.prevent="emitAction('broadcast')"
               >
-                <span class="plugin-dropdown-name">{{ p.name }}</span>
-                <span v-if="p.description" class="plugin-dropdown-desc">{{ p.description }}</span>
+                <Radio :size="14" class="new-menu-icon" />
+                <span class="new-menu-label">{{ t('split.toggleBroadcast') }}</span>
+                <kbd class="new-menu-kbd">{{ kbdBroadcast }}</kbd>
               </div>
+              <div v-if="broadcastActive" class="new-menu-status">
+                {{ t('split.broadcastActive') }}
+              </div>
+            </template>
+            <div class="new-menu-sep" />
+            <div
+              class="new-menu-item"
+              @click="emitAction('ssh-connect')"
+              @touchend.prevent="emitAction('ssh-connect')"
+            >
+              <Globe :size="14" class="new-menu-icon" />
+              <span class="new-menu-label">{{ t('palette.sshConnect') }}</span>
+              <kbd class="new-menu-kbd">{{ kbdSshConnect }}</kbd>
             </div>
-          </template>
+            <div class="new-menu-sep" />
+            <div
+              class="new-menu-item"
+              @click="$emit('apply-template')"
+              @touchend.prevent="$emit('apply-template')"
+            >
+              <LayoutTemplate :size="14" class="new-menu-icon" />
+              <span class="new-menu-label">{{ t('palette.fromTemplate') }}</span>
+              <kbd class="new-menu-kbd">{{ kbdApplyTemplate }}</kbd>
+            </div>
+          </div>
         </div>
-      </div>
-      <slot name="right"></slot>
+        <div
+          v-else-if="itemId === 'plugins' && plugins.length > 0 && toolbarPlugins.length > 0"
+          ref="pluginWrapRef"
+          class="tab-bar-plugin-wrap"
+        >
+          <button
+            type="button"
+            class="tab-bar-icon-btn"
+            title="Plugins"
+            @click="pluginMenuOpen = !pluginMenuOpen"
+            @touchend.prevent="pluginMenuOpen = !pluginMenuOpen"
+          >
+            <Puzzle :size="16" />
+          </button>
+          <div
+            v-if="pluginMenuOpen"
+            class="plugin-dropdown"
+            :class="{ 'overflow-flip': pluginMenuOverflowFlip }"
+          >
+            <div v-if="toolbarPlugins.length === 0" class="plugin-dropdown-empty">
+              {{ t('plugin.toolbarEmpty') }}
+            </div>
+            <template v-for="group in toolbarPluginGroups" :key="group.category">
+              <div v-if="group.items.length > 0" class="plugin-dropdown-group">
+                <div class="plugin-dropdown-group-title">{{ group.label }}</div>
+                <div
+                  v-for="p in group.items"
+                  :key="p.id"
+                  class="plugin-dropdown-item"
+                  @click="openPlugin(p.id)"
+                  @touchend.prevent="openPlugin(p.id)"
+                >
+                  <span class="plugin-dropdown-name">{{ p.name }}</span>
+                  <span v-if="p.description" class="plugin-dropdown-desc">{{ p.description }}</span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+        <slot v-else name="toolbar-item" :item-id="itemId" />
+      </template>
+      <slot name="more"></slot>
     </div>
     <div
       v-if="isVertical"
@@ -338,6 +341,7 @@ const props = withDefaults(
     currentTabIndex?: number
     activeWorkspaceAbbr?: string
     activeWorkspaceColor?: string
+    toolbarOrder?: string[]
   }>(),
   {
     indicators: () => ({}),
@@ -349,6 +353,7 @@ const props = withDefaults(
     currentTabIndex: 0,
     activeWorkspaceAbbr: '',
     activeWorkspaceColor: undefined,
+    toolbarOrder: () => [],
   }
 )
 

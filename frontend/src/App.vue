@@ -30,6 +30,7 @@
         :current-tab-index="currentTabIndex"
         :active-workspace-abbr="activeWorkspaceAbbr"
         :active-workspace-color="activeWorkspaceColor"
+        :toolbar-order="previewToolbarItems.map((item) => item.id)"
         @activate="activateTab"
         @close="requestCloseTab"
         @close-tabs="onCloseTabsBulk"
@@ -42,9 +43,9 @@
         @save-as-template="openSaveTemplateDialog"
         @apply-template="templatePickerVisible = true"
       >
-        <template #left>
+        <template #toolbar-item="{ itemId }">
           <button
-            v-if="isBroadcastActive"
+            v-if="itemId === 'broadcast' && isBroadcastActive"
             type="button"
             class="tab-bar-icon-btn broadcast-btn"
             :title="t('split.toggleBroadcast')"
@@ -53,10 +54,61 @@
           >
             <Radar :size="16" />
           </button>
+          <button
+            v-else-if="
+              activeTabType === 'terminal' &&
+              (itemId === 'files' || itemId === 'web') &&
+              isPreviewToolbarItemVisible(itemId)
+            "
+            type="button"
+            class="tab-bar-icon-btn"
+            :title="previewToolbarLabel(itemId)"
+            @click="openOrFocusPreview(itemId)"
+            @touchend.prevent="openOrFocusPreview(itemId)"
+          >
+            <FolderTree v-if="itemId === 'files'" :size="16" />
+            <Globe v-else :size="16" />
+          </button>
+          <button
+            v-else-if="itemId === 'reload'"
+            type="button"
+            class="tab-bar-icon-btn"
+            :title="t('app.reload')"
+            @click="reloadApp"
+            @touchend.prevent="reloadApp"
+          >
+            <RefreshCw :size="16" />
+          </button>
+          <button
+            v-else-if="itemId === 'settings'"
+            type="button"
+            class="tab-bar-icon-btn"
+            :title="t('app.settings')"
+            @click="settingsOpen = true"
+            @touchend.prevent="settingsOpen = true"
+          >
+            <Settings :size="16" />
+          </button>
+          <button
+            v-else-if="
+              itemId === 'notifications' &&
+              (notif.notifications.value.length > 0 || notif.unreadAttentionCount.value > 0)
+            "
+            type="button"
+            class="tab-bar-icon-btn notif-btn"
+            :title="t('notification.title')"
+            @click="notif.togglePanel()"
+            @touchend.prevent="notif.togglePanel()"
+          >
+            <Bell :size="16" />
+            <span v-if="notif.unreadAttentionCount.value > 0" class="notif-badge">{{
+              notif.unreadAttentionCount.value > 9 ? '9+' : notif.unreadAttentionCount.value
+            }}</span>
+          </button>
         </template>
-        <template #right>
+        <template #more>
           <div
-            v-if="activeTabType === 'terminal'"
+            v-if="activeTabType === 'terminal' && hiddenPreviewToolbarItems.length"
             ref="previewMenuWrapRef"
             class="preview-menu-wrap"
           >
@@ -64,11 +116,11 @@
               type="button"
               class="tab-bar-icon-btn"
               :class="{ 'is-active': previewMenuOpen }"
-              :title="t('app.preview')"
+              :title="t('previewToolbar.more')"
               @click="previewMenuOpen = !previewMenuOpen"
               @touchend.prevent="previewMenuOpen = !previewMenuOpen"
             >
-              <Monitor :size="16" />
+              <Ellipsis :size="16" />
             </button>
             <div
               v-if="previewMenuOpen"
@@ -83,56 +135,19 @@
               role="menu"
             >
               <button
+                v-for="item in hiddenPreviewToolbarItems"
+                :key="item.id"
                 type="button"
                 class="preview-menu-item"
                 role="menuitem"
-                @click="((previewMenuOpen = false), openOrFocusPreview('files'))"
+                @click="((previewMenuOpen = false), openOrFocusPreview(item.id as 'files' | 'web'))"
               >
-                <FolderTree :size="14" />
-                <span>{{ t('previewPanel.switchFiles') }}</span>
-              </button>
-              <button
-                type="button"
-                class="preview-menu-item"
-                role="menuitem"
-                @click="((previewMenuOpen = false), openOrFocusPreview('web'))"
-              >
-                <Globe :size="14" />
-                <span>{{ t('previewPanel.switchWeb') }}</span>
+                <FolderTree v-if="item.id === 'files'" :size="14" />
+                <Globe v-else :size="14" />
+                <span>{{ previewToolbarLabel(item.id) }}</span>
               </button>
             </div>
           </div>
-          <button
-            type="button"
-            class="tab-bar-icon-btn"
-            :title="t('app.reload')"
-            @click="reloadApp"
-            @touchend.prevent="reloadApp"
-          >
-            <RefreshCw :size="16" />
-          </button>
-          <button
-            type="button"
-            class="tab-bar-icon-btn"
-            :title="t('app.settings')"
-            @click="settingsOpen = true"
-            @touchend.prevent="settingsOpen = true"
-          >
-            <Settings :size="16" />
-          </button>
-          <button
-            v-if="notif.notifications.value.length > 0 || notif.unreadAttentionCount.value > 0"
-            type="button"
-            class="tab-bar-icon-btn notif-btn"
-            :title="t('notification.title')"
-            @click="notif.togglePanel()"
-            @touchend.prevent="notif.togglePanel()"
-          >
-            <Bell :size="16" />
-            <span v-if="notif.unreadAttentionCount.value > 0" class="notif-badge">{{
-              notif.unreadAttentionCount.value > 9 ? '9+' : notif.unreadAttentionCount.value
-            }}</span>
-          </button>
         </template>
       </TabBar>
 
@@ -454,7 +469,8 @@ import { useAppKeyboard } from './composables/useAppKeyboard'
 import { useAppConnectivity } from './composables/useAppConnectivity'
 import { useAppTauri } from './composables/useAppTauri'
 import { usePluginBridge } from './composables/usePluginBridge'
-import { Settings, Bell, Monitor, Radar, RefreshCw, FolderTree, Globe } from 'lucide-vue-next'
+import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe } from 'lucide-vue-next'
+import { normalizePreviewToolbarItems, type PreviewToolbarId } from './utils/previewToolbar'
 
 // ── Stores & shared app services ────────────────────────────────
 const session = useSessionStore()
@@ -659,6 +675,47 @@ const {
   clearActiveReadContext,
   stopForegroundGainSubscription,
 } = core
+
+const previewToolbarItems = computed(() =>
+  normalizePreviewToolbarItems(appSettings.preview.toolbar_items)
+)
+const visiblePreviewToolbarItems = computed(() =>
+  previewToolbarItems.value.filter((item) => item.visible)
+)
+const hiddenPreviewToolbarItems = computed(() =>
+  previewToolbarItems.value.filter(
+    (item) => (item.id === 'files' || item.id === 'web') && !item.visible
+  )
+)
+
+function isPreviewToolbarItemVisible(id: 'files' | 'web') {
+  return visiblePreviewToolbarItems.value.some((item) => item.id === id)
+}
+
+watch(hiddenPreviewToolbarItems, (items) => {
+  if (items.length === 0) previewMenuOpen.value = false
+})
+
+function previewToolbarLabel(id: PreviewToolbarId) {
+  switch (id) {
+    case 'broadcast':
+      return t('settings.previewToolbar.broadcast')
+    case 'new_tab':
+      return t('settings.previewToolbar.newTab')
+    case 'plugins':
+      return t('settings.previewToolbar.plugins')
+    case 'files':
+      return t('previewPanel.switchFiles')
+    case 'web':
+      return t('previewPanel.switchWeb')
+    case 'reload':
+      return t('app.reload')
+    case 'settings':
+      return t('app.settings')
+    case 'notifications':
+      return t('notification.title')
+  }
+}
 
 // Lazy-mount the Mission Control overview on first open; stays mounted
 // afterwards so re-opens are instant.

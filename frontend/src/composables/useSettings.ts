@@ -7,6 +7,7 @@ import { canonicalizeSystemKeyboard } from '../utils/systemKeyboardLayout'
 import type { KeyboardGuardMode } from '../utils/keyboardGuardMode'
 import type { KeyBinding } from './useKeybindings'
 import type { SavedTheme } from './useDeviceThemeSelection'
+import type { PreviewToolbarItem } from '../utils/previewToolbar'
 export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
 /** 'builtin' | 'system' 为宿主键盘；其余字符串为键盘插件 id（keyboard-plugin-design.md §3.2C） */
 export type MobileInputMode = 'builtin' | 'system' | (string & {})
@@ -137,6 +138,7 @@ export interface SettingsData {
   }
   preview: {
     allow_external: boolean
+    toolbar_items: PreviewToolbarItem[]
   }
   keybindings: Record<string, KeyBinding>
   log: LogConfig
@@ -618,6 +620,16 @@ export const settings = reactive<SettingsData>({
   },
   preview: {
     allow_external: false,
+    toolbar_items: [
+      { id: 'broadcast', visible: true },
+      { id: 'new_tab', visible: true },
+      { id: 'plugins', visible: true },
+      { id: 'files', visible: true },
+      { id: 'web', visible: true },
+      { id: 'reload', visible: true },
+      { id: 'settings', visible: true },
+      { id: 'notifications', visible: true },
+    ],
   },
   keybindings: {},
   log: {

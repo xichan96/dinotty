@@ -3,6 +3,57 @@
     <ThemeManager />
 
     <div class="settings-group">
+      <h3 class="settings-group-title">{{ t('settings.previewToolbar') }}</h3>
+      <section class="settings-section">
+        <p class="settings-hint">{{ t('settings.previewToolbar.hint') }}</p>
+        <div
+          v-for="(item, index) in previewToolbarItems"
+          :key="item.id"
+          class="preview-toolbar-setting"
+        >
+          <span>{{ previewToolbarLabel(item.id) }}</span>
+          <div class="preview-toolbar-setting-actions">
+            <label
+              v-if="isPreviewToolbarItemToggleable(item.id)"
+              class="toggle"
+              :title="t('settings.previewToolbar.show')"
+            >
+              <input
+                :checked="item.visible"
+                type="checkbox"
+                @change="
+                  setPreviewToolbarVisibility(item.id, ($event.target as HTMLInputElement).checked)
+                "
+              />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+            <span v-else class="settings-hint">{{
+              t('settings.previewToolbar.alwaysVisible')
+            }}</span>
+            <button
+              class="icon-btn"
+              type="button"
+              :disabled="index === 0"
+              :title="t('settings.previewToolbar.moveEarlier')"
+              @click="movePreviewToolbarItem(index, -1)"
+            >
+              ↑
+            </button>
+            <button
+              class="icon-btn"
+              type="button"
+              :disabled="index === previewToolbarItems.length - 1"
+              :title="t('settings.previewToolbar.moveLater')"
+              @click="movePreviewToolbarItem(index, 1)"
+            >
+              ↓
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="settings-group">
       <h3 class="settings-group-title">{{ t('settings.text') }}</h3>
 
       <div class="settings-row">
@@ -296,11 +347,61 @@ import {
   useDeviceTextSettings,
 } from '../../composables/useDeviceTextSettings'
 import { TAB_PLACEMENT_MODES, useTabPlacement } from '../../composables/useTabPlacement'
+import {
+  isPreviewToolbarItemToggleable,
+  normalizePreviewToolbarItems,
+  type PreviewToolbarId,
+} from '../../utils/previewToolbar'
 
 const { settings, saveSettings } = useSettings()
 const { fontSize, fontFamily, lineHeight, letterSpacing, hasOverride, resetOverride } =
   useDeviceTextSettings()
 const { t } = useI18n()
+
+const previewToolbarItems = computed(() =>
+  normalizePreviewToolbarItems(settings.preview.toolbar_items)
+)
+
+function previewToolbarLabel(id: PreviewToolbarId) {
+  switch (id) {
+    case 'broadcast':
+      return t('settings.previewToolbar.broadcast')
+    case 'new_tab':
+      return t('settings.previewToolbar.newTab')
+    case 'plugins':
+      return t('settings.previewToolbar.plugins')
+    case 'files':
+      return t('previewPanel.switchFiles')
+    case 'web':
+      return t('previewPanel.switchWeb')
+    case 'reload':
+      return t('app.reload')
+    case 'settings':
+      return t('app.settings')
+    case 'notifications':
+      return t('notification.title')
+  }
+}
+
+function savePreviewToolbarItems(items: ReturnType<typeof normalizePreviewToolbarItems>) {
+  settings.preview.toolbar_items = items
+  void saveSettings()
+}
+
+function setPreviewToolbarVisibility(id: PreviewToolbarId, visible: boolean) {
+  if (!isPreviewToolbarItemToggleable(id)) return
+  savePreviewToolbarItems(
+    previewToolbarItems.value.map((item) => (item.id === id ? { ...item, visible } : item))
+  )
+}
+
+function movePreviewToolbarItem(index: number, direction: -1 | 1) {
+  const nextIndex = index + direction
+  if (nextIndex < 0 || nextIndex >= previewToolbarItems.value.length) return
+  const items = [...previewToolbarItems.value]
+  ;[items[index], items[nextIndex]] = [items[nextIndex], items[index]]
+  savePreviewToolbarItems(items)
+}
 
 // ── Tab bar placement ──
 // Device-scoped like the font settings above: writing it must never trigger a
@@ -468,3 +569,21 @@ onBeforeUnmount(() => {
   if (textChangeTimer) clearTimeout(textChangeTimer)
 })
 </script>
+
+<style scoped>
+.preview-toolbar-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.preview-toolbar-setting-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+</style>

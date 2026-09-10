@@ -81,14 +81,72 @@ pub(crate) fn default_verification_code_rate_limit_per_minute() -> u32 {
     5
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PreviewConfig {
     #[serde(default = "default_preview_allow_external")]
     pub allow_external: bool,
+    #[serde(default = "default_preview_toolbar_items")]
+    pub toolbar_items: Vec<PreviewToolbarItem>,
 }
 
 pub(crate) fn default_preview_allow_external() -> bool {
     true
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PreviewToolbarItem {
+    pub id: String,
+    #[serde(default = "default_preview_toolbar_item_visible")]
+    pub visible: bool,
+}
+
+pub(crate) fn default_preview_toolbar_item_visible() -> bool {
+    true
+}
+
+pub(crate) fn default_preview_toolbar_items() -> Vec<PreviewToolbarItem> {
+    vec![
+        PreviewToolbarItem { id: "broadcast".into(), visible: true },
+        PreviewToolbarItem { id: "new_tab".into(), visible: true },
+        PreviewToolbarItem { id: "plugins".into(), visible: true },
+        PreviewToolbarItem { id: "files".into(), visible: true },
+        PreviewToolbarItem { id: "web".into(), visible: true },
+        PreviewToolbarItem { id: "reload".into(), visible: true },
+        PreviewToolbarItem { id: "settings".into(), visible: true },
+        PreviewToolbarItem { id: "notifications".into(), visible: true },
+    ]
+}
+
+impl Default for PreviewConfig {
+    fn default() -> Self {
+        Self {
+            allow_external: default_preview_allow_external(),
+            toolbar_items: default_preview_toolbar_items(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PreviewConfig;
+
+    #[test]
+    fn legacy_preview_config_gets_the_default_toolbar() {
+        let config: PreviewConfig = serde_json::from_str(r#"{"allow_external":false}"#).unwrap();
+
+        assert!(!config.allow_external);
+        assert_eq!(config.toolbar_items.len(), 8);
+        assert_eq!(config.toolbar_items[0].id, "broadcast");
+        assert_eq!(config.toolbar_items[1].id, "new_tab");
+        assert_eq!(config.toolbar_items[2].id, "plugins");
+        assert_eq!(config.toolbar_items[3].id, "files");
+        assert!(config.toolbar_items[3].visible);
+        assert_eq!(config.toolbar_items[4].id, "web");
+        assert!(config.toolbar_items[4].visible);
+        assert_eq!(config.toolbar_items[5].id, "reload");
+        assert_eq!(config.toolbar_items[6].id, "settings");
+        assert_eq!(config.toolbar_items[7].id, "notifications");
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

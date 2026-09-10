@@ -78,11 +78,7 @@
         <div class="access-url-row">
           <div class="access-url-display">
             <span class="access-url-text">{{ accessUrl }}</span>
-            <button
-              class="access-url-copy"
-              :title="t('settings.copyUrl')"
-              @click="copyAccessUrl()"
-            >
+            <button class="access-url-copy" :title="t('settings.copyUrl')" @click="copyAccessUrl()">
               <Check v-if="copied" :size="14" /><Copy v-else :size="14" />
             </button>
           </div>

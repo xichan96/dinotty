@@ -631,9 +631,32 @@ pub fn setup_zsh_title_hooks(home: &str) -> Option<std::path::PathBuf> {
 "#
     );
 
-    let zshrc = format!(
+    let zshrc = zshrc_contents(home, &zdotdir);
+
+    let zprofile = format!(
+        r#"[[ -f "{home}/.zprofile" ]] && source "{home}/.zprofile"
+"#
+    );
+
+    std::fs::write(zdotdir.join(".zshenv"), zshenv).ok()?;
+    std::fs::write(zdotdir.join(".zshrc"), zshrc).ok()?;
+    std::fs::write(zdotdir.join(".zprofile"), zprofile).ok()?;
+    Some(zdotdir)
+}
+
+fn zshrc_contents(home: &str, zdotdir: &std::path::Path) -> String {
+    let zdotdir = zdotdir.display();
+    format!(
         r#"# dinotty title injection — loaded via ZDOTDIR
-ZDOTDIR=  # reset so child shells behave normally
+# macOS /etc/zshrc may have already derived HISTFILE from this temporary
+# ZDOTDIR. Restore only that derived value, without touching a user's custom
+# HISTFILE, before loading their startup configuration.
+_dinotty_zdotdir="{zdotdir}"
+unset ZDOTDIR
+if [[ "$HISTFILE" == "$_dinotty_zdotdir/.zsh_history" ]]; then
+  HISTFILE="$HOME/.zsh_history"
+fi
+unset _dinotty_zdotdir
 
 [[ -f "{home}/.zshrc" ]] && source "{home}/.zshrc"
 
@@ -648,7 +671,8 @@ fi
 [[ $HISTSIZE -gt 0 ]] || HISTSIZE=10000
 [[ $SAVEHIST -gt 0 ]] || SAVEHIST=10000
 [[ -n "$HISTFILE" ]] || HISTFILE="$HOME/.zsh_history"
-setopt INC_APPEND_HISTORY SHARE_HISTORY
+unsetopt INC_APPEND_HISTORY INC_APPEND_HISTORY_TIME
+setopt SHARE_HISTORY
 
 function _dinotty_precmd {{
   printf "\033]0;%s@%s:%s\007" "${{USER}}" "${{HOST%%.*}}" "${{PWD/#$HOME/~}}"
@@ -668,17 +692,7 @@ if [[ -z "${{preexec_functions[(r)_dinotty_preexec]}}" ]]; then
   preexec_functions+=(_dinotty_preexec)
 fi
 "#
-    );
-
-    let zprofile = format!(
-        r#"[[ -f "{home}/.zprofile" ]] && source "{home}/.zprofile"
-"#
-    );
-
-    std::fs::write(zdotdir.join(".zshenv"), zshenv).ok()?;
-    std::fs::write(zdotdir.join(".zshrc"), zshrc).ok()?;
-    std::fs::write(zdotdir.join(".zprofile"), zprofile).ok()?;
-    Some(zdotdir)
+    )
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -809,8 +823,58 @@ mod tests {
     use super::simplify_host_cwd;
     use super::{
         append_wsl_cwd_args, is_claude_session_env_key, locale_adjustment, notify_url_for,
-        LocaleAdjustment,
+        zshrc_contents, LocaleAdjustment,
     };
+
+    fn run_zshrc(
+        home: &std::path::Path,
+        zdotdir: &std::path::Path,
+        histfile: &std::path::Path,
+    ) -> String {
+        let script_path = zdotdir.join(".zshrc");
+        std::fs::write(&script_path, zshrc_contents(&home.display().to_string(), zdotdir)).unwrap();
+        std::fs::write(
+            home.join(".zshrc"),
+            r#"print -r -- "user_histfile=$HISTFILE"
+if (( ${+ZDOTDIR} )); then
+  print -r -- "user_zdotdir=set"
+else
+  print -r -- "user_zdotdir=unset"
+fi
+"#,
+        )
+        .unwrap();
+
+        let output = std::process::Command::new("/bin/zsh")
+            .args([
+                "-f",
+                "-c",
+                r#"source "$1"
+print -r -- "after_histfile=$HISTFILE"
+if (( ${+ZDOTDIR} )); then
+  print -r -- "after_zdotdir=set"
+else
+  print -r -- "after_zdotdir=unset"
+fi
+print -r -- "sharehistory=${options[sharehistory]}"
+print -r -- "incappendhistory=${options[incappendhistory]}"
+print -r -- "incappendhistorytime=${options[incappendhistorytime]}"
+"#,
+                "zsh",
+                script_path.to_str().unwrap(),
+            ])
+            .env("HOME", home)
+            .env("HISTFILE", histfile)
+            .env("ZDOTDIR", zdotdir)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "zsh integration failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
 
     #[test]
     fn builds_notify_url_for_bound_port() {
@@ -912,5 +976,46 @@ mod tests {
             locale_adjustment(Some("en_US.ISO8859-1"), Some("C"), Some("")),
             LocaleAdjustment::Preserve
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_integration_restores_only_dinotty_history_and_unsets_zdotdir() {
+        if !std::path::Path::new("/bin/zsh").is_file() {
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let zdotdir = tempfile::tempdir().unwrap();
+        let dinotty_history = zdotdir.path().join(".zsh_history");
+
+        let output = run_zshrc(home.path(), zdotdir.path(), &dinotty_history);
+
+        assert!(
+            output.contains(&format!("user_histfile={}/.zsh_history", home.path().display())),
+            "unexpected zsh integration output: {output}"
+        );
+        assert!(output.contains("user_zdotdir=unset"));
+        assert!(output.contains(&format!("after_histfile={}/.zsh_history", home.path().display())));
+        assert!(output.contains("after_zdotdir=unset"));
+        assert!(output.contains("sharehistory=on"));
+        assert!(output.contains("incappendhistory=off"));
+        assert!(output.contains("incappendhistorytime=off"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_integration_preserves_custom_history() {
+        if !std::path::Path::new("/bin/zsh").is_file() {
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let zdotdir = tempfile::tempdir().unwrap();
+        let custom_history = home.path().join("custom-zsh-history");
+
+        let output = run_zshrc(home.path(), zdotdir.path(), &custom_history);
+
+        assert!(output.contains(&format!("user_histfile={}", custom_history.display())));
+        assert!(output.contains(&format!("after_histfile={}", custom_history.display())));
+        assert!(output.contains("user_zdotdir=unset"));
     }
 }

@@ -3,6 +3,7 @@ use super::types::{validate_create_tab_request, CreateTabRequest};
 fn request(argv: Vec<&str>) -> CreateTabRequest {
     CreateTabRequest {
         cwd: None,
+        source_pane_id: None,
         argv: Some(argv.into_iter().map(str::to_string).collect()),
         title: None,
     }

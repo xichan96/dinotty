@@ -7,7 +7,13 @@ import { pickSuccessorTab } from '../utils/tabSuccessor'
 import { isKbTypingLocked } from './useTerminal'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
 import { invalidatePluginPreview } from './useTabPreview'
-import { apiActivatePane, apiCloseTab, apiCreateTab, apiCreateSshTab } from './useTabApi'
+import {
+  apiActivatePane,
+  apiCloseTab,
+  apiCreateTab,
+  apiCreateSshTab,
+  apiGetPaneCwd,
+} from './useTabApi'
 import { apiApplyTemplate } from './useTemplateApi'
 import type { SshConnectResult } from './useSshConnectFlow'
 import type { MarkReadReason } from './useNotification'
@@ -26,7 +32,10 @@ export interface TabLifecycleOptions {
     requestClosePane: (tabId: string, paneId: string) => void
     cancelClose: () => void
   }
-  appSettings: { confirm_before_close_tab?: boolean }
+  appSettings: {
+    confirm_before_close_tab?: boolean
+    inherit_cwd_for_new_tab?: boolean
+  }
   activeWorkspaceId: Ref<string | null>
   workspaces: Ref<Workspace[]>
   matchWorkspace: (
@@ -123,6 +132,45 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       // cwd fallback - otherwise the new tab would be attributed to the
       // confirmed active workspace instead of the MC-selected one.
       const useActiveFallback = workspaceId === undefined
+      const activeTab = tabs.value.find(
+        (tab): tab is TerminalTab => tab.type === 'terminal' && tab.paneId === activePaneId.value
+      )
+      const inheritsActiveCwd =
+        !cwd &&
+        !argv &&
+        useActiveFallback &&
+        appSettings.inherit_cwd_for_new_tab === true &&
+        activeTab !== undefined
+
+      // SSH tabs need their remote cwd passed to the SSH creation endpoint.
+      // Local tabs instead pass the source pane id to POST /api/tabs, where the
+      // server resolves its current CWD atomically with tab creation.
+      let inheritedCwd: string | undefined
+      const inheritedLocalPaneId =
+        inheritsActiveCwd && activeTab && !activeTab.connectionId
+          ? activeTab.activePaneId
+          : undefined
+      if (inheritsActiveCwd && activeTab?.connectionId) {
+        try {
+          inheritedCwd = await apiGetPaneCwd(activeTab.activePaneId)
+        } catch (error) {
+          console.warn('Failed to read active pane cwd for new tab:', error)
+        }
+      }
+
+      // A profile-backed SSH tab needs another SSH connection, rather than a
+      // local PTY pointed at its remote path. Preserve its workspace identity
+      // while using the live remote cwd as the initial directory.
+      if (inheritedCwd && activeTab?.connectionId) {
+        const result = await apiCreateSshTab(
+          activeTab.connectionId,
+          inheritedCwd,
+          activeTab.workspaceId
+        )
+        await onSshConnectRef.value(result)
+        return result.pane_id
+      }
+
       const activeWs = useActiveFallback
         ? workspaces.value.find((w) => w.id === activeWorkspaceId.value)
         : null
@@ -131,8 +179,10 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
         await onSshConnectRef.value(result)
         return result.pane_id
       }
-      const effectiveCwd = useActiveFallback ? (cwd ?? activeWorkspacePath.value) : cwd
-      const result = await apiCreateTab(effectiveCwd, argv, title)
+      const effectiveCwd = useActiveFallback
+        ? (cwd ?? inheritedCwd ?? activeWorkspacePath.value)
+        : cwd
+      const result = await apiCreateTab(effectiveCwd, argv, title, inheritedLocalPaneId)
       const existing = tabs.value.find((t) => t.type === 'terminal' && t.paneId === result.tab_id)
       if (existing) {
         if (result.cwd && existing.type === 'terminal' && !existing.cwd) {

@@ -395,7 +395,8 @@ impl McpTools {
             Some(_) => return Err("argv must be an array of strings".into()),
         };
 
-        let req = crate::tabs::CreateTabRequest { cwd, argv: argv_opt, title };
+        let req =
+            crate::tabs::CreateTabRequest { cwd, source_pane_id: None, argv: argv_opt, title };
         match crate::tabs::service::create_tab(
             &self.manager,
             &self.settings,

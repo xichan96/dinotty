@@ -11,7 +11,7 @@ export type WorkspaceBadgeMode = 'off' | 'tab' | 'icon' | 'both'
 /** 'builtin' | 'system' 为宿主键盘；其余字符串为键盘插件 id（keyboard-plugin-design.md §3.2C） */
 export type MobileInputMode = 'builtin' | 'system' | (string & {})
 export type SystemToolbarMode = 'follow_ime' | 'persistent_mobile'
-export const SETTINGS_SCHEMA_VERSION = 13
+export const SETTINGS_SCHEMA_VERSION = 14
 export const IME_KEYBOARD_OVERLAP_MIN = 0
 export const IME_KEYBOARD_OVERLAP_MAX = 300
 
@@ -107,6 +107,7 @@ export interface SettingsData {
   keyboard_guard_mode: KeyboardGuardMode
   ime_keyboard_overlap_px: number | null
   workspace_badge_mode: WorkspaceBadgeMode | null
+  inherit_cwd_for_new_tab: boolean
   confirm_before_close_tab: boolean
   restore_session_on_startup: boolean
   reload_after_supervise_tabs: boolean
@@ -554,6 +555,7 @@ export const settings = reactive<SettingsData>({
   keyboard_guard_mode: 'off',
   ime_keyboard_overlap_px: null,
   workspace_badge_mode: null,
+  inherit_cwd_for_new_tab: false,
   confirm_before_close_tab: true,
   restore_session_on_startup: true,
   reload_after_supervise_tabs: false,

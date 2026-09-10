@@ -41,6 +41,23 @@
       </section>
 
       <section class="settings-section">
+        <h3>{{ t('settings.newTab') }}</h3>
+        <div class="settings-row">
+          <label>{{ t('settings.newTab.inheritCwd') }}</label>
+          <label class="toggle">
+            <input
+              v-model="settings.inherit_cwd_for_new_tab"
+              type="checkbox"
+              data-setting="inherit-cwd-for-new-tab"
+              @change="saveSettings()"
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+        <p class="settings-hint">{{ t('settings.newTab.inheritCwdHint') }}</p>
+      </section>
+
+      <section class="settings-section">
         <h3>{{ t('settings.virtualKeyboard') }}</h3>
         <div class="settings-row">
           <label>{{ t('settings.virtualKeyboard.show') }}</label>

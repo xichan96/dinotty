@@ -44,15 +44,25 @@ export async function apiListTabs(): Promise<ListTabsResult> {
 export async function apiCreateTab(
   cwd?: string,
   argv?: string[],
-  title?: string
+  title?: string,
+  sourcePaneId?: string
 ): Promise<CreateTabResult> {
   const res = await authFetch(apiUrl('/api/tabs'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cwd, argv, title }),
+    body: JSON.stringify({ cwd, argv, title, source_pane_id: sourcePaneId }),
   })
   if (!res.ok) throw await apiErrorFromResponse(res, 'create tab failed')
   return res.json()
+}
+
+/** Return the live working directory for a terminal pane. */
+export async function apiGetPaneCwd(paneId: string): Promise<string | undefined> {
+  const q = new URLSearchParams({ pane_id: paneId })
+  const res = await authFetch(apiUrl(`/api/workspace/cwd?${q}`))
+  if (!res.ok) throw new Error(`get pane cwd failed: ${res.status}`)
+  const body = (await res.json()) as { cwd?: string }
+  return body.cwd
 }
 
 export async function apiCloseTab(tabId: string): Promise<void> {

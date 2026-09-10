@@ -25,6 +25,10 @@ pub struct UpdateLayoutRequest {
 pub struct CreateTabRequest {
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Source terminal pane whose current local CWD should be used when `cwd`
+    /// is absent. This is resolved server-side so it remains current after `cd`.
+    #[serde(default)]
+    pub source_pane_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_argv")]
     pub argv: Option<Vec<String>>,
     #[serde(default)]

@@ -68,6 +68,7 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
   beforeEach(async () => {
     // Reset the shared reactive settings to the documented default.
     settings.confirm_before_close_tab = true
+    settings.inherit_cwd_for_new_tab = false
     settings.space_confirms_dialogs = false
     settings.workspace_badge_mode = null
     settings.upload_dir = ''
@@ -106,6 +107,18 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     expect(input.exists()).toBe(true)
     // Initial value mirrors reactive default (true).
     expect(input.element.checked).toBe(true)
+  })
+
+  it('renders the opt-in new-tab cwd inheritance toggle', async () => {
+    const wrapper = mount(GeneralTab)
+    const input = wrapper.find<HTMLInputElement>(
+      'input[type="checkbox"][data-setting="inherit-cwd-for-new-tab"]'
+    )
+    expect(input.exists()).toBe(true)
+    expect(input.element.checked).toBe(false)
+
+    await input.setValue(true)
+    expect(settings.inherit_cwd_for_new_tab).toBe(true)
   })
 
   it('saves exact WSL selections and clears backend-specific stale fields', async () => {

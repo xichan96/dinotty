@@ -182,6 +182,8 @@ pub(crate) fn migrate_settings(settings: &mut Settings) -> bool {
     // Serde defaults legacy lower counts to zero while existing upper counts remain intact.
     // v13 synchronizes the optional IME keyboard overlap. `None` deliberately remains
     // uninitialized so the first capable client can seed its previous device-local value.
+    // v14 adds the opt-in new-tab CWD inheritance switch. Its serde default keeps the
+    // established behavior (start at the configured workspace/default directory).
     settings.settings_version = CURRENT_SETTINGS_VERSION;
     true
 }

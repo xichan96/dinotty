@@ -89,6 +89,10 @@ pub(crate) fn preserve_current_settings_on_legacy_put(
     {
         incoming.ime_keyboard_overlap_px = existing.ime_keyboard_overlap_px;
     }
+    if client_settings_version.is_none_or(|version| version < 14) && existing.settings_version >= 14
+    {
+        incoming.inherit_cwd_for_new_tab = existing.inherit_cwd_for_new_tab;
+    }
 }
 
 pub async fn upload_background(

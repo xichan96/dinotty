@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   closeTab: vi.fn(),
   createTab: vi.fn(),
   createSshTab: vi.fn(),
+  getPaneCwd: vi.fn(),
   applyTemplate: vi.fn(),
 }))
 
@@ -16,6 +17,7 @@ vi.mock('../composables/useTabApi', () => ({
   apiCloseTab: api.closeTab,
   apiCreateTab: api.createTab,
   apiCreateSshTab: api.createSshTab,
+  apiGetPaneCwd: api.getPaneCwd,
 }))
 vi.mock('../composables/useTemplateApi', () => ({
   apiApplyTemplate: api.applyTemplate,
@@ -26,14 +28,14 @@ vi.mock('../composables/useTerminal', () => ({
 
 import { useTabLifecycle } from '../composables/useTabLifecycle'
 
-function setup() {
+function setup(options: { inheritCwd?: boolean; tabs?: Tab[]; activePaneId?: string | null } = {}) {
   const showCreateTerminalError = vi.fn()
   const subject = useTabLifecycle({
-    tabs: ref<Tab[]>([]),
-    activePaneId: ref<string | null>(null),
+    tabs: ref<Tab[]>(options.tabs ?? []),
+    activePaneId: ref<string | null>(options.activePaneId ?? null),
     session: { reorderTab: vi.fn(), renameTab: vi.fn() },
     ui: { requestCloseTab: vi.fn(), requestClosePane: vi.fn(), cancelClose: vi.fn() },
-    appSettings: {},
+    appSettings: { inherit_cwd_for_new_tab: options.inheritCwd ?? false },
     activeWorkspaceId: ref<string | null>(null),
     workspaces: ref<Workspace[]>([]),
     matchWorkspace: () => null,
@@ -77,5 +79,33 @@ describe('useTabLifecycle shell errors', () => {
 
     await expect(subject.newTab('C:\\workspace', ['command'])).rejects.toBe(error)
     expect(showCreateTerminalError).not.toHaveBeenCalled()
+  })
+
+  it('uses the active pane live cwd when new-tab inheritance is enabled', async () => {
+    api.createTab.mockResolvedValue({
+      tab_id: 'new-tab',
+      pane_id: 'new-pane',
+      layout: { type: 'leaf', paneId: 'new-pane', title: 'Terminal', ratio: 1, zoomed: false },
+      cwd: '/tmp/dinotty-current',
+    })
+    const activeTab: Tab = {
+      type: 'terminal',
+      paneId: 'active-tab',
+      activePaneId: 'active-pane',
+      layout: { type: 'leaf', paneId: 'active-pane', title: 'Terminal', ratio: 1, zoomed: false },
+      paneMru: ['active-pane'],
+      broadcastMode: false,
+      broadcastActivity: 0,
+    }
+    const { subject } = setup({
+      inheritCwd: true,
+      tabs: [activeTab],
+      activePaneId: 'active-tab',
+    })
+
+    await subject.newTab()
+
+    expect(api.getPaneCwd).not.toHaveBeenCalled()
+    expect(api.createTab).toHaveBeenCalledWith(undefined, undefined, undefined, 'active-pane')
   })
 })

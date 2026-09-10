@@ -19,6 +19,12 @@ describe('useSettings - confirm_before_close_tab mirror', () => {
     expect(settings.confirm_before_close_tab).toBe(true)
   })
 
+  it('defaults new-tab cwd inheritance to off', () => {
+    const _field: keyof SettingsData = 'inherit_cwd_for_new_tab'
+    expect(_field).toBe('inherit_cwd_for_new_tab')
+    expect(settings.inherit_cwd_for_new_tab).toBe(false)
+  })
+
   it('defaults space_confirms_dialogs to false', () => {
     // The reactive settings object should have space_confirms_dialogs
     // set to false out of the box, matching the backend serde default.

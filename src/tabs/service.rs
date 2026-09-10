@@ -31,16 +31,22 @@ pub async fn create_tab(
     req: CreateTabRequest,
 ) -> Result<CreateTabOutcome, CreateTabError> {
     let requested_cwd = validate_create_tab_request(&req).map_err(CreateTabError::Validation)?;
+    // Resolve the source on the server rather than trusting a potentially stale
+    // frontend tab snapshot. SSH source panes intentionally do not provide a
+    // host path; their dedicated creation path is handled by the frontend.
+    let source_cwd = req
+        .source_pane_id
+        .as_deref()
+        .and_then(|pane_id| manager.session_for_attach(pane_id))
+        .filter(|session| !session.is_ssh())
+        .and_then(|session| session.host_cwd());
     let tab_id = uuid::Uuid::new_v4().to_string();
     let pane_id = uuid::Uuid::new_v4().to_string();
 
     // Copy settings under the lock, then probe outside it.
     let (cwd, shell_preference) = {
         let s = settings.read().await;
-        let cwd = match requested_cwd {
-            Some(cwd) => Some(cwd),
-            None => s.resolved_default_workspace_root(),
-        };
+        let cwd = requested_cwd.or(source_cwd).or_else(|| s.resolved_default_workspace_root());
         let preference =
             ShellPreference::new(s.shell.clone(), s.shell_path.clone(), s.wsl_distro.clone());
         (cwd, preference)

@@ -364,6 +364,10 @@ export default {
   'settings.virtualKeyboard.show': 'Show floating button',
   'settings.virtualKeyboard.hint':
     'Display a floating keyboard button at bottom-right for quick access to the virtual keyboard',
+  'settings.newTab': 'New tabs',
+  'settings.newTab.inheritCwd': 'Inherit the current tab working directory',
+  'settings.newTab.inheritCwdHint':
+    'New tabs start in the active terminal pane\'s current directory. Disabled by default.',
   'settings.workspaceBadge': 'Workspace badges',
   'settings.workspaceBadge.mode': 'Workspace badge display',
   'settings.workspaceBadge.mode.off': 'Off',

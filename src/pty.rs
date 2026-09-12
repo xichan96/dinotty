@@ -289,7 +289,7 @@ pub fn create_session(
     for key in claude_session_env_keys_to_strip() {
         cmd.env_remove(&key);
     }
-    cmd.env("TERM", "xterm-256color");
+    crate::platform::terminal_env::configure_terminal_environment(&mut cmd);
     cmd.env("DINOTTY_PANE_ID", pane_id);
     cmd.env(
         "DINOTTY_INSTANCE",
@@ -302,8 +302,6 @@ pub fn create_session(
     if let Some(tid) = tab_id {
         cmd.env("DINOTTY_TAB_ID", tid);
     }
-    configure_utf8_locale(&mut cmd);
-
     cmd.cwd(&effective_cwd);
 
     // Shell-specific hooks depend on HOME-style prompt expansion.
@@ -695,56 +693,6 @@ fi
     )
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum LocaleAdjustment {
-    Preserve,
-    SetCtype,
-    RemoveAllAndSetCtype,
-}
-
-fn is_utf8_locale(value: &str) -> bool {
-    let normalized = value.trim().to_ascii_uppercase();
-    normalized.contains("UTF-8") || normalized.contains("UTF8")
-}
-
-fn is_default_locale(value: &str) -> bool {
-    matches!(value.trim().to_ascii_uppercase().as_str(), "" | "C" | "POSIX")
-}
-
-fn locale_adjustment(
-    lc_all: Option<&str>,
-    lc_ctype: Option<&str>,
-    lang: Option<&str>,
-) -> LocaleAdjustment {
-    if let Some(value) = lc_all.filter(|value| !value.trim().is_empty()) {
-        if is_utf8_locale(value) {
-            return LocaleAdjustment::Preserve;
-        }
-        return if is_default_locale(value) {
-            LocaleAdjustment::RemoveAllAndSetCtype
-        } else {
-            LocaleAdjustment::Preserve
-        };
-    }
-
-    if let Some(value) = lc_ctype.filter(|value| !value.trim().is_empty()) {
-        if is_utf8_locale(value) {
-            return LocaleAdjustment::Preserve;
-        }
-        return if is_default_locale(value) {
-            LocaleAdjustment::SetCtype
-        } else {
-            LocaleAdjustment::Preserve
-        };
-    }
-
-    match lang {
-        Some(value) if is_utf8_locale(value) => LocaleAdjustment::Preserve,
-        Some(value) if !is_default_locale(value) => LocaleAdjustment::Preserve,
-        _ => LocaleAdjustment::SetCtype,
-    }
-}
-
 /// Env keys inherited from a parent Claude Code session that must NOT leak into
 /// the spawned terminal — otherwise an interactive `claude` inside the terminal
 /// treats itself as a child session and never persists its transcript.
@@ -768,38 +716,16 @@ fn is_claude_session_env_key(key: &str) -> bool {
 /// from a GUI context with a minimal PATH (e.g. `/Applications/Dinotty.app` on
 /// macOS, which inherits `PATH=/usr/bin:/bin:/usr/sbin:/sbin` from launchd).
 fn ensure_command_path(cmd: &mut CommandBuilder) {
-    let current = cmd.get_env("PATH").map(|v| v.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut parts: Vec<String> = if current.is_empty() {
-        Vec::new()
-    } else {
-        current.split(':').map(str::to_string).collect()
-    };
+    let current = crate::platform::terminal_env::direct_command_path()
+        .map(str::to_owned)
+        .or_else(|| cmd.get_env("PATH").map(|value| value.to_string_lossy().into_owned()))
+        .unwrap_or_default();
     let extras: &[&str] = if cfg!(target_os = "macos") {
         &["/opt/homebrew/bin", "/usr/local/bin"]
     } else {
         &["/usr/local/bin"]
     };
-    for dir in extras {
-        if !parts.iter().any(|p| p == dir) {
-            parts.push((*dir).to_string());
-        }
-    }
-    cmd.env("PATH", parts.join(":"));
-}
-
-fn configure_utf8_locale(cmd: &mut CommandBuilder) {
-    let lc_all = std::env::var("LC_ALL").ok();
-    let lc_ctype = std::env::var("LC_CTYPE").ok();
-    let lang = std::env::var("LANG").ok();
-
-    match locale_adjustment(lc_all.as_deref(), lc_ctype.as_deref(), lang.as_deref()) {
-        LocaleAdjustment::Preserve => {}
-        LocaleAdjustment::SetCtype => cmd.env("LC_CTYPE", "C.UTF-8"),
-        LocaleAdjustment::RemoveAllAndSetCtype => {
-            cmd.env_remove("LC_ALL");
-            cmd.env("LC_CTYPE", "C.UTF-8");
-        }
-    }
+    cmd.env("PATH", crate::platform::terminal_env::path_with_fallbacks(&current, extras));
 }
 
 #[must_use]
@@ -821,10 +747,7 @@ pub fn get_shell_args(shell: &str) -> Vec<String> {
 mod tests {
     #[cfg(windows)]
     use super::simplify_host_cwd;
-    use super::{
-        append_wsl_cwd_args, is_claude_session_env_key, locale_adjustment, notify_url_for,
-        zshrc_contents, LocaleAdjustment,
-    };
+    use super::{append_wsl_cwd_args, is_claude_session_env_key, notify_url_for, zshrc_contents};
     use crate::platform::process::CommandNoWindowExt;
 
     // Both callers are `#[cfg(unix)]`, so on other targets this helper is
@@ -944,48 +867,6 @@ print -r -- "incappendhistorytime=${options[incappendhistorytime]}"
 
         assert!(!effective.to_string_lossy().starts_with(r"\\?\"));
         assert_eq!(effective, dunce::canonicalize(temp).unwrap());
-    }
-
-    #[test]
-    fn locale_defaults_to_utf8_ctype_when_environment_is_missing() {
-        assert_eq!(locale_adjustment(None, None, None), LocaleAdjustment::SetCtype);
-    }
-
-    #[test]
-    fn locale_fixes_applications_launch_environment() {
-        assert_eq!(locale_adjustment(Some(""), Some("C"), Some("")), LocaleAdjustment::SetCtype);
-    }
-
-    #[test]
-    fn locale_removes_c_lc_all_override() {
-        assert_eq!(
-            locale_adjustment(Some("POSIX"), Some("C.UTF-8"), Some("")),
-            LocaleAdjustment::RemoveAllAndSetCtype
-        );
-    }
-
-    #[test]
-    fn locale_preserves_existing_utf8_environment() {
-        assert_eq!(
-            locale_adjustment(None, Some("zh_CN.UTF-8"), Some("C")),
-            LocaleAdjustment::Preserve
-        );
-        assert_eq!(
-            locale_adjustment(Some("C.UTF8"), Some("C"), Some("C")),
-            LocaleAdjustment::Preserve
-        );
-    }
-
-    #[test]
-    fn locale_preserves_explicit_non_utf8_environment() {
-        assert_eq!(
-            locale_adjustment(None, Some("zh_CN.GB2312"), Some("")),
-            LocaleAdjustment::Preserve
-        );
-        assert_eq!(
-            locale_adjustment(Some("en_US.ISO8859-1"), Some("C"), Some("")),
-            LocaleAdjustment::Preserve
-        );
     }
 
     #[cfg(unix)]

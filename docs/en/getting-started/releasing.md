@@ -155,7 +155,24 @@ Expected artifacts:
 | `dinotty-linux` | Desktop `.deb` / `.AppImage`, Server `dinotty-server_*.deb` |
 | `dinotty-windows` | NSIS installer, portable `.exe` |
 
-After publishing, verify that the GitHub Release tag, title, and asset versions match. Perform at least a basic install and startup check for the supported platforms.
+The exact asset filenames matter: the in-app updater picks the file for the
+running platform by matching these names, so renaming a bundle in CI silently
+removes in-app download for that platform.
+
+| Platform / arch | Asset filename |
+|-----------------|----------------|
+| macOS arm64 | `Dinotty_{version}_aarch64.dmg` |
+| macOS x64 | `Dinotty_{version}_x64.dmg` (no such job yet — Intel Macs have no in-app download) |
+| Linux amd64 | `Dinotty_{version}_amd64.AppImage`, `Dinotty_{version}_amd64.deb` |
+| Linux arm64 | `Dinotty_{version}_aarch64.AppImage`, `Dinotty_{version}_arm64.deb` |
+| Windows x64 | `Dinotty_{version}_x64-setup.exe`, `Dinotty_{version}_x64-portable.exe` |
+| Server (not offered in-app) | `dinotty-server_{version}-1_{amd64,arm64}.deb` |
+
+Note that the arch token is not uniform: the arm build is spelled `aarch64` for
+the AppImage and `.dmg` but `arm64` for the `.deb`, and Windows uses `x64`.
+`select_assets` in `src/update_check.rs` encodes exactly this table.
+
+After publishing, verify that the GitHub Release tag, title, and asset versions match. Perform at least a basic install and startup check for the supported platforms. Check the asset names against the table above, and if a rename was intended, update `AssetKind` in `src/update_check.rs` in the same change.
 
 ## 7. Withdraw a Broken Release
 

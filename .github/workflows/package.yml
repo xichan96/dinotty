@@ -258,17 +258,6 @@ jobs:
             spctl --assess --type open --context context:primary-signature --verbose=2 "${dmg}"
           done < <(find target src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print0 2>/dev/null || true)
 
-      - name: Install cargo-deb
-        if: startsWith(matrix.platform, 'linux')
-        run: |
-          if ! command -v cargo-deb >/dev/null 2>&1; then
-            cargo install cargo-deb --locked
-          fi
-
-      - name: Build server deb package
-        if: startsWith(matrix.platform, 'linux')
-        run: cargo deb --profile release --package dinotty-server
-
       - name: Stage Windows portable executable
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -331,6 +320,8 @@ jobs:
           Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
+          # 服务端 deb 由下面的 package-server-deb job 单独产出，
+          # 这里只收 tauri 桌面端的 bundle。
           $roots = @(
             'target/release/bundle',
             'src-tauri/target/release/bundle'
@@ -362,14 +353,8 @@ jobs:
             }
           }
 
-          $serverDebDir = 'target/debian'
-          if (Test-Path -LiteralPath $serverDebDir) {
-            Get-ChildItem -LiteralPath $serverDebDir -Filter '*.deb' -File -ErrorAction SilentlyContinue |
-              ForEach-Object {
-                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stage $_.Name) -Force
-                $copied++
-              }
-          }
+          # Linux 桌面端的 tauri deb 走 $bundleDirs 里的 deb/，
+          # 服务端 deb 不走这里 —— 它由 package-server-deb 单独构建并上传。
 
           if ($copied -eq 0) {
             throw 'No package artifacts were found to upload.'
@@ -387,11 +372,130 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # ---------------------------------------------------------------
+  # 服务端 deb 单独在 ubuntu:20.04 容器里构建。
+  #
+  # 为什么必须单独开 job：cargo-deb 的 `$auto` 会按**构建机**的 glibc
+  # 推算 libc6 依赖下限。桌面端要求 ubuntu-22.04（libwebkit2gtk-4.1 只有
+  # jammy 起才有），在 22.04（glibc 2.35）上编出来的服务端二进制，
+  # 控制文件会写成 libc6 (>= 2.34)，Ubuntu 20.04 / Debian 11 直接装不上，
+  # 而且二进制本身也会因 __libc_start_main@GLIBC_2.34 起不来。
+  #
+  # 服务端不链接任何 GUI 库（前端经 rust-embed 编进二进制），focal 完全编得动，
+  # 所以把它挪到 20.04（glibc 2.31）单独构建，兼容 Ubuntu 20.04+ / Debian 11+。
+  #
+  # 注意两件事：
+  #   1. container 模式下 shell 默认是 sh 且 set -e 已开，这里显式用 bash -e {0}；
+  #   2. 20.04 的 apt 只有 nodejs 10，前端必须靠 setup-node 的 cache
+  #      （它会自动导出 ACTIONS_CACHE_URL/ACTIONS_RUNTIME_TOKEN），不能走 apt。
+  # ---------------------------------------------------------------
+  package-server-deb:
+    name: Package server deb (${{ matrix.arch }})
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    container: ubuntu:20.04
+    defaults:
+      run:
+        shell: bash -e {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            curl \
+            git \
+            pkg-config \
+            tzdata
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-deb-focal
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install cargo-deb
+        run: |
+          if ! command -v cargo-deb >/dev/null 2>&1; then
+            cargo install cargo-deb --locked
+          fi
+
+      - name: Build server deb
+        run: cargo deb --profile release --package dinotty-server
+
+      - name: Verify glibc floor
+        run: |
+          deb="$(find target/debian -name 'dinotty-server_*.deb' -print -quit)"
+          if [[ -z "${deb}" ]]; then
+            echo "::error::cargo-deb produced no package"
+            exit 1
+          fi
+
+          # 从控制文件里取出 $auto 算出来的 libc6 下限，超过 2.31 说明
+          # 构建环境不是 focal（或有人调高了 depends），兼容性回退已经失效。
+          # 正则容忍 `libc6:any` 这类多架构限定写法。
+          deps="$(dpkg-deb -f "${deb}" Depends)"
+          floor="$(printf '%s\n' "${deps}" | tr ',' '\n' \
+            | sed -n 's/.*libc6[^ (]* (>= \([0-9.]*\)).*/\1/p')"
+          if [[ -z "${floor}" ]]; then
+            echo "::error::No versioned libc6 floor in ${deb} Depends — \$auto did not run?"
+            echo "${deps}"
+            exit 1
+          fi
+
+          echo "libc6 floor: ${floor} (expected 2.31 on focal)"
+          if [[ "${floor}" != "2.31" ]]; then
+            echo "::error::libc6 floor is ${floor}, expected 2.31. The build image is no longer focal; compatibility with Ubuntu 20.04 / Debian 11 regressed."
+            exit 1
+          fi
+
+      - name: Stage artifact
+        run: |
+          stage=dist/server-deb-artifacts
+          rm -rf "${stage}"
+          mkdir -p "${stage}"
+          find target/debian -name 'dinotty-server_*.deb' -exec cp -v {} "${stage}/" \;
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: dinotty-server-deb-${{ matrix.arch }}
+          path: dist/server-deb-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
   publish-release:
     name: Publish GitHub release
     needs:
       - prepare
       - package
+      - package-server-deb
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:

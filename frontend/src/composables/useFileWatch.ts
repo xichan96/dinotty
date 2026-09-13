@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import { getApiBase, apiUrl, authFetch, wsUrlWithToken } from './apiBase'
+import { getApiBase, apiUrl, authFetch, wsUrl } from './apiBase'
 
 export interface FileWatchOptions {
   paneId: () => string
@@ -158,14 +158,13 @@ export function useFileWatch(opts: FileWatchOptions): FileWatch {
   }
 
   async function doConnect() {
-    const base = await getApiBase()
-    const apiBase = base || window.location.origin
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsBase = apiBase.replace(/^https?:\/\//, `${wsProtocol}//`)
-    const wsUrl = `${wsBase}/ws/watch?pane_id=${opts.paneId()}&path=${encodeURIComponent('.')}`
+    // `wsUrl()` is synchronous and reads the cached Tauri origin, so it must be
+    // primed first — this function is already async, so that costs nothing.
+    await getApiBase()
+    const url = wsUrl(`/ws/watch?pane_id=${opts.paneId()}&path=${encodeURIComponent('.')}`)
 
     try {
-      const ws = new WebSocket(wsUrlWithToken(wsUrl))
+      const ws = new WebSocket(url)
       socket.value = ws
 
       ws.onopen = () => {

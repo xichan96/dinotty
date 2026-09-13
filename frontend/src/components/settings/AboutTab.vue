@@ -10,20 +10,131 @@
         <label>{{ t('settings.about.version') }}</label>
         <span class="about-val">{{ info.version || '—' }}</span>
       </div>
+      <div class="update-check-row">
+        <div class="update-check-status" role="status">
+          <span v-if="update.status.value === 'checking'" class="update-check-line">
+            <LoaderCircle :size="13" class="spin" />
+            {{ t('settings.about.checking') }}
+          </span>
+          <span v-else-if="update.status.value === 'up_to_date'" class="update-check-line">
+            <Check :size="13" />
+            {{ t('settings.about.upToDate', { version: `v${update.currentVersion.value}` }) }}
+          </span>
+          <span v-else-if="update.status.value === 'unavailable'" class="update-check-line failed">
+            <AlertTriangle :size="13" />
+            {{ t('settings.about.checkFailed') }}
+          </span>
+          <span v-else-if="update.status.value === 'grace_period'" class="update-check-line">
+            <Clock :size="13" />
+            {{ t('settings.about.gracePeriod', { version: `v${update.latestVersion.value}` }) }}
+          </span>
+          <span v-else-if="update.status.value === 'update_available'" class="update-check-line">
+            <Sparkles :size="13" />
+            {{ t('settings.about.updateAvailable', { version: `v${update.latestVersion.value}` }) }}
+          </span>
+        </div>
+        <button
+          class="update-check-button"
+          type="button"
+          :disabled="update.status.value === 'checking'"
+          @click="checkNow"
+        >
+          <RefreshCw :size="13" :class="{ spin: update.status.value === 'checking' }" />
+          {{ t('settings.about.checkForUpdates') }}
+        </button>
+      </div>
       <div v-if="update.status.value === 'update_available'" class="update-card" role="status">
         <div class="update-card-copy">
           <strong>{{
             t('settings.about.updateAvailable', { version: `v${update.latestVersion.value}` })
           }}</strong>
+          <span v-if="update.assetName.value" class="update-asset-line">
+            {{ update.assetName.value }}
+            <template v-if="update.assetSize.value !== null">
+              · {{ formatBytes(update.assetSize.value) }}
+            </template>
+          </span>
         </div>
-        <button
-          class="update-release-button"
-          type="button"
-          :disabled="opening"
-          @click="openRelease"
-        >
-          {{ t('settings.about.viewRelease') }}
-        </button>
+
+        <template v-if="update.downloadStatus.value === 'saving'">
+          <p class="update-progress-label">{{ t('settings.about.downloadPreparing') }}</p>
+        </template>
+        <template v-else-if="update.downloadStatus.value === 'downloading'">
+          <div class="update-progress">
+            <div class="update-progress-track">
+              <div
+                class="update-progress-bar"
+                :style="{ width: `${update.downloadProgress.value.percent ?? 0}%` }"
+              ></div>
+            </div>
+            <span class="update-progress-label">
+              {{
+                update.downloadProgress.value.percent === null
+                  ? formatBytes(update.downloadProgress.value.downloaded)
+                  : t('settings.about.downloading', {
+                      percent: String(update.downloadProgress.value.percent),
+                    })
+              }}
+            </span>
+            <button class="update-link-button" type="button" @click="update.cancelDownload()">
+              {{ t('settings.about.cancelDownload') }}
+            </button>
+          </div>
+        </template>
+        <template v-else-if="update.downloadStatus.value === 'done'">
+          <p class="update-progress-label">
+            {{ t('settings.about.downloadComplete', { path: update.downloadedPath.value }) }}
+          </p>
+          <div class="update-actions">
+            <button class="update-release-button" type="button" @click="revealDownloaded">
+              {{ t('settings.about.revealInFolder') }}
+            </button>
+            <button class="update-release-button" type="button" @click="openDownloaded">
+              {{ t('settings.about.openInstaller') }}
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <div v-if="canDownloadInApp" class="update-actions">
+            <button
+              class="update-release-button"
+              type="button"
+              :disabled="opening"
+              @click="update.startDownload()"
+            >
+              {{ t('settings.about.downloadUpdate') }}
+            </button>
+          </div>
+          <p v-else-if="update.assetUrl.value" class="update-hint">
+            {{ t('settings.about.desktopOnlyDownload') }}
+          </p>
+          <div class="update-actions">
+            <button
+              class="update-release-button secondary"
+              type="button"
+              :disabled="opening"
+              @click="openRelease"
+            >
+              {{ t('settings.about.viewRelease') }}
+            </button>
+          </div>
+          <p
+            v-for="asset in update.alternateAssets.value"
+            :key="asset.url"
+            class="update-hint"
+          >
+            <button class="update-link-button" type="button" @click="openAlternate(asset.url)">
+              {{ t('settings.about.alternateDownload', { name: asset.name }) }}
+            </button>
+          </p>
+        </template>
+
+        <p v-if="update.downloadStatus.value === 'cancelled'" class="update-hint">
+          {{ t('settings.about.downloadCancelled') }}
+        </p>
+        <p v-else-if="update.downloadStatus.value === 'error'" class="update-open-error">
+          {{ t('settings.about.downloadFailed') }}
+        </p>
         <p v-if="openError" class="update-open-error">{{ openError }}</p>
       </div>
       <div class="settings-row">
@@ -80,14 +191,16 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'vue-toastification'
+import { AlertTriangle, Check, Clock, LoaderCircle, RefreshCw, Sparkles } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { getIsAppForeground, onAppForegroundGain } from '../../composables/useAppForeground'
 import { useSettings } from '../../composables/useSettings'
 import { useUpdateCheck } from '../../composables/useUpdateCheck'
-import { openExternalUrl } from '../../utils/openExternalUrl'
+import { isTauri } from '../../composables/useTransport'
+import { openExternalUrl, openReleaseAssetUrl } from '../../utils/openExternalUrl'
 
 const emit = defineEmits<{
   'open-about': []
@@ -99,6 +212,37 @@ const update = useUpdateCheck()
 const toast = useToast()
 const opening = ref(false)
 const openError = ref('')
+
+/** The app can only write the installer itself in the desktop shell. */
+const canDownloadInApp = computed(() => isTauri() && update.assetUrl.value.length > 0)
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value.toFixed(1)} ${units[unit]}`
+}
+
+function checkNow() {
+  void update.recheck()
+}
+
+function openAlternate(url: string) {
+  void openReleaseAssetUrl(url)
+}
+
+function revealDownloaded() {
+  void update.revealDownloadedFile()
+}
+
+function openDownloaded() {
+  void update.openDownloadedFile()
+}
 
 const info = ref<{
   version: string
@@ -195,8 +339,61 @@ onUnmounted(() => {
 .about-link:hover {
   text-decoration: underline;
 }
+.update-check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 2px;
+}
+.update-check-status {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.update-check-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.update-check-line.failed {
+  color: var(--danger);
+}
+.update-check-button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-bright);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+.update-check-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-input));
+}
+.update-check-button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.spin {
+  animation: about-spin 1s linear infinite;
+}
+@keyframes about-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
 .update-card {
-  margin: 2px 0 14px;
+  margin: 12px 0 14px;
   padding: 13px 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   border-radius: 8px;
@@ -207,6 +404,64 @@ onUnmounted(() => {
       transparent 68%
     ),
     var(--bg-surface);
+}
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.update-asset-line {
+  color: var(--fg-muted);
+  font-size: 11px;
+  word-break: break-all;
+}
+.update-hint {
+  margin: 10px 0 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.update-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+}
+.update-progress-track {
+  overflow: hidden;
+  flex: 1;
+  min-width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+}
+.update-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+.update-progress-label {
+  margin: 10px 0 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+.update-progress .update-progress-label {
+  margin: 0;
+}
+.update-link-button {
+  padding: 0;
+  border: none;
+  color: var(--accent);
+  background: none;
+  font-size: 11px;
+  text-decoration: none;
+}
+.update-link-button:hover {
+  text-decoration: underline;
 }
 .update-card-copy {
   display: flex;
@@ -239,6 +494,11 @@ onUnmounted(() => {
 .update-release-button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+.update-release-button.secondary {
+  border-color: var(--border);
+  background: var(--bg-input);
+  font-weight: 500;
 }
 .update-open-error {
   margin: 8px 0 0;

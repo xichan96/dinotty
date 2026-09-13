@@ -22,7 +22,7 @@ EventBus 是 Dinotty 的核心事件分发机制：
 - **容量**：1024 条事件缓冲，慢消费者会丢失旧事件
 
 ```rust
-use crate::event_bus::{EventBus, BusEvent};
+use crate::events::{EventBus, BusEvent};
 
 // 订阅
 let mut rx = event_bus.subscribe();

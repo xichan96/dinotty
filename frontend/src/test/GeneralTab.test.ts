@@ -54,7 +54,7 @@ vi.mock('../composables/useConfirm', () => ({
   confirmCancel: vi.fn(),
 }))
 
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import GeneralTab from '../components/settings/GeneralTab.vue'
 import ShellPicker from '../components/settings/ShellPicker.vue'
@@ -107,6 +107,21 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     expect(input.exists()).toBe(true)
     // Initial value mirrors reactive default (true).
     expect(input.element.checked).toBe(true)
+  })
+
+  it('refreshes the access URL whenever the General settings tab becomes visible', async () => {
+    const wrapper = mount(GeneralTab, { props: { visible: false } })
+
+    expect(infoRequestCount()).toBe(0)
+
+    await wrapper.setProps({ visible: true })
+    await flushPromises()
+    expect(infoRequestCount()).toBe(1)
+
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ visible: true })
+    await flushPromises()
+    expect(infoRequestCount()).toBe(2)
   })
 
   it('renders the opt-in new-tab cwd inheritance toggle', async () => {
@@ -407,6 +422,10 @@ function response(data: unknown, status = 200) {
     json: async () => data,
     text: async () => JSON.stringify(data),
   } as Response
+}
+
+function infoRequestCount() {
+  return generalMocks.authFetch.mock.calls.filter(([url]) => url === '/api/info').length
 }
 
 async function flush() {

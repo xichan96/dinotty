@@ -26,6 +26,12 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8999',
       },
+      // Relay to a remote server. Carries WebSocket traffic too, so it needs
+      // `ws: true` like `/ws` — without this entry relay is unreachable in dev.
+      '/__srv': {
+        target: 'http://127.0.0.1:8999',
+        ws: true,
+      },
     },
   },
   build: {

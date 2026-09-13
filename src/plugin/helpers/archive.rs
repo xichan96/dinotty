@@ -152,6 +152,23 @@ mod tests {
         }
     }
 
+    // zip 只开了 deflate/stored（见 Cargo.toml 注释），遇到按 bzip2/lzma/zstd
+    // 压的条目必须报错而不是解出坏数据。
+    #[test]
+    fn extract_zip_reports_unsupported_compression_method() {
+        const BZIP2_ZIP: &[u8] = include_bytes!("../../../tests/fixtures/bzip2.zip");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir(&dest).unwrap();
+
+        let err = extract_zip(BZIP2_ZIP, &dest).unwrap_err();
+        assert!(
+            err.contains("Compression method not supported") || err.contains("unsupported"),
+            "unexpected error: {err}"
+        );
+    }
+
     // 验证 zip 会拒绝路径穿越、绝对路径和 Windows drive path。
     #[test]
     fn extract_zip_rejects_unsafe_archive_paths() {

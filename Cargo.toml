@@ -2,7 +2,7 @@
 members = ["src-tauri"]
 
 [workspace.package]
-version = "0.26.0"
+version = "0.27.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/xichan96/dinotty"
@@ -59,7 +59,10 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 tempfile = "3"
 tar = "0.4"
 flate2 = "1"
-zip = "2"
+# 只用 deflate/stored：默认 features 会带上 xz → xz2 → lzma-sys，
+# 把 liblzma 的 C 源码一起编进来并动态链接（deb 因此多出 liblzma5 依赖），
+# 而我们只做插件包的常规解压，用不到 lzma/bzip2/zstd/deflate64。
+zip = { version = "2", default-features = false, features = ["deflate"] }
 libc = "0.2"
 russh = { version = "0.62", default-features = false, features = ["flate2", "ring", "rsa"] }
 russh-keys = "0.50.0-beta.7"

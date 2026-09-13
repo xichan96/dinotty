@@ -5,7 +5,7 @@ pub mod sftp;
 
 pub use request::{SshConnectRequest, SshProfileConnectRequest};
 
-use crate::event_bus::BusEvent;
+use crate::events::BusEvent;
 use crate::session::{
     CloseReason, CwdState, PendingSshAuth, Session, SessionBackend, SessionManager, SessionStatus,
     SshAuthPrompt, SshCmd, SshSessionParams,

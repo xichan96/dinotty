@@ -119,7 +119,7 @@ Agentes de código baseados em terminal (Claude Code, opencode, Codex, OpenClaw,
 - **Bookmarks de comandos** - clique direito no texto do terminal para favoritar, gestão de grupos, execução com um clique
 - **Conexão SSH remota** - cliente SSH embutido com auth por senha/chave, sessões remotas parecem locais
 - **Gestão remota de arquivos (SFTP)** - ativada automaticamente em conexões SSH, navegação/edição/upload/download completo de arquivos
-- **Lista de servidores** - gerencie múltiplos servidores remotos, troca rápida de conexão
+- **Gerenciamento multisservidor** - registre vários servidores dinotty e alterne entre eles no Mission Control
 - **Layout responsivo** - retrato empilha verticalmente, paisagem lado a lado; botões otimizados para touch e redimensionamento de painéis
 - **Teclado customizável de atalhos** - adicione Ctrl/Esc/teclas de função para mobile, suporta sequências escape arbitrárias
 - **Navegador de arquivos embutido** - highlight de código, renderização Markdown, pré-visualização de documentos Office, reprodução de áudio/vídeo

@@ -250,6 +250,11 @@
       @confirm="alertResolve"
     />
 
+    <!-- One instance, opened from the Mission Control switcher and the status
+         bar alike: two would race over the same roster. It owns its own
+         visibility (`managerOpen`), so nothing here has to pass it down. -->
+    <ServerManagerDialog />
+
     <PromptModal
       :visible="promptState.visible"
       :title="promptState.title"
@@ -291,8 +296,6 @@
     />
 
     <CommandBookmarks ref="bookmarksRef" :get-send-fn="getSendFn" :create-tab="newTab" />
-
-    <ServerList ref="serverListRef" @connect="onServerConnect" />
 
     <SshHostsPanel ref="sshPanelRef" @connect="onSshConnect" />
 
@@ -401,7 +404,6 @@ import {
 import TabBar from './components/terminal/TabBar.vue'
 import CommandPalette from './components/command/CommandPalette.vue'
 import CommandBookmarks from './components/command/CommandBookmarks.vue'
-import ServerList from './components/ServerList.vue'
 import SshHostsPanel from './components/ssh/SshHostsPanel.vue'
 import SshAuthPromptDialog from './components/ssh/SshAuthPromptDialog.vue'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
@@ -412,6 +414,7 @@ const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPa
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
 import AlertModal from './components/ui/AlertModal.vue'
+import ServerManagerDialog from './components/server/ServerManagerDialog.vue'
 import PromptModal from './components/ui/PromptModal.vue'
 import WindowCloseDialog from './components/ui/WindowCloseDialog.vue'
 import TrayVisibilityDialog from './components/ui/TrayVisibilityDialog.vue'
@@ -440,6 +443,7 @@ import {
   fetchAutoToken,
   validateToken,
   apiUrl,
+  authFetch,
 } from './composables/apiBase'
 import { useToast } from 'vue-toastification'
 import {
@@ -546,7 +550,6 @@ const appRootRef = ref<HTMLElement | null>(null)
 const tabBarRef = ref<InstanceType<typeof TabBar> | null>(null)
 const paletteRef = ref<InstanceType<typeof CommandPalette>>()
 const bookmarksRef = ref<InstanceType<typeof CommandBookmarks>>()
-const serverListRef = ref<InstanceType<typeof ServerList>>()
 const sshPanelRef = ref<InstanceType<typeof SshHostsPanel>>()
 
 // ── Orchestration composables (core → actions → keyboard → connectivity → tauri → bridge) ──
@@ -750,7 +753,6 @@ const {
 } = keyboard
 
 const {
-  onServerConnect,
   onSshConnect,
   onSshReconnect,
   onSshAuthSubmit,
@@ -854,7 +856,7 @@ onMounted(async () => {
         // when the cookie is absent/invalid.
         let cookieOk = false
         try {
-          const res = await fetch(apiUrl('/api/settings'), { credentials: 'include' })
+          const res = await authFetch(apiUrl('/api/settings'))
           cookieOk = res.ok
         } catch {
           // network error - fall through to auto-token
@@ -873,7 +875,7 @@ onMounted(async () => {
       } else {
         // Server mode: check if session cookie is still valid
         try {
-          const res = await fetch(apiUrl('/api/settings'), { credentials: 'include' })
+          const res = await authFetch(apiUrl('/api/settings'))
           if (res.ok) {
             await onLoginSuccess()
           }

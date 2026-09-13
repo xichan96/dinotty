@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::event_bus::{BusEvent, EventBus};
+use super::{BusEvent, EventBus};
 use crate::settings::config_dir;
 use crate::util::chrono_now;
 

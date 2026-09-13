@@ -231,6 +231,9 @@ const EDGE_SCROLL_INTERVAL_MS = 60
 // Link context menu state
 const linkType = ref<'file' | 'link'>()
 const linkTarget = ref<string>()
+// Last URL the pointer hovered. Right-click consults it so the single
+// context menu is link-aware; cleared on leave and on menu close (#306).
+const hoveredLinkUrl = ref<string | null>(null)
 
 const DT8_TOUCH_DEBUG =
   import.meta.env.DEV &&
@@ -311,6 +314,12 @@ function onContextMenu(e: MouseEvent) {
   menuSelectedText.value = text
   menuX.value = e.clientX
   menuY.value = e.clientY
+  // Right-clicking a hovered link makes the single context menu link-aware
+  // instead of showing the generic variant (#306).
+  if (hoveredLinkUrl.value) {
+    linkType.value = 'link'
+    linkTarget.value = hoveredLinkUrl.value
+  }
   menuVisible.value = true
 }
 
@@ -319,6 +328,7 @@ function closeMenu() {
   handlesVisible.value = false
   linkType.value = undefined
   linkTarget.value = undefined
+  hoveredLinkUrl.value = null
   nextTick(() => terminal?.focus())
 }
 
@@ -1006,6 +1016,25 @@ onMounted(() => {
     }
     menuSelectedText.value = ''
     menuVisible.value = true
+  }
+  // Primary link activation opens directly instead of showing the menu,
+  // so left-click and right-click no longer produce two menu variants (#306).
+  self.onPreviewLinkOpen = (url) => {
+    emit('linkActivate')
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+      if (isTauri()) {
+        void openUrlInSystemBrowser(url)
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+    } catch {
+      // Ignore malformed terminal links.
+    }
+  }
+  self.onPreviewLinkHover = (url) => {
+    hoveredLinkUrl.value = url
   }
   self.onFileUpload = async (files) => {
     // Attach the settle handlers synchronously so a fast-rejecting upload can never

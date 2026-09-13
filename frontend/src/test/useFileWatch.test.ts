@@ -31,7 +31,9 @@ vi.mock('../composables/apiBase', () => ({
   getApiBase: vi.fn().mockResolvedValue('http://localhost:8999'),
   apiUrl: (path: string) => `http://localhost:8999${path}`,
   authFetch: vi.fn(),
-  wsUrlWithToken: (url: string) => url,
+  // Stands in for the real `wsUrl`, which resolves the hub origin + relay
+  // prefix; both are empty in this suite's browser-mode fixture.
+  wsUrl: (path: string) => `ws://localhost:8999${path}`,
 }))
 
 describe('useFileWatch', () => {

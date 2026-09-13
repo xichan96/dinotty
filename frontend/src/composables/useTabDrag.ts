@@ -228,8 +228,14 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
     }
   }
 
-  function onPointerEnd() {
-    if (dragStarted && dragFromId) {
+  function onPointerEnd(e: MouseEvent | TouchEvent) {
+    if (!dragStarted && dragFromId && !isTouchDrag && releasedOnSourceTab(e, dragFromId)) {
+      // WebKit may skip the synthesized click when an OSC title update replaces
+      // the title node between mousedown and mouseup. Activate from the drag
+      // state machine instead, then consume a click when one is still emitted.
+      suppressClick = true
+      onActivate(dragFromId)
+    } else if (dragStarted && dragFromId) {
       if (paneTargetId && paneTargetZone) {
         suppressClick = true
         onMergeTabIntoPane(dragFromId, paneTargetId, paneTargetZone)
@@ -240,6 +246,16 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
     }
 
     cleanup()
+  }
+
+  function releasedOnSourceTab(e: MouseEvent | TouchEvent, paneId: string): boolean {
+    const target = e.target
+    if (!(target instanceof Element)) return false
+
+    // Let controls inside a tab retain their own mouseup/click behavior.
+    if (target.closest('button, input, textarea, select, [contenteditable="true"]')) return false
+
+    return target.closest('.tab[data-pane-id]')?.getAttribute('data-pane-id') === paneId
   }
 
   function cleanup() {

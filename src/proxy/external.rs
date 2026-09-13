@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn same_target_reuses_the_same_client() {
-        let cache = PinnedClients::new(Duration::from_secs(60), 4);
+        let cache = PinnedClients::new(Duration::from_mins(1), 4);
         let t = target(Some("example.com"), &["93.184.216.34:443"]);
         let c1 = cache.client_for("https://example.com", &t);
         let c2 = cache.client_for("https://example.com", &t);
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn changed_dns_answer_builds_a_fresh_client() {
-        let cache = PinnedClients::new(Duration::from_secs(60), 4);
+        let cache = PinnedClients::new(Duration::from_mins(1), 4);
         let t1 = target(Some("example.com"), &["93.184.216.34:443"]);
         let t2 = target(Some("example.com"), &["203.0.113.7:443"]);
         let c1 = cache.client_for("https://example.com", &t1);
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn different_scheme_is_a_distinct_entry() {
-        let cache = PinnedClients::new(Duration::from_secs(60), 4);
+        let cache = PinnedClients::new(Duration::from_mins(1), 4);
         let t = target(Some("example.com"), &["93.184.216.34:443"]);
         let c1 = cache.client_for("https://example.com", &t);
         let c2 = cache.client_for("http://example.com", &t);
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn cap_evicts_the_oldest_entry() {
-        let cache = PinnedClients::new(Duration::from_secs(60), 2);
+        let cache = PinnedClients::new(Duration::from_mins(1), 2);
         let t1 = target(Some("example.com"), &["93.184.216.34:443"]);
         let t2 = target(Some("example.com"), &["203.0.113.7:443"]);
         let t3 = target(Some("example.com"), &["198.51.100.7:443"]);

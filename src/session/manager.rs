@@ -6,7 +6,7 @@ use super::layout::{
 use super::types::SessionStatus;
 use super::types::{CloseReason, SyncClient, SyncMsg, TabInfo};
 use super::Session;
-use crate::event_bus::{BusEvent, EventBus};
+use crate::events::{BusEvent, EventBus};
 use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::{
@@ -997,7 +997,7 @@ impl SessionManager {
         let mut rx = self.event_bus.subscribe();
         tokio::spawn(async move {
             while let Ok(event) = rx.recv().await {
-                if let Some(sync_msg) = crate::event_bridge::map_bus_event_to_sync_event(&event) {
+                if let Some(sync_msg) = crate::events::map_bus_event_to_sync_event(&event) {
                     manager.broadcast_sync(&sync_msg);
                 }
             }

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 use axum::{
     extract::{ConnectInfo, Json, Path, State},
@@ -9,20 +10,38 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::app_state::AppState;
-use crate::auth;
-use crate::auth::verification_code::VerifyOutcome;
-use crate::event_bus::BusEvent;
-use crate::settings;
+use crate::audit::AuditState;
+use crate::events::BusEvent;
+use crate::session::SessionManager;
+use crate::settings::{self, SettingsState};
+
+use super::session::SessionStore;
+use super::verification_code::{CodeStore, VerifyOutcome};
+use super::{
+    check_lockout, constant_time_eq, get_fail_count, real_client_ip, record_auth_failure,
+    session_cookie_name,
+};
+
+/// Subset of app state needed by auth HTTP handlers.
+#[derive(Clone)]
+pub struct AuthHandlerState {
+    pub manager: Arc<SessionManager>,
+    pub settings: SettingsState,
+    pub auth_token: Arc<tokio::sync::RwLock<String>>,
+    pub port: u16,
+    pub sessions: Arc<SessionStore>,
+    pub code_store: Arc<CodeStore>,
+    pub audit: AuditState,
+}
 
 #[derive(Deserialize)]
-pub(crate) struct UpdateTokenRequest {
+pub struct UpdateTokenRequest {
     token: String,
 }
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-pub(crate) enum LoginBody {
+pub enum LoginBody {
     Token { token: String },
     Code { request_id: String, code: String },
 }
@@ -31,16 +50,13 @@ fn build_session_cookie(session_id: &str, ttl_days: u64, port: u16) -> String {
     let max_age = ttl_days * 86_400;
     format!(
         "{name}={value}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}",
-        name = auth::session_cookie_name(port),
+        name = session_cookie_name(port),
         value = session_id,
     )
 }
 
 fn clear_session_cookie(port: u16) -> String {
-    format!(
-        "{name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
-        name = auth::session_cookie_name(port)
-    )
+    format!("{name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0", name = session_cookie_name(port))
 }
 
 /// Login endpoint. Dispatches to either token login or verification-code login
@@ -48,8 +64,8 @@ fn clear_session_cookie(port: u16) -> String {
 /// `login_method=token` rejects `{request_id, code}` bodies; `verification_code`
 /// rejects `{token}`. Brute-force lockout is enforced here (the middleware
 /// exempts /api/auth).
-pub(crate) async fn login(
-    State(state): State<AppState>,
+pub async fn login(
+    State(state): State<AuthHandlerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: axum::http::HeaderMap,
     Json(body): Json<LoginBody>,
@@ -75,7 +91,7 @@ pub(crate) async fn login(
     ) = {
         let s = state.settings.read().await;
         (
-            auth::real_client_ip(&headers, addr.ip(), &s.auth.trusted_proxies),
+            real_client_ip(&headers, addr.ip(), &s.auth.trusted_proxies),
             s.auth.lockout_strategy.clone(),
             s.auth.lockout_max_failures,
             s.auth.lockout_secs,
@@ -88,7 +104,7 @@ pub(crate) async fn login(
     // Brute-force lockout check before credential validation. The login
     // endpoint is exempt from the middleware's check (so unauthenticated
     // users can reach it), so we must enforce it here.
-    if let Some(retry_after) = auth::check_lockout(
+    if let Some(retry_after) = check_lockout(
         real_ip,
         &lockout_strategy,
         max_failures,
@@ -96,7 +112,7 @@ pub(crate) async fn login(
         global_max_failures,
         global_lockout_secs,
     ) {
-        let attempt_count = auth::get_fail_count(real_ip);
+        let attempt_count = get_fail_count(real_ip);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -163,7 +179,7 @@ pub(crate) async fn login(
         (_, _) => {
             // Cross-case: login_method does not match the body shape. Account as
             // a brute-force attempt to discourage probing.
-            let attempt_count = auth::record_auth_failure(real_ip, global_lockout_secs);
+            let attempt_count = record_auth_failure(real_ip, global_lockout_secs);
             state.manager.event_bus.publish(BusEvent::AuthLoginFailed {
                 ip: real_ip.to_string(),
                 reason: "wrong_login_method".into(),
@@ -193,7 +209,7 @@ pub(crate) async fn login(
 /// Build the success response (session cookie + audit + 200 body) shared by
 /// token and code login paths.
 async fn create_session_response(
-    state: &AppState,
+    state: &AuthHandlerState,
     real_ip: IpAddr,
     headers: &axum::http::HeaderMap,
 ) -> axum::response::Response {
@@ -227,15 +243,15 @@ async fn create_session_response(
 /// Token login: constant-time compare the posted token against the stored
 /// master token. Records a brute-force attempt on mismatch.
 async fn handle_token_login(
-    state: &AppState,
+    state: &AuthHandlerState,
     real_ip: IpAddr,
     headers: &axum::http::HeaderMap,
     token: &str,
     stored: &str,
     global_lockout_secs: u64,
 ) -> axum::response::Response {
-    if !auth::constant_time_eq(token.trim(), stored) {
-        let attempt_count = auth::record_auth_failure(real_ip, global_lockout_secs);
+    if !constant_time_eq(token.trim(), stored) {
+        let attempt_count = record_auth_failure(real_ip, global_lockout_secs);
         state.manager.event_bus.publish(BusEvent::AuthLoginFailed {
             ip: real_ip.to_string(),
             reason: "token_mismatch".into(),
@@ -267,7 +283,7 @@ async fn handle_token_login(
 /// `record_auth_failure` here, since the rate limit / attempt cap on the code
 /// itself is the relevant gate (code is bound to `request_id`, not IP).
 async fn handle_code_login(
-    state: &AppState,
+    state: &AuthHandlerState,
     real_ip: IpAddr,
     headers: &axum::http::HeaderMap,
     request_id: String,
@@ -340,14 +356,14 @@ async fn handle_code_login(
 /// alongside /api/auth). Generates a 6-digit code, emits `auth.verification_code`
 /// event so subscribers (e.g. feishu-notify) can push it to the user, and
 /// returns only the `request_id` (never the code itself).
-pub(crate) async fn request_code(
-    State(state): State<AppState>,
+pub async fn request_code(
+    State(state): State<AuthHandlerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     let real_ip = {
         let s = state.settings.read().await;
-        auth::real_client_ip(&headers, addr.ip(), &s.auth.trusted_proxies)
+        real_client_ip(&headers, addr.ip(), &s.auth.trusted_proxies)
     };
 
     let Ok((request_id, code)) = state.code_store.create(real_ip) else {
@@ -387,15 +403,16 @@ pub(crate) async fn request_code(
         .into_response()
 }
 
-pub(crate) async fn logout(
-    State(state): State<AppState>,
+#[allow(clippy::unused_async)]
+pub async fn logout(
+    State(state): State<AuthHandlerState>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     // Best-effort: extract session id from Cookie header and revoke it.
     if let Some(cookie_hdr) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
         for pair in cookie_hdr.split(';') {
             let pair = pair.trim();
-            let cookie_prefix = format!("{}=", auth::session_cookie_name(state.port));
+            let cookie_prefix = format!("{}=", session_cookie_name(state.port));
             if let Some(rest) = pair.strip_prefix(&cookie_prefix) {
                 let sid = rest.to_string();
                 let () = state.audit.record(&sid, "logout", "session", serde_json::json!({}));
@@ -414,8 +431,8 @@ pub(crate) async fn logout(
     )
 }
 
-pub(crate) async fn put_settings_with_session_ttl(
-    State(state): State<AppState>,
+pub async fn put_settings_with_session_ttl(
+    State(state): State<AuthHandlerState>,
     body: axum::extract::Json<settings::Settings>,
 ) -> impl IntoResponse {
     let new_ttl = body.auth.session_ttl_days;
@@ -425,18 +442,20 @@ pub(crate) async fn put_settings_with_session_ttl(
     status
 }
 
-pub(crate) async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
+#[allow(clippy::unused_async)]
+pub async fn list_sessions(State(state): State<AuthHandlerState>) -> impl IntoResponse {
     let sessions = state.sessions.list();
     Json(serde_json::json!({ "sessions": sessions }))
 }
 
 #[derive(Deserialize)]
-pub(crate) struct RevokeSessionPath {
+pub struct RevokeSessionPath {
     id: String,
 }
 
-pub(crate) async fn revoke_session(
-    State(state): State<AppState>,
+#[allow(clippy::unused_async)]
+pub async fn revoke_session(
+    State(state): State<AuthHandlerState>,
     Path(path): Path<RevokeSessionPath>,
 ) -> impl IntoResponse {
     let ok = state.sessions.revoke(&path.id);
@@ -444,15 +463,16 @@ pub(crate) async fn revoke_session(
     Json(serde_json::json!({ "ok": ok }))
 }
 
-pub(crate) async fn revoke_other_sessions(
-    State(state): State<AppState>,
+#[allow(clippy::unused_async)]
+pub async fn revoke_other_sessions(
+    State(state): State<AuthHandlerState>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     // Preserve the caller's session by extracting it from the cookie.
     let current = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|raw| {
         for pair in raw.split(';') {
             let pair = pair.trim();
-            let cookie_prefix = format!("{}=", auth::session_cookie_name(state.port));
+            let cookie_prefix = format!("{}=", session_cookie_name(state.port));
             if let Some(rest) = pair.strip_prefix(&cookie_prefix) {
                 return Some(rest.to_string());
             }
@@ -466,17 +486,18 @@ pub(crate) async fn revoke_other_sessions(
     Json(serde_json::json!({ "ok": true }))
 }
 
-pub(crate) async fn check_auth(State(_state): State<AppState>) -> impl IntoResponse {
+#[allow(clippy::unused_async)]
+pub async fn check_auth(State(_state): State<AuthHandlerState>) -> impl IntoResponse {
     // Legacy endpoint kept for backward compat - returns 200 if middleware passed.
     StatusCode::OK
 }
 
-pub(crate) async fn get_token(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn get_token(State(state): State<AuthHandlerState>) -> impl IntoResponse {
     let token = state.auth_token.read().await;
     Json(serde_json::json!({ "token": *token }))
 }
 
-pub(crate) async fn token_configured(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn token_configured(State(state): State<AuthHandlerState>) -> impl IntoResponse {
     let token = state.auth_token.read().await;
     let login_method = {
         let s = state.settings.read().await;
@@ -489,8 +510,8 @@ pub(crate) async fn token_configured(State(state): State<AppState>) -> impl Into
     }))
 }
 
-pub(crate) async fn auto_token(
-    State(state): State<AppState>,
+pub async fn auto_token(
+    State(state): State<AuthHandlerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
     if cfg!(feature = "server") {
@@ -512,8 +533,8 @@ pub(crate) async fn auto_token(
     Json(serde_json::json!({ "token": *token })).into_response()
 }
 
-pub(crate) async fn update_token(
-    State(state): State<AppState>,
+pub async fn update_token(
+    State(state): State<AuthHandlerState>,
     Json(body): Json<UpdateTokenRequest>,
 ) -> impl IntoResponse {
     let new_token = body.token.trim().to_string();

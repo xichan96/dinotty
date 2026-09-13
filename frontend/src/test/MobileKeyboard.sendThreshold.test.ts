@@ -28,7 +28,7 @@ vi.mock('../composables/apiBase', () => ({
   authFetch: vi.fn(async () => ({ ok: true, json: async () => [] })),
   getApiBase: vi.fn(async () => 'http://127.0.0.1:7681'),
   hasAuthToken: vi.fn(() => false),
-  wsUrlWithToken: (url: string) => url,
+  wsUrl: (path: string) => `ws://localhost${path}`,
 }))
 
 import MobileKeyboard from '../components/keyboard/MobileKeyboard.vue'

@@ -67,6 +67,6 @@ watch(renderable, (list) => {
   z-index: 640;
   pointer-events: none;
   /* above overlay layer (600) and keyboard band (500/520), below modal
-   * layers (ServerList 930 / Palette 1000 / MC 2000) */
+   * layers (Bookmarks 940 / SSH 950 / Palette 1000 / MC 2000) */
 }
 </style>

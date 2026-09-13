@@ -179,11 +179,14 @@ CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 
 跨平台桌面包由 `Package` workflow 的 matrix 统一生成：
 
-| 平台 | CI 环境 | 产物 |
-|------|---------|------|
-| macOS | `macos-latest` | `.dmg` |
-| Linux | `ubuntu-22.04` | 桌面 `.deb` / `.AppImage`、服务端 `dinotty-server_*.deb` |
-| Windows | `windows-latest` | NSIS `.exe`、portable `.exe` |
+| 平台 | CI 环境 | 产物 | glibc 下限 |
+|------|---------|------|-----------|
+| macOS | `macos-latest` | `.dmg` | — |
+| Linux | `ubuntu-22.04` | 桌面 `.deb` / `.AppImage` | 2.34 |
+| Linux（服务端） | `ubuntu:20.04` 容器 | `dinotty-server_*.deb` | 2.31 |
+| Windows | `windows-latest` | NSIS `.exe`、portable `.exe` | — |
+
+服务端 deb 之所以单独用 20.04 容器构建，是因为 `$auto` 会按构建机的 glibc 推算 `libc6` 下限：桌面端受 WebKitGTK 运行库限制必须留在 22.04，服务端不链接任何 GUI 库（前端经 `rust-embed` 编进二进制），放到 focal 构建即可把下限压到 2.31，兼容 Ubuntu 20.04 / Debian 11。workflow 里有一条断言校验下限正好是 `2.31`，防止构建机被悄悄升级后兼容性无声回退。
 
 ## 配置说明
 

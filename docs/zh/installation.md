@@ -31,10 +31,16 @@ macOS 产物已通过 Apple Developer ID 签名并完成公证，首次打开无
 
 | 格式 | 适用发行版 | 安装方式 |
 |------|-----------|---------|
-| `.deb` | Debian / Ubuntu / Linux Mint | `sudo dpkg -i dinotty_<version>_amd64.deb` |
+| `.deb` | Ubuntu 22.04+ / Debian 12+ / Linux Mint 21+ | `sudo dpkg -i dinotty_<version>_amd64.deb` |
 | `.AppImage` | 大多数发行版 | `chmod +x Dinotty_*.AppImage && ./Dinotty_*.AppImage` |
 
 `.AppImage` 是单文件可执行，无需安装；首次运行如果提示信任，需在文件属性里勾选「允许执行」。
+
+::: warning 桌面端 `.deb` 需要 glibc ≥ 2.34
+桌面端 `.deb` 在 Ubuntu 22.04 runner 上构建（GNOME/WebKit 的运行库只有 22.04 起才齐备），因此二进制要求 `libc6 (>= 2.34)`，只能装在 Ubuntu 22.04+ / Debian 12+ / Mint 21+ 上。
+
+在 Ubuntu 20.04 / Debian 11 这类老系统上，`dpkg -i` 会报依赖错误且 `apt-get -f install` 也修不好 —— 这是 glibc 符号版本不匹配，不是缺包。老系统请改用下面「服务端」的 `.deb`，或直接用 AppImage / Docker 镜像。
+:::
 
 ### Windows
 
@@ -48,6 +54,8 @@ macOS 产物已通过 Apple Developer ID 签名并完成公证，首次打开无
 ## 服务端 deb（Linux）
 
 `dinotty-server` 是独立的 Rust 二进制，不依赖桌面端，适合部署到 VPS 或家用服务器。
+
+服务端 `.deb` 在 Ubuntu 20.04 容器里单独构建，要求 `libc6 (>= 2.31)`，可装在 **Ubuntu 20.04+ / Debian 11+ / Linux Mint 20+** 上，比桌面端 `.deb` 的适用范围宽。
 
 ```bash
 # 一键下载安装最新版
@@ -111,7 +119,9 @@ DINOTTY_SHELL=/bin/zsh dinotty-server
 | Windows | `%APPDATA%\dinotty\` |
 | Linux 服务端（deb） | `/var/lib/dinotty/` |
 
-Dinotty 默认会在每次桌面程序启动，或浏览器/PWA 页面重新加载并完成登录后，自动检查一次官方 GitHub Release；不会在程序运行期间定时检查。可在“设置 > 关于”最下方关闭“自动检查更新”，重新开启时会立即检查一次。只有稳定版高于当前版本且已发布超过 24 小时时，“设置 > 关于”才会显示新版本卡片；如果窗口处于可见前台，还会在启动阶段弹出一次提示，如果检查结果在后台返回，则在窗口重新进入前台时提示。点击提示会进入“设置 > 关于”，点击“前往下载”时，Web/PWA 会在浏览器新标签页打开，桌面程序会使用系统浏览器打开；Dinotty 不会自动下载或安装更新。断网、GitHub 限流或检查失败不会影响启动，也不会显示错误通知。
+Dinotty 默认会在每次桌面程序启动，或浏览器/PWA 页面重新加载并完成登录后，自动检查一次官方 GitHub Release；不会在程序运行期间定时检查。可在“设置 > 关于”最下方关闭“自动检查更新”，重新开启时会立即检查一次；也可以随时点击“检查更新”手动检查一次。只有稳定版高于当前版本且已发布超过 24 小时时，“设置 > 关于”才会显示新版本卡片；如果窗口处于可见前台，还会在启动阶段弹出一次提示，如果检查结果在后台返回，则在窗口重新进入前台时提示。点击提示会进入“设置 > 关于”。
+
+桌面程序中点击“下载更新”，会下载与当前平台和架构匹配的安装包，先让你选择保存位置，并显示下载进度；下载完成后可通过“在文件夹中显示”或“打开安装包”完成安装。Linux 用户还可以额外下载 `.deb` 安装包。Web/PWA 没有可安装的本地程序，因此卡片提供的是“前往下载”，会在浏览器新标签页打开 Release 页面。**Dinotty 不会自动安装更新，也不会自动启动安装程序**——启动安装程序始终是你主动点击的结果。断网、GitHub 限流或检查失败不会影响启动，也不会显示错误通知。
 
 服务端 deb 升级：
 

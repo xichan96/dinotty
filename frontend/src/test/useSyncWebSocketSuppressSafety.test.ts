@@ -24,7 +24,7 @@ vi.stubGlobal('WebSocket', MockWebSocket)
 
 vi.mock('../composables/apiBase', () => ({
   getApiBase: async () => 'http://localhost',
-  wsUrlWithToken: (url: string) => url,
+  wsUrl: (path: string) => `ws://localhost${path}`,
   hasAuthToken: () => false,
 }))
 vi.mock('../composables/useTransport', () => ({ isTauri: () => false }))

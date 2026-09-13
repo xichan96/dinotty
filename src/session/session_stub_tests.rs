@@ -371,6 +371,33 @@ fn osc_notify_uses_pane_decoupled_notif_path() {
 }
 
 #[test]
+fn osc_notify_keeps_attribution_alongside_the_decoupled_pane_id() {
+    let (_manager, notifier, mut rx) = osc_broadcast_setup();
+
+    notifier.send_notify("osc-pane", Some("Task done title"), "task done", "info");
+
+    let mut messages = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        messages.push(msg);
+    }
+    let notify = messages
+        .iter()
+        .map(|m| serde_json::from_str::<serde_json::Value>(m).expect("valid json"))
+        .find(|v| v["type"] == "notify")
+        .expect("notify message must be broadcast");
+
+    // The two fields must disagree, and that disagreement *is* the contract.
+    // `pane_id` stays empty so the client's focused-pane rules cannot suppress
+    // presentation; `sourcePaneId` names the producer so an external
+    // supervisor can route without polling every pane. Collapsing either one
+    // into the other breaks a consumer: filling `pane_id` reintroduces
+    // suppression, and dropping `sourcePaneId` makes an OSC-only watcher blind
+    // to *which* pane spoke.
+    assert_eq!(notify["pane_id"], "");
+    assert_eq!(notify["sourcePaneId"], "osc-pane");
+}
+
+#[test]
 fn osc_notify_debounce_allows_different_content_in_same_window() {
     let (_manager, notifier, mut rx) = osc_broadcast_setup();
 

@@ -24,7 +24,7 @@ export function useAppConnectivity(options: AppConnectivityOptions) {
     splitPane,
   } = core
 
-  const { onServerConnect, onSshConnect, onSshReconnect, onSshAuthSubmit, onSshAuthCancel } =
+  const { onSshConnect, onSshReconnect, onSshAuthSubmit, onSshAuthCancel } =
     useSshConnectFlow({
       tabs,
       activeWorkspaceId,
@@ -56,7 +56,6 @@ export function useAppConnectivity(options: AppConnectivityOptions) {
   }
 
   return {
-    onServerConnect,
     onSshConnect,
     onSshReconnect,
     onSshAuthSubmit,

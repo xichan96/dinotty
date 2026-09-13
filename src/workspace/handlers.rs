@@ -446,24 +446,40 @@ pub async fn workspace_reveal(
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
+/// Opens the OS file manager at `path`, selecting it where the platform's file
+/// manager supports a selection argument.
+///
+/// Spawns are detached and never waited on. Public so the desktop shell can
+/// reveal a downloaded installer without duplicating the per-OS command lines.
+///
+/// # Errors
+///
+/// Returns the spawn error when the platform's file manager cannot be started.
+pub fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
+    reveal_command(path).spawn().map(|_| ())
+}
+
 #[cfg(target_os = "windows")]
-fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("explorer.exe")
-        .no_window()
-        .arg(format!("/select,{}", path.display()))
-        .spawn()
-        .map(|_| ())
+fn reveal_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("explorer.exe");
+    command.no_window().arg(format!("/select,{}", path.display()));
+    command
 }
 
 #[cfg(target_os = "macos")]
-fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("open").no_window().arg("-R").arg(path).spawn().map(|_| ())
+fn reveal_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("open");
+    command.no_window().arg("-R").arg(path);
+    command
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn reveal_in_file_manager(path: &Path) -> std::io::Result<()> {
-    let parent = path.parent().unwrap_or(path);
-    std::process::Command::new("xdg-open").no_window().arg(parent).spawn().map(|_| ())
+fn reveal_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("xdg-open");
+    // The Linux file managers these desktops ship have no select-one-file
+    // argument, so open the containing directory instead.
+    command.no_window().arg(path.parent().unwrap_or(path));
+    command
 }
 
 #[allow(clippy::unused_async)]

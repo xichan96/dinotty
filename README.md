@@ -135,7 +135,7 @@ Self-hosted. No subscriptions. No relay. Your data stays on your machine.
 - **Command bookmarks** — right-click terminal text to bookmark, group management, one-click execution
 - **SSH remote connection** — built-in SSH client with password/key auth, remote sessions feel just like local
 - **Remote file management (SFTP)** — auto-enabled over SSH connections, full file browse/edit/upload/download
-- **Server list** — manage multiple remote servers, quick switch connections
+- **Multi-server management** — register multiple dinotty servers and switch between them from Mission Control
 - **Responsive layout** — portrait stacks vertically, landscape side-by-side; touch-optimized buttons & pane resizing
 - **Customizable shortcut keyboard** — add Ctrl/Esc/function keys for mobile, supports arbitrary escape sequences
 - **Built-in file browser** — code highlighting, Markdown rendering, Office document preview, audio/video playback

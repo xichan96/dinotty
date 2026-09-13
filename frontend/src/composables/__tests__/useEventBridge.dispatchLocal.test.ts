@@ -19,7 +19,7 @@ vi.mock('../apiBase', () => ({
   authFetch: api.authFetch,
   apiUrl: (path: string) => path,
   getApiBase: api.getApiBase,
-  wsUrlWithToken: (url: string) => url,
+  wsUrl: (path: string) => `ws://localhost${path}`,
 }))
 
 import { subscribe, dispatchLocal } from '../useEventBridge'

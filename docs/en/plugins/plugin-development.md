@@ -635,7 +635,7 @@ await ctx.workspace.rename('~/foo.txt', 'bar.txt')
 await ctx.workspace.move('~/foo.txt', '~/bar/')
 
 // Watch for changes
-const watcher = ctx.workspace.watch('~/notes.md', (event) => {
+const watcher = await ctx.workspace.watch('~/notes.md', (event) => {
   console.log(event.type, event.path, event.kind)
   // type: 'file_event' | 'error'
   // kind: 'changed' | 'created' | 'deleted'
@@ -741,7 +741,7 @@ Returns `{ code: number, stdout: string, stderr: string }`.
 Suitable for long-running commands (`watch`, continuous logs, etc.):
 
 ```js
-const handle = ctx.exec.spawn(['watch', '--interval', '1'], {
+const handle = await ctx.exec.spawn(['watch', '--interval', '1'], {
   cwd: '/path/to/workspace',
   env: { MODE: 'watch' }
 })

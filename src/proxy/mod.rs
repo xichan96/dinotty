@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod external;
 mod inject;
+mod relay;
 mod response;
 mod rewrite;
 mod websocket;
@@ -21,6 +22,9 @@ use crate::auth::session::SessionStore;
 use crate::settings::SettingsState;
 
 pub use external::external_proxy_handler;
+pub use relay::{
+    relay_dispatch_handler, relay_http_handler, relay_ws_handler, RELAY_CSRF_HEADER, RELAY_PREFIX,
+};
 
 use inject::INJECT_SCRIPT_INTERNAL;
 use response::build_proxied_response;
@@ -309,7 +313,9 @@ async fn proxy_internal(
 
     if is_websocket {
         let ws_url = format!("ws://{host}:{port}{path_part}{query}");
-        return proxy_websocket(req, ws_url, allowed_origins, trusted_proxies).await;
+        // `/preview/` forwards on the caller's behalf; there is no roster
+        // credential to inject here.
+        return proxy_websocket(req, ws_url, allowed_origins, trusted_proxies, &[]).await;
     }
 
     let target_url = format!("http://{host}:{port}{path_part}{query}");

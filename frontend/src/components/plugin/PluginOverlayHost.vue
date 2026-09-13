@@ -36,6 +36,6 @@ function apiFor(item: RegisteredOverlay): PluginContext {
   inset: 0;
   z-index: 600;
   pointer-events: none;
-  /* above keyboard band (500/520), below modal layers (ServerList 930 / Palette 1000 / MC 2000) */
+  /* above keyboard band (500/520), below modal layers (Bookmarks 940 / SSH 950 / Palette 1000 / MC 2000) */
 }
 </style>

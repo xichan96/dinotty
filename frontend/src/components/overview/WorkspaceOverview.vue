@@ -12,7 +12,6 @@
       :transition="{ duration: 0.2 }"
       tabindex="0"
       @click.self="$emit('close')"
-      @keydown="onKeydown"
     >
       <Motion
         key="ws-dual"
@@ -30,6 +29,7 @@
           <X :size="18" />
         </button>
         <WorkspaceList
+          v-if="syncConnected"
           :workspaces="workspaces"
           :selected-id="selectedWorkspaceId"
           :active-id="activeWorkspaceId"
@@ -40,8 +40,25 @@
           @rename="onRenameWorkspace"
         />
         <div class="mc-right-panel">
-          <div v-if="selectedWorkspacePath" class="mc-right-path">{{ selectedWorkspacePath }}</div>
+          <div v-if="syncConnected && selectedWorkspacePath" class="mc-right-path">
+            {{ selectedWorkspacePath }}
+          </div>
+          <!-- Disconnected: the grid would show stale cards and every op would
+               be dropped, and the selection mirror is broadcast-only (see the
+               `selectedWorkspaceId` comment), so a local switch here would
+               never resolve. Offer the server picker instead - it is the only
+               control that still works with the socket down. -->
+          <div v-if="!syncConnected" class="mc-offline">
+            <Unplug class="mc-offline-icon" :size="32" />
+            <p class="mc-offline-title">{{ t('server.disconnected') }}</p>
+            <p class="mc-offline-hint">{{ t('server.disconnectedHint') }}</p>
+            <button class="mc-offline-btn" @click="toggleServerPicker()">
+              <Server :size="14" />
+              <span>{{ t('server.switch') }}</span>
+            </button>
+          </div>
           <TabOverview
+            v-else
             ref="tabOverviewRef"
             :visible="true"
             :cards="filteredCards"
@@ -68,15 +85,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Motion, AnimatePresence } from 'motion-v'
-import { X } from 'lucide-vue-next'
+import { Server, Unplug, X } from 'lucide-vue-next'
 import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../../composables/useWorkspaces'
 import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
 import { useSessionStore } from '../../stores/sessionStore'
+import { useUiStore } from '../../stores/uiStore'
 import { useTabPreview, type TabCard } from '../../composables/useTabPreview'
 import { useMissionControlState, sendMcOp } from '../../composables/useMissionControlState'
+import {
+  closeServerPicker,
+  serverPickerOpen,
+  toggleServerPicker,
+} from '../../composables/useAppCore'
 import { getAllLeaves } from '../../types/pane'
 import type { Workspace } from '../../types/workspace'
 import WorkspaceList from './WorkspaceList.vue'
@@ -106,8 +129,15 @@ const { workspaces, defaultWorkspace, activeWorkspaceId, matchWorkspace, deleteW
   useWorkspaces()
 const { t } = useI18n()
 const session = useSessionStore()
+const ui = useUiStore()
 const tabPreview = useTabPreview()
 const mcState = useMissionControlState()
+
+// The workspace/tab grid is rebuilt from the active server's state; while the
+// sync WS is down there is nothing to render and nothing to drive it, so the
+// grid is replaced by the disconnected panel, which offers the status bar's
+// server picker as the way out.
+const syncConnected = computed(() => ui.syncConnected)
 
 const closing = ref(false)
 const backdropRef = ref<any>(null)
@@ -120,6 +150,34 @@ const switchDirection = ref<'left' | 'right'>('right')
 // means the default workspace (`__default__`). Local mutation is intentionally
 // forbidden - all changes come from `selection_changed` broadcasts.
 const selectedWorkspaceId = computed(() => mcState.selectedWorkspaceId ?? DEFAULT_WORKSPACE_ID)
+
+// The overlay is the only keyboard surface while MC is open.
+//
+// This is a document listener rather than a `keydown` binding on the container:
+// the overlay holds `tabindex="0"`, but clicking any child moves focus there,
+// so after mouse use an overlay-level binding never fires and the shortcuts go
+// dead. Scoping by `backdrop.contains(e.target)` also keeps the global
+// touchscreen keyboard (rendered outside this component) out of it.
+onMounted(() => {
+  document.addEventListener('keydown', onDocKeydown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onDocKeydown)
+})
+
+function onDocKeydown(e: KeyboardEvent) {
+  const backdrop = backdropRef.value?.$el as HTMLElement | undefined
+  if (!props.visible || !backdrop || !backdrop.contains(e.target as Node)) return
+  onKeydown(e)
+}
+
+// Managing servers is a dialog (`ServerManagerDialog`, opened from the status
+// bar's picker), so this component has no part in it: the old "close MC, open
+// the settings panel" route led to a panel with no server section at all.
+//
+// MC hosts no switcher of its own either - see `serverPickerOpen` in
+// `useAppCore`. The `s` binding below opens the status bar's picker, which
+// rides above this overlay via `.status-bar.is-elevated`.
 
 // Capture all cards when visible — deferred so overlay renders first
 const allCards = ref<TabCard[]>([])
@@ -289,6 +347,20 @@ function onNewTabForSelected() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // While the server picker is open it owns the keyboard. It lives in the
+  // status bar, underneath this backdrop, so its own Up/Down/Enter/Escape
+  // handler sits on `window` - which only runs *after* this one. Without the
+  // gate, Up/Down would also drive workspace navigation, Enter would confirm a
+  // tab, and Escape would become the Cancel op and close MC server-side for
+  // every client.
+  if (serverPickerOpen.value) {
+    if ((e.key === 's' || e.key === 'Escape') && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault()
+      closeServerPicker()
+    }
+    return
+  }
+
   switch (e.key) {
     case 'ArrowUp':
       // Workspace nav: previous workspace. Backend cycles through
@@ -312,6 +384,18 @@ function onKeydown(e: KeyboardEvent) {
       if (!e.metaKey && !e.ctrlKey) {
         e.preventDefault()
         onNewTabForSelected()
+      }
+      break
+    case 's':
+      // The server picker - the same one the status-bar chip opens, not a
+      // second implementation of it. Device-level local view state,
+      // deliberately not an McOp: the roster and the active server belong to
+      // this device, not to the server's own MissionControlState. It is also
+      // the way out when the sync WS is down and the grid has been replaced by
+      // the disconnected panel.
+      if (!e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        toggleServerPicker()
       }
       break
     case 'Delete':

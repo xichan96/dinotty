@@ -14,7 +14,7 @@ import {
   resetOverride,
   setOverride,
 } from './useDeviceTextSettings'
-import { wsUrlWithToken } from './apiBase'
+import { wsUrl } from './apiBase'
 import { useKeybindings } from './useKeybindings'
 import { hostTarget, isWindowsClient } from '../utils/clientPlatform'
 import { setupTouchScroll } from '../utils/touchScroll'
@@ -126,6 +126,66 @@ export function configureAllMobileInputTextareas(mode: MobileInputMode | null | 
   document.querySelectorAll<HTMLTextAreaElement>('.xterm-helper-textarea').forEach((textarea) => {
     configureMobileInputTextarea(textarea, mode)
   })
+}
+
+export interface UrlLinkProviderCallbacks {
+  /** Terminal text of the 1-based buffer line, or undefined when absent. */
+  readLine: (bufferLineNumber: number) => string | undefined
+  /** Primary activation opens the URL directly. */
+  onOpen: (url: string) => void
+  /** Non-primary activation keeps the previous context-menu path. */
+  onMenu: (url: string, x: number, y: number) => void
+  /** Pointer hover tracking; null on leave. */
+  onHover: (url: string | null) => void
+}
+
+/**
+ * URL link provider shared by the terminal panes. Factored out of
+ * `attach` so the click routing (primary opens, other buttons menu) and
+ * the hover bookkeeping are unit-testable without a live xterm instance.
+ */
+export function createUrlLinkProvider(callbacks: UrlLinkProviderCallbacks) {
+  return {
+    provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void) => {
+      const text = callbacks.readLine(bufferLineNumber)
+      if (text === undefined) {
+        callback(undefined)
+        return
+      }
+      const regex =
+        /(?:https?:\/\/[^\s"'<>]+|(?:www\.)[a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z]{2,})+(?:\/[^\s"'<>]*)?)/g
+      const links: any[] = []
+      let match
+      while ((match = regex.exec(text)) !== null) {
+        const raw = match[0]
+        const uri = raw.startsWith('http') ? raw : `http://${raw}`
+        const startX = match.index
+        links.push({
+          range: {
+            start: { x: startX + 1, y: bufferLineNumber },
+            end: { x: startX + raw.length + 1, y: bufferLineNumber },
+          },
+          text: uri,
+          activate: (event: MouseEvent) => {
+            // Primary click opens the link directly. Any other button
+            // keeps the previous menu path so its action stays reachable.
+            if (event.button === 0) {
+              callbacks.onOpen(uri)
+            } else {
+              callbacks.onMenu(uri, event.clientX, event.clientY)
+            }
+          },
+          hover: () => {
+            callbacks.onHover(uri)
+          },
+          leave: () => {
+            callbacks.onHover(null)
+          },
+        })
+      }
+      callback(links.length > 0 ? links : undefined)
+    },
+  }
 }
 
 export class TerminalInstance {
@@ -258,6 +318,8 @@ export class TerminalInstance {
   onDisconnect: (() => void) | null = null
   onFileClick: ((path: string, x?: number, y?: number) => void) | null = null
   onPreviewLink: ((url: string, x?: number, y?: number) => void) | null = null
+  onPreviewLinkOpen: ((url: string) => void) | null = null
+  onPreviewLinkHover: ((url: string | null) => void) | null = null
   onRawOutput: ((data: string) => void) | null = null
   onInput: ((data: string) => void) | null = null
   onSessionExit: (() => void) | null = null
@@ -286,10 +348,13 @@ export class TerminalInstance {
       letterSpacing: text.letter_spacing,
       allowProposedApi: true,
       linkHandler: {
+        // OSC-8 hyperlinks only (provider-detected URLs use the link
+        // provider below). Activation is a primary click by construction,
+        // so it opens directly; right-clicks arrive via contextmenu.
         activate: (_event, text) => {
           const uri = text.startsWith('http') ? text : `http://${text}`
-          if (this.onPreviewLink) {
-            this.onPreviewLink(uri)
+          if (this.onPreviewLinkOpen) {
+            this.onPreviewLinkOpen(uri)
           } else {
             window.open(uri, '_blank')
           }
@@ -664,40 +729,31 @@ export class TerminalInstance {
     })
 
     // Register URL link provider (localhost → preview, others → new tab)
-    this.xterm.registerLinkProvider({
-      provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void) => {
-        const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
-        if (!line) {
-          callback(undefined)
-          return
-        }
-        const text = line.translateToString()
-        const regex =
-          /(?:https?:\/\/[^\s"'<>]+|(?:www\.)[a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z]{2,})+(?:\/[^\s"'<>]*)?)/g
-        const links: any[] = []
-        let match
-        while ((match = regex.exec(text)) !== null) {
-          const raw = match[0]
-          const uri = raw.startsWith('http') ? raw : `http://${raw}`
-          const startX = match.index
-          links.push({
-            range: {
-              start: { x: startX + 1, y: bufferLineNumber },
-              end: { x: startX + raw.length + 1, y: bufferLineNumber },
-            },
-            text: uri,
-            activate: (event: MouseEvent) => {
-              if (this.onPreviewLink) {
-                this.onPreviewLink(uri, event.clientX, event.clientY)
-              } else {
-                window.open(uri, '_blank')
-              }
-            },
-          })
-        }
-        callback(links.length > 0 ? links : undefined)
-      },
-    })
+    this.xterm.registerLinkProvider(
+      createUrlLinkProvider({
+        readLine: (bufferLineNumber) => {
+          const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
+          return line?.translateToString()
+        },
+        onOpen: (uri) => {
+          if (this.onPreviewLinkOpen) {
+            this.onPreviewLinkOpen(uri)
+          } else {
+            window.open(uri, '_blank')
+          }
+        },
+        onMenu: (uri, x, y) => {
+          if (this.onPreviewLink) {
+            this.onPreviewLink(uri, x, y)
+          } else {
+            window.open(uri, '_blank')
+          }
+        },
+        onHover: (uri) => {
+          this.onPreviewLinkHover?.(uri)
+        },
+      })
+    )
 
     // Sample a short settle series while the renderer and DOM layout converge.
     this._scheduleSettleResize()
@@ -1168,10 +1224,10 @@ export class TerminalInstance {
   // ── Private ──────────────────────────────────────────────
 
   private _connectWS() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = wsUrlWithToken(
-      `${proto}//${location.host}/ws?paneId=${encodeURIComponent(this.paneId)}`
-    )
+    // `wsUrl` resolves the hub origin and the relay prefix for the active
+    // server. Tauri never reaches this path (see `createTransport`), and the
+    // browser is same-origin, so no await is needed to prime it.
+    const url = wsUrl(`/ws?paneId=${encodeURIComponent(this.paneId)}`)
     this.ws = new WebSocket(url)
 
     this.ws.onopen = () => {

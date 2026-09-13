@@ -13,11 +13,17 @@ use tokio_tungstenite::tungstenite;
 use tungstenite::client::IntoClientRequest;
 
 #[allow(clippy::too_many_lines)]
+/// `inject_headers` are added to the upstream handshake after the client's own
+/// headers are forwarded, so they win on conflict. The relay uses this to
+/// present the roster's `Authorization` to the upstream - the credential the
+/// browser cannot set on a cross-origin WebSocket. Callers that forward a
+/// request on the caller's own behalf (the `/preview/` proxy) pass `&[]`.
 pub async fn proxy_websocket(
     req: Request,
     upstream_url: String,
     allowed_origins: &[String],
     trusted_proxies: &[String],
+    inject_headers: &[(String, String)],
 ) -> Response {
     // WS Origin check (prevents cross-site WebSocket hijacking).
     let conn_ip = req
@@ -73,6 +79,9 @@ pub async fn proxy_websocket(
 
     let ws = if protocols.is_empty() { ws } else { ws.protocols(protocols.clone()) };
 
+    // Owned so the upgrade closure can stay `move` without borrowing the caller.
+    let inject_headers: Vec<(String, String)> = inject_headers.to_vec();
+
     ws.on_upgrade(move |client_ws| async move {
         let mut request = match upstream_url.as_str().into_client_request() {
             Ok(r) => r,
@@ -104,6 +113,15 @@ pub async fn proxy_websocket(
                 if let Ok(v) = format!("http://{h}").parse() {
                     request.headers_mut().insert(axum::http::header::ORIGIN, v);
                 }
+            }
+        }
+        // Applied last so a caller-supplied credential cannot be shadowed by a
+        // same-named header the client happened to send.
+        for (name, value) in &inject_headers {
+            if let (Ok(n), Ok(v)) =
+                (axum::http::header::HeaderName::from_bytes(name.as_bytes()), value.parse())
+            {
+                request.headers_mut().insert(n, v);
             }
         }
         let connect_result = tokio_tungstenite::connect_async(request).await;

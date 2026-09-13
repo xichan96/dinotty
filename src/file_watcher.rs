@@ -14,7 +14,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info};
 
-use crate::event_bus::{BusEvent, EventBus};
+use crate::events::{BusEvent, EventBus};
 use crate::session::SessionManager;
 
 #[derive(Debug, Clone, Serialize)]

@@ -101,7 +101,7 @@ vi.mock('../../composables/apiBase', () => ({
   fetchAutoToken: async () => '',
   validateToken: async () => ({ ok: true }),
   hasAuthToken: () => true,
-  wsUrlWithToken: (url: string) => url,
+  wsUrl: (path: string) => `ws://127.0.0.1:7681${path}`,
   checkTokenConfigured: async () => false,
 }))
 vi.mock('../../composables/useTransport', () => ({ isTauri: () => false, tauriInvoke: vi.fn() }))

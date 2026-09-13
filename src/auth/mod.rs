@@ -18,6 +18,7 @@ use std::{net::IpAddr, sync::OnceLock, time::Instant};
 use crate::auth::session::SessionStore;
 use crate::settings::SettingsState;
 
+pub mod handlers;
 pub mod session;
 pub mod verification_code;
 
@@ -180,6 +181,16 @@ pub async fn auth_middleware(
     // /preview/* still bypasses here; the proxy handler enforces its own
     // loopback / session check.
     if path.starts_with("/preview/") {
+        return next.run(request).await;
+    }
+
+    // /__srv/* is the hub relay, which carries *another* server's credentials
+    // and therefore enforces a stricter gate of its own (loopback-or-valid-auth
+    // AND not cross-site AND target in the roster AND the X-Dinotty-Relay
+    // header on writes). Checking it here as well would only produce a 403 that
+    // hides which of those failed, and would break the browser mode where the
+    // session cookie belongs to the hub, not the upstream.
+    if path.starts_with("/__srv/") {
         return next.run(request).await;
     }
 

@@ -371,4 +371,24 @@ impl Settings {
             .map(std::path::PathBuf::from)
             .filter(|p| p.is_dir())
     }
+
+    /// Strip every credential this struct carries, for use on an HTTP response.
+    ///
+    /// `Settings` serializes to disk and to `GET /api/settings` through one and
+    /// the same `Serialize` impl, so "keep the secret off the wire" has to be a
+    /// step a handler takes rather than a serde attribute. Today the only
+    /// secrets in here are the remote-server tokens; SSH profile passwords are
+    /// deliberately left alone so `/api/settings` keeps behaving exactly as it
+    /// did before the roster existed, and so this change cannot break the SSH
+    /// UI by turning a round-tripped password into a cleared one.
+    ///
+    /// Anything that returns a whole `Settings` to a client must call this
+    /// first: `get_settings` is the only one today. The `PUT` handlers answer
+    /// with a bare status code and never echo the stored object, so they need
+    /// nothing - but if one ever starts returning a body, it needs this too.
+    pub fn scrub_secrets(&mut self) {
+        for server in &mut self.remote_servers {
+            server.scrub_secrets();
+        }
+    }
 }

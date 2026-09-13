@@ -4,6 +4,7 @@ mod handlers;
 mod io;
 mod logging;
 mod normalize;
+mod remote_servers;
 mod types;
 
 #[cfg(test)]
@@ -14,19 +15,23 @@ use std::path::PathBuf;
 pub use handlers::{get_background, get_settings, put_settings, upload_background};
 pub use io::{create_settings_state, load_settings, load_token, save_settings_sync, save_token};
 pub use logging::{get_log, init_logging, init_stderr_logging, log_dir, log_file_path};
+pub use remote_servers::{
+    get_remote_servers, probe_remote_server, put_remote_servers, ProbeRemoteServerRequest,
+    ProbeRemoteServerResponse,
+};
 pub use types::{
     default_upload_dir, ActionBottomCluster, ActionKey, ActionKeyboardConfig, AuthConfig,
     BackgroundConfig, BellNotificationConfig, CommandBookmark, CommandCompleteConfig, CustomColors,
     KeyBinding, KeywordRule, LogConfig, MobileInputMode, MonitorConfig, NotificationChannels,
     NotificationConfig, NotificationHook, NotificationSounds, NotificationType, OpenApiConfig,
-    PanelPosition, PreviewConfig, RecentEntry, SavedTheme, SensitiveString, Settings,
+    PanelPosition, PreviewConfig, RecentEntry, RemoteServer, SavedTheme, SensitiveString, Settings,
     SettingsState, SoundConfig, SshAuthMethod, SshProfile, SystemKeyboardConfig, SystemToolbarMode,
     TextConfig, ThemeColors, ThemeConfig, WebBookmark, WorkspaceBadgeMode, WorkspaceBookmark,
     CURRENT_SETTINGS_VERSION,
 };
 
 #[cfg(test)]
-pub(crate) use handlers::preserve_current_settings_on_legacy_put;
+pub(crate) use handlers::{merge_remote_server_tokens, preserve_current_settings_on_legacy_put};
 #[cfg(test)]
 pub(crate) use io::migrate_settings;
 #[cfg(test)]

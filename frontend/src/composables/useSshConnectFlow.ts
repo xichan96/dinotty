@@ -24,7 +24,6 @@ export interface SshConnectFlowOptions {
 }
 
 export interface SshConnectFlowState {
-  onServerConnect: (host: string, port: number) => void
   onSshConnect: (result: SshConnectResult) => Promise<void>
   onSshReconnect: () => void
   onSshAuthSubmit: (responses: string[]) => void
@@ -45,10 +44,10 @@ export function useSshConnectFlow(opts: SshConnectFlowOptions): SshConnectFlowSt
     focusActive,
   } = opts
 
-  function onServerConnect(host: string, port: number) {
-    const proto = location.protocol
-    window.location.href = `${proto}//${host}:${port}/`
-  }
+  // NB: server switching deliberately does NOT live here. Navigating the whole
+  // WebView to another origin deadlocks the desktop app (no address bar, and
+  // the origin won't match on the way back). Switching goes through
+  // `switchServer()` in `activeServer.ts`, which relays via the hub instead.
 
   async function onSshConnect(result: SshConnectResult) {
     const resolvedConnectionId =
@@ -95,5 +94,5 @@ export function useSshConnectFlow(opts: SshConnectFlowOptions): SshConnectFlowSt
   const onSshAuthSubmit = (responses: string[]) => sshAuth.submit(responses)
   const onSshAuthCancel = () => sshAuth.cancel()
 
-  return { onServerConnect, onSshConnect, onSshReconnect, onSshAuthSubmit, onSshAuthCancel }
+  return { onSshConnect, onSshReconnect, onSshAuthSubmit, onSshAuthCancel }
 }

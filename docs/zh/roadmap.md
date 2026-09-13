@@ -16,10 +16,6 @@ Dinotty 的演进方向。状态随版本迭代更新，已完成项归档到 [R
 
 内置插件，在终端侧管理 todo 列表，与 Coding Agent 工作流整合。
 
-### 客户端管理
-
-集中管理多台 dinotty 服务端，统一的服务器列表与连接管理。
-
 ### 文档与官网
 
 补充文档截图，搭建项目官网。
@@ -33,6 +29,12 @@ Dinotty 的演进方向。状态随版本迭代更新，已完成项归档到 [R
 - 重连渲染、SSH 分屏 resize 防抖
 - Mission Control 动画与方向键导航
 - Mission Control 概览状态后端主导
+
+### 多服务端管理
+
+- 注册多台 dinotty 服务端，在 Mission Control 中切换
+- 流量经 hub 服务端中转，无需逐台配置 CORS 或跨源
+- 按服务端存储 token，relay 路径上剥离凭据并校验 CSRF
 
 ### 工作区管理
 

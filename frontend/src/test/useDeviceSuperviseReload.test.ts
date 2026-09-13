@@ -9,7 +9,7 @@ vi.mock('../composables/apiBase', () => ({
   authFetch: apiMocks.authFetch,
   getApiBase: vi.fn(async () => ''),
   hasAuthToken: () => true,
-  wsUrlWithToken: (url: string) => url,
+  wsUrl: (path: string) => `ws://localhost${path}`,
 }))
 
 import {

@@ -1,5 +1,6 @@
 import type { ClientMsg, ServerMsg } from '../types/protocol'
-import { wsUrlWithToken } from './apiBase'
+import { wsUrl } from './apiBase'
+import { isLocalActive } from './activeServer'
 
 export interface Transport {
   send(msg: ClientMsg): void | Promise<void>
@@ -79,10 +80,13 @@ export class WebSocketTransport implements Transport {
   }
 
   private _connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = this.host || location.host
-    const url = wsUrlWithToken(`${proto}//${host}/ws?paneId=${encodeURIComponent(this.paneId)}`)
-    this.ws = new WebSocket(url)
+    if (this.host) {
+      // Explicit host override (tests, embedded use): build the URL directly.
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      this.ws = new WebSocket(`${proto}//${this.host}/ws?paneId=${encodeURIComponent(this.paneId)}`)
+    } else {
+      this.ws = new WebSocket(wsUrl(`/ws?paneId=${encodeURIComponent(this.paneId)}`))
+    }
 
     this.ws.onopen = () => {
       this._reconnectAttempts = 0
@@ -280,8 +284,23 @@ export class TauriIpcTransport implements Transport {
   }
 }
 
+/**
+ * Transport for a terminal pane on the *active* server.
+ *
+ * `TauriIpcTransport` drives the embedded server in-process — `pty_spawn` always
+ * opens a shell on **this** machine. That is only correct while the local server
+ * is active: on a remote server it would silently spawn locally and the pane
+ * would be talking to the wrong host. Remote panes must go over the hub relay
+ * via `WebSocketTransport`.
+ *
+ * Precondition for the Tauri path: `getApiBase()` must have resolved, because
+ * `wsUrl()` is synchronous and only then knows the embedded server's origin
+ * (`apiBase.ts` `wsUrl`). Every pre-await caller is fine: `App.vue` awaits
+ * `getApiBase()` (or `checkTokenConfigured()`) before the authenticated tree
+ * mounts, and `createTransport` is only reached from a mounted `TerminalPane`.
+ */
 export function createTransport(paneId: string, host?: string): Transport {
-  if (isTauri()) {
+  if (isTauri() && isLocalActive()) {
     return new TauriIpcTransport(paneId)
   }
   return new WebSocketTransport(paneId, host)

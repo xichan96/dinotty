@@ -45,6 +45,7 @@ describe('app action catalog', () => {
       'searchTerminal',
       'addCursorsInFiles',
       'missionControl',
+      'switchServer',
       'superviseTabs',
       'sshConnect',
       'fontSizeUp',
@@ -59,7 +60,7 @@ describe('app action catalog', () => {
       'term.lineEnd',
       'term.deleteToLineStart',
     ])
-    expect(APP_ACTIONS).toHaveLength(28)
+    expect(APP_ACTIONS).toHaveLength(29)
   })
 
   it('uses the registry icons for actions whose old catalog icons differed', () => {

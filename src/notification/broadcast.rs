@@ -8,7 +8,7 @@ use crate::attention::{
     evaluate_ingest_gate, AttentionLedger, DedupOutcome, IngestGateResult, IngestSource,
     MarkReadResult, ProducerOutcome, ReserveResult, Severity,
 };
-use crate::event_bus::{BusEvent, EventBus};
+use crate::events::{BusEvent, EventBus};
 use crate::platform::{process::CommandNoWindowExt, shell};
 use crate::session::{SyncClient, SyncMsg};
 use crate::settings::{NotificationConfig, SettingsState};
@@ -159,7 +159,9 @@ impl NotificationBroadcast {
         self.broadcast(&SyncMsg::StateDelta { delta });
         self.broadcast(&SyncMsg::Notify {
             v: MIN_PROTOCOL_VERSION,
+            // Left empty on purpose - see `source_pane_id` below.
             pane_id: String::new(),
+            source_pane_id: Some(pane_id.to_string()),
             title: title.map(String::from),
             body: body.to_string(),
             notification_type: notification_type.to_string(),
@@ -366,6 +368,7 @@ impl NotificationBroadcast {
                                     self.broadcast(&SyncMsg::Notify {
                                         v: MIN_PROTOCOL_VERSION,
                                         pane_id: pane_id.clone(),
+                                        source_pane_id: Some(pane_id.clone()),
                                         title: req.title.clone(),
                                         body: req.body.clone(),
                                         notification_type: req.notification_type.clone(),
@@ -403,6 +406,10 @@ impl NotificationBroadcast {
                                 self.broadcast(&SyncMsg::Notify {
                                     v: MIN_PROTOCOL_VERSION,
                                     pane_id: String::new(),
+                                    // Genuinely pane-less: this producer sent
+                                    // no `pane_id` at all, so there is nothing
+                                    // to attribute.
+                                    source_pane_id: None,
                                     title: req.title.clone(),
                                     body: req.body.clone(),
                                     notification_type: req.notification_type.clone(),

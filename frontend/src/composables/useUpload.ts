@@ -1,4 +1,4 @@
-import { apiUrl, authFetch, authHeaders } from './apiBase'
+import { apiUrl, authFetch, authHeaders, relayCsrfHeaders } from './apiBase'
 import { isTauri } from './useTransport'
 
 import type { UploadResponse } from '../types/uploads'
@@ -70,6 +70,13 @@ function uploadWithProgress(
   onProgress: (p: UploadProgress) => void
 ): Promise<UploadResponse> {
   return new Promise((resolve, reject) => {
+    // `XMLHttpRequest` is not defined when a caller passes `onProgress` in the
+    // desktop app — `uploadFiles` rejects Tauri earlier. Guarded so the failure
+    // is that rejection rather than a ReferenceError about a missing global.
+    if (typeof XMLHttpRequest === 'undefined') {
+      reject({ status: 400, reason: 'multipart-unsupported-in-tauri' })
+      return
+    }
     const xhr = new XMLHttpRequest()
     xhr.open('POST', apiUrl('/api/uploads'))
     if (isTauri()) {
@@ -77,6 +84,11 @@ function uploadWithProgress(
     } else {
       xhr.withCredentials = true
     }
+    // POST on the active server: the relay gates every mutating method, and
+    // this path bypasses `authFetch` (XHR is what gives us upload progress).
+    Object.entries(relayCsrfHeaders('POST')).forEach(([key, value]) =>
+      xhr.setRequestHeader(key, value)
+    )
     xhr.upload.onprogress = (ev) => {
       if (!ev.lengthComputable || ev.total <= 0) return
       onProgress({ loaded: ev.loaded, total: ev.total })

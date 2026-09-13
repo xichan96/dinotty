@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use dinotty_server::{
-    agent, api::clipboard, audit, mcp, mission_control, plugin, token, update_check, webhook,
+    agent, api::clipboard, audit, auth, events, mcp, mission_control, plugin, token, update_check,
     workspace_mgmt,
 };
 
@@ -33,7 +33,7 @@ pub struct AppState {
     pub tokens: token::TokenState,
     pub audit: audit::AuditState,
     pub agent: agent::AgentState,
-    pub webhooks: webhook::WebhookState,
+    pub webhooks: events::WebhookState,
     pub mcp: mcp::transport::McpState,
     pub mcp_sse: Arc<mcp::transport::SseState>,
     pub workspaces: workspace_mgmt::WorkspacesState,
@@ -44,7 +44,20 @@ pub struct AppState {
     pub update_checker: update_check::UpdateCheckState,
 }
 
-// Allow extracting Arc<SessionManager> from AppState for ws handlers
+impl FromRef<AppState> for auth::handlers::AuthHandlerState {
+    fn from_ref(state: &AppState) -> Self {
+        Self {
+            manager: state.manager.clone(),
+            settings: state.settings.clone(),
+            auth_token: state.auth_token.clone(),
+            port: state.port,
+            sessions: state.sessions.clone(),
+            code_store: state.code_store.clone(),
+            audit: state.audit.clone(),
+        }
+    }
+}
+
 impl FromRef<AppState> for Arc<SessionManager> {
     fn from_ref(state: &AppState) -> Self {
         state.manager.clone()

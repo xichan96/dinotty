@@ -4,7 +4,7 @@ import { apiCreateSshTab } from './useTabApi'
 import { ensureSplitRoot } from '../types/pane'
 import type { TerminalTab, Tab } from '../types/pane'
 import type { SyncClientMsg } from '../types/protocol'
-import { useMissionControlState } from './useMissionControlState'
+import { sendMcOp, useMissionControlState } from './useMissionControlState'
 import { toActiveWorkspaceId } from './useWorkspaces'
 
 export interface OverviewCallbacksOptions {
@@ -68,16 +68,22 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
   const overviewOpen = computed(() => mcState.open)
 
   function openOverview(): void {
-    // Toggle only if currently closed - the hardware keyboard / other
-    // client may have opened it; we don't want to flip it back to closed.
+    // `set` rather than `toggle`: the local `open` bit is only a mirror of the
+    // server's, so a stale copy would make a toggle flip the wrong way. Asking
+    // for the state we actually want is idempotent, and a duplicate op from a
+    // second client is a no-op instead of a close.
+    //
+    // Through `sendMcOp` rather than `sendSync` so this shares the one place
+    // that adapts to a server too old to know `set` - see it for why a peer
+    // that only knows `toggle` can be driven there and when it cannot.
     if (!mcState.open) {
-      sendSync({ type: 'mission_control_op', op: { kind: 'toggle' } })
+      sendMcOp({ kind: 'set', open: true })
     }
   }
 
   function closeOverview(): void {
     if (mcState.open) {
-      sendSync({ type: 'mission_control_op', op: { kind: 'toggle' } })
+      sendMcOp({ kind: 'set', open: false })
     }
   }
 

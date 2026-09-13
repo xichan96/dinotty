@@ -561,6 +561,55 @@ fn navigate_tab_in_workspace(
     }
 }
 
+/// Seed the Mission Control highlight when the overview transitions to open.
+///
+/// On open, the selection is taken from the current active tab so the
+/// highlight lands where the user expects. On close, `selected_*` is left
+/// intact. Shared by [`McOp::Toggle`] and [`McOp::Set`] so the two cannot
+/// drift - a server switch re-sends the open state with `Set`, and it has to
+/// land the highlight in exactly the same place a `Toggle` would.
+async fn seed_mission_control_selection(
+    snap: &mut crate::mission_control::MissionControlSnapshot,
+    open: bool,
+    manager: &Arc<SessionManager>,
+    workspaces: &WorkspacesState,
+) {
+    if !open {
+        return;
+    }
+    let active =
+        manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    let Some(active_id) = active else {
+        return;
+    };
+    // Resolve from active leaf -> tab id by scanning layouts.
+    let mut found_tab: Option<String> = None;
+    for entry in &manager.tab_layouts {
+        let v = entry.value();
+        let leaf = v
+            .get("active_pane_id")
+            .and_then(|a| a.as_str())
+            .map(String::from)
+            .or_else(|| v.get("layout").and_then(crate::session::first_leaf_id));
+        if leaf.as_deref() == Some(active_id.as_str()) || entry.key() == &active_id {
+            found_tab = Some(entry.key().clone());
+            break;
+        }
+    }
+    // Seed both the tab and its workspace so the seeded tab is
+    // visible in the overview's filtered grid (frontend
+    // `filteredCards` shows only the selected workspace). Same
+    // attribution as `matchWorkspace` on the frontend.
+    snap.selected_tab_id.clone_from(&found_tab);
+    if let Some(tab_id) = &found_tab {
+        let (tabs, _) = manager.tab_list();
+        let ws_snapshot = workspaces.read().await.clone();
+        snap.selected_workspace_id = tabs.iter().find(|t| &t.tab_id == tab_id).and_then(|t| {
+            tab_workspace_id(&ws_snapshot, t.cwd.as_deref(), t.connection_id.as_deref())
+        });
+    }
+}
+
 /// Apply a Mission Control operation. The lock is held only while mutating
 /// `mc`; broadcasts happen after release so a slow WS write cannot block
 /// other clients' mutations.
@@ -577,50 +626,23 @@ async fn handle_mission_control_op(
         McOp::Toggle => {
             let mut snap = mc.write().await;
             snap.open = !snap.open;
-            // On open, seed selection from the current active tab so the
-            // highlight lands where the user expects. On close, leave
-            // selected_* intact.
-            if snap.open {
-                let active = manager
-                    .active_pane_id
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone();
-                if let Some(active_id) = active {
-                    // Resolve from active leaf -> tab id by scanning layouts.
-                    let mut found_tab: Option<String> = None;
-                    for entry in &manager.tab_layouts {
-                        let v = entry.value();
-                        let leaf = v
-                            .get("active_pane_id")
-                            .and_then(|a| a.as_str())
-                            .map(String::from)
-                            .or_else(|| v.get("layout").and_then(crate::session::first_leaf_id));
-                        if leaf.as_deref() == Some(active_id.as_str()) || entry.key() == &active_id
-                        {
-                            found_tab = Some(entry.key().clone());
-                            break;
-                        }
-                    }
-                    // Seed both the tab and its workspace so the seeded tab is
-                    // visible in the overview's filtered grid (frontend
-                    // `filteredCards` shows only the selected workspace). Same
-                    // attribution as `matchWorkspace` on the frontend.
-                    snap.selected_tab_id.clone_from(&found_tab);
-                    if let Some(tab_id) = &found_tab {
-                        let (tabs, _) = manager.tab_list();
-                        let ws_snapshot = workspaces.read().await.clone();
-                        snap.selected_workspace_id =
-                            tabs.iter().find(|t| &t.tab_id == tab_id).and_then(|t| {
-                                tab_workspace_id(
-                                    &ws_snapshot,
-                                    t.cwd.as_deref(),
-                                    t.connection_id.as_deref(),
-                                )
-                            });
-                    }
-                }
-            }
+            let open = snap.open;
+            seed_mission_control_selection(&mut snap, open, manager, workspaces).await;
+            let open = snap.open;
+            let selected_workspace_id = snap.selected_workspace_id.clone();
+            let selected_tab_id = snap.selected_tab_id.clone();
+            drop(snap);
+            manager.broadcast_sync(&SyncMsg::MissionControlToggled {
+                open,
+                selected_workspace_id,
+                selected_tab_id,
+            });
+        }
+        McOp::Set { open: target } => {
+            let mut snap = mc.write().await;
+            snap.open = target;
+            let open = snap.open;
+            seed_mission_control_selection(&mut snap, open, manager, workspaces).await;
             let open = snap.open;
             let selected_workspace_id = snap.selected_workspace_id.clone();
             let selected_tab_id = snap.selected_tab_id.clone();
@@ -1004,5 +1026,28 @@ mod tests {
             None,
         );
         assert_eq!(resolve_activate_leaf(&manager, "tab-1").as_deref(), Some("pane-a"));
+    }
+
+    /// `McOp::Set` exists precisely because `Toggle` is not idempotent: a
+    /// server switch re-sends the target state, and a retry or double-send must
+    /// not flip the overview back. That is a wire-format contract as much as a
+    /// behavioural one - the tag has to stay `set` with an `open` bool.
+    #[test]
+    fn set_op_survives_a_wire_round_trip() {
+        let op: crate::mission_control::McOp =
+            serde_json::from_str(r#"{"kind":"set","open":true}"#).unwrap();
+        assert!(matches!(op, crate::mission_control::McOp::Set { open: true }));
+
+        let json =
+            serde_json::to_string(&crate::mission_control::McOp::Set { open: false }).unwrap();
+        assert_eq!(json, r#"{"kind":"set","open":false}"#);
+    }
+
+    /// `Toggle` keeps its own tag and stays variant-less, so the frontend's
+    /// existing call sites and the hardware keyboard route keep working.
+    #[test]
+    fn toggle_still_serializes_as_a_bare_tag() {
+        let json = serde_json::to_string(&crate::mission_control::McOp::Toggle).unwrap();
+        assert_eq!(json, r#"{"kind":"toggle"}"#);
     }
 }

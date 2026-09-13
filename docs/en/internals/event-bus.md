@@ -22,7 +22,7 @@ The EventBus is Dinotty's core event distribution mechanism:
 - **Capacity**: 1024 buffered events; slow consumers lose older events
 
 ```rust
-use crate::event_bus::{EventBus, BusEvent};
+use crate::events::{EventBus, BusEvent};
 
 // Subscribe
 let mut rx = event_bus.subscribe();

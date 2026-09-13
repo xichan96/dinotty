@@ -4,7 +4,7 @@
     clippy::must_use_candidate,
     clippy::needless_pass_by_value
 )]
-use crate::event_bus::BusEvent;
+use super::BusEvent;
 use crate::session::SyncMsg;
 
 /// Map a backend `BusEvent` to a generic `SyncMsg::Event` for plugin consumption.

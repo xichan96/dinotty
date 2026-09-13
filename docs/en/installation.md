@@ -31,10 +31,16 @@ The desktop ships in two formats:
 
 | Format | Distro | Install |
 |--------|--------|---------|
-| `.deb` | Debian / Ubuntu / Linux Mint | `sudo dpkg -i dinotty_<version>_amd64.deb` |
+| `.deb` | Ubuntu 22.04+ / Debian 12+ / Linux Mint 21+ | `sudo dpkg -i dinotty_<version>_amd64.deb` |
 | `.AppImage` | Most distros | `chmod +x Dinotty_*.AppImage && ./Dinotty_*.AppImage` |
 
 `.AppImage` is a single executable, no install needed. If your file manager prompts for trust, enable "Allow executing" in the file properties.
+
+::: warning Desktop `.deb` requires glibc ≥ 2.34
+The desktop `.deb` is built on an Ubuntu 22.04 runner (the GNOME/WebKit runtime libraries only exist from 22.04 onward), so the binary requires `libc6 (>= 2.34)` and installs only on Ubuntu 22.04+ / Debian 12+ / Mint 21+.
+
+On older systems such as Ubuntu 20.04 / Debian 11, `dpkg -i` reports dependency errors that `apt-get -f install` cannot fix — the glibc symbol versions simply do not match, and no package can supply them. Use the server `.deb` described below, the AppImage, or the Docker image instead.
+:::
 
 ### Windows
 
@@ -48,6 +54,8 @@ Download the NSIS installer (`Dinotty_<version>_x64-setup.exe`) and run it, or u
 ## Server deb (Linux)
 
 `dinotty-server` is a standalone Rust binary with no desktop dependency, suitable for VPS or home servers.
+
+The server `.deb` is built separately in an Ubuntu 20.04 container and requires `libc6 (>= 2.31)`, so it installs on **Ubuntu 20.04+ / Debian 11+ / Linux Mint 20+** — a wider range than the desktop `.deb`.
 
 ```bash
 # Download and install the latest version in one go
@@ -111,7 +119,9 @@ Download the new version and install over the old one. Config and workspace data
 | Windows | `%APPDATA%\dinotty\` |
 | Linux server (deb) | `/var/lib/dinotty/` |
 
-Dinotty checks the official GitHub Release once by default after login on each desktop launch or browser/PWA page reload. It does not poll while the app remains open. You can disable **Automatically check for updates** at the bottom of **Settings > About**; enabling it again runs one check immediately. The update card appears only when a newer stable version has been published for more than 24 hours. Dinotty also shows one startup toast while the window is visible and in the foreground, or when the window next returns to the foreground if the result arrived in the background. Clicking the toast opens **Settings > About**. **Go to Downloads** opens the release page in a new browser tab on the web/PWA or in the system browser on desktop; Dinotty does not download or install updates automatically. Offline starts, GitHub rate limits, and check failures remain silent and do not block startup.
+Dinotty checks the official GitHub Release once by default after login on each desktop launch or browser/PWA page reload. It does not poll while the app remains open. You can disable **Automatically check for updates** at the bottom of **Settings > About**; enabling it again runs one check immediately. You can also run a check at any time with **Check for updates**. The update card appears only when a newer stable version has been published for more than 24 hours. Dinotty also shows one startup toast while the window is visible and in the foreground, or when the window next returns to the foreground if the result arrived in the background. Clicking the toast opens **Settings > About**.
+
+On the desktop app, **Download update** fetches the installer built for your platform and architecture, asks where to save it, and shows the transfer progress. When it finishes, use **Show in folder** or **Open installer** to install it. Linux users can additionally download the `.deb` package. On the web/PWA there is nothing to install locally, so the card offers **Go to Downloads** instead, which opens the release page in a new browser tab. **Dinotty never installs an update or launches an installer on its own** — starting the installer is always an explicit action. Offline starts, GitHub rate limits, and check failures remain silent and do not block startup.
 
 Server deb upgrade:
 

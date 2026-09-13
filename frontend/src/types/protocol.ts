@@ -464,6 +464,10 @@ export type NavDir = 'up' | 'down' | 'left' | 'right'
 /// `McOp` enum (`#[serde(tag = "kind", rename_all = "snake_case")]`).
 export type McOp =
   | { kind: 'toggle' }
+  /// Drive `open` to an explicit state. Idempotent, unlike `toggle`: a retry or
+  /// a double-send is a no-op. Use this whenever the intent is "the overview
+  /// should be showing" — a switch, or a reconnect.
+  | { kind: 'set'; open: boolean }
   | { kind: 'navigate'; dir: NavDir }
   | { kind: 'confirm' }
   | { kind: 'cancel' }

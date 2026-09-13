@@ -16,10 +16,6 @@ Built-in plugin for cron-style scheduled command execution. Combined with the no
 
 Built-in plugin to manage todo lists on the terminal side, integrated with Coding Agent workflows.
 
-### Client Management
-
-Centrally manage multiple dinotty servers with a unified server list and connection management.
-
 ### Docs & Website
 
 Add screenshots to docs; build the project website.
@@ -33,6 +29,12 @@ Add screenshots to docs; build the project website.
 - Reconnect rendering, SSH split-pane resize debounce
 - Mission Control animation and keyboard navigation
 - Mission Control overview state backend-led
+
+### Multi-server Management
+
+- Register multiple dinotty servers and switch between them from Mission Control
+- Traffic relayed through the hub server, so no per-server CORS or cross-origin setup is needed
+- Per-server token storage, credential stripping, and CSRF guard on the relay path
 
 ### Workspace Management
 

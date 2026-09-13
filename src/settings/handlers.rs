@@ -18,7 +18,7 @@ use super::normalize::{
     clamp_theme_on_put, normalize_action_keyboards,
 };
 use super::types::CURRENT_SETTINGS_VERSION;
-use super::{log_file_path, Settings, SettingsState};
+use super::{log_file_path, RemoteServer, Settings, SettingsState};
 
 pub async fn get_settings(
     State(state): State<(Arc<SessionManager>, SettingsState)>,
@@ -27,6 +27,10 @@ pub async fn get_settings(
     if settings.log.path.is_empty() {
         settings.log.path = log_file_path().to_string_lossy().to_string();
     }
+    // The token has to be in `settings.json` (see `RemoteServer::token`), which
+    // means the same `Serialize` impl that writes the file would happily write
+    // it into this response. Scrubbing here is what separates the two.
+    settings.scrub_secrets();
     Json(settings)
 }
 
@@ -56,6 +60,7 @@ pub async fn put_settings(
             &existing,
         );
         new_settings.active_workspace_id = existing.active_workspace_id.clone();
+        merge_remote_server_tokens(&mut new_settings, &existing);
     }
     match save_settings(&new_settings) {
         Ok(()) => {
@@ -66,6 +71,40 @@ pub async fn put_settings(
             error!("save settings: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+/// Merge the incoming remote-server roster with the stored one.
+///
+/// The list itself is a full replace - dropping an entry deletes it. Only the
+/// tokens are inherited, and only per matching `id`: `None` means the client
+/// never sent a `token` key (see [`RemoteServer::token`]), which is the normal
+/// case because the GET handlers scrub the secret out of their responses and so
+/// never hand it back. `Some("")` is the explicit "clear this token"
+/// instruction and is left alone.
+///
+/// `has_token` is derived, never trusted: the client's value is overwritten
+/// here so it cannot drift from the merged token.
+pub(crate) fn merge_remote_server_tokens(incoming: &mut Settings, existing: &Settings) {
+    inherit_remote_server_tokens(&mut incoming.remote_servers, &existing.remote_servers);
+}
+
+/// The roster half of [`merge_remote_server_tokens`], for callers that hold
+/// the list rather than a whole `Settings` (the dedicated
+/// `PUT /api/remote-servers` endpoint takes a bare `Vec<RemoteServer>`).
+///
+/// Same contract: the incoming list wins entry-for-entry, only a *missing*
+/// `token` key inherits from the entry with the same `id`, and `has_token` is
+/// recomputed from the merged token.
+pub(crate) fn inherit_remote_server_tokens(
+    incoming: &mut [RemoteServer],
+    existing: &[RemoteServer],
+) {
+    for srv in incoming {
+        if srv.token.is_none() {
+            srv.token = existing.iter().find(|e| e.id == srv.id).and_then(|e| e.token.clone());
+        }
+        srv.refresh_has_token();
     }
 }
 

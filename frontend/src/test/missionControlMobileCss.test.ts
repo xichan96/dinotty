@@ -43,4 +43,11 @@ describe('mission control mobile layout', () => {
   it('provides a 44px close-button touch target inside the mobile override', () => {
     expect(mobileCss).toMatch(/\.mc-close-btn\s*{[^}]*width:\s*44px;[^}]*height:\s*44px;/s)
   })
+
+  // The server switcher used to be a row of this overlay, with its own mobile
+  // sheet. It is the status bar's picker now, so those rules are gone; the
+  // `.mc-ws-list` override above must still not be keyed off it.
+  it('leaves nothing of the old in-overlay server bar behind', () => {
+    expect(css).not.toMatch(/\.mc-srv-/)
+  })
 })

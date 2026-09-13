@@ -8,7 +8,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use dinotty_server::auth;
 use dinotty_server::auth::verification_code::VerifyOutcome;
-use dinotty_server::event_bus::BusEvent;
+use dinotty_server::events::BusEvent;
 use dinotty_server::settings;
 
 use super::state::AppState;

@@ -11,7 +11,9 @@ vi.mock('../composables/apiBase', () => ({
   authFetch: api.authFetch,
   getApiBase: api.getApiBase,
   apiUrl: (path: string) => path,
-  wsUrlWithToken: (url: string) => url,
+  // Mirror of the real `wsUrl` for a browser-mode fixture: hub origin empty,
+  // no relay prefix, same-origin default scheme.
+  wsUrl: (path: string) => `ws://localhost${path}`,
 }))
 
 import {
@@ -195,7 +197,7 @@ describe('usePluginLoader lifecycle', () => {
     expect(store.overlays).toHaveLength(0)
   })
 
-  it('forwards cwd and env options to streaming process spawns', () => {
+  it('forwards cwd and env options to streaming process spawns', async () => {
     const urls: string[] = []
     class CapturingWebSocket {
       onmessage: ((event: MessageEvent) => void) | null = null
@@ -211,7 +213,7 @@ describe('usePluginLoader lifecycle', () => {
     vi.stubGlobal('WebSocket', CapturingWebSocket)
 
     const context = usePluginLoader().getPluginContext('native-plugin')
-    context.exec.spawn(['serve'], { cwd: 'work', env: { MODE: 'test' } })
+    await context.exec.spawn(['serve'], { cwd: 'work', env: { MODE: 'test' } })
 
     const url = new URL(urls[0])
     expect(JSON.parse(url.searchParams.get('args')!)).toEqual(['serve'])

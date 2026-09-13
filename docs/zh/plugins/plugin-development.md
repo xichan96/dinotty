@@ -635,7 +635,7 @@ await ctx.workspace.rename('~/foo.txt', 'bar.txt')
 await ctx.workspace.move('~/foo.txt', '~/bar/')
 
 // 监听文件变化
-const watcher = ctx.workspace.watch('~/notes.md', (event) => {
+const watcher = await ctx.workspace.watch('~/notes.md', (event) => {
   console.log(event.type, event.path, event.kind)
   // type: 'file_event' | 'error'
   // kind: 'changed' | 'created' | 'deleted'
@@ -741,7 +741,7 @@ const data = JSON.parse(res.stdout)
 适合长时间运行的命令（如 `watch`、持续日志）：
 
 ```js
-const handle = ctx.exec.spawn(['watch', '--interval', '1'], {
+const handle = await ctx.exec.spawn(['watch', '--interval', '1'], {
   cwd: '/path/to/workspace',
   env: { MODE: 'watch' }
 })

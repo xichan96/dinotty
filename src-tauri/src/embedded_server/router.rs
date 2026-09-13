@@ -209,6 +209,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/preview/:port", any(proxy::proxy_handler_root))
         .route("/preview/:port/", any(proxy::proxy_handler_root))
         .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+        // Keep in sync with `src/main.rs` - this route table is a separate copy
+        // because `src-tauri` is not part of the lib.
+        .route("/__srv/:id", any(proxy::relay_dispatch_handler))
+        .route("/__srv/:id/", any(proxy::relay_dispatch_handler))
+        .route("/__srv/:id/*rest", any(proxy::relay_dispatch_handler))
+        .route(
+            "/api/remote-servers",
+            get(settings::get_remote_servers).put(settings::put_remote_servers),
+        )
+        .route("/api/remote-servers/probe", post(settings::probe_remote_server))
         .route("/assets/*path", get(static_handler))
         .route("/icons/*path", get(icon_handler))
         .route("/manifest.json", get(manifest_handler))

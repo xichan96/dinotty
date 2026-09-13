@@ -1,6 +1,6 @@
 import type { Component } from 'vue'
 import { reactive, ref, computed, watch, onMounted, onUnmounted, h } from 'vue'
-import { authFetch, apiUrl, wsUrlWithToken, getApiBase } from './apiBase'
+import { authFetch, apiUrl, wsUrl, getApiBase } from './apiBase'
 import { usePluginMonitorStore } from '../stores/pluginMonitor'
 import { usePluginOverlaysStore } from '../stores/pluginOverlays'
 import type { MonitorSeries } from '../stores/pluginMonitor'
@@ -109,10 +109,12 @@ export interface PluginContext {
       args: string[],
       options?: { cwd?: string; env?: Record<string, string>; timeout?: number }
     ): Promise<{ code: number; stdout: string; stderr: string }>
+    /** The socket is dialled asynchronously (the server origin is not known
+     *  synchronously); the returned streams buffer until it is up. */
     spawn(
       args: string[],
       options?: { cwd?: string; env?: Record<string, string> }
-    ): { stdout: ReadableStream<string>; stderr: ReadableStream<string>; kill(): void }
+    ): Promise<{ stdout: ReadableStream<string>; stderr: ReadableStream<string>; kill(): void }>
   }
 
   terminal: {
@@ -213,6 +215,8 @@ export interface PluginContext {
       is_dir: boolean
       modified: number | null
     }>
+    /** The socket is dialled asynchronously (the server origin is not known
+     *  synchronously); the returned handle is usable straight away. */
     watch(
       path: string,
       cb: (event: {
@@ -221,7 +225,7 @@ export interface PluginContext {
         kind?: string
         message?: string
       }) => void
-    ): Disposable
+    ): Promise<Disposable>
     mkdir(path: string): Promise<void>
     delete(path: string): Promise<void>
     rename(path: string, newName: string): Promise<void>
@@ -353,15 +357,13 @@ function createPluginContext(pluginId: string): PluginContext {
       if (!res.ok) throw new Error(await describeHttpError(res, 'Plugin command failed'))
       return res.json()
     },
-    spawn(args, options) {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    async spawn(args, options) {
       const query = new URLSearchParams({ args: JSON.stringify(args) })
       if (options) query.set('options', JSON.stringify(options))
-      const ws = new WebSocket(
-        wsUrlWithToken(
-          `${proto}//${location.host}/api/plugins/${pluginId}/spawn?${query.toString()}`
-        )
-      )
+      // `wsUrl()` needs the Tauri origin cached, so prime it first; the browser
+      // resolves immediately (see the contract on `wsUrl` in `apiBase.ts`).
+      await getApiBase()
+      const ws = new WebSocket(wsUrl(`/api/plugins/${pluginId}/spawn?${query.toString()}`))
       let stdoutCtrl: ReadableStreamDefaultController<string>
       let stderrCtrl: ReadableStreamDefaultController<string>
 
@@ -398,6 +400,8 @@ function createPluginContext(pluginId: string): PluginContext {
       ws.onclose = closeStreams
       ws.onerror = closeStreams
 
+      // The socket buffers outbound data while CONNECTING, so the streams are
+      // returned immediately and callers keep their existing `.stdout` shape.
       return { stdout, stderr, kill: () => ws.close() }
     },
   }
@@ -497,13 +501,11 @@ function createPluginContext(pluginId: string): PluginContext {
       if (!res.ok) throw new Error(await describeHttpError(res, 'workspace.stat failed'))
       return res.json()
     },
-    watch(path, cb) {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    async watch(path, cb) {
       const query = new URLSearchParams({ path })
+      await getApiBase()
       const ws = new WebSocket(
-        wsUrlWithToken(
-          `${proto}//${location.host}/ws/plugins/${pluginId}/workspace/watch?${query.toString()}`
-        )
+        wsUrl(`/ws/plugins/${pluginId}/workspace/watch?${query.toString()}`)
       )
       let sockets = pluginWatchSockets.get(pluginId)
       if (!sockets) {

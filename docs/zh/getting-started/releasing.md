@@ -155,7 +155,20 @@ tag push 会触发 `.github/workflows/package.yml`：
 | `dinotty-linux` | Desktop `.deb` / `.AppImage`、Server `dinotty-server_*.deb` |
 | `dinotty-windows` | NSIS 安装包、portable `.exe` |
 
-发布完成后检查 GitHub Release 的 tag、标题和资产版本一致，并至少对所支持平台的安装包做基本启动验证。
+资产的确切文件名很重要：应用内的更新功能就是靠匹配这些名字来挑选当前平台的安装包，所以在 CI 里改名会让该平台静默失去应用内下载能力。
+
+| 平台 / 架构 | 资产文件名 |
+|-------------|-----------|
+| macOS arm64 | `Dinotty_{version}_aarch64.dmg` |
+| macOS x64 | `Dinotty_{version}_x64.dmg`（目前还没有对应的 job，Intel Mac 无应用内下载） |
+| Linux amd64 | `Dinotty_{version}_amd64.AppImage`、`Dinotty_{version}_amd64.deb` |
+| Linux arm64 | `Dinotty_{version}_aarch64.AppImage`、`Dinotty_{version}_arm64.deb` |
+| Windows x64 | `Dinotty_{version}_x64-setup.exe`、`Dinotty_{version}_x64-portable.exe` |
+| Server（不在应用内提供） | `dinotty-server_{version}-1_{amd64,arm64}.deb` |
+
+注意架构拼写并不统一：arm 构建在 AppImage 和 `.dmg` 里写作 `aarch64`，在 `.deb` 里却写作 `arm64`，Windows 则用 `x64`。`src/update_check.rs` 里的 `select_assets` 精确编码了这张表。
+
+发布完成后检查 GitHub Release 的 tag、标题和资产版本一致，并至少对所支持平台的安装包做基本启动验证。同时对照上表核对资产文件名；如果确实要改名，需在同一次变更中同步更新 `src/update_check.rs` 里的 `AssetKind`。
 
 ## 7. 撤回有问题的 Release
 

@@ -479,3 +479,104 @@ fn cross_site_browser_request_detection() {
         ("host", "127.0.0.1:8999"),
     ])));
 }
+
+// ── relay path early return ─────────────────────────────────────
+
+/// The hub relay owns its own gate (roster membership, the `X-Dinotty-Relay`
+/// CSRF header, upstream token injection), so `auth_middleware` must pass
+/// `/__srv/*` through untouched. If this early return is ever dropped, every
+/// relayed request from a non-whitelisted peer becomes a 403 *before* the
+/// relay can apply its stricter-but-different rules, and browser mode breaks
+/// outright because the session cookie belongs to the hub, not the upstream.
+///
+/// The `/preview/` precedent has the same shape, so both are asserted here.
+#[tokio::test]
+async fn relay_and_preview_paths_bypass_the_global_auth_gate() {
+    use axum::{body::Body, middleware, routing::any, Router};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    async fn assert_reaches_inner(path: &str) {
+        let settings: crate::settings::SettingsState =
+            Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default()));
+        let sessions = SessionStore::new(30);
+        // A non-empty token is what arms the gate; an empty one makes the whole
+        // middleware a no-op and would make this test pass vacuously.
+        let token = "configured-token";
+        let settings_for_layer = settings.clone();
+        let app = Router::new()
+            .route("/__srv/:id/*rest", any(|| async { "reached the relay" }))
+            .route("/preview/:port/*path", any(|| async { "reached the proxy" }))
+            .layer(middleware::from_fn(move |req, next| {
+                let settings = settings_for_layer.clone();
+                let sessions = sessions.clone();
+                async move {
+                    auth_middleware(
+                        req,
+                        next,
+                        token,
+                        &settings,
+                        &sessions,
+                        "203.0.113.9".parse().unwrap(),
+                        8999,
+                    )
+                    .await
+                }
+            }));
+
+        let resp = app
+            .oneshot(axum::http::Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "{path} was stopped by the global auth gate instead of reaching its handler"
+        );
+    }
+
+    assert_reaches_inner("/__srv/abc/api/info").await;
+    assert_reaches_inner("/__srv/abc/ws/sync").await;
+    assert_reaches_inner("/preview/8999/api/info").await;
+}
+
+/// Guard the guard: an unrelated `/api/` path from the same non-whitelisted
+/// peer must still be rejected, so the test above cannot pass because the
+/// middleware turned into a no-op.
+#[tokio::test]
+async fn a_plain_api_path_is_still_gated_from_a_non_whitelisted_peer() {
+    use axum::{body::Body, middleware, routing::any, Router};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    let settings: crate::settings::SettingsState =
+        Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default()));
+    let sessions = SessionStore::new(30);
+    let settings_for_layer = settings.clone();
+    let app = Router::new().route("/api/settings", any(|| async { "reached settings" })).layer(
+        middleware::from_fn(move |req, next| {
+            let settings = settings_for_layer.clone();
+            let sessions = sessions.clone();
+            async move {
+                auth_middleware(
+                    req,
+                    next,
+                    "configured-token",
+                    &settings,
+                    &sessions,
+                    "203.0.113.9".parse().unwrap(),
+                    8999,
+                )
+                .await
+            }
+        }),
+    );
+
+    let resp = app
+        .oneshot(axum::http::Request::builder().uri("/api/settings").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    // 401 (`UNAUTHORIZED`, no session and no Bearer), not 403 - 403 is the
+    // separate cross-site-from-a-whitelisted-peer branch.
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}

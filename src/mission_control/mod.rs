@@ -18,7 +18,18 @@ pub enum NavDir {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum McOp {
+    /// Flip `open`. Kept for the hardware keyboard and other live callers;
+    /// **not idempotent**, so a retry or a double-send flips it back.
     Toggle,
+    /// Drive `open` to an explicit state.
+    ///
+    /// Use this whenever the intent is "the overview should be showing", e.g.
+    /// after a server switch: `Toggle` would race with a retry, and `open` is
+    /// per-server global rather than per-client, so flipping it also closes
+    /// Mission Control for *other* devices connected to that server.
+    Set {
+        open: bool,
+    },
     Navigate {
         dir: NavDir,
     },

@@ -118,6 +118,22 @@ pub enum SyncMsg {
     Notify {
         v: u64,
         pane_id: String,
+        /// Which pane actually produced this, when one is known.
+        ///
+        /// `pane_id` above is deliberately empty for OSC 9/777 and for
+        /// pane-less plugin producers, so that presentation is never
+        /// suppressed by the client's focused-pane rules (see the comment on
+        /// `send_notify`). That decoupling is right for *rendering* but it
+        /// erases attribution, which external supervisors need: a watcher that
+        /// only sees `pane_id: ""` learns "something happened" but not
+        /// *where*, forcing it back to polling every pane.
+        ///
+        /// `source_pane_id` carries attribution without touching `pane_id`, so
+        /// consumers that render (which must respect focus rules) and
+        /// consumers that route (which must not) can each read the field that
+        /// fits. Absent when the event genuinely has no pane.
+        #[serde(rename = "sourcePaneId", skip_serializing_if = "Option::is_none")]
+        source_pane_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
         body: String,

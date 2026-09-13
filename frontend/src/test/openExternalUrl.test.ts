@@ -11,12 +11,16 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 }))
 
 import {
+  isOfficialDinottyAssetUrl,
   isOfficialDinottyReleaseUrl,
   openExternalUrl,
+  openReleaseAssetUrl,
   openUrlInSystemBrowser,
 } from '../utils/openExternalUrl'
 
 const releaseUrl = 'https://github.com/xichan96/dinotty/releases/tag/v0.21.0'
+const assetUrl =
+  'https://github.com/xichan96/dinotty/releases/download/v0.21.0/Dinotty_0.21.0_aarch64.dmg'
 
 describe('openExternalUrl', () => {
   beforeEach(() => {
@@ -88,5 +92,37 @@ describe('openExternalUrl', () => {
     transportMocks.isTauri.mockReturnValue(true)
     shellMocks.open.mockRejectedValue(new Error('blocked'))
     await expect(openExternalUrl(releaseUrl)).resolves.toBe(false)
+  })
+
+  it('accepts a release asset URL and opens it in the system browser', async () => {
+    transportMocks.isTauri.mockReturnValue(true)
+    shellMocks.open.mockResolvedValue(undefined)
+
+    expect(isOfficialDinottyAssetUrl(assetUrl)).toBe(true)
+    await expect(openReleaseAssetUrl(assetUrl)).resolves.toBe(true)
+    expect(shellMocks.open).toHaveBeenCalledWith(assetUrl)
+  })
+
+  it.each([
+    'http://github.com/xichan96/dinotty/releases/download/v0.21.0/Dinotty_0.21.0_aarch64.dmg',
+    'https://example.com/xichan96/dinotty/releases/download/v0.21.0/Dinotty_0.21.0_aarch64.dmg',
+    'https://github.com:444/xichan96/dinotty/releases/download/v0.21.0/Dinotty_0.21.0_aarch64.dmg',
+    'https://github.com/xichan96/dinotty/releases/download/v0.21.0/',
+    'https://github.com/xichan96/dinotty/releases/download/v0.21.0/sub/Dinotty_0.21.0_aarch64.dmg',
+    'https://github.com/xichan96/dinotty/releases/download/v0.21.0/Dinotty_0.21.0_aarch64.dmg?x=1',
+    'https://github.com/xichan96/dinotty/releases/download/v0.21.0/Dinotty_0.21.0_aarch64.dmg#x',
+    'https://github.com/xichan96/dinotty/releases/tag/v0.21.0',
+  ])('rejects an untrusted asset URL: %s', async (url) => {
+    transportMocks.isTauri.mockReturnValue(false)
+
+    expect(isOfficialDinottyAssetUrl(url)).toBe(false)
+    await expect(openReleaseAssetUrl(url)).resolves.toBe(false)
+  })
+
+  it('keeps the release-page and asset allowlists mutually exclusive', async () => {
+    transportMocks.isTauri.mockReturnValue(false)
+
+    expect(isOfficialDinottyReleaseUrl(assetUrl)).toBe(false)
+    expect(isOfficialDinottyAssetUrl(releaseUrl)).toBe(false)
   })
 })

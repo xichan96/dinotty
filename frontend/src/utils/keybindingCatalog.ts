@@ -25,6 +25,7 @@ import {
   Layers,
   RefreshCw,
   LayoutTemplate,
+  Server,
 } from 'lucide-vue-next'
 
 export interface KeyBinding {
@@ -142,6 +143,12 @@ export const defs: KeyBindingDef[] = [
     defaultBinding: { key: 'm', shift: true },
     icon: LayoutDashboard,
     titleKey: 'keybinding.missionControl',
+  },
+  {
+    id: 'switchServer',
+    defaultBinding: { key: 's', shift: true },
+    icon: Server,
+    titleKey: 'keybinding.switchServer',
   },
   {
     id: 'superviseTabs',

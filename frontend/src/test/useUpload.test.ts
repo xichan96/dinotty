@@ -4,6 +4,7 @@ const uploadMocks = vi.hoisted(() => ({
   tauri: false,
   authFetch: vi.fn(),
   authHeaders: vi.fn(() => ({})),
+  relayCsrfHeaders: vi.fn((_method?: string): Record<string, string> => ({})),
 }))
 
 vi.mock('../composables/useTransport', () => ({
@@ -14,6 +15,7 @@ vi.mock('../composables/apiBase', () => ({
   apiUrl: (path: string) => path,
   authFetch: uploadMocks.authFetch,
   authHeaders: uploadMocks.authHeaders,
+  relayCsrfHeaders: (method?: string) => uploadMocks.relayCsrfHeaders(method),
 }))
 
 import { formatMB, useUpload, uploadErrorStatus } from '../composables/useUpload'
@@ -28,6 +30,8 @@ describe('useUpload', () => {
     uploadMocks.authFetch.mockReset()
     uploadMocks.authHeaders.mockReset()
     uploadMocks.authHeaders.mockReturnValue({})
+    uploadMocks.relayCsrfHeaders.mockReset()
+    uploadMocks.relayCsrfHeaders.mockReturnValue({})
     vi.unstubAllGlobals()
   })
 
@@ -107,6 +111,25 @@ describe('useUpload', () => {
     // Browser mode: uses withCredentials for cookie-based auth, no Bearer header.
     expect(requests[0].withCredentials).toBe(true)
     expect(requests[0].headers.Authorization).toBeUndefined()
+  })
+
+  it('carries the relay CSRF header on the XMLHttpRequest branch', async () => {
+    uploadMocks.relayCsrfHeaders.mockReturnValue({ 'X-Dinotty-Relay': '1' })
+    const requests: MockXHR[] = []
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class extends MockXHR {
+        constructor() {
+          super()
+          requests.push(this)
+        }
+      }
+    )
+
+    await useUpload().uploadFiles([new File(['x'], 'x.bin')], { onProgress: vi.fn() })
+
+    expect(uploadMocks.relayCsrfHeaders).toHaveBeenCalledWith('POST')
+    expect(requests[0].headers['X-Dinotty-Relay']).toBe('1')
   })
 
   it('formats raw byte counts as one-decimal MB values', () => {

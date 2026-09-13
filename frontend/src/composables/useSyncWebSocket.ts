@@ -17,12 +17,13 @@ import {
 } from '../types/paneMru'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
-import { getApiBase, wsUrlWithToken, hasAuthToken } from './apiBase'
-import { isTauri } from './useTransport'
+import { getApiBase, wsUrl } from './apiBase'
+import { isLocalActive } from './activeServer'
+import { scopedKey } from './serverScope'
 import { toActiveWorkspaceId, useWorkspaces } from './useWorkspaces'
 import { apiCreatePluginTab } from './useTabApi'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
-import { useMissionControlState } from './useMissionControlState'
+import { markMcSnapshot, useMissionControlState } from './useMissionControlState'
 import { pickSuccessorTab } from '../utils/tabSuccessor'
 import { currentRevealNavGen, nextRevealNavGen } from '../utils/navGen'
 import { workspaceIdFromPaneId } from '../utils/pluginPaneId'
@@ -145,6 +146,10 @@ export function useSyncWebSocket(opts: {
   // work, and an exception on any exit path must not leave the flag stuck.
   let suppressDepth = 0
   let syncReconnectDelay = 1000
+  // `onclose` auto-reconnects. An intentional `closeWs()` (server switch, logout)
+  // would otherwise race that timer back to the server we just left, so the
+  // close is flagged and `onclose` honours it by staying down.
+  let intentionalClose = false
 
   // Grace period: tabs created within the last 5s are protected from tab_list pruning.
   // This prevents a race where tab_list arrives before the REST-driven tab_created.
@@ -201,11 +206,31 @@ export function useSyncWebSocket(opts: {
     sendSync({ type: 'ssh_auth_response', pane_id: paneId, responses })
   }
 
-  function getSavedTab(paneId: string): any {
+  /**
+   * Saved tabs for the active server. Scoped per server so a switch does not
+   * resurrect the previous server's panes. On the local server, fall back to
+   * the pre-namespacing key so upgrading users don't lose their tabs.
+   */
+  function readSavedTabs(): any[] {
+    try {
+      const raw = localStorage.getItem(scopedKey('dinotty_tabs'))
+      if (raw) return JSON.parse(raw)?.tabs ?? []
+    } catch {
+      /* fall through to the legacy key */
+    }
+    if (!isLocalActive()) return []
     try {
       const raw = localStorage.getItem('dinotty_tabs')
-      if (!raw) return null
-      const { tabs: savedTabs } = JSON.parse(raw)
+      if (!raw) return []
+      return JSON.parse(raw)?.tabs ?? []
+    } catch {
+      return []
+    }
+  }
+
+  function getSavedTab(paneId: string): any {
+    try {
+      const savedTabs = readSavedTabs()
       const direct = savedTabs?.find((t: any) => t.paneId === paneId)
       if (direct) return direct
       return (
@@ -221,19 +246,13 @@ export function useSyncWebSocket(opts: {
   }
 
   async function connectSyncWS() {
-    let url: string
-    if (isTauri()) {
-      const origin = await getApiBase()
-      url = `${origin.replace(/^http/, 'ws')}/ws/sync`
-    } else {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-      url = `${proto}//${location.host}/ws/sync`
-    }
-    const wsUrl = wsUrlWithToken(url)
-    if (wsUrl === url && hasAuthToken()) {
-      console.warn('[sync] token available but not appended to WS URL')
-    }
-    syncWs = new WebSocket(wsUrl)
+    // Tauri's origin is async; `wsUrl()` is synchronous. Priming `getApiBase()`
+    // here (it is a no-op in the browser) is what makes that call correct —
+    // see the contract on `wsUrl` in `apiBase.ts`.
+    await getApiBase()
+    const url = wsUrl('/ws/sync')
+    intentionalClose = false
+    syncWs = new WebSocket(url)
 
     syncWs.onopen = () => {
       console.log('[sync] connected')
@@ -325,25 +344,17 @@ export function useSyncWebSocket(opts: {
         // Migrate legacy plugin tabs from localStorage: convert to TerminalTab
         // with a plugin leaf and register with the backend so they gain a
         // `tab_layouts` entry (required for Mode A drag-and-drop merge).
-        try {
-          const raw = localStorage.getItem('dinotty_tabs')
-          if (raw) {
-            const { tabs: savedTabs } = JSON.parse(raw)
-            for (const st of savedTabs) {
-              if (st.type !== 'plugin') continue
-              if (tabs.value.some((t) => t.paneId === st.paneId)) continue
-              const migrated = migrateTab(st)
-              tabs.value.push(migrated)
-              // Fire-and-forget: the backend `insert_tab` is idempotent, so
-              // re-registering an already-tracked plugin tab is a no-op.
-              void apiCreatePluginTab(st.pluginId, {
-                title: st.title ?? st.pluginId,
-                tabId: st.paneId,
-              }).catch((e) => console.warn('[sync] plugin tab register failed:', e))
-            }
-          }
-        } catch {
-          /* noop */
+        for (const st of readSavedTabs()) {
+          if (st.type !== 'plugin') continue
+          if (tabs.value.some((t) => t.paneId === st.paneId)) continue
+          const migrated = migrateTab(st)
+          tabs.value.push(migrated)
+          // Fire-and-forget: the backend `insert_tab` is idempotent, so
+          // re-registering an already-tracked plugin tab is a no-op.
+          void apiCreatePluginTab(st.pluginId, {
+            title: st.title ?? st.pluginId,
+            tabId: st.paneId,
+          }).catch((e) => console.warn('[sync] plugin tab register failed:', e))
         }
 
         // Remove terminal tabs whose leaf paneIds are no longer on the server
@@ -583,6 +594,9 @@ export function useSyncWebSocket(opts: {
         mcState.selectedWorkspaceId = msg.selected_workspace_id ?? null
         mcState.selectedTabId = msg.selected_tab_id ?? null
         mcState.selectedTabTitle = null
+        // This is the server's own answer, sent as the socket opens - the point
+        // at which the mirror stops being a leftover from the previous server.
+        markMcSnapshot()
       } else if (msg.type === 'layout_updated') {
         // Two-pass match: prefer paneId, fall back to leaf overlap only if no
         // paneId match. A single-pass `find()` with OR-ed conditions can pick
@@ -731,6 +745,7 @@ export function useSyncWebSocket(opts: {
       resetHandshakeState()
       syncWs = null
       syncConnected.value = false
+      if (intentionalClose) return
       setTimeout(connectSyncWS, syncReconnectDelay)
       syncReconnectDelay = Math.min(syncReconnectDelay * 2, 30000)
     }
@@ -741,6 +756,7 @@ export function useSyncWebSocket(opts: {
   }
 
   function closeWs() {
+    intentionalClose = true
     if (syncWs) {
       syncWs.close()
       syncWs = null

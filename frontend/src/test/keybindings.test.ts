@@ -15,7 +15,7 @@ vi.mock('../composables/apiBase', () => ({
   authFetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })),
   getApiBase: async () => 'http://127.0.0.1:7681',
   hasAuthToken: () => false,
-  wsUrlWithToken: (url: string) => url,
+  wsUrl: (path: string) => `ws://localhost${path}`,
 }))
 
 const APP_DEFAULTS = [
@@ -35,6 +35,7 @@ const APP_DEFAULTS = [
   ['addCursorsInFiles', 'l', true, false],
   ['switchTab', '1', false, true],
   ['missionControl', 'm', true, false],
+  ['switchServer', 's', true, false],
   ['superviseTabs', '`', false, false],
   ['sshConnect', 'n', true, false],
   ['fontSizeUp', '=', true, false],
@@ -92,10 +93,10 @@ describe('unified keybindings', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps the 22 app defaults and persisted shape unchanged', () => {
+  it('keeps the 23 app defaults and persisted shape unchanged', () => {
     const appDefs = keyBindingDefs.filter((def) => (def.kind ?? 'app') === 'app')
 
-    expect(appDefs).toHaveLength(22)
+    expect(appDefs).toHaveLength(23)
     expect(
       appDefs.map((def) => [
         def.id,

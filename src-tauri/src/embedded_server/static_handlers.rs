@@ -103,13 +103,11 @@ pub fn read_git_info() -> GitInfo {
 }
 
 pub async fn server_info(AxumState(state): AxumState<AppState>) -> Json<serde_json::Value> {
-    let lan_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "127.0.0.1".to_string());
-    Json(serde_json::json!({
-        "lan_ip": lan_ip,
-        "port": state.port,
-        "version": state.git_info.version,
-        "repo_url": state.git_info.repo_url,
-    }))
+    // Shared with the standalone binary's copy so the two cannot drift; see
+    // `dinotty_server::api::info` for why `settings_version` is in the payload.
+    Json(dinotty_server::api::info::info_payload(
+        state.port,
+        &state.git_info.version,
+        &state.git_info.repo_url,
+    ))
 }

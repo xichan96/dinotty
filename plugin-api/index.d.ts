@@ -92,7 +92,12 @@ export interface PluginContext {
 
   exec: {
     run(args: string[], options?: ExecOptions): Promise<ExecResult>
-    spawn(args: string[], options?: ProcessStartOptions): SpawnHandle
+    /**
+     * Streams the process's output. The socket is dialled asynchronously
+     * (the server origin is not known synchronously on desktop), so this
+     * resolves once the connection is being established — `await` it.
+     */
+    spawn(args: string[], options?: ProcessStartOptions): Promise<SpawnHandle>
   }
 
   terminal: {
@@ -193,6 +198,11 @@ export interface PluginContext {
       is_dir: boolean
       modified: number | null
     }>
+    /**
+     * Watches a path for changes. The socket is dialled asynchronously (the
+     * server origin is not known synchronously on desktop), so this resolves
+     * once the connection is being established — `await` it.
+     */
     watch(
       path: string,
       cb: (event: {
@@ -201,7 +211,7 @@ export interface PluginContext {
         kind?: string
         message?: string
       }) => void,
-    ): Disposable
+    ): Promise<Disposable>
     mkdir(path: string): Promise<void>
     delete(path: string): Promise<void>
     rename(path: string, newName: string): Promise<void>

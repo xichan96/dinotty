@@ -17,6 +17,7 @@ mod autostart;
 mod embedded_server;
 mod shutdown;
 mod tray;
+mod update_download;
 mod window_actions;
 
 static EMBEDDED_HTTP_PORT: OnceLock<u16> = OnceLock::new();
@@ -649,51 +650,9 @@ fn set_window_title(title: String, window: tauri::Window) -> Result<(), String> 
     window.set_title(&title).map_err(|e| e.to_string())
 }
 
-/// macOS-specific: GUI-launched apps inherit LaunchServices' minimal PATH, so
-/// argv tabs (e.g. `claude --resume`) fail to spawn. Import the user's
-/// login-shell PATH once at startup, before any PTY spawn or thread exists.
-#[cfg(target_os = "macos")]
-fn import_login_shell_path() {
-    use dinotty_server::platform::process::CommandNoWindowExt;
-
-    const START_MARKER: &[u8] = b"__DINOTTY_PATH_START__";
-    const END_MARKER: &[u8] = b"__DINOTTY_PATH_END__";
-
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let Ok(out) = std::process::Command::new(&shell)
-        .no_window()
-        .args(["-lc", "printf '__DINOTTY_PATH_START__%s__DINOTTY_PATH_END__' \"$PATH\""])
-        .output()
-    else {
-        return;
-    };
-    if !out.status.success() {
-        return;
-    }
-
-    let Some(start) =
-        out.stdout.windows(START_MARKER.len()).position(|window| window == START_MARKER)
-    else {
-        return;
-    };
-    let value_start = start + START_MARKER.len();
-    let Some(end) =
-        out.stdout[value_start..].windows(END_MARKER.len()).position(|window| window == END_MARKER)
-    else {
-        return;
-    };
-
-    if let Ok(path) = std::str::from_utf8(&out.stdout[value_start..value_start + end]) {
-        let path = path.trim();
-        if !path.is_empty() {
-            std::env::set_var("PATH", path);
-        }
-    }
-}
-
 fn main() {
     #[cfg(target_os = "macos")]
-    import_login_shell_path();
+    dinotty_server::platform::terminal_env::prime_direct_command_path();
     let _log_guard = dinotty_server::settings::init_logging();
 
     let args: Vec<String> = std::env::args().collect();
@@ -767,6 +726,7 @@ fn main() {
         .manage(tray::state::TrayCapabilityState::default())
         .manage(tray::state::TrayMenuState::default())
         .manage(window_actions::MainWindowState::default())
+        .manage(update_download::UpdateDownloadState::default())
         .manage(StartupExitState::default())
         .manage(shutdown::ShutdownCoordinator::new(manager.clone()))
         .setup(move |app| {
@@ -866,6 +826,10 @@ fn main() {
             tauri_read_drag_pboard,
             pick_upload_dir,
             pick_workspace_dir,
+            update_download::download_update_asset,
+            update_download::cancel_update_download,
+            update_download::reveal_downloaded_file,
+            update_download::open_downloaded_file,
             shutdown::request_desktop_quit,
             shutdown::desktop_quit_ack,
             window_actions::desktop_capabilities,

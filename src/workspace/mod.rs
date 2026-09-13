@@ -16,9 +16,9 @@ pub use git::{
 pub use syntax::{workspace_syntax_check, SyntaxCheckBody, SyntaxCheckResponse, SyntaxDiagnostic};
 
 pub use handlers::{
-    workspace_create_entry, workspace_cwd, workspace_delete, workspace_list, workspace_meta,
-    workspace_move, workspace_put_file, workspace_raw, workspace_rename, workspace_resolve,
-    workspace_reveal, workspace_search,
+    reveal_in_file_manager, workspace_create_entry, workspace_cwd, workspace_delete,
+    workspace_list, workspace_meta, workspace_move, workspace_put_file, workspace_raw,
+    workspace_rename, workspace_resolve, workspace_reveal, workspace_search,
 };
 pub use types::{
     CreateEntryBody, CreateEntryQuery, DirEntry, ListResponse, MetaResponse, MoveBody,

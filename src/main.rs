@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 
 use dinotty_server::{
-    agent, api::clipboard, audit, auth, event_bus, events, file_watcher, history, mcp,
-    mission_control, monitor, notification, openapi, plugin, proxy, session, settings, tabs,
-    templates, token, update_check, webhook, workspace, workspace_mgmt, ws,
+    agent, api::clipboard, audit, auth, events, file_watcher, history, mcp, mission_control,
+    monitor, notification, openapi, plugin, proxy, session, settings, tabs, templates, token,
+    update_check, workspace, workspace_mgmt, ws,
 };
 
 use axum::{
@@ -32,8 +32,7 @@ use crate::session::SessionManager;
 mod app_state;
 use app_state::AppState;
 
-mod auth_handlers;
-use auth_handlers::{
+use auth::handlers::{
     auto_token, check_auth, get_token, list_sessions, login, logout, put_settings_with_session_ttl,
     request_code, revoke_other_sessions, revoke_session, token_configured, update_token,
 };
@@ -221,14 +220,13 @@ fn parse_port() -> u16 {
 }
 
 async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let lan_ip =
-        local_ip_address::local_ip().map_or_else(|_| "127.0.0.1".to_string(), |ip| ip.to_string());
-    Json(serde_json::json!({
-        "lan_ip": lan_ip,
-        "port": state.port,
-        "version": state.git_info.version,
-        "repo_url": state.git_info.repo_url,
-    }))
+    // Shared with the Tauri host's copy so the two cannot drift; see
+    // `api::info` for why `settings_version` is part of the payload.
+    Json(dinotty_server::api::info::info_payload(
+        state.port,
+        &state.git_info.version,
+        &state.git_info.repo_url,
+    ))
 }
 
 #[tokio::main]
@@ -356,9 +354,9 @@ async fn main() {
     // Load webhook configs from settings
     let webhook_configs = {
         // Webhook configs will be added to settings later; for now empty
-        Vec::<webhook::WebhookConfig>::new()
+        Vec::<events::WebhookConfig>::new()
     };
-    let webhooks = Arc::new(webhook::WebhookDispatcher::new(webhook_configs));
+    let webhooks = Arc::new(events::WebhookDispatcher::new(webhook_configs));
     webhooks.start(&manager.event_bus);
 
     // Shared single instance: the in-flight WSL probe dedup relies on it.
@@ -603,6 +601,18 @@ async fn main() {
             .route("/preview/:port", any(proxy::proxy_handler_root))
             .route("/preview/:port/", any(proxy::proxy_handler_root))
             .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+            // Hub relay to a roster server. One dispatcher serves all three
+            // shapes and splits HTTP from WebSocket on the Upgrade header; the
+            // gate lives inside the relay, not in auth_middleware (see the
+            // `/__srv/` early return there).
+            .route("/__srv/:id", any(proxy::relay_dispatch_handler))
+            .route("/__srv/:id/", any(proxy::relay_dispatch_handler))
+            .route("/__srv/:id/*rest", any(proxy::relay_dispatch_handler))
+            .route(
+                "/api/remote-servers",
+                get(settings::get_remote_servers).put(settings::put_remote_servers),
+            )
+            .route("/api/remote-servers/probe", post(settings::probe_remote_server))
             .route("/assets/*path", get(static_handler))
             .route("/icons/*path", get(icon_handler))
             .route("/manifest.json", get(manifest_handler))

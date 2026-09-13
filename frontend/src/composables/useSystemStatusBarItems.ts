@@ -25,6 +25,13 @@ function fmtRate(bps: number): string {
   return `${(bps / 1024 / 1024).toFixed(1)}M`
 }
 
+/**
+ * The monitor items for the status bar.
+ *
+ * `enabled` gates each item as well as the per-metric boxes do. It used to hide
+ * the whole bar instead, but the bar is permanent chrome now - the server chip
+ * lives there - so the master switch can only mean "show the monitor items".
+ */
 export function createSystemStatusBarItems(
   monitorSettings: ComputedRef<MonitorSettings>,
   onMetricClick: (key: MetricKey, event: MouseEvent) => void
@@ -36,7 +43,7 @@ export function createSystemStatusBarItems(
       priority: 100,
       tooltip: 'CPU 使用率',
       onClick: (e) => onMetricClick('cpu', e),
-      visible: () => monitorSettings.value.cpu,
+      visible: () => monitorSettings.value.enabled && monitorSettings.value.cpu,
       render: () => {
         const d = monitorData.value
         const usage = d ? `${d.cpu.usage.toFixed(0)}%` : '-'
@@ -52,7 +59,7 @@ export function createSystemStatusBarItems(
       priority: 110,
       tooltip: '内存使用',
       onClick: (e) => onMetricClick('memory', e),
-      visible: () => monitorSettings.value.memory,
+      visible: () => monitorSettings.value.enabled && monitorSettings.value.memory,
       render: () => {
         const d = monitorData.value
         const label = d ? `${fmtBytes(d.memory.used)}/${fmtBytes(d.memory.total)}` : '-'
@@ -68,7 +75,7 @@ export function createSystemStatusBarItems(
       priority: 120,
       tooltip: '磁盘使用',
       onClick: (e) => onMetricClick('disk', e),
-      visible: () => monitorSettings.value.disk,
+      visible: () => monitorSettings.value.enabled && monitorSettings.value.disk,
       render: () => {
         const d = monitorData.value
         const mainDisk = d?.disk[0]
@@ -85,7 +92,7 @@ export function createSystemStatusBarItems(
       priority: 130,
       tooltip: '网络速率',
       onClick: (e) => onMetricClick('network', e),
-      visible: () => monitorSettings.value.network,
+      visible: () => monitorSettings.value.enabled && monitorSettings.value.network,
       render: () => {
         const d = monitorData.value
         const label = d
@@ -104,7 +111,9 @@ export function createSystemStatusBarItems(
       tooltip: 'GPU 显存',
       onClick: (e) => onMetricClick('gpu', e),
       visible: () =>
-        (monitorSettings.value.gpu ?? false) && (monitorData.value?.gpu?.length ?? 0) > 0,
+        monitorSettings.value.enabled &&
+        (monitorSettings.value.gpu ?? false) &&
+        (monitorData.value?.gpu?.length ?? 0) > 0,
       render: () => {
         const d = monitorData.value
         if (!d || !d.gpu?.length) return null

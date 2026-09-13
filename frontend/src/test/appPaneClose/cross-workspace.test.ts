@@ -327,17 +327,20 @@ describe('App.vue - plugin tab close persistence', () => {
     ])
     session.setActivePane('plugin:memory')
 
+    // Tabs are namespaced by the active server; this suite runs on local.
+    const tabsKey = 'dinotty_tabs@__local__'
+
     const splitContainer = wrapper.findComponent(SplitContainerStub)
     splitContainer.vm.$emit('divider-drag-end')
     window.dispatchEvent(new Event('beforeunload'))
-    expect(JSON.parse(localStorageMock.getItem('dinotty_tabs')!).tabs).toHaveLength(2)
+    expect(JSON.parse(localStorageMock.getItem(tabsKey)!).tabs).toHaveLength(2)
 
     await (wrapper.vm as any).closeTab('plugin:memory')
 
     // Synchronous flush: localStorage must reflect the close immediately,
     // not after a 200ms debounce. Otherwise a tab_list arriving in the
     // window would re-read stale storage and resurrect the closed plugin tab.
-    const saved = JSON.parse(localStorageMock.getItem('dinotty_tabs')!)
+    const saved = JSON.parse(localStorageMock.getItem(tabsKey)!)
     expect(saved.tabs).toHaveLength(1)
     expect(saved.tabs[0].paneId).toBe(terminal.paneId)
   })

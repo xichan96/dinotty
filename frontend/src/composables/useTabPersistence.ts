@@ -1,5 +1,6 @@
 import { type Ref } from 'vue'
 import type { Tab } from '../types/pane'
+import { scopedKey } from './serverScope'
 
 export interface TabPersistenceOptions {
   tabs: Ref<Tab[]>
@@ -43,7 +44,7 @@ export function useTabPersistence(opts: TabPersistenceOptions): TabPersistenceSt
       }
     })
     const activeIdx = tabs.value.findIndex((t) => t.paneId === activePaneId.value)
-    localStorage.setItem('dinotty_tabs', JSON.stringify({ tabs: state, activeIdx }))
+    localStorage.setItem(scopedKey('dinotty_tabs'), JSON.stringify({ tabs: state, activeIdx }))
   }
 
   function persist() {

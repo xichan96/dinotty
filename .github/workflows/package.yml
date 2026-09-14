@@ -375,8 +375,9 @@ jobs:
   # ---------------------------------------------------------------
   # 服务端 deb 单独在 ubuntu:20.04 容器里构建。
   #
-  # 为什么必须单独开 job：cargo-deb 的 `$auto` 会按**构建机**的 glibc
-  # 推算 libc6 依赖下限。桌面端要求 ubuntu-22.04（libwebkit2gtk-4.1 只有
+  # 为什么必须单独开 job：cargo-deb 的 `$auto` 走 dpkg-shlibdeps，按二进制
+  # **实际引用的最高 GLIBC_ 符号版本**推算 libc6 依赖下限，而这个符号版本由
+  # 构建机的 glibc 决定。桌面端要求 ubuntu-22.04（libwebkit2gtk-4.1 只有
   # jammy 起才有），在 22.04（glibc 2.35）上编出来的服务端二进制，
   # 控制文件会写成 libc6 (>= 2.34)，Ubuntu 20.04 / Debian 11 直接装不上，
   # 而且二进制本身也会因 __libc_start_main@GLIBC_2.34 起不来。
@@ -418,15 +419,18 @@ jobs:
             pkg-config \
             tzdata
 
+      # pnpm 必须先装：setup-node 的 `cache: pnpm` 要执行 `pnpm --version`
+      # 才能算出 lockfile 的 cache key，顺序反了会直接报 "Unable to locate
+      # executable file: pnpm"。与上面 package job 的顺序保持一致。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -457,8 +461,12 @@ jobs:
             exit 1
           fi
 
-          # 从控制文件里取出 $auto 算出来的 libc6 下限，超过 2.31 说明
-          # 构建环境不是 focal（或有人调高了 depends），兼容性回退已经失效。
+          # 从控制文件里取出 $auto 算出来的 libc6 下限。$auto 走 dpkg-shlibdeps，
+          # 它按**二进制实际引用的最高 GLIBC_ 符号版本**推算，所以 focal 里编出来的
+          # 包落在 2.28 / 2.30 / 2.31 都正常 —— 低于 2.31 只是更兼容，不是回归。
+          # 真正要守的不变量是「不超过 focal 的 2.31」：镜像一旦换成 jammy 之类，
+          # 二进制会开始引用 __libc_start_main@GLIBC_2.34，floor 就会冒过 2.31，
+          # Ubuntu 20.04 / Debian 11 直接装不上。
           # 正则容忍 `libc6:any` 这类多架构限定写法。
           deps="$(dpkg-deb -f "${deb}" Depends)"
           floor="$(printf '%s\n' "${deps}" | tr ',' '\n' \
@@ -469,9 +477,12 @@ jobs:
             exit 1
           fi
 
-          echo "libc6 floor: ${floor} (expected 2.31 on focal)"
-          if [[ "${floor}" != "2.31" ]]; then
-            echo "::error::libc6 floor is ${floor}, expected 2.31. The build image is no longer focal; compatibility with Ubuntu 20.04 / Debian 11 regressed."
+          # 构建镜像的 glibc 一并打出来：floor 高于 2.31 时，这行是判断
+          # 「镜像变了」还是「有人调高了 depends」的第一手证据。
+          echo "build image: $(ldd --version | head -1)"
+          echo "libc6 floor: ${floor} (must not exceed 2.31)"
+          if dpkg --compare-versions "${floor}" gt 2.31; then
+            echo "::error::libc6 floor is ${floor}, above focal's 2.31. The build image is no longer focal; compatibility with Ubuntu 20.04 / Debian 11 regressed."
             exit 1
           fi
 

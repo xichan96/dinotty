@@ -1,6 +1,7 @@
 import { computed, reactive, readonly, watch, type ComputedRef } from 'vue'
 import { fillDefaults, getThemeByName, getThemeByNameStrict } from '../themes'
 import { settings, type SettingsData } from './useSettings'
+import { themePacks } from './useThemePacks'
 
 export interface ThemeColors {
   foreground: string
@@ -13,7 +14,22 @@ export interface SavedTheme {
   name: string
   colors: ThemeColors
 }
-export type Selection = { kind: 'builtin'; name: string } | { kind: 'custom'; uuid: string }
+/**
+ * Which theme this device is showing.
+ *
+ * Three sources, and they are genuinely different things rather than three
+ * spellings of one:
+ *
+ * - `builtin` — one of the 12 compiled-in themes, hidden by `hidden_builtins`.
+ * - `custom` — the user's own editable theme, from `settings.custom_themes`.
+ * - `installed` — a theme file installed on the *server*, shared by every
+ *   device attached to it and read-only on this one. Identified by its file,
+ *   not by a uuid, because that is what the delete route takes.
+ */
+export type Selection =
+  | { kind: 'builtin'; name: string }
+  | { kind: 'custom'; uuid: string }
+  | { kind: 'installed'; id: string }
 export interface ResolvedTheme {
   colors: Record<string, string>
   source: Selection | 'server-default'
@@ -67,6 +83,7 @@ function isValidSelection(s: unknown): s is Selection {
   const t = s as Record<string, unknown>
   if (t.kind === 'builtin') return typeof t.name === 'string'
   if (t.kind === 'custom') return typeof t.uuid === 'string'
+  if (t.kind === 'installed') return typeof t.id === 'string'
   return false
 }
 function loadStored() {
@@ -109,7 +126,17 @@ function ensureLoaded() {
 }
 ensureLoaded()
 
-export function buildCustomThemeColors(saved: SavedTheme): Record<string, string> {
+/**
+ * Expand a saved or installed theme's 19 colours into the full variable set.
+ *
+ * Takes the shape rather than a `SavedTheme` because an installed theme has no
+ * `uuid` — its identity is its filename — and both kinds are reduced to
+ * colours the same way.
+ */
+export function buildCustomThemeColors(saved: {
+  name: string
+  colors: ThemeColors
+}): Record<string, string> {
   const base: Record<string, string> = {
     '--bg': saved.colors.background,
     '--fg': saved.colors.foreground,
@@ -146,6 +173,7 @@ export function resolveTheme(input: {
   preset: string
   legacyCustom: SettingsData['theme']['custom']
   customThemes: SavedTheme[]
+  installedThemes: { id: string; name: string; colors: ThemeColors }[]
   hiddenBuiltins: string[]
 }): ResolvedTheme {
   const { selection } = input
@@ -155,11 +183,17 @@ export function resolveTheme(input: {
         const strict = getThemeByNameStrict(selection.name)
         if (strict) return { colors: strict.colors, source: selection }
       }
-    } else {
+    } else if (selection.kind === 'custom') {
       const found = input.customThemes.find((t) => t.uuid === selection.uuid)
+      if (found) return { colors: buildCustomThemeColors(found), source: selection }
+    } else {
+      const found = input.installedThemes.find((t) => t.id === selection.id)
       if (found) return { colors: buildCustomThemeColors(found), source: selection }
     }
   }
+  // A selection that resolves to nothing — a theme since removed, or one whose
+  // load has not landed yet — falls back to the server default rather than
+  // throwing. The watcher below re-resolves when the list arrives.
   return { colors: serverDefaultColors(input.preset, input.legacyCustom), source: 'server-default' }
 }
 
@@ -171,6 +205,9 @@ export function resolveEffectiveTheme(): ResolvedTheme {
     preset: settings.theme.preset,
     legacyCustom: settings.theme.custom,
     customThemes: settings.custom_themes,
+    // Reactive, so a device showing an installed theme re-applies it when the
+    // list lands after first paint.
+    installedThemes: themePacks.installed,
     hiddenBuiltins: settings.hidden_builtins,
   })
 }

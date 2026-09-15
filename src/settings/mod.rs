@@ -6,6 +6,7 @@ mod locales;
 mod logging;
 mod normalize;
 mod remote_servers;
+mod themes;
 mod types;
 
 #[cfg(test)]
@@ -23,6 +24,10 @@ pub use logging::{get_log, init_logging, init_stderr_logging, log_dir, log_file_
 pub use remote_servers::{
     get_remote_servers, probe_remote_server, put_remote_servers, ProbeRemoteServerRequest,
     ProbeRemoteServerResponse,
+};
+pub use themes::{
+    delete_theme, get_theme_registry, get_themes, install_registry_theme, post_theme, themes_dir,
+    RegistryTheme, ThemeFile,
 };
 pub use types::{
     default_upload_dir, ActionBottomCluster, ActionKey, ActionKeyboardConfig, AuthConfig,

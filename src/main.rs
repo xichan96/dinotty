@@ -473,6 +473,10 @@ async fn main() {
             .route("/api/locales/registry", get(settings::get_locale_registry))
             .route("/api/locales/fetch", post(settings::fetch_locale))
             .route("/api/locales/:tag", delete(settings::delete_locale))
+            .route("/api/themes", get(settings::get_themes).post(settings::post_theme))
+            .route("/api/themes/registry", get(settings::get_theme_registry))
+            .route("/api/themes/install/:id", post(settings::install_registry_theme))
+            .route("/api/themes/:id", delete(settings::delete_theme))
             .route(
                 "/api/templates",
                 get(templates::list_templates).post(templates::create_template),

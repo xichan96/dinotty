@@ -8,3 +8,4 @@ mod remote_servers;
 mod system_keyboard;
 mod text_config;
 mod theme;
+mod themes;

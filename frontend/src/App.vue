@@ -474,6 +474,7 @@ import { useAppKeyboard } from './composables/useAppKeyboard'
 import { useAppConnectivity } from './composables/useAppConnectivity'
 import { useAppTauri } from './composables/useAppTauri'
 import { usePluginBridge } from './composables/usePluginBridge'
+import { loadLocalePacks } from './composables/useLocalePacks'
 import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe } from 'lucide-vue-next'
 import { normalizePreviewToolbarItems, type PreviewToolbarId } from './utils/previewToolbar'
 
@@ -790,6 +791,11 @@ onMounted(async () => {
   try {
     if (authenticated.value) {
       await getApiBase()
+      // Packs live on the server, so this can only run once we know where the
+      // server is and that we may talk to it. Deliberately not awaited: a
+      // missing or slow route must not hold up the first paint, and until it
+      // lands the UI renders with the builtin locales.
+      void loadLocalePacks()
       await settingsStore.load()
       void syncWs.connectSyncWS()
       initMonitorHistory()

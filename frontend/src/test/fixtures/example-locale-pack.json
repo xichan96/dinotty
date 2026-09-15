@@ -1,0 +1,19 @@
+{
+  "tag": "ja",
+  "name": "日本語",
+  "version": "1.0.0",
+  "minAppVersion": "0.27.0",
+  "extends": "en",
+  "messages": {
+    "app.settings": "設定",
+    "app.reload": "再読み込み",
+    "app.preview": "Web プレビュー",
+    "cancel": "キャンセル",
+    "confirm.closeTabConfirm": "閉じる",
+    "confirm.closeTabCancel": "キャンセル",
+    "settings.language": "言語",
+    "settings.theme.dark": "ダーク",
+    "settings.theme.light": "ライト",
+    "plugin.category.dev": "開発"
+  }
+}

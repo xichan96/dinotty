@@ -24,10 +24,6 @@
             <AlertTriangle :size="13" />
             {{ t('settings.about.checkFailed') }}
           </span>
-          <span v-else-if="update.status.value === 'grace_period'" class="update-check-line">
-            <Clock :size="13" />
-            {{ t('settings.about.gracePeriod', { version: `v${update.latestVersion.value}` }) }}
-          </span>
           <span v-else-if="update.status.value === 'update_available'" class="update-check-line">
             <Sparkles :size="13" />
             {{ t('settings.about.updateAvailable', { version: `v${update.latestVersion.value}` }) }}
@@ -118,11 +114,7 @@
               {{ t('settings.about.viewRelease') }}
             </button>
           </div>
-          <p
-            v-for="asset in update.alternateAssets.value"
-            :key="asset.url"
-            class="update-hint"
-          >
+          <p v-for="asset in update.alternateAssets.value" :key="asset.url" class="update-hint">
             <button class="update-link-button" type="button" @click="openAlternate(asset.url)">
               {{ t('settings.about.alternateDownload', { name: asset.name }) }}
             </button>
@@ -193,7 +185,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'vue-toastification'
-import { AlertTriangle, Check, Clock, LoaderCircle, RefreshCw, Sparkles } from 'lucide-vue-next'
+import { AlertTriangle, Check, LoaderCircle, RefreshCw, Sparkles } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import { getIsAppForeground, onAppForegroundGain } from '../../composables/useAppForeground'
@@ -398,11 +390,7 @@ onUnmounted(() => {
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   border-radius: 8px;
   background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent) 12%, transparent),
-      transparent 68%
-    ),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 68%),
     var(--bg-surface);
 }
 .update-actions {

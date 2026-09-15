@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { useI18n } from '../composables/useI18n'
+import { useI18n, t } from '../composables/useI18n'
+import { tables } from '../composables/i18n/tables'
 import { settings } from '../composables/useSettings'
 
 // Behavioral tests for the new confirm-before-close-tab i18n strings.
@@ -218,21 +219,68 @@ describe('follow-system locale (auto)', () => {
     languageSpy = undefined
   })
 
-  it("resolves 'auto' to zh when the browser language is Chinese", () => {
+  // `auto` keeps the browser's full tag instead of collapsing it to a builtin:
+  // the tag is what plugins observe through `getLocale()`, and a plugin may ship
+  // strings for a language the app's own UI packs do not cover. Picking a
+  // *table* is the separate job of `tables.tableFor`, which matches on the
+  // primary subtag (`zh-CN` -> `zh`).
+  it("resolves 'auto' to the browser tag when the browser language is Chinese", () => {
     mockNavigatorLanguage('zh-CN')
     settings.locale = 'auto'
-    expect(useI18n().locale.value).toBe('zh')
+    expect(useI18n().locale.value).toBe('zh-CN')
   })
 
-  it("resolves 'auto' to en when the browser language is not Chinese", () => {
+  it("resolves 'auto' to the browser tag when the browser language is not Chinese", () => {
     mockNavigatorLanguage('en-US')
     settings.locale = 'auto'
-    expect(useI18n().locale.value).toBe('en')
+    expect(useI18n().locale.value).toBe('en-US')
   })
 
   it('uses the resolved language for t()', () => {
     mockNavigatorLanguage('fr-FR')
     settings.locale = 'auto'
     expect(useI18n().t('settings.language')).toBe('Language')
+  })
+})
+
+// Replaces `formatCloseTabMessage`, which branched on the locale (`en` vs
+// everything else) and so handed every non-English language CJK brackets —
+// German got 「Titel」？. The quoting now lives in the table, so each language
+// supplies its own and there is no locale comparison left to widen.
+describe('close-tab message with title', () => {
+  it.each([
+    ['en', "Closing this session will terminate all running processes. Close 'npm install'?"],
+    ['zh', '关闭此会话将终止所有正在运行的进程。仍要关闭「npm install」？'],
+  ] as const)('renders the %s variant from the table', (locale, expected) => {
+    settings.locale = locale
+    expect(useI18n().t('confirm.closeTabMessageWithTitle', { title: 'npm install' })).toBe(expected)
+  })
+
+  it('leaves an apostrophe in the title unescaped, matching the previous behaviour', () => {
+    settings.locale = 'en'
+    expect(useI18n().t('confirm.closeTabMessageWithTitle', { title: "it's running" })).toBe(
+      "Closing this session will terminate all running processes. Close 'it's running'?"
+    )
+  })
+})
+
+describe('placeholder substitution', () => {
+  // `t()` used `String.replace`, which replaces only the first occurrence, so a
+  // message naming the same placeholder twice kept a literal `{x}`. No builtin
+  // message does that today, but a language pack easily could — German and
+  // Russian inflection repeat a noun — which is what makes it reachable.
+  it('replaces every occurrence of a repeated placeholder', () => {
+    settings.locale = 'en'
+    // A variable, not a literal: `i18nCoverage.test.ts` scans for `t('...')`
+    // literals and asserts each is a real key in both tables. This key is
+    // deliberately not — it exists only for the duration of this test — and the
+    // dynamic-key case is the one that scanner documents as out of scope.
+    const key = 'test.repeatedPlaceholder'
+    tables.en![key] = 'a {x} b {x} c {y}'
+    try {
+      expect(t(key, { x: 'Z', y: 'W' })).toBe('a Z b Z c W')
+    } finally {
+      delete tables.en![key]
+    }
   })
 })

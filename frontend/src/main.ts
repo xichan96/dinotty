@@ -6,6 +6,7 @@ import 'vue-toastification/dist/index.css'
 import App from './App.vue'
 import { installHostBridge } from './keyboard/installHostBridge'
 import { loadLocale, normalizeLocale } from './composables/useI18n'
+import { loadAllBuiltins } from './composables/i18n/tables'
 import { settings } from './composables/useSettings'
 import '@xterm/xterm/css/xterm.css'
 import './styles/base.css'
@@ -70,8 +71,10 @@ const prefetchLazyChunks = () => {
   import('./components/workspace/MonacoEditor.vue').catch(() => {})
   import('./components/SettingsPanel.vue').catch(() => {})
   import('./components/overview/WorkspaceOverview.vue').catch(() => {})
-  // The other locale, so switching languages never flashes raw keys.
-  loadLocale(normalizeLocale(settings.locale) === 'en' ? 'zh' : 'en').catch(() => {})
+  // Every builtin locale, so switching languages never flashes raw keys.
+  // Installed packs are not prefetched: they arrive as data with the settings
+  // round-trip rather than as a chunk, and there may be arbitrarily many.
+  loadAllBuiltins().catch(() => {})
 }
 if ('requestIdleCallback' in window) {
   requestIdleCallback(() => prefetchLazyChunks(), { timeout: 3000 })

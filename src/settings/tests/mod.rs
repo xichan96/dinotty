@@ -1,5 +1,6 @@
 mod action_keyboard;
 mod ime_keyboard_overlap;
+mod locales;
 mod migrations;
 mod plugin_prefs;
 mod preview_open_modes;

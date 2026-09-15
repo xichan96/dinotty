@@ -2,6 +2,7 @@
 
 mod handlers;
 mod io;
+mod locales;
 mod logging;
 mod normalize;
 mod remote_servers;
@@ -14,6 +15,7 @@ use std::path::PathBuf;
 
 pub use handlers::{get_background, get_settings, put_settings, upload_background};
 pub use io::{create_settings_state, load_settings, load_token, save_settings_sync, save_token};
+pub use locales::{delete_locale, get_locales, locales_dir, post_locale, LocaleFile};
 pub use logging::{get_log, init_logging, init_stderr_logging, log_dir, log_file_path};
 pub use remote_servers::{
     get_remote_servers, probe_remote_server, put_remote_servers, ProbeRemoteServerRequest,

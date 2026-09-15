@@ -15,8 +15,90 @@
             <option value="auto">{{ t('settings.lang.auto') }}</option>
             <option value="zh">{{ t('settings.lang.zh') }}</option>
             <option value="en">{{ t('settings.lang.en') }}</option>
+            <!-- Installed packs. Listed by their own endonym, never translated. -->
+            <option v-for="cover in installedLocales" :key="cover.tag" :value="cover.tag">
+              {{ cover.name }}
+            </option>
+            <!-- Keep the current value addressable when its pack is gone. -->
+            <option v-if="orphanLocale" :value="orphanLocale">{{ orphanLocale }}</option>
           </select>
         </div>
+
+        <div class="settings-row lang-packs-head">
+          <h4 class="lang-packs-title">{{ t('settings.lang.packs') }}</h4>
+          <div class="lang-pack-actions">
+            <!-- A picked file is posted straight through as the request body, so
+                 no FormData assembly is needed on either side. -->
+            <input
+              ref="packInput"
+              class="lang-pack-file"
+              type="file"
+              accept=".json,application/json"
+              @change="onPackFile"
+            />
+            <button
+              class="shortcut-btn"
+              :disabled="localePacks.importing"
+              @click="packInput?.click()"
+            >
+              {{ localePacks.importing ? t('settings.lang.importing') : t('settings.lang.import') }}
+            </button>
+            <button class="shortcut-btn" :disabled="localePacks.loading" @click="reloadLocalePacks">
+              {{ localePacks.loading ? t('settings.lang.reloading') : t('settings.lang.reload') }}
+            </button>
+          </div>
+        </div>
+        <p class="settings-hint">{{ t('settings.lang.packsHint') }}</p>
+
+        <p v-if="localePacks.lastError" class="lang-pack-error">
+          {{ t('settings.lang.loadFailed') }}
+        </p>
+        <p v-else-if="localePacks.covers.length === 0" class="settings-hint">
+          {{ t('settings.lang.none') }}
+        </p>
+        <div v-else class="lang-pack-list">
+          <div v-for="cover in localePacks.covers" :key="cover.file" class="lang-pack-row">
+            <div class="lang-pack-head">
+              <span class="lang-pack-name">{{ cover.name }}</span>
+              <span class="lang-pack-tag">{{ cover.tag }}</span>
+              <span class="lang-pack-coverage">{{
+                t('settings.lang.coverage', { percent: cover.percent })
+              }}</span>
+              <button
+                class="shortcut-btn lang-pack-remove"
+                :disabled="localePacks.removing === cover.tag"
+                @click="removePack(cover.tag, cover.name)"
+              >
+                {{
+                  localePacks.removing === cover.tag
+                    ? t('settings.lang.removing')
+                    : t('settings.lang.remove')
+                }}
+              </button>
+            </div>
+            <p class="settings-hint">
+              {{
+                t('settings.lang.coverageDetail', {
+                  translated: cover.translated,
+                  total: cover.total,
+                })
+              }}
+            </p>
+            <p v-if="cover.outdated" class="lang-pack-warn">
+              {{ t('settings.lang.outdated', { version: cover.minAppVersion ?? '' }) }}
+            </p>
+            <p v-if="cover.unknownKeys > 0" class="settings-hint">
+              {{ t('settings.lang.unknownKeys', { count: cover.unknownKeys }) }}
+            </p>
+            <p v-if="cover.dropped > 0" class="lang-pack-warn">
+              {{ t('settings.lang.droppedKeys', { count: cover.dropped }) }}
+            </p>
+          </div>
+        </div>
+        <p v-if="packError" class="lang-pack-error">{{ packError }}</p>
+        <p v-for="pack in localePacks.rejected" :key="pack.file" class="lang-pack-warn">
+          {{ t('settings.lang.invalidPack', { file: pack.file }) }} — {{ pack.errors.join('; ') }}
+        </p>
       </section>
 
       <section class="settings-section">
@@ -127,11 +209,7 @@
         <div class="access-url-row">
           <div class="access-url-display">
             <span class="access-url-text">{{ accessUrl }}</span>
-            <button
-              class="access-url-copy"
-              :title="t('settings.copyUrl')"
-              @click="copyAccessUrl()"
-            >
+            <button class="access-url-copy" :title="t('settings.copyUrl')" @click="copyAccessUrl()">
               <Check v-if="copied" :size="14" /><Copy v-else :size="14" />
             </button>
           </div>
@@ -684,6 +762,12 @@ import { useAccessUrl } from '../../composables/useAccessUrl'
 import { useAutostart } from '../../composables/useAutostart'
 import { uiConfirm } from '../../composables/useConfirm'
 import { onAppForegroundGain } from '../../composables/useAppForeground'
+import {
+  installLocalePack,
+  loadLocalePacks,
+  localePacks,
+  removeLocalePack,
+} from '../../composables/useLocalePacks'
 
 const emit = defineEmits<{ 'token-changed': [] }>()
 const props = withDefaults(defineProps<{ visible?: boolean }>(), { visible: true })
@@ -692,6 +776,71 @@ const { t } = useI18n()
 const { isMobile } = useIsMobile()
 const toast = useToast()
 const autostart = useAutostart()
+
+/** Packs that can be selected right now. */
+const installedLocales = computed(() =>
+  localePacks.covers.filter((cover) => cover.tag !== 'en' && cover.tag !== 'zh')
+)
+
+/**
+ * The current locale when no pack (and no builtin) offers it any more — the
+ * pack was deleted while it was selected. Kept in the list so the `<select>`
+ * still shows what is actually stored instead of silently falling back.
+ */
+const orphanLocale = computed(() => {
+  const current = settings.locale
+  if (!current || current === 'auto') return ''
+  if (current === 'en' || current === 'zh') return ''
+  if (installedLocales.value.some((cover) => cover.tag === current)) return ''
+  return current
+})
+
+/** Re-read packs from disk. Does not re-fetch settings; see `useLocalePacks`. */
+async function reloadLocalePacks() {
+  await loadLocalePacks()
+  toast.success(t('settings.lang.reloaded'))
+}
+
+const packInput = ref<HTMLInputElement | null>(null)
+/** Last install/remove failure, shown under the list until the next action. */
+const packError = ref('')
+
+async function onPackFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Reset first: picking the same file twice in a row must still fire `change`,
+  // which matters right after fixing a pack the server just rejected.
+  input.value = ''
+  if (!file) return
+
+  packError.value = ''
+  const result = await installLocalePack(await file.text(), file.name)
+  if (result.ok) {
+    toast.success(t('settings.lang.imported', { name: result.name, count: result.count }))
+    return
+  }
+  // Kept on screen rather than only toasted: a rejection reason ("invalid JSON
+  // at position 42") is long enough to need reading, and the toast times out.
+  packError.value = t('settings.lang.importFailed', { error: result.error })
+  toast.error(packError.value)
+}
+
+async function removePack(tag: string, name: string) {
+  const confirmed = await uiConfirm(t('settings.lang.confirmRemove', { name }))
+  if (!confirmed) return
+
+  packError.value = ''
+  const result = await removeLocalePack(tag)
+  if (result.ok) {
+    toast.success(t('settings.lang.removed', { name }))
+    return
+  }
+  // Removing the pack the user is currently on would leave the UI on English;
+  // the language setting is left alone on purpose, and the picker keeps showing
+  // it as a dangling entry so the state is visible rather than silent.
+  packError.value = t('settings.lang.removeFailed', { error: result.error })
+  toast.error(packError.value)
+}
 
 const autostartToggleDisabled = computed(() => {
   const status = autostart.status.value
@@ -760,7 +909,10 @@ function previewOpenModeValue(kind: PreviewPaneKind): string {
   return settings.preview_open_modes?.[kind] ?? 'split'
 }
 function onPreviewOpenModeChange(kind: PreviewPaneKind, mode: string) {
-  settings.preview_open_modes = { ...settings.preview_open_modes, [kind]: mode as 'split' | 'floating' }
+  settings.preview_open_modes = {
+    ...settings.preview_open_modes,
+    [kind]: mode as 'split' | 'floating',
+  }
   saveSettings()
 }
 
@@ -942,6 +1094,79 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.lang-packs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lang-packs-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lang-pack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lang-pack-row {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.lang-pack-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lang-pack-name {
+  font-weight: 600;
+}
+
+.lang-pack-tag {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.lang-pack-coverage {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.lang-pack-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Driven by the Import button, never shown. */
+.lang-pack-file {
+  display: none;
+}
+
+.lang-pack-remove {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* Out-of-date and dropped-entry notes are advisories, not failures: the pack
+   still works, its untranslated keys just fall back to English. */
+.lang-pack-warn,
+.lang-pack-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--warn, #d08b28);
+}
+
 .mt-8 {
   margin-top: 8px;
 }

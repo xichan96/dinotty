@@ -78,7 +78,7 @@
           <Server v-else-if="tab.shellType === 'ssh'" :size="12" class="tab-ssh-icon" />
           <input
             v-if="editingPaneId === tab.paneId"
-            ref="editInputRef"
+            :ref="setEditInput"
             class="tab-title-input"
             :value="editValue"
             @input="editValue = ($event.target as HTMLInputElement).value"
@@ -108,7 +108,7 @@
     <div class="tab-bar-tools">
       <template v-for="itemId in toolbarOrder" :key="itemId">
         <slot v-if="itemId === 'broadcast'" name="toolbar-item" :item-id="itemId" />
-        <div v-else-if="itemId === 'new_tab'" ref="newMenuWrapRef" class="new-tab-split">
+        <div v-else-if="itemId === 'new_tab'" :ref="setNewMenuWrap" class="new-tab-split">
           <button
             id="tab-new-btn"
             :title="`${t('keybinding.newTab')} (${kbdNewTab})`"
@@ -189,7 +189,7 @@
         </div>
         <div
           v-else-if="itemId === 'plugins' && plugins.length > 0 && toolbarPlugins.length > 0"
-          ref="pluginWrapRef"
+          :ref="setPluginWrap"
           class="tab-bar-plugin-wrap"
         >
           <button
@@ -287,6 +287,7 @@ import { SIDEBAR_WIDTH_DEFAULT, useTabPlacement } from '../../composables/useTab
 import { copyToClipboard } from '../../utils/clipboard'
 import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
+import { singleElRef } from '../../utils/singleElRef'
 import type { PreviewToolbarId } from '../../utils/previewToolbar'
 
 const { t } = useI18n()
@@ -520,6 +521,7 @@ function hasTab(paneId: string): boolean {
 const editingPaneId = ref<string | null>(null)
 const editValue = ref('')
 const editInputRef = ref<HTMLInputElement | null>(null)
+const setEditInput = singleElRef(editInputRef)
 
 function onDocMouseDown(e: MouseEvent) {
   const el = e.target as HTMLElement
@@ -672,10 +674,12 @@ function cancelEdit() {
 }
 
 const pluginMenuOpen = ref(false)
-const pluginWrapRef = ref<HTMLElement>()
+const pluginWrapRef = ref<HTMLElement | null>(null)
+const setPluginWrap = singleElRef(pluginWrapRef)
 const newMenuOpen = ref(false)
 const newMenuAlignRight = ref(false)
-const newMenuWrapRef = ref<HTMLElement>()
+const newMenuWrapRef = ref<HTMLElement | null>(null)
+const setNewMenuWrap = singleElRef(newMenuWrapRef)
 // Vertical only: true when the sideways menu has no room outside the sidebar
 // and must overlap it instead of hanging off the viewport edge.
 const newMenuOverflowFlip = ref(false)

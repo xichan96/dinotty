@@ -189,7 +189,9 @@ describe('createKeyboardContext', () => {
 
   it('i18n exposes locale and a translating t()', () => {
     const ctx = createKeyboardContext(deps)
-    expect(['en', 'zh']).toContain(ctx.i18n.getLocale())
+    // A full BCP-47 tag, not a collapsed builtin: with `auto` the browser's own
+    // tag is reported (happy-dom says `en-US`).
+    expect(ctx.i18n.getLocale()).toMatch(/^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/)
     const translated = ctx.i18n.t('settings.title')
     expect(typeof translated).toBe('string')
     expect(translated.length).toBeGreaterThan(0)

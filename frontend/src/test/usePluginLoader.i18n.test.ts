@@ -16,14 +16,17 @@ describe('plugin locale context', () => {
     settings.locale = 'zh'
   })
 
-  it('exposes only the normalized Dinotty locale', () => {
+  it('exposes the resolved tag rather than collapsing it to a builtin', () => {
     const context = usePluginLoader().getPluginContext('locale-test')
 
     expect(context.i18n.getLocale()).toBe('zh')
     settings.locale = 'en'
     expect(context.i18n.getLocale()).toBe('en')
+    // An unrecognised tag is reported as-is, not squashed to a builtin: a plugin
+    // may ship its own strings for a language the app's UI packs do not cover.
+    // The UI's own fallback to English lives in `t()`, not here.
     settings.locale = 'unsupported'
-    expect(context.i18n.getLocale()).toBe('zh')
+    expect(context.i18n.getLocale()).toBe('unsupported')
   })
 
   it('notifies plugins when the effective locale changes', async () => {

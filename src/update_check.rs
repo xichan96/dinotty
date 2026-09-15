@@ -9,7 +9,7 @@ use axum::{
 use reqwest::header::{ACCEPT, ETAG, IF_NONE_MATCH, RETRY_AFTER, USER_AGENT};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::{sync::Mutex, time::Instant};
 
 use crate::plugin::HostTarget;
@@ -28,7 +28,6 @@ const GITHUB_API_VERSION: &str = "2022-11-28";
 const SUCCESS_TTL: StdDuration = StdDuration::from_hours(6);
 const FAILURE_BACKOFF: StdDuration = StdDuration::from_mins(10);
 const MAX_FAILURE_BACKOFF: StdDuration = StdDuration::from_hours(6);
-const RELEASE_GRACE_PERIOD: Duration = Duration::hours(24);
 
 pub type UpdateCheckState = Arc<UpdateChecker>;
 
@@ -120,8 +119,8 @@ pub struct DownloadAsset {
 struct ValidatedRelease {
     version: Version,
     release_url: String,
-    published_at: OffsetDateTime,
-    published_at_text: String,
+    /// The publication timestamp, echoed to clients exactly as GitHub sent it.
+    published_at: String,
     download: Option<DownloadAsset>,
     alternates: Vec<DownloadAsset>,
 }
@@ -132,11 +131,6 @@ enum UpdateStatus {
     UpToDate {
         current_version: String,
         latest_version: String,
-    },
-    GracePeriod {
-        current_version: String,
-        latest_version: String,
-        published_at: String,
     },
     UpdateAvailable {
         current_version: String,
@@ -161,7 +155,6 @@ struct Cache {
     release: Option<ValidatedRelease>,
     etag: Option<String>,
     validated_at: Option<Instant>,
-    validated_after_grace: bool,
     backoff_until: Option<Instant>,
 }
 
@@ -237,11 +230,11 @@ impl UpdateChecker {
         let monotonic_now = Instant::now();
         let mut cache = self.cache.lock().await;
 
-        if !force && self.cache_is_usable(&cache, monotonic_now, now) {
+        if !force && self.cache_is_usable(&cache, monotonic_now) {
             return cache
                 .release
                 .as_ref()
-                .map(|release| classify_release(&self.current_version, release, now))
+                .map(|release| classify_release(&self.current_version, release))
                 .ok_or_else(|| "usable cache did not contain a release".to_string());
         }
 
@@ -264,18 +257,11 @@ impl UpdateChecker {
         }
     }
 
-    fn cache_is_usable(&self, cache: &Cache, monotonic_now: Instant, now: OffsetDateTime) -> bool {
-        let (Some(release), Some(validated_at)) = (&cache.release, cache.validated_at) else {
+    fn cache_is_usable(&self, cache: &Cache, monotonic_now: Instant) -> bool {
+        let Some(validated_at) = cache.validated_at else {
             return false;
         };
-        if monotonic_now.saturating_duration_since(validated_at) >= self.config.success_ttl {
-            return false;
-        }
-
-        let crossed_unvalidated_grace = release.version > self.current_version
-            && now >= release.published_at + RELEASE_GRACE_PERIOD
-            && !cache.validated_after_grace;
-        !crossed_unvalidated_grace
+        monotonic_now.saturating_duration_since(validated_at) < self.config.success_ttl
     }
 
     async fn refresh(
@@ -306,9 +292,8 @@ impl UpdateChecker {
                 retry_after: None,
             })?;
             cache.validated_at = Some(monotonic_now);
-            cache.validated_after_grace = now >= release.published_at + RELEASE_GRACE_PERIOD;
             cache.backoff_until = None;
-            return Ok(classify_release(&self.current_version, release, now));
+            return Ok(classify_release(&self.current_version, release));
         }
 
         if !status.is_success() {
@@ -328,7 +313,6 @@ impl UpdateChecker {
         let release = validate_release(release)
             .map_err(|message| RefreshFailure { message, retry_after: None })?;
 
-        cache.validated_after_grace = now >= release.published_at + RELEASE_GRACE_PERIOD;
         cache.validated_at = Some(monotonic_now);
         cache.release = Some(release);
         cache.etag = etag;
@@ -337,7 +321,7 @@ impl UpdateChecker {
         cache
             .release
             .as_ref()
-            .map(|release| classify_release(&self.current_version, release, now))
+            .map(|release| classify_release(&self.current_version, release))
             .ok_or_else(|| RefreshFailure {
                 message: "validated release was not cached".to_string(),
                 retry_after: None,
@@ -362,11 +346,10 @@ fn validate_release(release: GitHubRelease) -> Result<ValidatedRelease, String> 
         return Err("latest release tag contains a prerelease version".to_string());
     }
 
-    let published_at = OffsetDateTime::parse(&release.published_at, &Rfc3339)
+    // The timestamp is echoed to clients verbatim, so reject a release whose
+    // publication time is not a real RFC3339 instant rather than forwarding it.
+    OffsetDateTime::parse(&release.published_at, &Rfc3339)
         .map_err(|error| format!("invalid published_at: {error}"))?;
-    if published_at.checked_add(RELEASE_GRACE_PERIOD).is_none() {
-        return Err("published_at is outside the supported range".to_string());
-    }
     let release_url = validate_release_url(&release.html_url, &release.tag_name)?;
     let (download, alternates) =
         select_assets(&release.assets, &release.tag_name, &version, HostTarget::current());
@@ -374,8 +357,7 @@ fn validate_release(release: GitHubRelease) -> Result<ValidatedRelease, String> 
     Ok(ValidatedRelease {
         version,
         release_url,
-        published_at,
-        published_at_text: release.published_at,
+        published_at: release.published_at,
         download,
         alternates,
     })
@@ -533,29 +515,20 @@ fn validate_release_url(raw_url: &str, expected_tag: &str) -> Result<String, Str
     Ok(url.into())
 }
 
-fn classify_release(
-    current_version: &Version,
-    release: &ValidatedRelease,
-    now: OffsetDateTime,
-) -> UpdateStatus {
+/// A newer release is announced the moment GitHub publishes it: there is no
+/// notification delay. A release whose bundles are still uploading is held back
+/// by [`select_assets`] alone, which ignores assets that are not `uploaded` yet.
+fn classify_release(current_version: &Version, release: &ValidatedRelease) -> UpdateStatus {
     let latest_version = release.version.to_string();
+    let current_version_text = current_version.to_string();
 
     if release.version <= *current_version {
-        let current_version = current_version.to_string();
-        return UpdateStatus::UpToDate { current_version, latest_version };
-    }
-    let current_version = current_version.to_string();
-    if now < release.published_at + RELEASE_GRACE_PERIOD {
-        return UpdateStatus::GracePeriod {
-            current_version,
-            latest_version,
-            published_at: release.published_at_text.clone(),
-        };
+        return UpdateStatus::UpToDate { current_version: current_version_text, latest_version };
     }
     UpdateStatus::UpdateAvailable {
-        current_version,
+        current_version: current_version_text,
         latest_version,
-        published_at: release.published_at_text.clone(),
+        published_at: release.published_at.clone(),
         release_url: release.release_url.clone(),
         download: release.download.clone(),
         alternates: release.alternates.clone(),
@@ -618,6 +591,8 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+    use time::Duration;
+
     use axum::{routing::get, Router};
     use tokio::task::JoinHandle;
 
@@ -632,9 +607,13 @@ mod tests {
         }
     }
 
-    fn validated(tag: &str, published_at: OffsetDateTime) -> ValidatedRelease {
-        let published_at_text = published_at.format(&Rfc3339).unwrap();
-        validate_release(github_release(tag, &published_at_text)).unwrap()
+    /// A release published a moment ago — the case that must be announced
+    /// immediately, with the bundles GitHub already reports as uploaded.
+    fn validated_with_bundles(tag: &str) -> ValidatedRelease {
+        let version = tag.strip_prefix('v').unwrap();
+        let mut release = github_release(tag, &OffsetDateTime::now_utc().format(&Rfc3339).unwrap());
+        release.assets = release_assets(tag, version);
+        validate_release(release).unwrap()
     }
 
     #[derive(Clone)]
@@ -700,42 +679,41 @@ mod tests {
     }
 
     #[test]
-    fn classifies_versions_and_grace_boundary() {
+    fn classifies_versions() {
         let current = Version::parse("0.20.0").unwrap();
-        let published_at = OffsetDateTime::UNIX_EPOCH;
 
         assert!(matches!(
-            classify_release(&current, &validated("v0.20.0", published_at), published_at),
+            classify_release(&current, &validated_with_bundles("v0.20.0")),
             UpdateStatus::UpToDate { .. }
         ));
         assert!(matches!(
-            classify_release(&current, &validated("v0.19.0", published_at), published_at),
+            classify_release(&current, &validated_with_bundles("v0.19.0")),
             UpdateStatus::UpToDate { .. }
         ));
-        assert!(matches!(
-            classify_release(
-                &current,
-                &validated("v0.21.0", published_at),
-                published_at + Duration::hours(24) - Duration::seconds(1),
-            ),
-            UpdateStatus::GracePeriod { .. }
-        ));
-        assert!(matches!(
-            classify_release(
-                &current,
-                &validated("v0.21.0", published_at),
-                published_at + Duration::hours(24),
-            ),
-            UpdateStatus::UpdateAvailable { .. }
-        ));
-        assert!(matches!(
-            classify_release(
-                &current,
-                &validated("v0.21.0", published_at + Duration::hours(1)),
-                published_at,
-            ),
-            UpdateStatus::GracePeriod { .. }
-        ));
+    }
+
+    /// A release that went public seconds ago is announced immediately. This is
+    /// the regression guard against reintroducing a notification delay: users
+    /// must get the download for a version that already has its bundles uploaded.
+    #[test]
+    fn announces_a_just_published_release() {
+        let current = Version::parse("0.26.0").unwrap();
+        match classify_release(&current, &validated_with_bundles("v0.27.0")) {
+            UpdateStatus::UpdateAvailable { latest_version, download, published_at, .. } => {
+                assert_eq!(latest_version, "0.27.0");
+                assert!(!published_at.is_empty());
+                // The host running the tests may have no matching bundle (e.g. an
+                // Intel Mac), so assert against the same selector the handler uses.
+                let (expected, _) = select_assets(
+                    &release_assets("v0.27.0", "0.27.0"),
+                    "v0.27.0",
+                    &Version::parse("0.27.0").unwrap(),
+                    HostTarget::current(),
+                );
+                assert_eq!(download, expected);
+            }
+            other => panic!("expected an immediate update, got {other:?}"),
+        }
     }
 
     #[test]
@@ -960,35 +938,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revalidates_after_grace_even_when_success_cache_is_fresh() {
-        let published_at = OffsetDateTime::now_utc();
-        let before_grace = published_at + Duration::hours(23);
-        let after_grace = published_at + Duration::hours(25);
-        let state = MockState {
-            calls: Arc::new(AtomicUsize::new(0)),
-            saw_etag: Arc::new(AtomicBool::new(false)),
-            published_at: published_at.format(&Rfc3339).unwrap(),
-            delay: StdDuration::ZERO,
-            return_not_modified: true,
-            fail_after_first: false,
-        };
-        let (api_url, task) = spawn_mock(state.clone()).await;
-        let checker = test_checker(api_url, StdDuration::from_hours(6));
-
-        assert!(matches!(
-            checker.check_at(before_grace).await.unwrap(),
-            UpdateStatus::GracePeriod { .. }
-        ));
-        assert!(matches!(
-            checker.check_at(after_grace).await.unwrap(),
-            UpdateStatus::UpdateAvailable { .. }
-        ));
-        assert_eq!(state.calls.load(Ordering::SeqCst), 2);
-        assert!(state.saw_etag.load(Ordering::SeqCst));
-        task.abort();
-    }
-
-    #[tokio::test]
     async fn refresh_failure_does_not_serve_expired_update() {
         let now = OffsetDateTime::now_utc();
         let state = MockState {
@@ -1088,9 +1037,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handler_reports_the_platform_download_for_a_forced_check() {
-        let now = OffsetDateTime::now_utc();
-        let published_at = (now - Duration::hours(48)).format(&Rfc3339).unwrap();
+    async fn handler_reports_the_platform_download_for_a_fresh_release() {
+        // Published a moment ago: the handler must still answer with the
+        // platform's own bundle rather than holding the release back.
+        let published_at = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let assets = release_assets("v0.21.0", "0.21.0");

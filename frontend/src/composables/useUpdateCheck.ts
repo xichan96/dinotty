@@ -7,11 +7,16 @@ export type UpdateCheckStatus =
   | 'idle'
   | 'checking'
   | 'up_to_date'
-  | 'grace_period'
   | 'update_available'
   | 'unavailable'
 
-export type UpdateDownloadStatus = 'idle' | 'saving' | 'downloading' | 'done' | 'cancelled' | 'error'
+export type UpdateDownloadStatus =
+  | 'idle'
+  | 'saving'
+  | 'downloading'
+  | 'done'
+  | 'cancelled'
+  | 'error'
 
 export interface AlternateAsset {
   name: string
@@ -85,9 +90,6 @@ function applyResponse(value: unknown): boolean {
   clearAsset()
   if (value.status === 'up_to_date') {
     status.value = 'up_to_date'
-  } else if (value.status === 'grace_period' && typeof value.published_at === 'string') {
-    status.value = 'grace_period'
-    publishedAt.value = value.published_at
   } else if (
     value.status === 'update_available' &&
     typeof value.published_at === 'string' &&

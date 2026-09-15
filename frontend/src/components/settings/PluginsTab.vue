@@ -79,7 +79,7 @@
             </span>
           </div>
           <p class="plugin-card-desc">
-            {{ locale === 'zh' && mp.description_zh ? mp.description_zh : mp.description }}
+            {{ localeIs(locale, 'zh') && mp.description_zh ? mp.description_zh : mp.description }}
           </p>
           <div class="plugin-card-actions">
             <button
@@ -132,7 +132,7 @@
         </p>
         <p class="plugin-detail-desc">
           {{
-            locale === 'zh' && detailPlugin.description_zh
+            localeIs(locale, 'zh') && detailPlugin.description_zh
               ? detailPlugin.description_zh
               : detailPlugin.description
           }}
@@ -398,7 +398,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useI18n } from '../../composables/useI18n'
+import { localeIs, useI18n } from '../../composables/useI18n'
 import { authFetch, apiUrl } from '../../composables/apiBase'
 import { usePluginLoader } from '../../composables/usePluginLoader'
 import { usePluginOverlaysStore } from '../../stores/pluginOverlays'

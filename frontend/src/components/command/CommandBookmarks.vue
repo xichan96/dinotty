@@ -92,7 +92,7 @@
             <template v-if="editId === bm.id">
               <div class="bookmark-edit-form">
                 <input
-                  ref="editNameInputRef"
+                  :ref="setEditNameInput"
                   v-model="editName"
                   :placeholder="t('bookmarks.name')"
                   class="bookmark-input"
@@ -100,7 +100,7 @@
                   @keydown.escape="cancelEdit"
                 />
                 <input
-                  ref="editCommandInputRef"
+                  :ref="setEditCommandInput"
                   v-model="editCommand"
                   :placeholder="t('bookmarks.command')"
                   class="bookmark-input wide"
@@ -172,6 +172,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { Plus, X, Check, GripVertical, Search, Pencil } from 'lucide-vue-next'
 import { useSettings } from '../../composables/useSettings'
 import { randomId } from '../../utils/id'
+import { singleElRef } from '../../utils/singleElRef'
 import { useI18n } from '../../composables/useI18n'
 
 const props = defineProps<{
@@ -203,8 +204,10 @@ const editId = ref<string | null>(null)
 const editName = ref('')
 const editCommand = ref('')
 const editGroup = ref('')
-const editNameInputRef = ref<HTMLInputElement>()
-const editCommandInputRef = ref<HTMLInputElement>()
+const editNameInputRef = ref<HTMLInputElement | null>(null)
+const editCommandInputRef = ref<HTMLInputElement | null>(null)
+const setEditNameInput = singleElRef(editNameInputRef)
+const setEditCommandInput = singleElRef(editCommandInputRef)
 
 // Drag state
 const dragId = ref<string | null>(null)

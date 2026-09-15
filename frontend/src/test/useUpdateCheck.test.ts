@@ -332,10 +332,9 @@ describe('useUpdateCheck', () => {
     apiMocks.authFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
-          status: 'grace_period',
-          current_version: '0.20.0',
+          status: 'up_to_date',
+          current_version: '0.21.0',
           latest_version: '0.21.0',
-          published_at: '2026-08-06T08:00:00Z',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
@@ -345,10 +344,31 @@ describe('useUpdateCheck', () => {
 
     await update.start()
 
-    expect(update.status.value).toBe('grace_period')
+    expect(update.status.value).toBe('up_to_date')
     expect(update.takeAvailablePrompt()).toBeNull()
     expect(intervalSpy).not.toHaveBeenCalled()
     intervalSpy.mockRestore()
+  })
+
+  it('announces a release published moments ago with its installer', async () => {
+    apiMocks.authFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ ...availableResponse, published_at: new Date().toISOString() }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    )
+    const { useUpdateCheck } = await freshUpdateCheck()
+    const update = useUpdateCheck()
+
+    await update.start()
+
+    expect(update.status.value).toBe('update_available')
+    expect(update.assetName.value).toBe('Dinotty_0.21.0_aarch64.dmg')
+    expect(update.assetUrl.value).toBe(assetUrl)
+    expect(update.takeAvailablePrompt()).toEqual({
+      currentVersion: '0.20.0',
+      latestVersion: '0.21.0',
+    })
   })
 
   it('rejects untrusted response URLs', async () => {

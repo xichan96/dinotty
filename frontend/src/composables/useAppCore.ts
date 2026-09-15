@@ -489,7 +489,9 @@ export function useAppCore(options: AppCoreOptions) {
   watch(
     locale,
     (l) => {
-      document.documentElement.lang = l === 'en' ? 'en' : 'zh-CN'
+      // The resolved tag itself is already a valid BCP-47 tag (`en-US`,
+      // `zh-CN`, an installed pack's tag), so no locale-specific mapping.
+      document.documentElement.lang = l
     },
     { immediate: true }
   )

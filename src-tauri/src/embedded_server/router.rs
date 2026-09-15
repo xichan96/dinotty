@@ -72,6 +72,8 @@ pub fn build_router(state: AppState) -> Router {
             post(settings::upload_background).get(settings::get_background),
         )
         .route("/api/log", get(settings::get_log))
+        .route("/api/locales", get(settings::get_locales).post(settings::post_locale))
+        .route("/api/locales/:tag", delete(settings::delete_locale))
         .route("/api/templates", get(templates::list_templates).post(templates::create_template))
         .route("/api/templates/apply", post(templates::apply_template))
         .route(

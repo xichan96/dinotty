@@ -88,6 +88,8 @@ export interface QuickPickOptions {
   items: () => QuickPickItem[] | Promise<QuickPickItem[]>
 }
 
+// Mirrors `PluginLocale` in plugin-api/index.d.ts: a full BCP-47 tag, not a
+// closed two-value union. `Locale` already carries the `(string & {})` arm.
 export type PluginLocale = Locale
 
 export interface PluginContext {

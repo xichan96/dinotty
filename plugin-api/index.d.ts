@@ -72,7 +72,19 @@ export interface OverlayContribution {
   defaultVisible?: boolean
 }
 
-export type PluginLocale = 'en' | 'zh'
+/**
+ * A BCP-47 locale tag, e.g. `'en'`, `'zh'`, `'zh-CN'`, `'ja'`.
+ *
+ * `'en'` and `'zh'` ship with the app; any other tag comes from a language pack
+ * the user installed. The `(string & {})` arm keeps autocomplete for the
+ * built-ins without closing the union, so a pack tag is still assignable.
+ *
+ * Note this is the tag the user (or their browser) asked for, which may have no
+ * matching UI translation — compare on the primary subtag rather than with
+ * `===`, and fall back to your own English strings for anything you do not
+ * translate.
+ */
+export type PluginLocale = 'en' | 'zh' | (string & {})
 
 export interface PluginContext {
   // Vue 响应式 API
@@ -84,7 +96,11 @@ export interface PluginContext {
   onUnmounted: typeof import('vue').onUnmounted
   h: typeof import('vue').h
 
-  /** The Dinotty UI locale. Plugins own and render their translated strings. */
+  /**
+   * The Dinotty UI locale, as a full BCP-47 tag (`'en-US'`, `'zh-CN'`, `'ja'`).
+   * Plugins own and render their translated strings — see [`PluginLocale`] for
+   * why this is a tag rather than one of two literals.
+   */
   i18n: {
     getLocale(): PluginLocale
     onDidChangeLocale(callback: (locale: PluginLocale) => void): Disposable

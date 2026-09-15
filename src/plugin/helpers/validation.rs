@@ -4,6 +4,7 @@ pub const NATIVE_EXECUTE_PERMISSION: &str = "native.execute";
 pub const LONG_RUNNING_PERMISSION: &str = "process.long-running";
 pub const WORKSPACE_READ_PERMISSION: &str = "workspace.read";
 pub const WORKSPACE_WRITE_PERMISSION: &str = "workspace.write";
+pub const REMOTE_SERVER_TRANSPORT_PERMISSION: &str = "remoteServers.transport";
 
 pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
     if manifest.id.is_empty() {
@@ -78,6 +79,11 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
                 && permission != WORKSPACE_WRITE_PERMISSION
             {
                 return Err(format!("unknown workspace permission '{permission}'"));
+            }
+            if permission.starts_with("remoteServers.")
+                && permission != REMOTE_SERVER_TRANSPORT_PERMISSION
+            {
+                return Err(format!("unknown remote-server permission '{permission}'"));
             }
         }
     }
@@ -203,7 +209,7 @@ mod tests {
     use super::{
         is_compatible, require_native_approval, resolve_binary, validate_manifest,
         validate_min_app_version, LONG_RUNNING_PERMISSION, NATIVE_EXECUTE_PERMISSION,
-        WORKSPACE_READ_PERMISSION, WORKSPACE_WRITE_PERMISSION,
+        REMOTE_SERVER_TRANSPORT_PERMISSION, WORKSPACE_READ_PERMISSION, WORKSPACE_WRITE_PERMISSION,
     };
     use crate::plugin::{
         BinConfig, HostTarget, PluginManifest, ProcessLifecycleConfig, ProcessLifecycleScope,
@@ -298,6 +304,15 @@ mod tests {
 
         m.permissions = Some(vec!["workspace.unknown".into()]);
         assert!(validate_manifest(&m).unwrap_err().contains("unknown workspace permission"));
+    }
+
+    #[test]
+    fn remote_server_transport_permission_is_explicit_and_allowlisted() {
+        let mut m = manifest(None);
+        m.permissions = Some(vec![REMOTE_SERVER_TRANSPORT_PERMISSION.into()]);
+        assert!(validate_manifest(&m).is_ok());
+        m.permissions = Some(vec!["remoteServers.other".into()]);
+        assert!(validate_manifest(&m).unwrap_err().contains("unknown remote-server permission"));
     }
 
     #[test]

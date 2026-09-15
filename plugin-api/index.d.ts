@@ -86,6 +86,50 @@ export interface OverlayContribution {
  */
 export type PluginLocale = 'en' | 'zh' | (string & {})
 
+/** A saved remote-server record as a transport may see it. Tokens are never exposed. */
+export interface RemoteServerTransportServer {
+  id: string
+  name: string
+  /** A validated loopback connector origin, never a remote target URL. */
+  url: string
+}
+
+/** Returned by a transport form after it has prepared/reconfigured its connector. */
+export interface RemoteServerTransportResult {
+  /** `http(s)` loopback origin only; no credentials, paths, query, or fragment. */
+  url: string
+  /** Called if the user abandons or replaces this prepared result before the host saves it. */
+  discard?(): void | Promise<void>
+}
+
+/** Props injected into the component a transport contributes to Server Manager. */
+export interface RemoteServerTransportFormProps {
+  mode: 'create' | 'update'
+  server: RemoteServerTransportServer
+  /** Call only once a local connector is ready. The host then asks for the Dinotty token. */
+  onPrepared(result: RemoteServerTransportResult): void
+}
+
+/**
+ * A named Server Manager add method. Declare `remoteServers.transport` in the
+ * manifest, register from `ctx.remoteServers`, and keep private configuration
+ * in `ctx.storage`. The host persists the roster and Dinotty token.
+ */
+export interface RemoteServerTransport {
+  id: string
+  label: string
+  description?: string
+  component: Component
+  /** Called after the host has atomically saved a create/update. No token is provided. */
+  onSaved?(server: RemoteServerTransportServer): void | Promise<void>
+  /** Called after the host has atomically removed the roster entry. */
+  onDeleted?(server: RemoteServerTransportServer): void | Promise<void>
+  /** Called on startup/reload for this transport's still-saved records. */
+  recover?(servers: RemoteServerTransportServer[]): void | Promise<void>
+  /** Called before the host unregisters this plugin's contributions. */
+  onUnload?(server: RemoteServerTransportServer): void | Promise<void>
+}
+
 export interface PluginContext {
   // Vue 响应式 API
   reactive: <T extends object>(target: T) => UnwrapRef<T>
@@ -154,6 +198,11 @@ export interface PluginContext {
   commands: {
     register(id: string, handler: () => void): Disposable
     registerQuickPick(id: string, options: QuickPickOptions): Disposable
+  }
+
+  remoteServers: {
+    /** Requires the explicit `remoteServers.transport` manifest permission. */
+    registerTransport(transport: RemoteServerTransport): Disposable
   }
 
   ui: {

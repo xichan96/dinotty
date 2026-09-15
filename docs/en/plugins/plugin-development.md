@@ -13,6 +13,7 @@ This document explains how to develop plugins for Dinotty.
 - [Global Overlays (overlay)](#global-overlays-overlay)
 - [CSS Styles](#css-styles)
 - [Command Palette Integration](#command-palette-integration)
+- [Remote Server Transports](#remote-server-transports)
 - [Persistent Storage](#persistent-storage)
 - [File System Access](#file-system-access)
 - [Invoking CLI Tools](#invoking-cli-tools)
@@ -564,6 +565,59 @@ export function activate(ctx) {
 Dynamically registered commands also appear in the command palette.
 
 ---
+
+## Remote Server Transports
+
+A transport contributes a named **add method** to Server Manager. It is for a
+plugin that owns a local connector (for example, a proxy or tunnel), not for a
+plugin to own Dinotty server credentials or the saved server roster.
+
+Declare the sensitive capability explicitly:
+
+```json
+{ "permissions": ["remoteServers.transport"] }
+```
+
+Then register in `activate`. `component` is rendered inside the host's Server
+Manager and receives `{ mode, server, onPrepared }`. Keep connector settings in
+`ctx.storage`; call `onPrepared({ url })` only when its local connector is
+ready. A result may also supply `discard()` for the host to call if the user
+abandons or replaces it before saving. The host validates that URL as an
+`http(s)` loopback **origin** and then
+collects, validates, and stores the target Dinotty URL/token itself.
+
+```ts
+ctx.remoteServers.registerTransport({
+  id: 'local-connector',
+  label: 'My connector',
+  component: {
+    props: ['mode', 'server', 'onPrepared'],
+    setup(props) {
+      return () => ctx.h('button', {
+        onClick: () => props.onPrepared({ url: 'http://127.0.0.1:8123' }),
+      }, 'Prepare connector')
+    },
+  },
+  async recover(servers) {
+    // Re-establish private connector state for these safe descriptors.
+  },
+  async onDeleted(server) {
+    // Remove private state after the host has removed this roster entry.
+  },
+})
+```
+
+`recover` runs after plugin load/reload for matching saved entries. `onSaved`
+runs after an atomic host roster create/update, `onDeleted` after its removal,
+and `onUnload` before the contribution unregisters. All callbacks receive only
+`{ id, name, url }`, where `url` is the local connector origin. They never
+receive a remote token or arbitrary host events. If a plugin is absent or its
+recovery fails, saved entries remain visible and deletable; the transport is
+shown unavailable until its plugin can recover it.
+
+The built-in Direct URL method remains the default and has no transport
+metadata. Do not call `/api/remote-servers`, use an auth-bypass loopback route,
+or monkey-patch Server Manager; those are host-owned implementation details.
 
 ## Persistent Storage
 

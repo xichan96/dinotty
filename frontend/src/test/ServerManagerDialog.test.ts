@@ -1,5 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
+
+vi.hoisted(() => {
+  const values = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+    clear: () => values.clear(),
+  })
+})
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -34,6 +45,10 @@ import {
   managerOpen,
   openServerManager,
 } from '../composables/useRemoteServerAdmin'
+import {
+  registerRemoteServerTransport,
+  unregisterRemoteServerTransports,
+} from '../composables/useRemoteServerTransports'
 
 function jsonResponse(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body }
@@ -63,6 +78,10 @@ beforeEach(() => {
   mocks.uiConfirm.mockResolvedValue(true)
   closeServerManager()
   hub([LAB, ATTIC])
+})
+
+afterEach(() => {
+  unregisterRemoteServerTransports('transport-test')
 })
 
 async function openManager() {
@@ -140,6 +159,30 @@ describe('ServerManagerDialog', () => {
     await wrapper.find(SAVE).trigger('click')
     await flushPromises()
     expect(putBody().map((s) => s.name)).toContain('New board')
+  })
+
+  it('uses a registered transport result while the host retains the token and roster write', async () => {
+    registerRemoteServerTransport('transport-test', {
+      id: 'connector',
+      label: 'Test connector',
+      component: defineComponent({
+        props: { onPrepared: { type: Function, required: true } },
+        setup(props) {
+          return () => h('button', { class: 'transport-prepare', onClick: () => props.onPrepared({ url: 'http://127.0.0.1:8123' }) }, 'Prepare')
+        },
+      }),
+    })
+    const wrapper = await openManager()
+
+    await wrapper.find('.srv-mgr-select').setValue('transport-test:connector')
+    await wrapper.find('.transport-prepare').trigger('click')
+    expect(wrapper.findAll('.srv-mgr-input')[1].element).toHaveProperty('value', 'http://127.0.0.1:8123')
+    expect(wrapper.findAll('.srv-mgr-input')[1].attributes('disabled')).toBeDefined()
+
+    await wrapper.find(SAVE).trigger('click')
+    await flushPromises()
+    expect(putBody()[0].transport).toEqual({ plugin_id: 'transport-test', transport_id: 'connector' })
+    expect('token' in putBody()[0]).toBe(false)
   })
 
   it('mints ids that are unique and never the local sentinel', async () => {

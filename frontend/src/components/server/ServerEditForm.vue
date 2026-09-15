@@ -14,12 +14,50 @@
       </label>
 
       <label class="srv-mgr-field">
+        <span class="srv-mgr-label">{{ t('server.addMethod') }}</span>
+        <select
+          class="srv-mgr-select"
+          :value="transportKey"
+          @change="onTransportSelected(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">{{ t('server.directUrl') }}</option>
+          <option v-if="draft.transport && !transport" :value="transportKey" disabled>
+            {{ t('server.transportUnavailable') }}
+          </option>
+          <option
+            v-for="item in transports"
+            :key="`${item.pluginId}:${item.id}`"
+            :value="`${item.pluginId}:${item.id}`"
+            :disabled="!item.available"
+          >
+            {{ item.label }}{{ item.available ? '' : ` (${t('server.transportUnavailable')})` }}
+          </option>
+        </select>
+        <p v-if="transport?.description" class="srv-mgr-hint">{{ transport.description }}</p>
+        <p v-if="transport && !transport.available" class="srv-mgr-warn">
+          <TriangleAlert :size="12" />{{ transport.error || t('server.transportUnavailableDetail') }}
+        </p>
+        <p v-else-if="draft.transport && !transport" class="srv-mgr-warn">
+          <TriangleAlert :size="12" />{{ t('server.transportUnavailableDetail') }}
+        </p>
+      </label>
+
+      <component
+        :is="transport.component"
+        v-if="transport && transport.available"
+        :mode="transportMode"
+        :server="{ id: draft.id, name: draft.name, url: draft.url }"
+        :on-prepared="onPrepared"
+      />
+
+      <label class="srv-mgr-field">
         <span class="srv-mgr-label">{{ t('server.url') }}</span>
         <input
           v-model="draft.url"
           class="srv-mgr-input srv-mgr-input--mono"
           placeholder="http://192.168.1.5:58901"
           spellcheck="false"
+          :disabled="!!draft.transport"
           @input="$emit('edit')"
         />
       </label>
@@ -125,11 +163,15 @@ import {
   type ProbeResult,
   type RemoteServerDraft,
 } from '../../composables/useRemoteServerAdmin'
+import type { RegisteredRemoteServerTransport } from '../../composables/useRemoteServerTransports'
+import type { RemoteServerTransportResult } from '../../../../plugin-api/index'
 
 const props = defineProps<{
   draft: RemoteServerDraft | null
   testing: boolean
   result: ProbeResult | null
+  transports: RegisteredRemoteServerTransport[]
+  savedTransport: { pluginId: string; transportId: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -137,6 +179,8 @@ const emit = defineEmits<{
   edit: []
   test: []
   'request-delete': []
+  'select-transport': [ref: { pluginId: string; transportId: string } | null]
+  prepared: [result: RemoteServerTransportResult]
 }>()
 
 const { t } = useI18n()
@@ -151,6 +195,40 @@ const failedText = computed(() => {
   if (!props.result || !draft) return ''
   return probeFailureText(t, props.result, draft.url.trim()) ?? ''
 })
+
+const transportKey = computed(() => {
+  const ref = props.draft?.transport
+  return ref ? `${ref.pluginId}:${ref.transportId}` : ''
+})
+
+const transport = computed(() =>
+  props.draft?.transport
+    ? props.transports.find(
+        (item) => item.pluginId === props.draft?.transport?.pluginId && item.id === props.draft?.transport?.transportId
+      )
+    : undefined
+)
+
+const transportMode = computed(() =>
+  props.draft?.transport &&
+  props.draft.transport.pluginId === props.savedTransport?.pluginId &&
+  props.draft.transport.transportId === props.savedTransport?.transportId
+    ? 'update'
+    : 'create'
+)
+
+function onTransportSelected(value: string) {
+  if (!value) {
+    emit('select-transport', null)
+    return
+  }
+  const item = props.transports.find((candidate) => `${candidate.pluginId}:${candidate.id}` === value)
+  if (item) emit('select-transport', { pluginId: item.pluginId, transportId: item.id })
+}
+
+function onPrepared(result: RemoteServerTransportResult) {
+  emit('prepared', result)
+}
 
 /**
  * Keep the two token flags in step with what was typed.

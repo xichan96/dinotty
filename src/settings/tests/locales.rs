@@ -512,6 +512,45 @@ async fn serves_the_configured_registry() {
     assert_eq!(ja.url, "https://packs.example/ja.json");
 }
 
+/// Offsite publishes *one* registry document partitioned by content kind, not a
+/// per-kind file: `locales` for packs, `themes` for themes, generated from the
+/// same `build_registry` call. This pins the contract against the document that
+/// side actually serves, rather than the single-kind shape above — the two
+/// drifted apart once already, and nothing failed loudly when they did: the
+/// unknown `locales` key was simply ignored and the registry came back empty.
+#[tokio::test]
+async fn reads_the_partitioned_document_offsite_publishes() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(
+        StatusCode::OK,
+        r#"{"schema":1,"generatedAt":"2026-09-16T00:00:00Z",
+            "locales":[
+              {"tag":"ko","name":"한국어","description":"Korean","version":"1.0.0",
+               "minAppVersion":"0.28.0","url":"https://content.example/locales/ko.json",
+               "sha256":"0000000000000000000000000000000000000000000000000000000000000000",
+               "bytes":1234,"reviewedAt":"2026-09-16T00:00:00Z","reviewedBy":null}
+            ],
+            "themes":[
+              {"id":"dracula-soft","name":"Dracula Soft","description":"A theme",
+               "version":"1.0.0","minAppVersion":"0.28.0",
+               "url":"https://content.example/themes/dracula-soft.json",
+               "sha256":"1111111111111111111111111111111111111111111111111111111111111111",
+               "bytes":5678,"reviewedAt":"2026-09-16T00:00:00Z","reviewedBy":null}
+            ]}"#
+        .to_string(),
+    )
+    .await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::OK);
+    // The theme half must not leak into the pack list: this route serves packs.
+    let tags: Vec<&str> =
+        body["packs"].as_array().unwrap().iter().map(|p| p["tag"].as_str().unwrap()).collect();
+    assert_eq!(tags, ["ko"]);
+    assert_eq!(body["packs"][0]["url"], "https://content.example/locales/ko.json");
+}
+
 /// One bad row must not hide the good ones — the same rule `get_locales`
 /// applies to malformed files.
 #[tokio::test]
@@ -646,4 +685,33 @@ async fn a_temp_file_is_not_left_behind() {
     assert!(leftovers.is_empty(), "temporary files left behind: {leftovers:?}");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A malformed row must not hide the good ones — the same rule `get_locales`
+/// applies to a malformed file on disk.
+///
+/// Offsite always emits `tag` for a locale row (`content.rs`, the
+/// `ContentKind::Locale` arm), so this is defence against a hand-written or
+/// future index, not against the current publisher. `tag` is a required field
+/// on `RegistryPack`, so a row missing it fails the *whole* deserialize unless
+/// the row is dropped first.
+#[tokio::test]
+async fn a_row_without_a_tag_does_not_hide_the_rows_that_have_one() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(
+        StatusCode::OK,
+        r#"{"schema":1,"locales":[
+            {"tag":"ko","name":"한국어","version":"1.0.0","url":"https://packs.example/ko.json"},
+            {"name":"no tag at all","url":"https://packs.example/broken.json"}
+        ]}"#
+        .to_string(),
+    )
+    .await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::OK, "one bad row must not fail the request");
+    let tags: Vec<&str> =
+        body["packs"].as_array().unwrap().iter().map(|p| p["tag"].as_str().unwrap()).collect();
+    assert_eq!(tags, ["ko"]);
 }

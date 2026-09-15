@@ -189,8 +189,16 @@ pub struct RegistryPack {
 #[derive(Deserialize)]
 struct RegistryDocument {
     schema: u32,
-    #[serde(default)]
-    packs: Vec<RegistryPack>,
+    /// The offsite registry publishes one document covering every content kind,
+    /// partitioned by kind: `locales` for packs, `themes` for themes. A
+    /// single-purpose document with a bare `packs` array is still accepted so a
+    /// hand-written index keeps working, but `locales` is what offsite sends.
+    ///
+    /// `Vec<Value>` rather than `Vec<RegistryPack>` so one bad row is dropped
+    /// instead of failing the deserialize for the whole document — see the
+    /// per-row parse in [`get_locale_registry`].
+    #[serde(default, alias = "packs")]
+    locales: Vec<serde_json::Value>,
 }
 
 /// What `GET /api/locales/registry` returns: the same document, minus the
@@ -563,6 +571,10 @@ pub async fn get_locale_registry() -> Response {
         }
     };
 
+    // Rows are parsed one at a time so a single malformed entry is dropped
+    // rather than failing the request: `tag` and `url` are required, and
+    // without this one bad row would take down every good one with it — the
+    // same rule `get_locales` applies to a malformed file on disk.
     let Ok(document) = serde_json::from_slice::<RegistryDocument>(&body) else {
         return refused(StatusCode::BAD_GATEWAY, "invalid registry JSON");
     };
@@ -577,8 +589,9 @@ pub async fn get_locale_registry() -> Response {
     }
 
     let mut packs: Vec<RegistryPack> = document
-        .packs
+        .locales
         .into_iter()
+        .filter_map(|row| serde_json::from_value::<RegistryPack>(row).ok())
         .filter(|pack| is_valid_tag(&pack.tag) && is_http_url(&pack.url))
         .collect();
     // Deterministic order, like `get_locales`, so the list does not reshuffle.

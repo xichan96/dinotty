@@ -7,10 +7,13 @@ vi.mock('../composables/apiBase', () => ({
 
 import { authFetch } from '../composables/apiBase'
 import {
+  installFromRegistry,
   installLocalePack,
   loadLocalePacks,
+  loadRegistry,
   localePacks,
   removeLocalePack,
+  type RegistryEntry,
 } from '../composables/useLocalePacks'
 import { settings } from '../composables/useSettings'
 import { referenceKeys, setInstalledPacks, tables } from '../composables/i18n/tables'
@@ -61,6 +64,10 @@ beforeEach(() => {
   localePacks.covers = []
   localePacks.rejected = []
   localePacks.lastError = null
+  localePacks.registryEntries = []
+  localePacks.registryError = null
+  localePacks.registryLoaded = false
+  localePacks.installingTag = null
 })
 
 afterEach(() => {
@@ -353,6 +360,167 @@ describe('installLocalePack', () => {
     await installLocalePack(JSON.stringify({ messages: { 'a.b': 'x' } }), 'ja.json')
 
     expect(calls[0]!.url).toContain('file=ja.json')
+  })
+})
+
+describe('loadRegistry', () => {
+  function registryStub(body: unknown, status = 200) {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/api/locales/registry')) return jsonResponse(body, status)
+      throw new Error(`unexpected url ${url}`)
+    })
+  }
+
+  const ENTRY: RegistryEntry = {
+    tag: 'ja',
+    name: '日本語',
+    version: '1.0.0',
+    minAppVersion: '0.28.0',
+    url: 'https://packs.example/ja.json',
+    sha256: 'a'.repeat(64),
+  }
+
+  it('lists what the server says its registry offers', async () => {
+    registryStub({ schema: 1, packs: [ENTRY] })
+
+    await loadRegistry()
+
+    expect(mockFetch).toHaveBeenCalledWith('/api/locales/registry')
+    expect(localePacks.registryEntries).toEqual([ENTRY])
+    expect(localePacks.registryError).toBeNull()
+    expect(localePacks.registryLoaded).toBe(true)
+  })
+
+  // A server with no registry configured answers 503 naming the variable. That
+  // is a normal state, so the reason is shown rather than swallowed into an
+  // empty list.
+  it('surfaces the reason when no registry is configured', async () => {
+    registryStub({ error: 'no language pack registry is configured; set X' }, 503)
+
+    await loadRegistry()
+
+    expect(localePacks.registryError).toContain('no language pack registry is configured')
+    expect(localePacks.registryEntries).toEqual([])
+    expect(localePacks.registryLoaded).toBe(true)
+  })
+
+  it('keeps the previous list when a refresh fails', async () => {
+    registryStub({ schema: 1, packs: [ENTRY] })
+    await loadRegistry()
+
+    mockFetch.mockRejectedValue(new Error('network down'))
+    await loadRegistry()
+
+    // Blanking the list would claim the registry is empty, which is a
+    // different (and wrong) statement from "we could not reach it".
+    expect(localePacks.registryEntries).toEqual([ENTRY])
+    expect(localePacks.registryError).toContain('network down')
+  })
+
+  // The server filters already; this is the client refusing to render a row it
+  // cannot install, rather than a second copy of the server's rules.
+  it('drops entries missing the fields an install needs', async () => {
+    registryStub({
+      schema: 1,
+      packs: [ENTRY, { tag: 'ko', name: '한국어' }, { name: 'x', url: 'https://x' }, null],
+    })
+
+    await loadRegistry()
+
+    expect(localePacks.registryEntries.map((e) => e.tag)).toEqual(['ja'])
+  })
+
+  it('treats a missing packs array as an empty registry', async () => {
+    registryStub({ schema: 1 })
+
+    await loadRegistry()
+
+    expect(localePacks.registryEntries).toEqual([])
+    expect(localePacks.registryError).toBeNull()
+  })
+
+  it('clears the in-flight flag even when the request throws', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'))
+
+    await loadRegistry()
+
+    expect(localePacks.registryLoading).toBe(false)
+  })
+})
+
+describe('installFromRegistry', () => {
+  const ENTRY: RegistryEntry = {
+    tag: 'ja',
+    name: '日本語',
+    url: 'https://packs.example/ja.json',
+    sha256: 'a'.repeat(64),
+  }
+
+  /** Stub the POST, then the refresh that a successful install triggers. */
+  function stubFetch({ status = 200, body = {} as Record<string, unknown> } = {}) {
+    const calls: { url: string; init?: RequestInit }[] = []
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        calls.push({ url, init })
+        if (status !== 200) return jsonResponse(body, status)
+        return jsonResponse({ tag: 'ja', name: '日本語', count: 2, ...body })
+      }
+      return jsonResponse([{ file: 'ja', body: packBody('ja', { 'app.settings': '設定' }) }])
+    })
+    return calls
+  }
+
+  it('hands the entry back to the server and reloads the installed list', async () => {
+    const calls = stubFetch()
+
+    const result = await installFromRegistry(ENTRY)
+
+    expect(result.ok).toBe(true)
+    expect(result.ok === true && result.count).toBe(2)
+    // The route takes the registry entry itself, so this is the whole request:
+    // the server, not the browser, decides what that URL resolves to.
+    expect(calls[0]!.url).toBe('/api/locales/fetch')
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual(ENTRY)
+    expect(tables.ja).toBeDefined()
+  })
+
+  it('surfaces the server reason when it refuses', async () => {
+    stubFetch({ status: 502, body: { error: 'sha256 mismatch: registry says a, the file is b' } })
+
+    const result = await installFromRegistry(ENTRY)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok === false && result.error).toContain('sha256 mismatch')
+    // A refusal must not leave the list stale-looking.
+    expect(localePacks.installingTag).toBeNull()
+  })
+
+  it('falls back to a readable message when the server sends no error field', async () => {
+    stubFetch({ status: 500 })
+
+    const result = await installFromRegistry(ENTRY)
+
+    expect(result.ok === false && result.error).toContain('HTTP 500')
+  })
+
+  it('clears the in-flight tag even when the request throws', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'))
+
+    const result = await installFromRegistry(ENTRY)
+
+    expect(result.ok).toBe(false)
+    expect(localePacks.installingTag).toBeNull()
+  })
+
+  // Nothing local decides whether a pack is acceptable: a second validator here
+  // would be a third set of rules to keep in step with the server's.
+  it('does not pre-validate, so the server stays the only judge', async () => {
+    const calls = stubFetch({ status: 400, body: { error: 'invalid locale tag' } })
+
+    const result = await installFromRegistry({ tag: '../evil', name: 'x', url: 'file:///etc' })
+
+    expect(calls).toHaveLength(1)
+    expect(result.ok === false && result.error).toBe('invalid locale tag')
   })
 })
 

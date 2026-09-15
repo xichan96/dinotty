@@ -10,8 +10,10 @@ import { referenceKeys, setInstalledPacks } from './i18n/tables'
  * is the same act as changing a setting: it applies to every client attached to
  * that instance, and it survives a reload of any single device.
  *
- * Nothing here writes. There is no upload route — a pack is installed by putting
- * a file in the directory.
+ * A pack arrives one of three ways: dropped into the directory out of band,
+ * uploaded as a file, or fetched from the registry the *server* is configured
+ * with. The last two both end in the server's own revalidation, so nothing here
+ * decides whether a pack is safe to store.
  */
 
 /** One reported pack that failed to load, kept so the UI can explain itself. */
@@ -45,6 +47,23 @@ export interface PackCoverage {
   warnings: string[]
 }
 
+/**
+ * One pack a remote registry offers.
+ *
+ * This is the server's `RegistryPack` verbatim, including `url` and `sha256`:
+ * the client hands the entry straight back to install it, so the two sides
+ * cannot drift into different vocabularies for the same thing.
+ */
+export interface RegistryEntry {
+  tag: string
+  name: string
+  version?: string
+  minAppVersion?: string
+  url: string
+  /** Optional integrity check, verified by the server, not here. */
+  sha256?: string
+}
+
 export const localePacks = reactive({
   loaded: false,
   /** True once a load has finished, successfully or not. */
@@ -57,6 +76,19 @@ export const localePacks = reactive({
   lastError: null as string | null,
   covers: [] as PackCoverage[],
   rejected: [] as RejectedPack[],
+
+  /** True once the registry has been asked for, successfully or not. */
+  registryLoaded: false,
+  registryLoading: false,
+  /**
+   * Why the registry could not be read. A server with no registry configured
+   * answers 503, which lands here — it is a normal state to be in, not a bug,
+   * so the UI shows the reason rather than an empty list.
+   */
+  registryError: null as string | null,
+  registryEntries: [] as RegistryEntry[],
+  /** Tag currently being fetched, so only that row shows a spinner. */
+  installingTag: null as string | null,
 })
 
 /** `1.2.3` -> `[1, 2, 3]`. Anything unparseable yields null, and is not compared. */
@@ -206,6 +238,107 @@ export async function removeLocalePack(tag: string): Promise<{ ok: true } | Inst
     return { ok: false, error: e instanceof Error ? e.message : String(e), warnings: [] }
   } finally {
     localePacks.removing = null
+  }
+}
+
+/** Whether a value is an entry we can hand back to the server unchanged. */
+function isRegistryEntry(value: unknown): value is RegistryEntry {
+  const entry = value as RegistryEntry | null
+  return (
+    !!entry &&
+    typeof entry.tag === 'string' &&
+    typeof entry.name === 'string' &&
+    typeof entry.url === 'string'
+  )
+}
+
+/**
+ * Ask the server what its configured registry offers.
+ *
+ * The registry URL is the *server's* configuration, not ours — we never learn
+ * it and never fetch a pack ourselves. That keeps one trust decision in one
+ * place, and means a client cannot talk this instance into fetching anything.
+ */
+async function fetchRegistryEntries(): Promise<
+  { ok: true; entries: RegistryEntry[] } | { ok: false; error: string }
+> {
+  try {
+    const res = await authFetch(apiUrl('/api/locales/registry'))
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      return {
+        ok: false,
+        error: body?.error ?? `could not read the registry (HTTP ${res.status})`,
+      }
+    }
+    const body = await res.json()
+    const packs = Array.isArray(body?.packs) ? body.packs : []
+    return { ok: true, entries: packs.filter(isRegistryEntry) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Refresh the list of packs the registry offers.
+ *
+ * Read-only and cheap to repeat, so it doubles as the "check again" action.
+ * A failure keeps the previously-listed entries: transient is not the same as
+ * "the registry is empty", and blanking the list would say the latter.
+ */
+export async function loadRegistry(): Promise<void> {
+  localePacks.registryLoading = true
+  try {
+    const result = await fetchRegistryEntries()
+    if (!result.ok) {
+      localePacks.registryError = result.error
+      return
+    }
+    localePacks.registryEntries = result.entries
+    localePacks.registryError = null
+  } finally {
+    localePacks.registryLoading = false
+    localePacks.registryLoaded = true
+  }
+}
+
+/**
+ * Install one registry entry by handing it back to the server.
+ *
+ * The server downloads it — not the browser — so the integrity check runs
+ * somewhere that actually counts, and a pack host without permissive CORS is
+ * still installable. Nothing is validated here beyond the entry having the
+ * fields the route needs: the server is the boundary, and a pre-flight
+ * duplicate of its rules would be a third copy to keep in step.
+ */
+export async function installFromRegistry(entry: RegistryEntry): Promise<InstallResult> {
+  localePacks.installingTag = entry.tag
+  try {
+    const res = await authFetch(apiUrl('/api/locales/fetch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      return {
+        ok: false,
+        error: body?.error ?? `the server refused the pack (HTTP ${res.status})`,
+        warnings: [],
+      }
+    }
+    const body = await res.json()
+    await loadLocalePacks()
+    return {
+      ok: true,
+      tag: typeof body?.tag === 'string' ? body.tag : entry.tag,
+      name: typeof body?.name === 'string' ? body.name : entry.name,
+      count: typeof body?.count === 'number' ? body.count : 0,
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e), warnings: [] }
+  } finally {
+    localePacks.installingTag = null
   }
 }
 

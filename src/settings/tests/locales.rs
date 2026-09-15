@@ -7,17 +7,24 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 
-use crate::settings::locales::InstallQuery;
-use crate::settings::{delete_locale, get_locales, locales_dir, post_locale, LocaleFile};
+use crate::settings::locales::{InstallQuery, REGISTRY_URL_ENV};
+use crate::settings::{
+    delete_locale, fetch_locale, get_locale_registry, get_locales, locales_dir, post_locale,
+    LocaleFile, RegistryPack,
+};
 
 /// Isolates these tests from the user's real config directory. Named after this
 /// feature so a stray directory is obvious.
 const TEST_SUFFIX: &str = "-locales-endpoints-tests";
 
 /// Point `config_dir()` at a scratch directory and start from a clean slate.
+///
+/// Also clears `DINOTTY_LOCALES_REGISTRY_URL`, which is process-wide like the
+/// suffix and must not leak in from whichever test ran before.
 fn scratch_dir() -> (crate::test_support::EnvGuard, std::path::PathBuf) {
-    let env = crate::test_support::EnvGuard::new(&["DINOTTY_CONFIG_SUFFIX"]);
+    let env = crate::test_support::EnvGuard::new(&["DINOTTY_CONFIG_SUFFIX", REGISTRY_URL_ENV]);
     std::env::set_var("DINOTTY_CONFIG_SUFFIX", TEST_SUFFIX);
+    std::env::remove_var(REGISTRY_URL_ENV);
     let dir = locales_dir();
     let _ = std::fs::remove_dir_all(&dir);
     (env, dir)
@@ -397,6 +404,231 @@ async fn a_failed_install_leaves_the_previous_pack_intact() {
     assert!(stored("ja").contains("設定"), "the good pack was damaged by a failed install");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/locales/registry — discovery.
+//
+// The index URL is *operator* configuration, so unlike a pack URL it is not
+// put through the private-address guard (see `fetch_configured`). That is what
+// makes these testable end to end: a loopback stand-in is a legitimate
+// registry, whereas it could never be a legitimate pack URL.
+// ---------------------------------------------------------------------------
+
+/// A loopback stand-in for the registry index.
+struct FakeRegistry {
+    url: String,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for FakeRegistry {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// Serve `body` with `status` from a real socket.
+///
+/// Served rather than mocked: the route makes a real HTTP request, and what is
+/// under test is what it does with what a server actually sends back.
+async fn serve_registry(status: StatusCode, body: String) -> FakeRegistry {
+    use axum::routing::get;
+    let app = axum::Router::new().route(
+        "/registry.json",
+        get(move || {
+            let status = status;
+            let body = body.clone();
+            async move { (status, [(axum::http::header::CONTENT_TYPE, "application/json")], body) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    FakeRegistry { url: format!("http://{addr}/registry.json"), task }
+}
+
+/// Point the app at `url`.
+///
+/// Deliberately *not* guarded here: `scratch_dir()` already holds the
+/// process-wide env lock and has already registered this key for restore, and
+/// `EnvGuard`'s lock is not reentrant — taking it twice on one thread is a
+/// self-deadlock, not a nested lock.
+fn use_registry(url: &str) {
+    std::env::set_var(REGISTRY_URL_ENV, url);
+}
+
+async fn read_registry() -> (StatusCode, serde_json::Value) {
+    let response = get_locale_registry().await.into_response();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+/// The shipping default. A 503 naming the variable is the difference between
+/// "turn this on" and "something is broken".
+#[tokio::test]
+async fn an_unconfigured_registry_says_so() {
+    let (_env, _dir) = scratch_dir();
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        body["error"].as_str().unwrap().contains(REGISTRY_URL_ENV),
+        "the error must name the variable to set: {body}"
+    );
+}
+
+#[tokio::test]
+async fn serves_the_configured_registry() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(
+        StatusCode::OK,
+        r#"{"schema":1,"packs":[
+            {"tag":"ko","name":"한국어","version":"1.0.0","url":"https://packs.example/ko.json"},
+            {"tag":"ja","name":"日本語","minAppVersion":"0.28.0","url":"https://packs.example/ja.json",
+             "sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+        ]}"#
+        .to_string(),
+    )
+    .await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["schema"], 1);
+
+    // Sorted by tag, like `get_locales`, so the list does not reshuffle.
+    let tags: Vec<&str> =
+        body["packs"].as_array().unwrap().iter().map(|p| p["tag"].as_str().unwrap()).collect();
+    assert_eq!(tags, ["ja", "ko"]);
+
+    // The entry survives a round trip through the same shape the client posts
+    // back, which is what keeps the two routes from drifting apart.
+    let ja: RegistryPack = serde_json::from_value(body["packs"][0].clone()).unwrap();
+    assert_eq!(ja.name, "日本語");
+    assert_eq!(ja.min_app_version.as_deref(), Some("0.28.0"));
+    assert_eq!(ja.url, "https://packs.example/ja.json");
+}
+
+/// One bad row must not hide the good ones — the same rule `get_locales`
+/// applies to malformed files.
+#[tokio::test]
+async fn drops_entries_that_could_not_be_installed() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(
+        StatusCode::OK,
+        r#"{"schema":1,"packs":[
+            {"tag":"../evil","name":"bad tag","url":"https://packs.example/x.json"},
+            {"tag":"ja","name":"日本語","url":"file:///etc/passwd"},
+            {"tag":"ko","name":"한국어","url":"https://packs.example/ko.json"}
+        ]}"#
+        .to_string(),
+    )
+    .await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["packs"].as_array().unwrap().len(), 1);
+    assert_eq!(body["packs"][0]["tag"], "ko");
+}
+
+/// A schema bump is a different document, not a malformed one. Guessing at it
+/// would install packs from a format this build does not understand.
+#[tokio::test]
+async fn an_unsupported_schema_is_refused() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(StatusCode::OK, r#"{"schema":2,"packs":[]}"#.to_string()).await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(body["error"].as_str().unwrap().contains("schema 2"));
+}
+
+#[tokio::test]
+async fn a_registry_that_is_not_json_is_refused() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(StatusCode::OK, "{ this is not json".to_string()).await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(body["error"].as_str().unwrap().contains("invalid registry JSON"));
+}
+
+/// A missing `packs` key is an empty registry, not a malformed document: the
+/// field is additive and a registry with nothing to offer is well-formed.
+#[tokio::test]
+async fn a_registry_with_no_packs_is_an_empty_list() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(StatusCode::OK, r#"{"schema":1}"#.to_string()).await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["packs"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn a_registry_that_answers_an_error_is_a_bad_gateway() {
+    let (_env, _dir) = scratch_dir();
+    let fake = serve_registry(StatusCode::INTERNAL_SERVER_ERROR, "boom".to_string()).await;
+    use_registry(&fake.url);
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(body["error"].as_str().unwrap().contains("500"));
+}
+
+/// A dead registry is reported, not panicked on or hung.
+#[tokio::test]
+async fn an_unreachable_registry_is_a_bad_gateway() {
+    let (_env, _dir) = scratch_dir();
+    // Bound and dropped, so the port is almost certainly closed.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    use_registry(&format!("http://{addr}/registry.json"));
+
+    let (status, body) = read_registry().await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(body["error"].as_str().unwrap().contains("could not read the registry"));
+}
+
+/// The install half of the registry flow is asserted through the shared
+/// `finish_fetch` in `src/settings/locales.rs`: its guard refuses the loopback
+/// address a stand-in pack host would have to live on, which is the guard
+/// working. What is reachable from here is everything decided *before* the
+/// download, so those refusals are pinned at the endpoint.
+#[tokio::test]
+async fn fetch_refuses_before_it_dials() {
+    let (_env, dir) = scratch_dir();
+
+    let entry = |tag: &str, url: &str| RegistryPack {
+        tag: tag.to_string(),
+        name: "x".to_string(),
+        version: None,
+        min_app_version: None,
+        url: url.to_string(),
+        sha256: None,
+    };
+
+    for (pack, expected) in [
+        (entry("ja", "http://127.0.0.1:9/ja.json"), StatusCode::FORBIDDEN),
+        (entry("ja", "http://10.0.0.1/ja.json"), StatusCode::FORBIDDEN),
+        (entry("ja", "socket://x/ja.json"), StatusCode::BAD_REQUEST),
+        (entry("../evil", "https://packs.example/ja.json"), StatusCode::BAD_REQUEST),
+        (entry("", "https://packs.example/ja.json"), StatusCode::BAD_REQUEST),
+    ] {
+        let response = fetch_locale(axum::Json(pack.clone())).await.into_response();
+        assert_eq!(response.status(), expected, "entry {pack:?} should be refused");
+    }
+
+    // Nothing was written by any of them.
+    assert!(std::fs::read_dir(&dir).map_or(true, |d| d.count() == 0));
 }
 
 /// No temporary files are left behind for the read path to trip over.

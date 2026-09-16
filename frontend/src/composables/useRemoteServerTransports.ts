@@ -20,12 +20,24 @@ function key(pluginId: string, transportId: string): string {
   return `${pluginId}:${transportId}`
 }
 
+/**
+ * The `pluginId:transportId` spelling of a reference, and `''` for "no
+ * transport". One spelling has to serve the select's option values, the
+ * comparison when the user switches method, and the check that a prepared
+ * result came from the form that is still on screen.
+ */
+export function transportRefKey(
+  ref: { pluginId: string; transportId: string } | null | undefined
+): string {
+  return ref ? key(ref.pluginId, ref.transportId) : ''
+}
+
 export function registerRemoteServerTransport(
   pluginId: string,
   contribution: RemoteServerTransport
 ): { dispose(): void } {
   if (!/^[a-z][a-z0-9-]*$/.test(contribution.id)) {
-    throw new Error("remote server transport id must match [a-z][a-z0-9-]*")
+    throw new Error('remote server transport id must match [a-z][a-z0-9-]*')
   }
   if (!contribution.label.trim() || !contribution.component) {
     throw new Error('remote server transport requires a label and component')
@@ -56,7 +68,12 @@ export function hasRemoteServerTransports(pluginId: string): boolean {
 
 export async function unloadRemoteServerTransports(
   pluginId: string,
-  servers: Array<{ id: string; name: string; url: string; transport?: { pluginId: string; transportId: string } | null }>
+  servers: Array<{
+    id: string
+    name: string
+    url: string
+    transport?: { pluginId: string; transportId: string } | null
+  }>
 ): Promise<void> {
   for (const server of servers) {
     if (server.transport?.pluginId !== pluginId) continue
@@ -94,9 +111,21 @@ export function validateRemoteServerTransportResult(
   } catch {
     return { ok: false, error: 'transport returned an invalid URL' }
   }
-  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
-  if (!loopback || (url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
-    return { ok: false, error: 'transport URL must be an http(s) loopback origin without credentials or a path' }
+  const loopback =
+    url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (
+    !loopback ||
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  ) {
+    return {
+      ok: false,
+      error: 'transport URL must be an http(s) loopback origin without credentials or a path',
+    }
   }
   return { ok: true, url: url.origin }
 }
@@ -113,12 +142,21 @@ export function transportServer(draft: {
 
 export async function invokeTransportLifecycle(
   phase: 'saved' | 'deleted' | 'unload',
-  draft: { id: string; name: string; url: string; transport?: { pluginId: string; transportId: string } | null }
+  draft: {
+    id: string
+    name: string
+    url: string
+    transport?: { pluginId: string; transportId: string } | null
+  }
 ): Promise<string | null> {
   const transport = getRemoteServerTransport(draft.transport)
   if (!transport) return null // unavailable plugins cannot run cleanup; removal still remains possible.
   const callback =
-    phase === 'saved' ? transport.onSaved : phase === 'deleted' ? transport.onDeleted : transport.onUnload
+    phase === 'saved'
+      ? transport.onSaved
+      : phase === 'deleted'
+        ? transport.onDeleted
+        : transport.onUnload
   if (!callback) return null
   try {
     await callback(transportServer(draft))
@@ -133,12 +171,20 @@ export async function invokeTransportLifecycle(
 
 export async function recoverRemoteServerTransport(
   pluginId: string,
-  servers: Array<{ id: string; name: string; url: string; transport?: { pluginId: string; transportId: string } | null }>
+  servers: Array<{
+    id: string
+    name: string
+    url: string
+    transport?: { pluginId: string; transportId: string } | null
+  }>
 ): Promise<void> {
   for (const transport of transports.values()) {
     if (transport.pluginId !== pluginId || !transport.recover) continue
     const matching = servers
-      .filter((server) => server.transport?.pluginId === pluginId && server.transport.transportId === transport.id)
+      .filter(
+        (server) =>
+          server.transport?.pluginId === pluginId && server.transport.transportId === transport.id
+      )
       .map((server) => transportServer({ ...server, transport: server.transport ?? null }))
     try {
       await transport.recover(matching)

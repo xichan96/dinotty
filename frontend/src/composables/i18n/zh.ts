@@ -785,6 +785,8 @@ export default {
   'server.directUrl': '直接 URL',
   'server.transportUnavailable': '不可用',
   'server.transportUnavailableDetail': '此传输方式不可用。',
+  'server.transportUrlInvalid':
+    '此添加方式需要本机上的连接器地址。请改用直接 URL，或重新准备连接器。',
   'server.url': '地址',
   'server.token': 'Token',
   'server.tokenKeep': '留空则保持不变',

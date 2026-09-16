@@ -39,6 +39,7 @@ vi.mock('vue-toastification', () => ({
 }))
 
 import ServerManagerDialog from '../components/server/ServerManagerDialog.vue'
+import ServerEditForm from '../components/server/ServerEditForm.vue'
 import { refreshRemoteServers } from '../composables/useRemoteServers'
 import {
   closeServerManager,
@@ -58,7 +59,10 @@ const LAB = { id: 'a', name: 'Lab board', url: 'http://192.168.1.5:58901', has_t
 const ATTIC = { id: 'b', name: 'Attic', url: 'http://192.168.1.9:58901', has_token: false }
 
 /** The hub, answering the roster read and the roster write separately. */
-function hub(entries: unknown[], putResult: { body: unknown; status: number } = { body: {}, status: 200 }) {
+function hub(
+  entries: unknown[],
+  putResult: { body: unknown; status: number } = { body: {}, status: 200 }
+) {
   mocks.authFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       return jsonResponse(putResult.body, putResult.status)
@@ -168,7 +172,15 @@ describe('ServerManagerDialog', () => {
       component: defineComponent({
         props: { onPrepared: { type: Function, required: true } },
         setup(props) {
-          return () => h('button', { class: 'transport-prepare', onClick: () => props.onPrepared({ url: 'http://127.0.0.1:8123' }) }, 'Prepare')
+          return () =>
+            h(
+              'button',
+              {
+                class: 'transport-prepare',
+                onClick: () => props.onPrepared({ url: 'http://127.0.0.1:8123' }),
+              },
+              'Prepare'
+            )
         },
       }),
     })
@@ -176,13 +188,158 @@ describe('ServerManagerDialog', () => {
 
     await wrapper.find('.srv-mgr-select').setValue('transport-test:connector')
     await wrapper.find('.transport-prepare').trigger('click')
-    expect(wrapper.findAll('.srv-mgr-input')[1].element).toHaveProperty('value', 'http://127.0.0.1:8123')
+    expect(wrapper.findAll('.srv-mgr-input')[1].element).toHaveProperty(
+      'value',
+      'http://127.0.0.1:8123'
+    )
     expect(wrapper.findAll('.srv-mgr-input')[1].attributes('disabled')).toBeDefined()
 
     await wrapper.find(SAVE).trigger('click')
     await flushPromises()
-    expect(putBody()[0].transport).toEqual({ plugin_id: 'transport-test', transport_id: 'connector' })
+    expect(putBody()[0].transport).toEqual({
+      plugin_id: 'transport-test',
+      transport_id: 'connector',
+    })
     expect('token' in putBody()[0]).toBe(false)
+  })
+
+  // The address field is disabled under a transport, so whatever is in it when
+  // the user switches add-method is what gets persisted. It has to be an origin
+  // that the *selected* transport produced: the plugins are handed that value as
+  // a validated loopback connector, and one plugin's origin is meaningless as
+  // another's - or as a Dinotty server's.
+  describe('the address stored with a transport reference', () => {
+    const ADDRESS = '.srv-mgr-input'
+
+    function preparingForm(url: string, cls = 'transport-prepare') {
+      return defineComponent({
+        props: { onPrepared: { type: Function, required: true } },
+        setup(props) {
+          return () =>
+            h('button', { class: cls, onClick: () => props.onPrepared({ url }) }, 'Prepare')
+        },
+      })
+    }
+
+    /** The PUTs that reached the hub, so "nothing was saved" is assertable. */
+    function putCalls(): unknown[] {
+      return mocks.authFetch.mock.calls.filter(
+        ([, init]) => (init as RequestInit)?.method === 'PUT'
+      )
+    }
+
+    it('is cleared when the add method changes, so a remote address cannot ride along', async () => {
+      registerRemoteServerTransport('transport-test', {
+        id: 'connector',
+        label: 'Test connector',
+        component: preparingForm('http://127.0.0.1:8123'),
+      })
+      const wrapper = await openManager()
+
+      // The first row is selected and already carries a remote address.
+      expect(wrapper.findAll(ADDRESS)[1].element).toHaveProperty(
+        'value',
+        'http://192.168.1.5:58901'
+      )
+
+      await wrapper.find('.srv-mgr-select').setValue('transport-test:connector')
+      await flushPromises()
+
+      expect(wrapper.findAll(ADDRESS)[1].element).toHaveProperty('value', '')
+      // Nothing to store yet, so Save stays closed rather than persisting a
+      // transport reference against an address no transport validated.
+      expect(wrapper.find(SAVE).attributes('disabled')).toBeDefined()
+      expect(putCalls()).toHaveLength(0)
+
+      await wrapper.find('.transport-prepare').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.findAll(ADDRESS)[1].element).toHaveProperty('value', 'http://127.0.0.1:8123')
+      await wrapper.find(SAVE).trigger('click')
+      await flushPromises()
+      expect(putBody()[0]).toMatchObject({
+        url: 'http://127.0.0.1:8123',
+        transport: { plugin_id: 'transport-test', transport_id: 'connector' },
+      })
+    })
+
+    it('does not hand one transport the origin another one prepared', async () => {
+      registerRemoteServerTransport('transport-test', {
+        id: 'first',
+        label: 'First',
+        component: preparingForm('http://127.0.0.1:8001', 'prep-first'),
+      })
+      registerRemoteServerTransport('transport-test', {
+        id: 'second',
+        label: 'Second',
+        component: defineComponent({ template: '<div />' }),
+      })
+      const wrapper = await openManager()
+
+      await wrapper.find('.srv-mgr-select').setValue('transport-test:first')
+      await flushPromises()
+      await wrapper.find('.prep-first').trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll(ADDRESS)[1].element).toHaveProperty('value', 'http://127.0.0.1:8001')
+
+      await wrapper.find('.srv-mgr-select').setValue('transport-test:second')
+      await flushPromises()
+
+      expect(wrapper.findAll(ADDRESS)[1].element).toHaveProperty('value', '')
+      expect(wrapper.find(SAVE).attributes('disabled')).toBeDefined()
+    })
+
+    it('drops an origin reported by a form the user has already replaced', async () => {
+      registerRemoteServerTransport('transport-test', {
+        id: 'first',
+        label: 'First',
+        component: defineComponent({ template: '<div />' }),
+      })
+      registerRemoteServerTransport('transport-test', {
+        id: 'second',
+        label: 'Second',
+        component: defineComponent({ template: '<div />' }),
+      })
+      const wrapper = await openManager()
+
+      await wrapper.find('.srv-mgr-select').setValue('transport-test:first')
+      await flushPromises()
+      await wrapper.find('.srv-mgr-select').setValue('transport-test:second')
+      await flushPromises()
+
+      // First's connector only finishes starting up after the switch, and
+      // reports the form that was on screen when it began.
+      wrapper.findComponent(ServerEditForm).vm.$emit('prepared', 'transport-test:first', {
+        url: 'http://127.0.0.1:8001',
+      })
+      await flushPromises()
+
+      expect(wrapper.findAll(ADDRESS)[1].element).toHaveProperty('value', '')
+    })
+
+    it('refuses to save an entry whose stored address is not a connector origin', async () => {
+      hub([
+        {
+          id: 'a',
+          name: 'Lab board',
+          url: 'http://192.168.1.5:58901',
+          has_token: true,
+          transport: { plugin_id: 'transport-test', transport_id: 'connector' },
+        },
+      ])
+      registerRemoteServerTransport('transport-test', {
+        id: 'connector',
+        label: 'Test connector',
+        component: defineComponent({ template: '<div />' }),
+      })
+      const wrapper = await openManager()
+
+      await wrapper.find(SAVE).trigger('click')
+      await flushPromises()
+
+      expect(putCalls()).toHaveLength(0)
+      expect(wrapper.find('.srv-mgr-put-error').text()).toContain('connector address')
+    })
   })
 
   it('mints ids that are unique and never the local sentinel', async () => {

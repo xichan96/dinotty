@@ -586,6 +586,12 @@ abandons or replaces it before saving. The host validates that URL as an
 `http(s)` loopback **origin** and then
 collects, validates, and stores the target Dinotty URL/token itself.
 
+A saved entry's address is always the origin of the transport it names, and
+never one carried over from another method: switching add-method clears the
+address and holds Save until the newly chosen transport reports an origin of
+its own. Switching back to Direct URL leaves the address editable, so the value
+you prepared can be kept if the user wants it.
+
 ```ts
 ctx.remoteServers.registerTransport({
   id: 'local-connector',

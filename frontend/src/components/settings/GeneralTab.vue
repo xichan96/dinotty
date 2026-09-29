@@ -46,6 +46,13 @@
             <button class="shortcut-btn" :disabled="localePacks.loading" @click="reloadLocalePacks">
               {{ localePacks.loading ? t('settings.lang.reloading') : t('settings.lang.reload') }}
             </button>
+            <button class="shortcut-btn" @click="toggleRegistry">
+              {{
+                registryOpen
+                  ? t('settings.lang.registry.hide')
+                  : t('settings.lang.registry.browse')
+              }}
+            </button>
           </div>
         </div>
         <p class="settings-hint">{{ t('settings.lang.packsHint') }}</p>
@@ -99,6 +106,63 @@
         <p v-for="pack in localePacks.rejected" :key="pack.file" class="lang-pack-warn">
           {{ t('settings.lang.invalidPack', { file: pack.file }) }} — {{ pack.errors.join('; ') }}
         </p>
+
+        <!-- The registry the *server* is configured with. Nothing is fetched
+             until this is opened, because most instances have none. -->
+        <template v-if="registryOpen">
+          <div class="settings-row lang-packs-head">
+            <h4 class="lang-packs-title">{{ t('settings.lang.registry') }}</h4>
+            <div class="lang-pack-actions">
+              <button
+                class="shortcut-btn"
+                :disabled="localePacks.registryLoading"
+                @click="loadRegistry()"
+              >
+                {{
+                  localePacks.registryLoading
+                    ? t('settings.lang.registry.loading')
+                    : t('settings.lang.registry.reload')
+                }}
+              </button>
+            </div>
+          </div>
+          <p class="settings-hint">{{ t('settings.lang.registry.hint') }}</p>
+
+          <p v-if="localePacks.registryError" class="lang-pack-error">
+            {{ localePacks.registryError }}
+          </p>
+          <p v-else-if="localePacks.registryEntries.length === 0" class="settings-hint">
+            {{ t('settings.lang.registry.empty') }}
+          </p>
+          <div v-else class="lang-pack-list">
+            <div
+              v-for="entry in localePacks.registryEntries"
+              :key="entry.tag"
+              class="lang-pack-row"
+            >
+              <div class="lang-pack-head">
+                <span class="lang-pack-name">{{ entry.name }}</span>
+                <span class="lang-pack-tag">{{ entry.tag }}</span>
+                <span v-if="entry.version" class="lang-pack-coverage">{{ entry.version }}</span>
+                <span v-if="installedTags.has(entry.tag)" class="lang-pack-installed">
+                  {{ t('settings.lang.registry.installed') }}
+                </span>
+                <button
+                  v-else
+                  class="shortcut-btn lang-pack-remove"
+                  :disabled="localePacks.installingTag !== null"
+                  @click="installPack(entry)"
+                >
+                  {{
+                    localePacks.installingTag === entry.tag
+                      ? t('settings.lang.registry.installing')
+                      : t('settings.lang.registry.install')
+                  }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
       </section>
 
       <section class="settings-section">
@@ -763,10 +827,13 @@ import { useAutostart } from '../../composables/useAutostart'
 import { uiConfirm } from '../../composables/useConfirm'
 import { onAppForegroundGain } from '../../composables/useAppForeground'
 import {
+  installFromRegistry,
   installLocalePack,
   loadLocalePacks,
+  loadRegistry,
   localePacks,
   removeLocalePack,
+  type RegistryEntry,
 } from '../../composables/useLocalePacks'
 
 const emit = defineEmits<{ 'token-changed': [] }>()
@@ -822,6 +889,32 @@ async function onPackFile(event: Event) {
   // Kept on screen rather than only toasted: a rejection reason ("invalid JSON
   // at position 42") is long enough to need reading, and the toast times out.
   packError.value = t('settings.lang.importFailed', { error: result.error })
+  toast.error(packError.value)
+}
+
+/** The registry is opt-in: most users have none configured, so nothing is
+ *  fetched until the section is opened. */
+const registryOpen = ref(false)
+
+async function toggleRegistry() {
+  registryOpen.value = !registryOpen.value
+  if (registryOpen.value && !localePacks.registryLoaded) await loadRegistry()
+}
+
+/** Tags already installed, so the registry list can say so instead of nagging. */
+const installedTags = computed(() => new Set(localePacks.covers.map((cover) => cover.tag)))
+
+async function installPack(entry: RegistryEntry) {
+  packError.value = ''
+  const result = await installFromRegistry(entry)
+  if (result.ok) {
+    toast.success(
+      t('settings.lang.registry.installedToast', { name: result.name, count: result.count })
+    )
+    return
+  }
+  // Same reasoning as a file import: the reason is long enough to need reading.
+  packError.value = t('settings.lang.registry.installFailed', { error: result.error })
   toast.error(packError.value)
 }
 
@@ -1156,6 +1249,15 @@ onMounted(async () => {
 .lang-pack-remove {
   padding: 2px 8px;
   font-size: 12px;
+}
+
+/* A registry row that is already installed states it instead of offering a
+   button: re-installing is possible via Import, and the common case is
+   "already have it". */
+.lang-pack-installed {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 /* Out-of-date and dropped-entry notes are advisories, not failures: the pack

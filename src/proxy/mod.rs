@@ -22,6 +22,10 @@ use crate::auth::session::SessionStore;
 use crate::settings::SettingsState;
 
 pub use external::external_proxy_handler;
+// The private-address guard, reused by any route that fetches a URL the client
+// named (currently the language-pack registry). Re-exported rather than copied
+// so there is exactly one definition of "this address is not ours to dial".
+pub(crate) use external::{pinned_client, resolve_target};
 pub use relay::{
     relay_dispatch_handler, relay_http_handler, relay_ws_handler, RELAY_CSRF_HEADER, RELAY_PREFIX,
 };

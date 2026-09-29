@@ -691,9 +691,20 @@ impl Session {
     /// When disabling: mark inactive, flush buffered Output, and enqueue
     /// `SyncEnd` while holding the same guard. A concurrent `broadcast()` then
     /// lands after `SyncEnd` in each client's mpsc channel.
+    ///
+    /// Both transitions are idempotent: DEC 2026 is a mode (set/reset), not a
+    /// nesting counter, so a repeated set is a no-op. This matters because the
+    /// client-side transaction depth is driven purely by the events we enqueue
+    /// here - emitting `SyncBegin` twice for one logical sync (a program that
+    /// nests `CSI ?2026h`, or a single `CSI ?2026;2026h` whose params both hit
+    /// the performer's `for &p in &ps` loop) would leave the frontend one
+    /// unmatched decrement short and wedge the pane against every later write.
     pub fn set_sync_mode(&self, active: bool) {
         let mut sync = self.sync.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if active {
+            if sync.active {
+                return;
+            }
             sync.active = true;
             self.enqueue_control(&SessionClientEvent::SyncBegin);
         } else {

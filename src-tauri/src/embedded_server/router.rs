@@ -73,7 +73,14 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/log", get(settings::get_log))
         .route("/api/locales", get(settings::get_locales).post(settings::post_locale))
+        // Kept in step with `src/main.rs`; `tests/router_parity.rs` pins both.
+        .route("/api/locales/registry", get(settings::get_locale_registry))
+        .route("/api/locales/fetch", post(settings::fetch_locale))
         .route("/api/locales/:tag", delete(settings::delete_locale))
+        .route("/api/themes", get(settings::get_themes).post(settings::post_theme))
+        .route("/api/themes/registry", get(settings::get_theme_registry))
+        .route("/api/themes/install/:id", post(settings::install_registry_theme))
+        .route("/api/themes/:id", delete(settings::delete_theme))
         .route("/api/templates", get(templates::list_templates).post(templates::create_template))
         .route("/api/templates/apply", post(templates::apply_template))
         .route(

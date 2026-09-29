@@ -6,11 +6,13 @@ Dinotty's visual style follows a VSCode-dark muted theme (neutral gray `#8a8a8a`
 
 Open Settings -> Appearance; the theme manager is at the top:
 
-- **Theme list**: built-in + custom themes
+- **Theme list**: built-in, installed, and your own custom themes
 - **Current theme**: highlighted
 - **New theme**: clone from current
-- **Import**: from a JSON file
-- **Export**: share the current theme as JSON
+- **Import**: add a theme file to your own library
+- **Install to server**: upload a theme file for every device on this server to use
+- **Export**: save the current theme as a `.conf` file
+- **Theme store**: install a theme listed by the configured registry (see below)
 
 ## Built-in Themes
 
@@ -72,13 +74,27 @@ Workspace badge colors are independent of theme:
 
 See [Workspace Management -> Workspace Color](workspace#workspace-color).
 
-## Multi-device Sharing
+## Theme Sources
 
-Themes are **server-level** config, shared across all connected devices. Switch theme on mobile, desktop updates in real time.
+There are three, and they are not interchangeable:
+
+| Source | Stored in | Seen by | Editable |
+|--------|-----------|---------|----------|
+| Built-in (12) | Compiled into the app | Everyone | No, but can be hidden |
+| Installed | `themes/` on the server | Every device on that server | No — remove and reinstall |
+| Custom | `settings.json` on the server | Every device on that server | Yes, up to 15 |
+
+Installed themes are deliberately kept out of the 15-theme custom library: they
+arrive as shared files rather than as your own work, and would otherwise be
+truncated by the cap.
+
+The *current* theme is per device. It is stored locally, so your phone and your
+desktop can show different themes while sharing the same library of installed
+and custom themes.
 
 ## Config Directory
 
-Theme configs are stored at:
+Installed theme files are stored at:
 
 | Platform | Path |
 |----------|------|
@@ -86,7 +102,45 @@ Theme configs are stored at:
 | Windows | `%APPDATA%\dinotty\themes\` |
 | Linux server | `/var/lib/dinotty/themes/` |
 
-One JSON file per theme, directly editable or backup-able.
+One file per theme, either `<id>.json` (what the app writes) or a Ghostty
+`.conf` (what **Export** produces) — both are picked up, so an exported theme
+can be dropped straight back in. Files are read as data and never executed.
+They can be edited or backed up by hand.
+
+Your custom themes are *not* here: they live in `settings.json`, because they
+are editable settings rather than shared content.
+
+## Theme Store
+
+Installing themes from a remote registry is off until the server is pointed at
+one:
+
+```sh
+DINOTTY_THEMES_REGISTRY_URL=https://example.com/dinotty/themes/registry.json dinotty
+```
+
+The registry is a JSON document:
+
+```json
+{
+  "schema": 1,
+  "themes": [
+    {
+      "id": "dracula-soft",
+      "name": "Dracula Soft",
+      "version": "1.0.0",
+      "minAppVersion": "0.28.0",
+      "url": "https://example.com/dinotty/themes/dracula-soft.json",
+      "sha256": "<optional>"
+    }
+  ]
+}
+```
+
+The server fetches both the registry and the theme, so a client can only name an
+id — it cannot ask the server to fetch an address of its choosing. When an entry
+carries a `sha256`, it is checked against the downloaded bytes and a mismatch
+refuses the install.
 
 ## Next Steps
 

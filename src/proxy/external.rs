@@ -51,7 +51,7 @@ fn is_private_ip(ip: IpAddr) -> bool {
 /// private-IP check, and `domain` is set when the connection must be pinned to
 /// `addrs` (DNS-rebinding defense: the HTTP client re-resolves otherwise, and
 /// a re-resolve between check and connect can return a private address).
-struct ResolvedTarget {
+pub(crate) struct ResolvedTarget {
     domain: Option<String>,
     addrs: Vec<std::net::SocketAddr>,
 }
@@ -154,7 +154,12 @@ fn forbidden(msg: &str) -> Response {
     Response::builder().status(StatusCode::FORBIDDEN).body(Body::from(msg.to_string())).unwrap()
 }
 
-async fn resolve_target(parsed: &reqwest::Url, msg: &str) -> Result<ResolvedTarget, Box<Response>> {
+/// Also used outside this module: the language-pack registry route downloads a
+/// client-named URL and needs the same guard (see `settings::locales`).
+pub(crate) async fn resolve_target(
+    parsed: &reqwest::Url,
+    msg: &str,
+) -> Result<ResolvedTarget, Box<Response>> {
     let port = parsed.port_or_known_default().unwrap_or(80);
     let Some(host) = parsed.host_str() else {
         return Ok(ResolvedTarget { domain: None, addrs: vec![] });
@@ -193,7 +198,7 @@ async fn resolve_target(parsed: &reqwest::Url, msg: &str) -> Result<ResolvedTarg
 /// Per-hop client with DNS pinned to the validated addresses. Built per hop
 /// because reqwest has no per-request resolver override; redirects are handled
 /// manually so every hop is resolved + validated before connecting.
-fn pinned_client(target: &ResolvedTarget) -> reqwest::Client {
+pub(crate) fn pinned_client(target: &ResolvedTarget) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()

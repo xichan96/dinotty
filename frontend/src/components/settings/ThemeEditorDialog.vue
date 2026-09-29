@@ -151,11 +151,7 @@ watch(
     applyThemeToDOM({
       name: 'draft',
       label: '',
-      colors: buildCustomThemeColors({
-        uuid: 'draft',
-        name: 'draft',
-        colors: draftSnapshot(),
-      }),
+      colors: buildCustomThemeColors({ name: 'draft', colors: draftSnapshot() }),
     })
   },
   { deep: true, flush: 'sync' }

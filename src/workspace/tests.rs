@@ -596,10 +596,10 @@ async fn workspace_resolve_abs_resolves_path_outside_workspace_root() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = response_json(response).await;
-    assert_eq!(
-        json["abs"].as_str(),
-        Some(outside_file.canonicalize().unwrap().to_string_lossy().as_ref())
-    );
+    // The handler returns a dunce-simplified path; on Windows canonicalize()
+    // alone yields the \\?\ extended-length form, which would never match.
+    let expected = dunce::canonicalize(&outside_file).unwrap();
+    assert_eq!(json["abs"].as_str(), Some(expected.to_string_lossy().as_ref()));
 }
 
 #[tokio::test]
@@ -613,10 +613,8 @@ async fn workspace_resolve_abs_resolves_relative_against_session_root() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = response_json(response).await;
-    assert_eq!(
-        json["abs"].as_str(),
-        Some(root.path().join("a.txt").canonicalize().unwrap().to_string_lossy().as_ref())
-    );
+    let expected = dunce::canonicalize(root.path().join("a.txt")).unwrap();
+    assert_eq!(json["abs"].as_str(), Some(expected.to_string_lossy().as_ref()));
 }
 
 #[tokio::test]

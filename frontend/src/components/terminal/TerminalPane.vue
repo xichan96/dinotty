@@ -75,6 +75,7 @@
     @open-file="onMenuOpenFile"
     @open-link="onMenuOpenLink"
     @open-in-browser="onMenuOpenInBrowser"
+    @reveal-file="onMenuRevealFile"
     @split-horizontal="emit('splitHorizontal')"
     @split-vertical="emit('splitVertical')"
     @toggle-broadcast="emit('toggleBroadcast')"
@@ -98,7 +99,8 @@ import { TerminalInstance } from '../../composables/useTerminal'
 import type { MobileTerminalModifiers } from '../../utils/terminalInput'
 import { copyToClipboard, readHostClipboard } from '../../utils/clipboard'
 import { readText as readClipboardText } from '@tauri-apps/plugin-clipboard-manager'
-import { isTauri } from '../../composables/useTransport'
+import { isTauri, tauriInvoke } from '../../composables/useTransport'
+import { apiUrl, authFetch, getApiBase } from '../../composables/apiBase'
 import SearchBar from './SearchBar.vue'
 import TerminalContextMenu from './TerminalContextMenu.vue'
 import SelectionHandles from './SelectionHandles.vue'
@@ -234,6 +236,8 @@ const linkTarget = ref<string>()
 // Last URL the pointer hovered. Right-click consults it so the single
 // context menu is link-aware; cleared on leave and on menu close (#306).
 const hoveredLinkUrl = ref<string | null>(null)
+// Last file path the pointer hovered — same right-click duty for file links.
+const hoveredFilePath = ref<string | null>(null)
 
 const DT8_TOUCH_DEBUG =
   import.meta.env.DEV &&
@@ -319,6 +323,9 @@ function onContextMenu(e: MouseEvent) {
   if (hoveredLinkUrl.value) {
     linkType.value = 'link'
     linkTarget.value = hoveredLinkUrl.value
+  } else if (hoveredFilePath.value) {
+    linkType.value = 'file'
+    linkTarget.value = hoveredFilePath.value
   }
   menuVisible.value = true
 }
@@ -329,6 +336,7 @@ function closeMenu() {
   linkType.value = undefined
   linkTarget.value = undefined
   hoveredLinkUrl.value = null
+  hoveredFilePath.value = null
   nextTick(() => terminal?.focus())
 }
 
@@ -402,6 +410,24 @@ function onMenuOpenLink(url: string) {
 
 function onMenuOpenInBrowser(url: string) {
   void openUrlInSystemBrowser(url)
+}
+
+/** Desktop-only: reveal a terminal path in the OS file manager. Resolves the
+ *  raw terminal text (may be ~/…, ./…, or outside the workspace) to its local
+ *  absolute form first — this only makes sense for local sessions; the menu
+ *  item is hidden for SSH panes and remote servers. */
+async function onMenuRevealFile(path: string) {
+  try {
+    await getApiBase()
+    const q = new URLSearchParams({ pane_id: props.paneId, path })
+    const res = await authFetch(apiUrl(`/api/workspace/resolve_abs?${q}`))
+    if (!res.ok) throw new Error(`resolve_abs ${res.status}`)
+    const { abs } = (await res.json()) as { abs: string }
+    await tauriInvoke('reveal_path', { path: abs })
+  } catch (err) {
+    console.warn('[TerminalPane] reveal in file manager failed:', err)
+    toast.error(t('terminal.revealFailed'), { position: resolveResponsiveToastPosition() })
+  }
 }
 
 // Cached cell dimensions for touch selection
@@ -1035,6 +1061,9 @@ onMounted(() => {
   }
   self.onPreviewLinkHover = (url) => {
     hoveredLinkUrl.value = url
+  }
+  self.onFileLinkHover = (path) => {
+    hoveredFilePath.value = path
   }
   self.onFileUpload = async (files) => {
     // Attach the settle handlers synchronously so a fast-rejecting upload can never

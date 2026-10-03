@@ -90,6 +90,7 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(templates::delete_template),
         )
         .route("/api/workspace/resolve", get(workspace::workspace_resolve))
+        .route("/api/workspace/resolve_abs", get(workspace::workspace_resolve_abs))
         .route("/api/workspace/list", get(workspace::workspace_list))
         .route("/api/workspace/meta", get(workspace::workspace_meta))
         .route("/api/workspace/raw", get(workspace::workspace_raw))

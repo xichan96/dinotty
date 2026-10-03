@@ -14,12 +14,52 @@
       </label>
 
       <label class="srv-mgr-field">
+        <span class="srv-mgr-label">{{ t('server.addMethod') }}</span>
+        <select
+          class="srv-mgr-select"
+          :value="transportKey"
+          @change="onTransportSelected(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">{{ t('server.directUrl') }}</option>
+          <option v-if="draft.transport && !transport" :value="transportKey" disabled>
+            {{ t('server.transportUnavailable') }}
+          </option>
+          <option
+            v-for="item in transports"
+            :key="transportRefKey({ pluginId: item.pluginId, transportId: item.id })"
+            :value="transportRefKey({ pluginId: item.pluginId, transportId: item.id })"
+            :disabled="!item.available"
+          >
+            {{ item.label }}{{ item.available ? '' : ` (${t('server.transportUnavailable')})` }}
+          </option>
+        </select>
+        <p v-if="transport?.description" class="srv-mgr-hint">{{ transport.description }}</p>
+        <p v-if="transport && !transport.available" class="srv-mgr-warn">
+          <TriangleAlert :size="12" />{{
+            transport.error || t('server.transportUnavailableDetail')
+          }}
+        </p>
+        <p v-else-if="draft.transport && !transport" class="srv-mgr-warn">
+          <TriangleAlert :size="12" />{{ t('server.transportUnavailableDetail') }}
+        </p>
+      </label>
+
+      <component
+        :is="transport.component"
+        v-if="transport && transport.available"
+        :mode="transportMode"
+        :server="{ id: draft.id, name: draft.name, url: draft.url }"
+        :on-prepared="preparedFor"
+      />
+
+      <label class="srv-mgr-field">
         <span class="srv-mgr-label">{{ t('server.url') }}</span>
         <input
           v-model="draft.url"
           class="srv-mgr-input srv-mgr-input--mono"
           placeholder="http://192.168.1.5:58901"
           spellcheck="false"
+          :disabled="!!draft.transport"
           @input="$emit('edit')"
         />
       </label>
@@ -77,7 +117,9 @@
       <!-- The result belongs to the (url, token) pair that was tested, so the
            parent drops it on any edit rather than letting a stale "reachable"
            sit under a host that was just changed. -->
-      <div v-if="testing" class="srv-mgr-result"><span class="srv-mgr-spin" />{{ t('server.testing') }}</div>
+      <div v-if="testing" class="srv-mgr-result">
+        <span class="srv-mgr-spin" />{{ t('server.testing') }}
+      </div>
       <div v-else-if="result" class="srv-mgr-result" :class="resultOk ? 'ok' : 'bad'">
         <template v-if="!result.reachable">
           <span class="srv-mgr-result-line">{{ failedText }}</span>
@@ -125,11 +167,16 @@ import {
   type ProbeResult,
   type RemoteServerDraft,
 } from '../../composables/useRemoteServerAdmin'
+import { transportRefKey } from '../../composables/useRemoteServerTransports'
+import type { RegisteredRemoteServerTransport } from '../../composables/useRemoteServerTransports'
+import type { RemoteServerTransportResult } from '../../../../plugin-api/index'
 
 const props = defineProps<{
   draft: RemoteServerDraft | null
   testing: boolean
   result: ProbeResult | null
+  transports: RegisteredRemoteServerTransport[]
+  savedTransport: { pluginId: string; transportId: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -137,6 +184,9 @@ const emit = defineEmits<{
   edit: []
   test: []
   'request-delete': []
+  'select-transport': [ref: { pluginId: string; transportId: string } | null]
+  /** `key` names the transport whose form reported, so a stale one can be dropped. */
+  prepared: [key: string, result: RemoteServerTransportResult]
 }>()
 
 const { t } = useI18n()
@@ -150,6 +200,53 @@ const failedText = computed(() => {
   const draft = props.draft
   if (!props.result || !draft) return ''
   return probeFailureText(t, props.result, draft.url.trim()) ?? ''
+})
+
+const transportKey = computed(() => transportRefKey(props.draft?.transport))
+
+const transport = computed(() =>
+  props.draft?.transport
+    ? props.transports.find(
+        (item) =>
+          item.pluginId === props.draft?.transport?.pluginId &&
+          item.id === props.draft?.transport?.transportId
+      )
+    : undefined
+)
+
+const transportMode = computed(() =>
+  props.draft?.transport &&
+  props.draft.transport.pluginId === props.savedTransport?.pluginId &&
+  props.draft.transport.transportId === props.savedTransport?.transportId
+    ? 'update'
+    : 'create'
+)
+
+function onTransportSelected(value: string) {
+  if (!value) {
+    emit('select-transport', null)
+    return
+  }
+  const item = props.transports.find(
+    (candidate) =>
+      transportRefKey({ pluginId: candidate.pluginId, transportId: candidate.id }) === value
+  )
+  if (item) emit('select-transport', { pluginId: item.pluginId, transportId: item.id })
+}
+
+/**
+ * Bind a prepared result to the transport whose form is rendered *right now*.
+ *
+ * The key is captured when this recomputes - i.e. when the method changes - so a
+ * connector that resolves after the user has already switched still reports the
+ * method it belongs to, and the parent drops it rather than attributing a stale
+ * origin to the new one. A `computed` rather than a template call keeps the
+ * handler's identity stable across unrelated re-renders, so the plugin's form is
+ * not handed a fresh prop on every keystroke elsewhere in the dialog.
+ */
+const preparedFor = computed(() => {
+  const key = transportKey.value
+  return (result: RemoteServerTransportResult) => emit('prepared', key, result)
 })
 
 /**

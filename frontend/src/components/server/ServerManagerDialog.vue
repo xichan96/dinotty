@@ -29,7 +29,13 @@
           :draft="selected"
           :testing="isTesting"
           :result="selectedResult"
+          :transports="transports"
+          :saved-transport="
+            initialDrafts.find((draft) => draft.id === selectedId)?.transport ?? null
+          "
           @edit="onDraftEdited"
+          @select-transport="onTransportSelected"
+          @prepared="onTransportPrepared"
           @test="onTest"
           @request-delete="onRequestDelete"
         />
@@ -73,11 +79,19 @@ import {
   type ProbeResult,
   type RemoteServerDraft,
 } from '../../composables/useRemoteServerAdmin'
+import {
+  invokeTransportLifecycle,
+  transportRefKey,
+  useRemoteServerTransports,
+  validateRemoteServerTransportResult,
+} from '../../composables/useRemoteServerTransports'
+import type { RemoteServerTransportResult } from '../../../../plugin-api/index'
 
 const { t } = useI18n()
 const toast = useToast()
 const { isMobile } = useIsMobile()
 const { servers, currentId, refreshRemoteServers } = useRemoteServers()
+const { transports } = useRemoteServerTransports()
 
 const drafts = ref<RemoteServerDraft[]>([])
 const selectedId = ref<string | null>(null)
@@ -87,6 +101,8 @@ const baseline = ref('')
 const busyOps = ref<Set<string>>(new Set())
 const results = ref<Record<string, ProbeResult>>({})
 const putError = ref<{ message: string; serverId: string | null } | null>(null)
+const initialDrafts = ref<RemoteServerDraft[]>([])
+const preparedDiscards = new Map<string, () => void | Promise<void>>()
 
 const selected = computed(() => drafts.value.find((d) => d.id === selectedId.value) ?? null)
 const selectedResult = computed(() =>
@@ -129,7 +145,9 @@ watch(
     putError.value = null
     results.value = {}
     busyOps.value = new Set()
+    preparedDiscards.clear()
     drafts.value = servers.value.filter((s) => !s.local).map(draftFromEntry)
+    initialDrafts.value = drafts.value.map((draft) => ({ ...draft }))
     selectedId.value = drafts.value[0]?.id ?? null
     baseline.value = snapshot()
     // Pick up a roster change made on another device while we were closed. The
@@ -177,6 +195,46 @@ function onDraftEdited() {
   results.value = omitKey(results.value, selectedId.value)
 }
 
+function discardPrepared(id: string) {
+  const discard = preparedDiscards.get(id)
+  preparedDiscards.delete(id)
+  if (discard) void Promise.resolve(discard()).catch(() => {})
+}
+
+function onTransportSelected(ref: { pluginId: string; transportId: string } | null) {
+  const draft = selected.value
+  if (!draft) return
+  if (transportRefKey(draft.transport) === transportRefKey(ref)) return
+  discardPrepared(draft.id)
+  draft.transport = ref
+  // The address belonged to the method we just left. A connector origin is not
+  // meaningful to a different transport, so carrying it over would persist a url
+  // that the new transport never produced - and hand it to that plugin as if it
+  // had. Clearing it also holds Save closed until the new method reports an
+  // origin of its own. Choosing Direct URL keeps the text: there the field is
+  // editable, and the user may well want the connector origin they just had.
+  if (ref) draft.url = ''
+  onDraftEdited()
+}
+
+function onTransportPrepared(key: string, result: RemoteServerTransportResult) {
+  const draft = selected.value
+  if (!draft || !draft.transport) return
+  // A form that was replaced while its connector was still starting up must not
+  // paint its origin onto the method the user has since chosen.
+  if (key !== transportRefKey(draft.transport)) return
+  const validated = validateRemoteServerTransportResult(result)
+  if (!validated.ok) {
+    putError.value = { message: validated.error, serverId: draft.id }
+    return
+  }
+  discardPrepared(draft.id)
+  if (result.discard) preparedDiscards.set(draft.id, result.discard)
+  draft.url = validated.url
+  putError.value = null
+  onDraftEdited()
+}
+
 async function onRequestDelete() {
   const draft = selected.value
   if (!draft) return
@@ -198,6 +256,7 @@ async function onRequestDelete() {
   if (!ok) return
 
   drafts.value = drafts.value.filter((d) => d.id !== draft.id)
+  discardPrepared(draft.id)
   selectedId.value = drafts.value[0]?.id ?? null
 }
 
@@ -218,10 +277,7 @@ function storedUrl(id: string): string | undefined {
 function probeRequestFor(draft: RemoteServerDraft): ProbeRequest {
   const stored = storedUrl(draft.id)
   const untouched =
-    stored !== undefined &&
-    draft.url.trim() === stored &&
-    !draft.tokenDirty &&
-    !draft.tokenCleared
+    stored !== undefined && draft.url.trim() === stored && !draft.tokenDirty && !draft.tokenCleared
   if (untouched) return { kind: 'entry', id: draft.id }
   return {
     kind: 'draft',
@@ -254,6 +310,20 @@ async function onSave() {
   putError.value = null
   setBusy(SAVE_KEY, true)
   try {
+    // Last line of defence for the invariant the transport contract publishes:
+    // an entry that names a transport stores that transport's connector origin,
+    // never a remote target. `onTransportSelected` keeps the two in step while
+    // the dialog is open; this catches an entry that arrived already inconsistent
+    // (a hand-edited settings.json, or one written by a build before this check).
+    for (const draft of drafts.value) {
+      if (!draft.transport) continue
+      const validated = validateRemoteServerTransportResult({ url: draft.url })
+      if (validated.ok) continue
+      selectedId.value = draft.id
+      putError.value = { message: t('server.transportUrlInvalid'), serverId: draft.id }
+      return
+    }
+
     // Removing the server we are on leaves the relay prefix pointing at an id
     // no server answers to, so step back to local *before* the roster loses it.
     // Checked against the submitted list rather than against "what was
@@ -276,9 +346,41 @@ async function onSave() {
       if (result.serverId) selectedId.value = result.serverId
       return
     }
+    preparedDiscards.clear()
+
+    const lifecycleErrors: string[] = []
+    const after = new Map(drafts.value.map((draft) => [draft.id, draft]))
+    for (const before of initialDrafts.value) {
+      const next = after.get(before.id)
+      if (
+        !next ||
+        (before.transport &&
+          (!next.transport ||
+            before.transport.pluginId !== next.transport.pluginId ||
+            before.transport.transportId !== next.transport.transportId))
+      ) {
+        const error = await invokeTransportLifecycle('deleted', before)
+        if (error) lifecycleErrors.push(error)
+      }
+    }
+    for (const next of drafts.value) {
+      const before = initialDrafts.value.find((draft) => draft.id === next.id)
+      const changed =
+        !before ||
+        before.url !== next.url ||
+        before.name !== next.name ||
+        before.transport?.pluginId !== next.transport?.pluginId ||
+        before.transport?.transportId !== next.transport?.transportId
+      if (next.transport && changed) {
+        const error = await invokeTransportLifecycle('saved', next)
+        if (error) lifecycleErrors.push(error)
+      }
+    }
 
     baseline.value = snapshot()
-    if (result.refreshed) toast.success(t('server.saved'))
+    if (lifecycleErrors.length)
+      toast.warning(`Server saved, but transport maintenance failed: ${lifecycleErrors.join('; ')}`)
+    else if (result.refreshed) toast.success(t('server.saved'))
     else toast.warning(t('server.savedRefreshFailed'))
     closeServerManager()
   } finally {
@@ -296,6 +398,7 @@ async function requestClose() {
     })
     if (!ok) return
   }
+  for (const id of preparedDiscards.keys()) discardPrepared(id)
   closeServerManager()
 }
 </script>
@@ -521,7 +624,8 @@ async function requestClose() {
   font-size: 12px;
   color: var(--text-muted, #888);
 }
-.srv-mgr-input {
+.srv-mgr-input,
+.srv-mgr-select {
   box-sizing: border-box;
   width: 100%;
   height: 34px;
@@ -537,11 +641,13 @@ async function requestClose() {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
 }
-.srv-mgr-input:focus {
+.srv-mgr-input:focus,
+.srv-mgr-select:focus {
   outline: none;
   border-color: var(--accent);
 }
-.srv-mgr-input:disabled {
+.srv-mgr-input:disabled,
+.srv-mgr-select:disabled {
   opacity: 0.5;
 }
 .srv-mgr-badge {
@@ -676,6 +782,7 @@ async function requestClose() {
     min-height: 48px;
   }
   .srv-mgr-input,
+  .srv-mgr-select,
   .srv-mgr-btn {
     height: 40px;
   }

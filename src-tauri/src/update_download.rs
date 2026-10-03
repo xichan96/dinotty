@@ -221,13 +221,17 @@ fn existing_file(path: String) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Opens `path` with the OS default handler. For a directory that is the file
+/// manager showing the directory itself. Shared with `reveal_path` (terminal
+/// context menu), which opens directories directly instead of revealing them
+/// selected inside their parent.
 #[cfg(target_os = "macos")]
-fn open_path(path: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
     std::process::Command::new("open").no_window().arg(path).spawn().map(|_| ())
 }
 
 #[cfg(target_os = "windows")]
-fn open_path(path: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
     // `start` is a cmd builtin, and the empty first argument is the window
     // title — without it a quoted path would be parsed as the title.
     std::process::Command::new("cmd")
@@ -239,6 +243,6 @@ fn open_path(path: &std::path::Path) -> std::io::Result<()> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn open_path(path: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn open_path(path: &std::path::Path) -> std::io::Result<()> {
     std::process::Command::new("xdg-open").no_window().arg(path).spawn().map(|_| ())
 }

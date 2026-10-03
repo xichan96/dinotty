@@ -7,6 +7,10 @@
           <FolderOpen :size="12" class="tcm-icon" />
           <span class="tcm-label">{{ t('terminal.ctxOpenFile') }}</span>
         </button>
+        <button v-if="canRevealFile" class="tcm-item" role="menuitem" @click="onRevealFile">
+          <FolderSearch :size="12" class="tcm-icon" />
+          <span class="tcm-label">{{ t('terminal.ctxRevealInFileManager') }}</span>
+        </button>
         <button
           v-if="linkType === 'link' && isTauri()"
           class="tcm-item"
@@ -130,6 +134,7 @@ import {
   Bookmark,
   TextSelect,
   FolderOpen,
+  FolderSearch,
   ExternalLink,
   Globe,
   Columns2,
@@ -145,6 +150,7 @@ import { randomId } from '../../utils/id'
 import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 import { isTauri } from '../../composables/useTransport'
+import { isLocalActive } from '../../composables/activeServer'
 
 const props = defineProps<{
   visible: boolean
@@ -165,6 +171,7 @@ const emit = defineEmits<{
   openFile: [path: string]
   openLink: [url: string]
   openInBrowser: [url: string]
+  revealFile: [path: string]
   splitHorizontal: []
   splitVertical: []
   toggleBroadcast: []
@@ -200,6 +207,7 @@ const menuStyle = computed(() => {
   const menuHeight =
     BASE_HEIGHT +
     (props.linkType ? LINK_ITEM_HEIGHT + SEP_HEIGHT : 0) +
+    (canRevealFile.value ? LINK_ITEM_HEIGHT : 0) +
     (props.isSsh ? SSH_ITEM_HEIGHT : 0)
   const PAD = 8
   let x = props.x
@@ -268,6 +276,17 @@ function onSelectAll() {
 
 function onOpenFile() {
   if (props.linkTarget) emit('openFile', props.linkTarget)
+  close()
+}
+
+/** Reveal in the OS file manager: desktop client, local (embedded) server,
+ *  local terminal pane only — the path must live on this machine. */
+const canRevealFile = computed(
+  () => props.linkType === 'file' && isTauri() && isLocalActive() && !props.isSsh
+)
+
+function onRevealFile() {
+  if (props.linkTarget) emit('revealFile', props.linkTarget)
   close()
 }
 

@@ -38,6 +38,11 @@ pub struct ResolveResponse {
 }
 
 #[derive(Serialize)]
+pub struct ResolveAbsResponse {
+    pub abs: String,
+}
+
+#[derive(Serialize)]
 pub(crate) struct UploadDirStatus {
     pub(crate) managed: bool,
     pub(crate) foreign: bool,

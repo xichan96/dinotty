@@ -17,8 +17,8 @@ use crate::workspace_mgmt::is_sensitive;
 use super::remote;
 use super::types::{
     CreateEntryBody, CreateEntryQuery, DirEntry, ListResponse, MetaResponse, MoveBody,
-    PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveQuery, ResolveResponse,
-    SearchResponse, WorkspaceListQuery, WorkspaceSearchBody,
+    PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveAbsResponse, ResolveQuery,
+    ResolveResponse, SearchResponse, WorkspaceListQuery, WorkspaceSearchBody,
 };
 use super::util::{
     detect_language, get_root, json_err, media_kind, normalize_join, office_kind,
@@ -49,6 +49,34 @@ pub async fn workspace_resolve(
         return json_err(StatusCode::BAD_REQUEST, "bad path");
     };
     Json(ResolveResponse { rel }).into_response()
+}
+
+/// Resolves a terminal-emitted path to its absolute on-host form without the
+/// workspace-root restriction of [`workspace_resolve`]. Terminal output names
+/// paths anywhere on the machine (`/etc/hosts`, `~/...`), and the desktop
+/// client's "reveal in file manager" action needs the local absolute path.
+/// Returns the path string only — no content is read, so this is not a
+/// workspace escape for reading data the session user could not already
+/// reach from the terminal.
+#[allow(clippy::unused_async)]
+pub async fn workspace_resolve_abs(
+    State(manager): State<Arc<SessionManager>>,
+    Query(q): Query<ResolveQuery>,
+) -> Response {
+    if ssh_session(&manager, &q.pane_id).is_some() {
+        return json_err(StatusCode::BAD_REQUEST, "not supported for SSH sessions");
+    }
+    let root = try_res!(get_root(&manager, &q.pane_id));
+    let joined = if Path::new(&q.path).is_absolute() {
+        resolve_user_path(dirs::home_dir(), &q.path)
+    } else {
+        try_res!(normalize_join(&root, &q.path))
+    };
+    let canon =
+        joined.canonicalize().map_err(|_| json_err(StatusCode::NOT_FOUND, "path not found"));
+    let canon = try_res!(canon);
+    let abs = dunce::simplified(&canon);
+    Json(ResolveAbsResponse { abs: abs.to_string_lossy().into_owned() }).into_response()
 }
 
 pub async fn workspace_list(

@@ -18,6 +18,13 @@ export type UpdateDownloadStatus =
   | 'cancelled'
   | 'error'
 
+/**
+ * Why acting on the downloaded file failed. `missing_file` is the recoverable
+ * one: nothing is wrong with the app, the installer simply is not where it was
+ * saved any more.
+ */
+export type DownloadedFileActionError = '' | 'missing_file' | 'failed'
+
 export interface AlternateAsset {
   name: string
   url: string
@@ -32,6 +39,8 @@ interface DownloadProgressPayload {
 
 const PROGRESS_EVENT = 'update-download-progress'
 const CANCELLED = 'cancelled'
+/** Rejected by the desktop commands when the installer is gone from its path. */
+const MISSING_FILE = 'not_a_file'
 
 const status = ref<UpdateCheckStatus>('idle')
 const currentVersion = ref('')
@@ -48,6 +57,7 @@ const downloadStatus = ref<UpdateDownloadStatus>('idle')
 const downloadProgress = ref<DownloadProgressPayload>({ downloaded: 0, total: null, percent: null })
 const downloadedPath = ref('')
 const downloadError = ref('')
+const downloadedFileActionError = ref<DownloadedFileActionError>('')
 
 let started = false
 let promptConsumed = false
@@ -196,6 +206,7 @@ async function startDownload(): Promise<void> {
 
   downloadStatus.value = 'saving'
   downloadError.value = ''
+  downloadedFileActionError.value = ''
   downloadedPath.value = ''
   downloadProgress.value = { downloaded: 0, total: null, percent: null }
 
@@ -237,24 +248,44 @@ async function cancelDownload(): Promise<void> {
   }
 }
 
-async function revealDownloadedFile(): Promise<boolean> {
-  if (!downloadedPath.value) return false
+/**
+ * Drops the stale `done` panel: the recorded path is only as good as the moment
+ * it was written, and it outlives both the file and the settings panel, so a
+ * download that landed days ago can still be on screen. Falling back to `idle`
+ * hands the card back to the download button instead of leaving two dead ones.
+ */
+function forgetDownloadedFile() {
+  downloadedPath.value = ''
+  downloadStatus.value = 'idle'
+  downloadedFileActionError.value = 'missing_file'
+}
+
+async function runDownloadedFileAction(
+  command: 'reveal_downloaded_file' | 'open_downloaded_file'
+): Promise<boolean> {
+  const path = downloadedPath.value
+  if (!path) {
+    forgetDownloadedFile()
+    return false
+  }
+
+  downloadedFileActionError.value = ''
   try {
-    await tauriInvoke('reveal_downloaded_file', { path: downloadedPath.value })
+    await tauriInvoke(command, { path })
     return true
-  } catch {
+  } catch (error) {
+    if (String(error).includes(MISSING_FILE)) forgetDownloadedFile()
+    else downloadedFileActionError.value = 'failed'
     return false
   }
 }
 
-async function openDownloadedFile(): Promise<boolean> {
-  if (!downloadedPath.value) return false
-  try {
-    await tauriInvoke('open_downloaded_file', { path: downloadedPath.value })
-    return true
-  } catch {
-    return false
-  }
+function revealDownloadedFile(): Promise<boolean> {
+  return runDownloadedFileAction('reveal_downloaded_file')
+}
+
+function openDownloadedFile(): Promise<boolean> {
+  return runDownloadedFileAction('open_downloaded_file')
 }
 
 export function useUpdateCheck() {
@@ -272,6 +303,7 @@ export function useUpdateCheck() {
     downloadProgress: readonly(downloadProgress),
     downloadedPath: readonly(downloadedPath),
     downloadError: readonly(downloadError),
+    downloadedFileActionError: readonly(downloadedFileActionError),
     start,
     recheck,
     takeAvailablePrompt,

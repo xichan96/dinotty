@@ -882,6 +882,8 @@ export default {
   'settings.about.downloadComplete': '已下载到 {path}',
   'settings.about.downloadFailed': '下载失败，请重试。',
   'settings.about.downloadCancelled': '已取消下载。',
+  'settings.about.downloadedFileMissing': '安装包已不在原位置，可能被移动或删除，请重新下载。',
+  'settings.about.openInstallerFailed': '无法打开安装包，请重试。',
   'settings.about.openInstaller': '打开安装包',
   'settings.about.revealInFolder': '在文件夹中显示',
   'settings.about.alternateDownload': '或下载 {name}',

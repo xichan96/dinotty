@@ -128,6 +128,7 @@
           {{ t('settings.about.downloadFailed') }}
         </p>
         <p v-if="openError" class="update-open-error">{{ openError }}</p>
+        <p v-if="fileActionErrorText" class="update-open-error">{{ fileActionErrorText }}</p>
       </div>
       <div class="settings-row">
         <label>{{ t('settings.about.repository') }}</label>
@@ -207,6 +208,18 @@ const openError = ref('')
 
 /** The app can only write the installer itself in the desktop shell. */
 const canDownloadInApp = computed(() => isTauri() && update.assetUrl.value.length > 0)
+
+/**
+ * The composable knows why acting on the downloaded file failed; the tab owns
+ * the wording. A missing installer is worth saying out loud — the alternative
+ * is two buttons that appear to do nothing.
+ */
+const fileActionErrorText = computed(() => {
+  if (!update.downloadedFileActionError.value) return ''
+  return update.downloadedFileActionError.value === 'missing_file'
+    ? t('settings.about.downloadedFileMissing')
+    : t('settings.about.openInstallerFailed')
+})
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`

@@ -889,6 +889,9 @@ export default {
   'settings.about.downloadComplete': 'Downloaded to {path}',
   'settings.about.downloadFailed': 'Download failed. Please try again.',
   'settings.about.downloadCancelled': 'Download cancelled.',
+  'settings.about.downloadedFileMissing':
+    'The installer is no longer where it was saved — it may have been moved or deleted. Download it again.',
+  'settings.about.openInstallerFailed': 'Could not open the installer. Please try again.',
   'settings.about.openInstaller': 'Open installer',
   'settings.about.revealInFolder': 'Show in folder',
   'settings.about.alternateDownload': 'Or download {name}',

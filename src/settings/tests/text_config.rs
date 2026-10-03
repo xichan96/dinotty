@@ -126,7 +126,7 @@ fn clamp_text_on_load_preserves_empty_font_family() {
     let mut text = TextConfig::default();
 
     assert!(!clamp_text_on_load(&mut text));
-    assert!(text.font_family.is_empty());
+    assert_eq!(text.font_family, "");
 }
 
 #[test]

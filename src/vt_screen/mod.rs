@@ -321,7 +321,7 @@ mod csi_dispatch_tests {
         let first_chunk = chunks.next().unwrap();
         assert!(std::str::from_utf8(first_chunk).is_err());
         vs.feed(first_chunk);
-        assert!(!vs.pending_command.as_ref().unwrap().output_buf.is_empty());
+        assert_ne!(vs.pending_command.as_ref().unwrap().output_buf, [] as [u8; 0]);
         for chunk in chunks {
             vs.feed(chunk);
         }
@@ -505,7 +505,7 @@ mod osc_notification_tests {
         vs.feed(b"\x1b]9;9;\"/tmp\"\x07");
         vs.feed(b"\x1b]9;4\x07");
         vs.feed(b"\x1b]9;9\x07");
-        assert!(vs.drain_osc_actions().is_empty());
+        assert_eq!(vs.drain_osc_actions(), [] as [crate::vt_screen::data::OscAction; 0]);
     }
 
     #[test]
@@ -522,7 +522,7 @@ mod osc_notification_tests {
     fn osc9_can_be_split_across_feed_calls() {
         let mut vs = VirtualScreen::new(20, 5);
         vs.feed(b"\x1b]9;hel");
-        assert!(vs.drain_osc_actions().is_empty());
+        assert_eq!(vs.drain_osc_actions(), [] as [crate::vt_screen::data::OscAction; 0]);
         vs.feed(b"lo\x07");
         assert_eq!(
             vs.drain_osc_actions(),
@@ -583,7 +583,7 @@ mod osc_notification_tests {
         let mut vs = VirtualScreen::new(20, 5);
         vs.feed(b"\x1b]777;progress;50\x07");
         vs.feed(b"\x1b]777;settabicon;Title\x07");
-        assert!(vs.drain_osc_actions().is_empty());
+        assert_eq!(vs.drain_osc_actions(), [] as [crate::vt_screen::data::OscAction; 0]);
     }
 
     #[test]
@@ -656,6 +656,6 @@ mod osc_notification_tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].exit_code, 0);
         // OSC 133 must not produce notification actions.
-        assert!(vs.drain_osc_actions().is_empty());
+        assert_eq!(vs.drain_osc_actions(), [] as [crate::vt_screen::data::OscAction; 0]);
     }
 }

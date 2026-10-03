@@ -18,7 +18,7 @@ fn old_settings_without_theme_library_defaults_empty() {
     let settings: Settings = serde_json::from_str(r"{}").unwrap();
 
     assert!(settings.custom_themes.is_empty());
-    assert!(settings.hidden_builtins.is_empty());
+    assert_eq!(settings.hidden_builtins, [] as [String; 0]);
 }
 
 #[test]

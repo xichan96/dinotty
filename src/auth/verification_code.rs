@@ -205,7 +205,7 @@ mod tests {
     fn create_returns_request_id_and_code() {
         let s = store();
         let (req_id, code) = s.create(IpAddr::V4(Ipv4Addr::LOCALHOST)).expect("ok");
-        assert!(!req_id.is_empty());
+        assert_ne!(req_id, "");
         assert_eq!(code.len(), 6);
     }
 

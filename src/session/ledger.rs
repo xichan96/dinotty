@@ -594,7 +594,10 @@ mod platform {
             assert_eq!(ledger.entries[0].pane_id, "pane-b");
 
             std::fs::write(&path, b"{not-json").unwrap();
-            assert!(read_ledger(&path).entries.is_empty());
+            assert_eq!(
+                read_ledger(&path).entries,
+                [] as [crate::session::ledger::platform::LedgerEntry; 0]
+            );
         }
 
         #[test]

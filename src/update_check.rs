@@ -701,7 +701,7 @@ mod tests {
         match classify_release(&current, &validated_with_bundles("v0.27.0")) {
             UpdateStatus::UpdateAvailable { latest_version, download, published_at, .. } => {
                 assert_eq!(latest_version, "0.27.0");
-                assert!(!published_at.is_empty());
+                assert_ne!(published_at, "");
                 // The host running the tests may have no matching bundle (e.g. an
                 // Intel Mac), so assert against the same selector the handler uses.
                 let (expected, _) = select_assets(
@@ -782,7 +782,10 @@ mod tests {
         );
         // No Intel dmg is published, so an Intel Mac gets nothing rather than a
         // link that would 404.
-        assert!(selected_names(&assets, "v0.26.0", "0.26.0", HostTarget::MacosX86_64).is_empty());
+        assert_eq!(
+            selected_names(&assets, "v0.26.0", "0.26.0", HostTarget::MacosX86_64),
+            [] as [String; 0]
+        );
         assert_eq!(
             selected_names(&assets, "v0.26.0", "0.26.0", HostTarget::LinuxX86_64),
             ["Dinotty_0.26.0_amd64.AppImage", "Dinotty_0.26.0_amd64.deb"]
@@ -823,7 +826,10 @@ mod tests {
                 asset.state = Some("new".to_string());
             }
         }
-        assert!(selected_names(&assets, "v0.26.0", "0.26.0", HostTarget::MacosAarch64).is_empty());
+        assert_eq!(
+            selected_names(&assets, "v0.26.0", "0.26.0", HostTarget::MacosAarch64),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -839,7 +845,10 @@ mod tests {
             state: None,
         }];
         // `arm64` is not macOS's token, so this must NOT match by accident.
-        assert!(selected_names(&assets, "v0.27.0", "0.27.0", HostTarget::MacosAarch64).is_empty());
+        assert_eq!(
+            selected_names(&assets, "v0.27.0", "0.27.0", HostTarget::MacosAarch64),
+            [] as [String; 0]
+        );
 
         let renamed = vec![GitHubAsset {
             name: "Dinotty_0.27.0_aarch64.dmg".to_string(),
@@ -851,7 +860,10 @@ mod tests {
         }];
         // Filename in the URL disagrees with the asset name -> rejected, not
         // silently downgraded to a different asset.
-        assert!(selected_names(&renamed, "v0.27.0", "0.27.0", HostTarget::MacosAarch64).is_empty());
+        assert_eq!(
+            selected_names(&renamed, "v0.27.0", "0.27.0", HostTarget::MacosAarch64),
+            [] as [String; 0]
+        );
     }
 
     #[test]

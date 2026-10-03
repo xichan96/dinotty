@@ -253,7 +253,7 @@ mod tests {
         let store = fresh_store();
         let snap = store.load();
         assert!(snap.tabs.is_empty());
-        assert!(snap.tab_order.is_empty());
+        assert_eq!(snap.tab_order, [] as [String; 0]);
         assert_eq!(snap.version, 0);
     }
 
@@ -329,7 +329,7 @@ mod tests {
         store.build_and_save(&manager).expect("save should succeed");
         let loaded = store.load();
         assert!(loaded.tabs.is_empty());
-        assert!(loaded.tab_order.is_empty());
+        assert_eq!(loaded.tab_order, [] as [String; 0]);
         assert_eq!(loaded.version, SNAPSHOT_VERSION);
     }
 }

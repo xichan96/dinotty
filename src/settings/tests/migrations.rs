@@ -56,7 +56,7 @@ fn v8_clone_flows_into_v9_system_upper_once() {
 
     assert!(migrate_settings(&mut settings));
     assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
-    assert!(settings.system_toolbar_quick_keys.is_empty());
+    assert_eq!(settings.system_toolbar_quick_keys, [] as [ActionKey; 0]);
     let system = settings.system_keyboard.as_ref().unwrap();
     assert_eq!(system.upper.last(), settings.toolbar_quick_keys.last());
 

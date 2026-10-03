@@ -216,7 +216,7 @@ fn purge_pane_removes_from_layout() {
     );
 
     let emptied = manager.purge_pane_from_layouts("p2");
-    assert!(emptied.is_empty()); // p1 still exists
+    assert_eq!(emptied, [] as [String; 0]); // p1 still exists
 
     let val = manager.tab_layouts.get("t1").unwrap();
     let remaining = collect_leaf_pane_ids(val.get("layout").unwrap());
@@ -252,7 +252,7 @@ fn purge_pane_ignores_tab_matching_pane_id() {
 
     let emptied = manager.purge_pane_from_layouts("p1");
     // The entry with key "p1" is skipped (tab_pane_id == pane_id guard)
-    assert!(emptied.is_empty());
+    assert_eq!(emptied, [] as [String; 0]);
 }
 
 // ── SessionManager::broadcast_sync ──────────────────────────────
@@ -261,7 +261,7 @@ fn purge_pane_ignores_tab_matching_pane_id() {
 fn broadcast_sync_delivers_to_clients() {
     let manager = SessionManager::new();
     let (id, mut rx) = manager.add_sync_client();
-    assert!(!id.is_empty());
+    assert_ne!(id, "");
 
     manager.broadcast_sync(&SyncMsg::TabActivated { pane_id: "p1".into() });
 
@@ -397,7 +397,7 @@ fn wsl_output_does_not_replace_host_cwd_with_guest_path() {
 
     assert_eq!(session.host_cwd(), Some(PathBuf::from("/")));
     let state = session.cwd_state.lock().unwrap();
-    assert!(state.sniff_buf.is_empty());
+    assert_eq!(state.sniff_buf, [] as [u8; 0]);
 }
 
 #[test]

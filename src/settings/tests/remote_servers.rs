@@ -702,7 +702,7 @@ fn probe_request_accepts_the_shapes_clients_send() {
     // By id alone - the switch path.
     let by_id: ProbeRemoteServerRequest = serde_json::from_str(r#"{"id":"lab"}"#).unwrap();
     assert_eq!(by_id.id.as_deref(), Some("lab"));
-    assert!(by_id.url.is_empty());
+    assert_eq!(by_id.url, "");
     assert!(by_id.token.is_none());
 
     // By url, with and without a candidate token - the add/edit "Test
@@ -721,7 +721,7 @@ fn probe_request_accepts_the_shapes_clients_send() {
     // actionable "url is empty" rather than a field-name complaint.
     let neither: ProbeRemoteServerRequest = serde_json::from_str("{}").unwrap();
     assert!(neither.id.is_none());
-    assert!(neither.url.is_empty());
+    assert_eq!(neither.url, "");
 }
 
 // ---------------------------------------------------------------------------

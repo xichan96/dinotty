@@ -274,7 +274,7 @@ fn collect_terminal_leaf_pane_ids_no_terminal() {
     let layout =
         split("horizontal", vec![leaf_with_kind("p1", "plugin"), leaf_with_kind("p2", "files")]);
     let ids = collect_terminal_leaf_pane_ids(&layout);
-    assert!(ids.is_empty());
+    assert_eq!(ids, [] as [String; 0]);
 }
 
 #[test]

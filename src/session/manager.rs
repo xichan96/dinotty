@@ -1150,7 +1150,7 @@ mod reap_tests {
             reconcile_unowned_since(&session_ids, &referenced, &mut unowned_since, later);
 
         assert_eq!(stats.referenced, 1);
-        assert!(unowned.is_empty());
+        assert_eq!(unowned, [] as [(String, std::time::Instant); 0]);
         assert!(unowned_since.is_empty());
     }
 

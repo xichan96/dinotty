@@ -186,7 +186,7 @@ mod tests {
     fn create_and_validate_session() {
         let store = SessionStore::new(7);
         let id = store.create(None, None);
-        assert!(!id.is_empty());
+        assert_ne!(id, "");
         assert!(store.validate(&id));
     }
 

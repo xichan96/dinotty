@@ -437,6 +437,52 @@ describe('AboutTab update card and automatic check preference', () => {
     wrapper.unmount()
   })
 
+  it('says so and offers a fresh download when the installer has gone missing', async () => {
+    aboutMocks.isTauri = true
+    const wrapper = await mountAboutTab()
+    await flushPromises()
+    respondWithAvailableUpdate()
+    await flushPromises()
+
+    await wrapper.get('.update-release-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('已下载到 /tmp/Dinotty_0.21.0_aarch64.dmg')
+
+    aboutMocks.tauriInvoke.mockRejectedValueOnce('not_a_file')
+    const buttons = wrapper.findAll('.update-release-button')
+    await buttons[buttons.length - 2]!.trigger('click')
+    await flushPromises()
+
+    // Not silence: the user is told what happened and the download is offered
+    // again, because the recorded path is not coming back on its own.
+    expect(wrapper.text()).toContain('安装包已不在原位置，可能被移动或删除，请重新下载。')
+    expect(wrapper.text()).not.toContain('已下载到')
+    expect(wrapper.text()).toContain('下载更新')
+    wrapper.unmount()
+  })
+
+  it('reports a failed file manager without losing the downloaded installer', async () => {
+    aboutMocks.isTauri = true
+    const wrapper = await mountAboutTab()
+    await flushPromises()
+    respondWithAvailableUpdate()
+    await flushPromises()
+
+    await wrapper.get('.update-release-button').trigger('click')
+    await flushPromises()
+
+    aboutMocks.tauriInvoke.mockRejectedValueOnce('io_error: Operation not permitted')
+    const buttons = wrapper.findAll('.update-release-button')
+    await buttons[buttons.length - 1]!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('无法打开安装包，请重试。')
+    // Unlike the missing case, the installer is still offered: only the file
+    // manager failed.
+    expect(wrapper.text()).toContain('已下载到 /tmp/Dinotty_0.21.0_aarch64.dmg')
+    wrapper.unmount()
+  })
+
   it('treats a dismissed save dialog as cancelled rather than failed', async () => {
     aboutMocks.isTauri = true
     aboutMocks.tauriInvoke.mockRejectedValue('cancelled')

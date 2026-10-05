@@ -475,6 +475,7 @@ import { useAppConnectivity } from './composables/useAppConnectivity'
 import { useAppTauri } from './composables/useAppTauri'
 import { usePluginBridge } from './composables/usePluginBridge'
 import { loadLocalePacks } from './composables/useLocalePacks'
+import { loadThemePacks } from './composables/useThemePacks'
 import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe } from 'lucide-vue-next'
 import { normalizePreviewToolbarItems, type PreviewToolbarId } from './utils/previewToolbar'
 
@@ -753,13 +754,8 @@ const {
   onAppTouchStartCapture,
 } = keyboard
 
-const {
-  onSshConnect,
-  onSshReconnect,
-  onSshAuthSubmit,
-  onSshAuthCancel,
-  onNewMenuAction,
-} = connectivity
+const { onSshConnect, onSshReconnect, onSshAuthSubmit, onSshAuthCancel, onNewMenuAction } =
+  connectivity
 
 const {
   setupTauriWindowClose,
@@ -796,6 +792,12 @@ onMounted(async () => {
       // missing or slow route must not hold up the first paint, and until it
       // lands the UI renders with the builtin locales.
       void loadLocalePacks()
+      // Installed themes live on the server too, so a device may be showing one.
+      // Deliberately not awaited: an unreachable route must not hold up the
+      // first paint. `effectiveTheme` reads the list reactively, and
+      // `useSettingsSync` already watches it, so a late arrival still lands —
+      // no explicit re-apply needed here.
+      void loadThemePacks()
       await settingsStore.load()
       void syncWs.connectSyncWS()
       initMonitorHistory()

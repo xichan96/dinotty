@@ -267,6 +267,76 @@ fn double_sync_disable_emits_exactly_one_sync_end() {
     assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
 }
 
+#[test]
+fn double_sync_enable_emits_exactly_one_sync_begin() {
+    let session = stub_session();
+    let (_id, mut rx) = add_ready_client(&session);
+
+    session.set_sync_mode(true);
+    session.set_sync_mode(true);
+    session.set_sync_mode(false);
+
+    assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncBegin)));
+    assert!(matches!(rx.try_recv(), Ok(SessionClientEvent::SyncEnd)));
+    assert!(matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)));
+}
+
+/// Runs bytes through the real `VirtualScreen` performer and applies the
+/// resulting `SyncEvent`s exactly as the PTY read loop does (`src/pty.rs`).
+fn drive_screen_sync(session: &Session, bytes: &[u8]) {
+    let events = {
+        let mut screen = session.screen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        screen.feed(bytes);
+        screen.drain_sync_events()
+    };
+    for event in events {
+        match event {
+            crate::vt_screen::SyncEvent::Start => session.set_sync_mode(true),
+            crate::vt_screen::SyncEvent::Stop => session.set_sync_mode(false),
+        }
+    }
+}
+
+fn count_sync_events(rx: &mut mpsc::Receiver<SessionClientEvent>) -> (usize, usize) {
+    let (mut begins, mut ends) = (0, 0);
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            SessionClientEvent::SyncBegin => begins += 1,
+            SessionClientEvent::SyncEnd => ends += 1,
+            _ => {}
+        }
+    }
+    (begins, ends)
+}
+
+/// Issue #318: the Codex CLI 0.156.0 launch frame opens with a nested
+/// `CSI ?2026h` pair.
+/// The performer faithfully emits Start for every occurrence, so without an
+/// idempotent enable the wire carried `begin, begin, end` and the frontend's
+/// depth counter ended at 1 - holding every later write in its transaction
+/// buffer and freezing the pane permanently.
+#[test]
+fn nested_sync_enable_emits_exactly_one_sync_begin() {
+    let session = stub_session();
+    let (_id, mut rx) = add_ready_client(&session);
+
+    drive_screen_sync(&session, b"\x1b[?2026h\x1b[?2026hX\x1b[?2026l\x1b[?2026l");
+
+    assert_eq!(count_sync_events(&mut rx), (1, 1));
+}
+
+/// Same wedge, second path: `CSI ?2026;2026h` carries the mode twice in one
+/// sequence, and the performer's `for &p in &ps` loop pushes a Start per param.
+#[test]
+fn multi_param_sync_enable_emits_exactly_one_sync_begin() {
+    let session = stub_session();
+    let (_id, mut rx) = add_ready_client(&session);
+
+    drive_screen_sync(&session, b"\x1b[?2026;2026h");
+
+    assert_eq!(count_sync_events(&mut rx), (1, 0));
+}
+
 #[tokio::test]
 async fn kill_and_remove_notifies_attention_ledger_with_a_single_removal_delta() {
     let manager = Arc::new(SessionManager::new());

@@ -188,6 +188,56 @@ export function createUrlLinkProvider(callbacks: UrlLinkProviderCallbacks) {
   }
 }
 
+export interface FilePathLinkProviderCallbacks {
+  /** Terminal text of the 1-based buffer line, or undefined when absent. */
+  readLine: (bufferLineNumber: number) => string | undefined
+  /** Any activation (left click) on a detected path. */
+  onOpen: (path: string, x: number, y: number) => void
+  /** Pointer hover tracking; null on leave. */
+  onHover: (path: string | null) => void
+}
+
+/**
+ * File-path link provider shared by the terminal panes. Factored out of
+ * `attach` alongside `createUrlLinkProvider` so the detection regex and the
+ * hover bookkeeping are unit-testable without a live xterm instance.
+ */
+export function createFilePathLinkProvider(callbacks: FilePathLinkProviderCallbacks) {
+  return {
+    provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void) => {
+      const text = callbacks.readLine(bufferLineNumber)
+      if (text === undefined) {
+        callback(undefined)
+        return
+      }
+      const regex = /(?:^|\s)((?:\/|\.\/|~\/)[^\s:]+)/g
+      const links: any[] = []
+      let match
+      while ((match = regex.exec(text)) !== null) {
+        const path = match[1]
+        const startX = match.index + (match[0].length - path.length)
+        links.push({
+          range: {
+            start: { x: startX + 1, y: bufferLineNumber },
+            end: { x: startX + path.length + 1, y: bufferLineNumber },
+          },
+          text: path,
+          activate: (event: MouseEvent) => {
+            callbacks.onOpen(path, event.clientX, event.clientY)
+          },
+          hover: () => {
+            callbacks.onHover(path)
+          },
+          leave: () => {
+            callbacks.onHover(null)
+          },
+        })
+      }
+      callback(links.length > 0 ? links : undefined)
+    },
+  }
+}
+
 export class TerminalInstance {
   paneId: string
   xterm: XTerm | null = null
@@ -317,6 +367,7 @@ export class TerminalInstance {
   onConnect: (() => void) | null = null
   onDisconnect: (() => void) | null = null
   onFileClick: ((path: string, x?: number, y?: number) => void) | null = null
+  onFileLinkHover: ((path: string | null) => void) | null = null
   onPreviewLink: ((url: string, x?: number, y?: number) => void) | null = null
   onPreviewLinkOpen: ((url: string) => void) | null = null
   onPreviewLinkHover: ((url: string | null) => void) | null = null
@@ -699,34 +750,20 @@ export class TerminalInstance {
     }
 
     // Register file path link provider
-    this.xterm.registerLinkProvider({
-      provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void) => {
-        const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
-        if (!line) {
-          callback(undefined)
-          return
-        }
-        const text = line.translateToString()
-        const regex = /(?:^|\s)((?:\/|\.\/|~\/)[^\s:]+)/g
-        const links: any[] = []
-        let match
-        while ((match = regex.exec(text)) !== null) {
-          const path = match[1]
-          const startX = match.index + (match[0].length - match[1].length)
-          links.push({
-            range: {
-              start: { x: startX + 1, y: bufferLineNumber },
-              end: { x: startX + path.length + 1, y: bufferLineNumber },
-            },
-            text: path,
-            activate: (event: MouseEvent) => {
-              this.onFileClick?.(path, event.clientX, event.clientY)
-            },
-          })
-        }
-        callback(links.length > 0 ? links : undefined)
-      },
-    })
+    this.xterm.registerLinkProvider(
+      createFilePathLinkProvider({
+        readLine: (bufferLineNumber) => {
+          const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
+          return line?.translateToString()
+        },
+        onOpen: (path, x, y) => {
+          this.onFileClick?.(path, x, y)
+        },
+        onHover: (path) => {
+          this.onFileLinkHover?.(path)
+        },
+      })
+    )
 
     // Register URL link provider (localhost → preview, others → new tab)
     this.xterm.registerLinkProvider(

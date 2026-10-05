@@ -187,7 +187,7 @@ mod tests {
             "paneId": "p1"
         });
         let leaves = collect_terminal_leaves_with_cwd(&layout);
-        assert!(leaves.is_empty());
+        assert_eq!(leaves, [] as [(String, Option<String>); 0]);
     }
 
     #[test]

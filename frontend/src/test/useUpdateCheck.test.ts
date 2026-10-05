@@ -307,6 +307,81 @@ describe('useUpdateCheck', () => {
     })
   })
 
+  it('falls back to a fresh download when the installer is gone from its path', async () => {
+    apiMocks.authFetch.mockResolvedValue(
+      new Response(JSON.stringify(availableResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+    transportMocks.isTauri = true
+    const { useUpdateCheck } = await freshUpdateCheck()
+    const update = useUpdateCheck()
+    await update.start()
+    await update.startDownload()
+    expect(update.downloadStatus.value).toBe('done')
+
+    // The Rust side rejects before it reaches the file manager.
+    transportMocks.tauriInvoke.mockRejectedValueOnce('not_a_file')
+    await expect(update.revealDownloadedFile()).resolves.toBe(false)
+
+    expect(update.downloadedFileActionError.value).toBe('missing_file')
+    // The stale `done` panel gives way to a download button instead of staying
+    // on screen with two buttons that cannot do anything.
+    expect(update.downloadStatus.value).toBe('idle')
+    expect(update.downloadedPath.value).toBe('')
+
+    await update.startDownload()
+    expect(update.downloadedFileActionError.value).toBe('')
+    expect(update.downloadStatus.value).toBe('done')
+  })
+
+  it('reports a failed file manager without dropping the recorded path', async () => {
+    apiMocks.authFetch.mockResolvedValue(
+      new Response(JSON.stringify(availableResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+    transportMocks.isTauri = true
+    const { useUpdateCheck } = await freshUpdateCheck()
+    const update = useUpdateCheck()
+    await update.start()
+    await update.startDownload()
+
+    transportMocks.tauriInvoke.mockRejectedValueOnce('io_error: Operation not permitted')
+    await expect(update.openDownloadedFile()).resolves.toBe(false)
+
+    // Not the same thing as a missing installer: the file may still be there,
+    // so the path stays and only the message changes.
+    expect(update.downloadedFileActionError.value).toBe('failed')
+    expect(update.downloadStatus.value).toBe('done')
+    expect(update.downloadedPath.value).toBe('/tmp/Dinotty_0.21.0_aarch64.dmg')
+  })
+
+  it('surfaces a finished download that recorded no path', async () => {
+    apiMocks.authFetch.mockResolvedValue(
+      new Response(JSON.stringify(availableResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+    transportMocks.isTauri = true
+    const { useUpdateCheck } = await freshUpdateCheck()
+    const update = useUpdateCheck()
+    await update.start()
+
+    transportMocks.tauriInvoke.mockResolvedValueOnce({})
+    await update.startDownload()
+    expect(update.downloadStatus.value).toBe('done')
+    expect(update.downloadedPath.value).toBe('')
+
+    transportMocks.tauriInvoke.mockClear()
+    await expect(update.openDownloadedFile()).resolves.toBe(false)
+    expect(transportMocks.tauriInvoke).not.toHaveBeenCalled()
+    expect(update.downloadedFileActionError.value).toBe('missing_file')
+  })
+
   it('exposes an available update prompt only once', async () => {
     apiMocks.authFetch.mockResolvedValue(
       new Response(JSON.stringify(availableResponse), {

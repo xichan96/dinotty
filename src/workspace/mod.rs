@@ -18,12 +18,13 @@ pub use syntax::{workspace_syntax_check, SyntaxCheckBody, SyntaxCheckResponse, S
 pub use handlers::{
     reveal_in_file_manager, workspace_create_entry, workspace_cwd, workspace_delete,
     workspace_list, workspace_meta, workspace_move, workspace_put_file, workspace_raw,
-    workspace_rename, workspace_resolve, workspace_reveal, workspace_search,
+    workspace_rename, workspace_resolve, workspace_resolve_abs, workspace_reveal, workspace_search,
 };
 pub use types::{
     CreateEntryBody, CreateEntryQuery, DirEntry, ListResponse, MetaResponse, MoveBody,
-    PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveQuery, ResolveResponse, SearchMatch,
-    SearchResponse, UploadQuery, WorkspaceListQuery, WorkspaceSearchBody,
+    PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveAbsResponse, ResolveQuery,
+    ResolveResponse, SearchMatch, SearchResponse, UploadQuery, WorkspaceListQuery,
+    WorkspaceSearchBody,
 };
 pub use upload::{
     uploads_adopt, uploads_clear, uploads_default_dir, uploads_status, workspace_upload,

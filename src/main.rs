@@ -467,7 +467,16 @@ async fn main() {
             )
             .route("/api/log", get(settings::get_log))
             .route("/api/locales", get(settings::get_locales).post(settings::post_locale))
+            // Static segments outrank `/api/locales/:tag` below, so
+            // `GET /api/locales/registry` is the listing and never a pack
+            // that happens to be named "registry".
+            .route("/api/locales/registry", get(settings::get_locale_registry))
+            .route("/api/locales/fetch", post(settings::fetch_locale))
             .route("/api/locales/:tag", delete(settings::delete_locale))
+            .route("/api/themes", get(settings::get_themes).post(settings::post_theme))
+            .route("/api/themes/registry", get(settings::get_theme_registry))
+            .route("/api/themes/install/:id", post(settings::install_registry_theme))
+            .route("/api/themes/:id", delete(settings::delete_theme))
             .route(
                 "/api/templates",
                 get(templates::list_templates).post(templates::create_template),
@@ -480,6 +489,7 @@ async fn main() {
                     .delete(templates::delete_template),
             )
             .route("/api/workspace/resolve", get(workspace::workspace_resolve))
+            .route("/api/workspace/resolve_abs", get(workspace::workspace_resolve_abs))
             .route("/api/workspace/list", get(workspace::workspace_list))
             .route("/api/workspace/meta", get(workspace::workspace_meta))
             .route("/api/workspace/raw", get(workspace::workspace_raw))

@@ -10,6 +10,13 @@
         <button type="button" :disabled="atCap" @click.stop="openImport">
           {{ t('settings.theme.import') }}
         </button>
+        <!-- Import adds to this user's own library (editable, capped at 15).
+             Install writes a theme file to the server for every device to use
+             (read-only here, uncapped). Two different destinations, so two
+             different buttons rather than one that guesses. -->
+        <button type="button" :disabled="themePacks.importing" @click.stop="openInstall">
+          {{ themePacks.importing ? t('settings.theme.installing') : t('settings.theme.install') }}
+        </button>
         <button type="button" @click.stop="exportCurrentTheme">
           {{ t('settings.theme.exportTheme') }}
         </button>
@@ -19,6 +26,13 @@
           type="file"
           accept=".conf,.txt,.json"
           @change="onFile"
+        />
+        <input
+          ref="installInput"
+          class="theme-file-input"
+          type="file"
+          accept=".json,.conf"
+          @change="onInstallFile"
         />
       </div>
       <div class="theme-manager-count">
@@ -40,12 +54,20 @@
       </button>
     </div>
 
+    <div v-if="installError" class="theme-manager-error">{{ installError }}</div>
+    <div v-if="installNotice" class="theme-manager-notice">{{ installNotice }}</div>
+    <div v-if="themePacks.lastError" class="theme-manager-error">{{ themePacks.lastError }}</div>
+    <p v-for="pack in themePacks.rejected" :key="pack.file" class="theme-manager-error">
+      {{ t('settings.theme.invalidPack', { file: pack.file }) }} — {{ pack.errors.join('; ') }}
+    </p>
+
     <div class="theme-grid">
       <div
         v-for="item in themeItems"
         :key="item.key"
         class="theme-card"
         :class="{ active: item.active }"
+        :data-kind="item.kind"
         role="button"
         tabindex="0"
         @click.stop="selectItem(item)"
@@ -97,17 +119,82 @@
           </div>
         </div>
         <span class="theme-name">{{ item.label }}</span>
+        <!-- A builtin and an installed theme can legitimately share a name, so
+             the card has to say which one it is. -->
+        <span v-if="item.kind === 'installed'" class="theme-card-badge">
+          {{ t('settings.theme.installedBadge') }}
+        </span>
         <div class="theme-card-actions">
-          <button type="button" @click.stop="openEdit(item)">
+          <!-- An installed theme is not ours to edit: it lives on the server as
+               a file, and editing it here would fork it into a custom theme
+               instead. Hidden rather than disabled so the card stays honest. -->
+          <button v-if="item.kind !== 'installed'" type="button" @click.stop="openEdit(item)">
             {{ t('settings.theme.edit') }}
           </button>
           <button
             v-if="item.deletable"
             type="button"
             :class="{ confirm: pendingDeleteKey === item.key }"
+            :disabled="themePacks.removing === item.id"
             @click.stop="deleteItem(item)"
           >
-            {{ t('settings.theme.delete') }}<span v-if="pendingDeleteKey === item.key">?</span>
+            {{
+              item.kind === 'installed'
+                ? themePacks.removing === item.id
+                  ? t('settings.theme.removing')
+                  : t('settings.theme.remove')
+                : t('settings.theme.delete')
+            }}<span v-if="pendingDeleteKey === item.key">?</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="theme-manager-installed-head">
+      <span class="settings-hint">{{ t('settings.theme.installedHint') }}</span>
+      <!-- Deliberately user-initiated: opening the appearance tab must not hit
+           the server on its own. -->
+      <button type="button" :disabled="themePacks.loading" @click.stop="reloadInstalled">
+        {{ themePacks.loading ? t('settings.theme.reloading') : t('settings.theme.reload') }}
+      </button>
+    </div>
+
+    <div class="theme-store">
+      <div class="theme-store-head">
+        <h4 class="theme-store-title">{{ t('settings.theme.store') }}</h4>
+        <button type="button" :disabled="themePacks.registryLoading" @click.stop="browseStore">
+          {{
+            themePacks.registryLoading
+              ? t('settings.theme.storeLoading')
+              : t('settings.theme.storeBrowse')
+          }}
+        </button>
+      </div>
+      <p v-if="storeError" class="theme-manager-error">{{ storeError }}</p>
+      <!-- Unset is the shipped default, not a fault: say so plainly. -->
+      <p
+        v-else-if="themePacks.registry !== null && !themePacks.registryConfigured"
+        class="settings-hint"
+      >
+        {{ t('settings.theme.storeUnconfigured') }}
+      </p>
+      <p v-else-if="themePacks.registry?.length === 0" class="settings-hint">
+        {{ t('settings.theme.storeEmpty') }}
+      </p>
+      <div v-if="themePacks.registry?.length" class="theme-store-list">
+        <div v-for="entry in themePacks.registry" :key="entry.id" class="theme-store-row">
+          <span class="theme-store-name">{{ entry.name }}</span>
+          <span v-if="entry.version" class="theme-store-version">{{ entry.version }}</span>
+          <button
+            type="button"
+            :disabled="themePacks.installing !== null"
+            @click.stop="installStoreTheme(entry.id)"
+          >
+            {{
+              themePacks.installing === entry.id
+                ? t('settings.theme.storeInstalling')
+                : t('settings.theme.storeInstall')
+            }}
           </button>
         </div>
       </div>
@@ -140,6 +227,14 @@ import {
   type SavedTheme,
   type ThemeColors,
 } from '../../composables/useDeviceThemeSelection'
+import {
+  installFromRegistry,
+  installThemePack,
+  loadThemePacks,
+  loadThemeRegistry,
+  removeThemePack,
+  themePacks,
+} from '../../composables/useThemePacks'
 import { randomId } from '../../utils/id'
 import { parseThemeFile } from '../../utils/themeImport'
 import { downloadTheme } from '../../utils/themeTemplate'
@@ -169,9 +264,11 @@ const ANSI_KEYS = [
 
 interface ThemeItem {
   key: string
-  kind: 'builtin' | 'custom'
+  kind: 'builtin' | 'custom' | 'installed'
   name?: string
   uuid?: string
+  /** Set only for `installed`, where the id is the server-side filename. */
+  id?: string
   label: string
   colors: Record<string, string>
   deletable: boolean
@@ -184,9 +281,24 @@ const { t, themeLabel } = useI18n()
 
 const pendingDeleteKey = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const installInput = ref<HTMLInputElement | null>(null)
 const importErrors = ref<string[]>([])
 const libraryError = ref('')
 const importedUuid = ref<string | null>(null)
+/** Failure and success of the server-side install actions, which are not part
+ *  of the local library and so must not be reported as library problems. */
+const installError = ref('')
+const installNotice = ref('')
+const storeError = ref('')
+
+// The list is loaded once at startup (so a device showing an installed theme
+// gets it on first paint) and refreshed by the actions below. There is no
+// fetch on mount: rendering the appearance tab must not talk to the server, and
+// this button is the recovery path when the startup fetch did not land.
+async function reloadInstalled() {
+  libraryError.value = ''
+  await loadThemePacks()
+}
 
 function extractColors(full: Record<string, string>): ThemeColors {
   return {
@@ -199,6 +311,10 @@ function extractColors(full: Record<string, string>): ThemeColors {
 
 function previewColors(item: ThemeItem): Record<string, string> {
   if (item.kind === 'builtin') return getThemeByName(item.name!).colors
+  if (item.kind === 'installed') {
+    const installed = themePacks.installed.find((theme) => theme.id === item.id)
+    return installed ? buildCustomThemeColors(installed) : item.colors
+  }
   const saved = settings.custom_themes.find((theme) => theme.uuid === item.uuid)
   return saved ? buildCustomThemeColors(saved) : item.colors
 }
@@ -221,6 +337,7 @@ const themeItems = computed<ThemeItem[]>(() => {
       : null
     : settings.theme.preset
   const activeUuid = selection?.kind === 'custom' ? selection.uuid : null
+  const activeInstalledId = selection?.kind === 'installed' ? selection.id : null
   const items: ThemeItem[] = []
 
   const builtinItem = (name: string, deletable: boolean, isBase: boolean): ThemeItem => ({
@@ -252,10 +369,29 @@ const themeItems = computed<ThemeItem[]>(() => {
       active: activeUuid === saved.uuid,
     })
   }
+  // Installed themes last: they are a separate source, and grouping them keeps
+  // "mine" and "this server's" visually distinct.
+  for (const installed of themePacks.installed) {
+    items.push({
+      key: `i:${installed.id}`,
+      kind: 'installed',
+      id: installed.id,
+      name: installed.name,
+      label: installed.name,
+      colors: buildCustomThemeColors(installed),
+      deletable: true,
+      isBase: false,
+      active: activeInstalledId === installed.id,
+    })
+  }
   return items
 })
 
-const visibleCount = computed(() => themeItems.value.length)
+// The cap bounds `custom_themes`, so installed themes must not count toward it
+// — otherwise installing a few would disable "New theme" for no reason.
+const visibleCount = computed(
+  () => themeItems.value.filter((item) => item.kind !== 'installed').length
+)
 const atCap = computed(() => visibleCount.value >= VISIBLE_CAP)
 
 const editor = reactive<{
@@ -294,11 +430,9 @@ async function commitLibrary(op: () => void) {
 
 function selectItem(item: ThemeItem) {
   pendingDeleteKey.value = null
-  setThemeSelection(
-    item.kind === 'builtin'
-      ? { kind: 'builtin', name: item.name! }
-      : { kind: 'custom', uuid: item.uuid! }
-  )
+  if (item.kind === 'builtin') setThemeSelection({ kind: 'builtin', name: item.name! })
+  else if (item.kind === 'installed') setThemeSelection({ kind: 'installed', id: item.id! })
+  else setThemeSelection({ kind: 'custom', uuid: item.uuid! })
 }
 
 async function deleteItem(item: ThemeItem) {
@@ -310,7 +444,17 @@ async function deleteItem(item: ThemeItem) {
 
   pendingDeleteKey.value = null
   const selection = getThemeSelection()
-  if (item.kind === 'builtin') {
+
+  if (item.kind === 'installed') {
+    // Removing is a server call, not a settings write: it takes the file out
+    // of the directory every device reads from, so there is no optimistic
+    // local edit to make and no library to rebase.
+    const result = await removeThemePack(item.id!)
+    if (!result.ok) {
+      libraryError.value = result.error
+      return
+    }
+  } else if (item.kind === 'builtin') {
     await commitLibrary(() => {
       if (!settings.hidden_builtins.includes(item.name!)) settings.hidden_builtins.push(item.name!)
     })
@@ -322,11 +466,56 @@ async function deleteItem(item: ThemeItem) {
 
   const wasActive =
     (item.kind === 'builtin' && selection?.kind === 'builtin' && selection.name === item.name) ||
-    (item.kind === 'custom' && selection?.kind === 'custom' && selection.uuid === item.uuid)
+    (item.kind === 'custom' && selection?.kind === 'custom' && selection.uuid === item.uuid) ||
+    (item.kind === 'installed' && selection?.kind === 'installed' && selection.id === item.id)
   if (wasActive) {
     clearThemeSelection()
     applyCurrentTheme()
   }
+}
+
+function openInstall() {
+  pendingDeleteKey.value = null
+  libraryError.value = ''
+  installError.value = ''
+  installNotice.value = ''
+  installInput.value?.click()
+}
+
+async function onInstallFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  installError.value = ''
+  installNotice.value = ''
+  if (!file) return
+  try {
+    const result = await installThemePack(await file.text(), file.name)
+    if (!result.ok) {
+      installError.value = result.error
+      return
+    }
+    installNotice.value = t('settings.theme.installed', { name: result.name })
+  } finally {
+    input.value = ''
+  }
+}
+
+async function browseStore() {
+  storeError.value = ''
+  await loadThemeRegistry()
+  // The server reports an unreachable registry in the body, not as a throw.
+  if (themePacks.registryError) storeError.value = themePacks.registryError
+}
+
+async function installStoreTheme(id: string) {
+  storeError.value = ''
+  installNotice.value = ''
+  const result = await installFromRegistry(id)
+  if (!result.ok) {
+    storeError.value = result.error
+    return
+  }
+  installNotice.value = t('settings.theme.installed', { name: result.name })
 }
 
 function uniqueName(base: string): string {
@@ -337,6 +526,9 @@ function uniqueName(base: string): string {
   }
   for (const name of settings.hidden_builtins) names.add(name)
   for (const theme of settings.custom_themes) names.add(theme.name)
+  // Installed names too: a custom theme that shadowed one would make the grid
+  // show the same label twice with no way to tell which is which.
+  for (const theme of themePacks.installed) names.add(theme.name)
   if (!names.has(base)) return base
   let suffix = 2
   while (names.has(`${base} (${suffix})`)) suffix += 1
@@ -522,9 +714,127 @@ function applyImportedTheme() {
   color: var(--danger);
 }
 
-.theme-manager-error {
+.theme-manager-error,
+.theme-manager-notice,
+.theme-manager-hint {
   margin: 8px 0;
   font-size: 12px;
+}
+
+.theme-manager-notice {
+  color: var(--accent);
+}
+
+.theme-manager-hint {
+  color: var(--fg-muted);
+}
+
+.theme-card-badge {
+  display: block;
+  padding: 0 8px 4px;
+  color: var(--accent);
+  font-size: 9px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.theme-manager-installed-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.theme-manager-installed-head .settings-hint {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.theme-manager-installed-head button {
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.theme-manager-installed-head button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.theme-manager-installed-head button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.theme-store {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.theme-store-head,
+.theme-store-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.theme-store-head {
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.theme-store-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.theme-store-row {
+  padding: 4px 0;
+}
+
+.theme-store-name {
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-store-version {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.theme-store-head button,
+.theme-store-row button {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.theme-store-head button:hover:not(:disabled),
+.theme-store-row button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.theme-store-head button:disabled,
+.theme-store-row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .theme-manager-error ul {

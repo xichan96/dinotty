@@ -27,6 +27,12 @@ const toastMocks = vi.hoisted(() => ({
 
 const transportMocks = vi.hoisted(() => ({
   isTauri: vi.fn(() => false),
+  tauriInvoke: vi.fn(async () => undefined),
+}))
+
+const apiBaseMocks = vi.hoisted(() => ({
+  getApiBase: vi.fn(async () => {}),
+  authFetch: vi.fn(async () => ({ ok: true, json: async () => ({ abs: '/abs/resolved' }) })),
 }))
 
 const externalUrlMocks = vi.hoisted(() => ({ openUrlInSystemBrowser: vi.fn() }))
@@ -39,7 +45,14 @@ vi.mock('../composables/useAppForeground', () => ({ getIsAppForeground: () => fa
 vi.mock('../composables/useNotification', () => ({ markPaneReadIfUnread: vi.fn() }))
 vi.mock('../composables/useTransport', () => ({
   isTauri: transportMocks.isTauri,
+  tauriInvoke: transportMocks.tauriInvoke,
   createTransport: vi.fn(),
+}))
+vi.mock('../composables/apiBase', () => ({
+  getApiBase: apiBaseMocks.getApiBase,
+  authFetch: apiBaseMocks.authFetch,
+  apiUrl: (path: string) => path,
+  hasAuthToken: () => false,
 }))
 vi.mock('../utils/openExternalUrl', () => ({
   openUrlInSystemBrowser: externalUrlMocks.openUrlInSystemBrowser,
@@ -70,6 +83,9 @@ function menuProps(wrapper: ReturnType<typeof mountPane>) {
 beforeEach(() => {
   paneMocks.instances.length = 0
   externalUrlMocks.openUrlInSystemBrowser.mockReset()
+  apiBaseMocks.authFetch.mockClear()
+  transportMocks.tauriInvoke.mockClear()
+  toastMocks.error.mockClear()
 })
 
 describe('TerminalPane link click behavior (#306)', () => {
@@ -81,11 +97,7 @@ describe('TerminalPane link click behavior (#306)', () => {
 
     terminal.onPreviewLinkOpen('https://example.com/docs')
 
-    expect(open).toHaveBeenCalledWith(
-      'https://example.com/docs',
-      '_blank',
-      'noopener,noreferrer'
-    )
+    expect(open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
     expect(externalUrlMocks.openUrlInSystemBrowser).not.toHaveBeenCalled()
     expect(wrapper.emitted('linkActivate')).toHaveLength(1)
     expect(menuProps(wrapper).visible).toBe(false)
@@ -101,9 +113,7 @@ describe('TerminalPane link click behavior (#306)', () => {
 
     terminal.onPreviewLinkOpen('https://example.com/docs')
 
-    expect(externalUrlMocks.openUrlInSystemBrowser).toHaveBeenCalledWith(
-      'https://example.com/docs'
-    )
+    expect(externalUrlMocks.openUrlInSystemBrowser).toHaveBeenCalledWith('https://example.com/docs')
     expect(open).not.toHaveBeenCalled()
     open.mockRestore()
     wrapper.unmount()
@@ -161,6 +171,62 @@ describe('TerminalPane link click behavior (#306)', () => {
     await nextTick()
 
     expect(menuProps(wrapper).linkType).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('makes right-click file-aware when the pointer hovered a file path', async () => {
+    const wrapper = mountPane()
+    const terminal = paneMocks.instances[0]
+
+    terminal.onFileLinkHover('/var/log/system.log')
+    ;(wrapper.vm as any).onContextMenu({ clientX: 120, clientY: 80 })
+    await nextTick()
+
+    const props = menuProps(wrapper)
+    expect(props.visible).toBe(true)
+    expect(props.linkType).toBe('file')
+    expect(props.linkTarget).toBe('/var/log/system.log')
+    wrapper.unmount()
+  })
+
+  it('forgets the hovered file path on leave', async () => {
+    const wrapper = mountPane()
+    const terminal = paneMocks.instances[0]
+
+    terminal.onFileLinkHover('/var/log/system.log')
+    terminal.onFileLinkHover(null)
+    ;(wrapper.vm as any).onContextMenu({ clientX: 120, clientY: 80 })
+    await nextTick()
+
+    expect(menuProps(wrapper).linkType).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('resolves and reveals the path through the Tauri command on revealFile', async () => {
+    transportMocks.isTauri.mockReturnValue(true)
+    const wrapper = mountPane()
+
+    wrapper.findComponent(TerminalContextMenu).vm.$emit('revealFile', '~/notes.md')
+    await vi.waitFor(() => expect(transportMocks.tauriInvoke).toHaveBeenCalled())
+
+    expect(apiBaseMocks.authFetch).toHaveBeenCalledWith(
+      '/api/workspace/resolve_abs?' + new URLSearchParams({ pane_id: 'p1', path: '~/notes.md' })
+    )
+    expect(transportMocks.tauriInvoke).toHaveBeenCalledWith('reveal_path', {
+      path: '/abs/resolved',
+    })
+    expect(toastMocks.error).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('toasts instead of invoking when resolution fails', async () => {
+    apiBaseMocks.authFetch.mockResolvedValueOnce({ ok: false, status: 404 } as any)
+    const wrapper = mountPane()
+
+    wrapper.findComponent(TerminalContextMenu).vm.$emit('revealFile', '/gone')
+    await vi.waitFor(() => expect(toastMocks.error).toHaveBeenCalled())
+
+    expect(transportMocks.tauriInvoke).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

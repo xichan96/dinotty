@@ -135,7 +135,7 @@ fn action_keyboard_normalize_obeys_absence_and_empty_contract() {
         r#"{"rows":[],"bottom":{"rows":[],"enter":{"label":"Go","kind":"send","send":"\r"}}}"#,
     );
     explicit_empty.normalize();
-    assert!(explicit_empty.bottom.as_ref().unwrap().rows.is_empty());
+    assert_eq!(explicit_empty.bottom.as_ref().unwrap().rows, [] as [Vec<ActionKey>; 0]);
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn action_keyboard_normalize_applies_kind_contract() {
     assert_eq!(keys[2].send, "keep");
     assert_eq!(keys[2].auto_enter, Some(true));
 
-    assert!(keys[3].send.is_empty());
+    assert_eq!(keys[3].send, "");
     assert!(keys[3].special.is_none());
     assert!(keys[3].repeat);
     assert_eq!(keys[3].auto_enter, None);
@@ -253,7 +253,7 @@ fn action_keyboard_normalize_applies_kind_contract() {
     assert_eq!(serde_json::to_value(&keys[4]).unwrap()["auto_enter"], true);
     assert_eq!(serde_json::to_value(&keys[5]).unwrap()["auto_enter"], false);
 
-    assert!(keys[6].send.is_empty());
+    assert_eq!(keys[6].send, "");
     assert_eq!(keys[6].special.as_deref(), Some("bookmarks"));
 }
 

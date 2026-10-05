@@ -33,6 +33,11 @@ const SHARED: &[&str] = &[
     // from a phone, so a server-only copy means the feature is invisible in the
     // desktop app, and vice versa.
     "/api/locales/:tag",
+    // Installing from a remote registry. Same argument as the upload above: the
+    // pack is fetched by *this* process, so whichever process is missing the
+    // route simply cannot install from the registry.
+    "/api/locales/registry",
+    "/api/locales/fetch",
     // Settings and the background image are the precedent this route follows.
     "/api/settings",
     "/api/settings/background",

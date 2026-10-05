@@ -464,7 +464,7 @@ mod tests {
         let pwsh_args = shell_args("pwsh.exe");
         assert_eq!(pwsh_args[0], "-NoLogo");
         assert!(pwsh_args.iter().any(|arg| arg.contains("DinottyOriginalPrompt")));
-        assert!(shell_args("cmd.exe").is_empty());
+        assert_eq!(shell_args("cmd.exe"), [] as [String; 0]);
     }
 
     #[cfg(windows)]

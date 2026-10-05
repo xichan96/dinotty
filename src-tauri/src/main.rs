@@ -650,6 +650,23 @@ fn set_window_title(title: String, window: tauri::Window) -> Result<(), String> 
     window.set_title(&title).map_err(|e| e.to_string())
 }
 
+/// Opens an absolute local path from the terminal context menu. Unlike
+/// `update_download::reveal_downloaded_file` this accepts directories too —
+/// terminal output names both files and directories. A directory opens itself
+/// (revealing it would only select it inside its parent); a file is revealed
+/// selected in its containing folder.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let path = std::path::Path::new(&path);
+    if !path.is_absolute() || !path.exists() {
+        return Err("not_found".into());
+    }
+    if path.is_dir() {
+        return update_download::open_path(path).map_err(|e| e.to_string());
+    }
+    dinotty_server::workspace::reveal_in_file_manager(path).map_err(|e| e.to_string())
+}
+
 fn main() {
     #[cfg(target_os = "macos")]
     dinotty_server::platform::terminal_env::prime_direct_command_path();
@@ -838,6 +855,7 @@ fn main() {
             autostart::autostart_status,
             autostart::set_autostart,
             set_window_title,
+            reveal_path,
         ])
         .build(context)
         .expect("error building tauri application")

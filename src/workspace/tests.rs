@@ -570,3 +570,60 @@ fn parse_rg_json_handles_multibyte_line() {
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].column, 2);
 }
+
+async fn resolve_abs_request(
+    manager: Arc<SessionManager>,
+    pane_id: &str,
+    path: &str,
+) -> axum::response::Response {
+    workspace_resolve_abs(
+        State(manager),
+        axum::extract::Query(ResolveQuery { pane_id: pane_id.into(), path: path.into() }),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn workspace_resolve_abs_resolves_path_outside_workspace_root() {
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let outside_file = outside.path().join("note.txt");
+    fs::write(&outside_file, b"x").unwrap();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.path().to_path_buf()));
+
+    let response = resolve_abs_request(manager, "p1", outside_file.to_str().unwrap()).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    // The handler returns a dunce-simplified path; on Windows canonicalize()
+    // alone yields the \\?\ extended-length form, which would never match.
+    let expected = dunce::canonicalize(&outside_file).unwrap();
+    assert_eq!(json["abs"].as_str(), Some(expected.to_string_lossy().as_ref()));
+}
+
+#[tokio::test]
+async fn workspace_resolve_abs_resolves_relative_against_session_root() {
+    let root = TempDir::new().unwrap();
+    fs::write(root.path().join("a.txt"), b"x").unwrap();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.path().to_path_buf()));
+
+    let response = resolve_abs_request(manager, "p1", "./a.txt").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_json(response).await;
+    let expected = dunce::canonicalize(root.path().join("a.txt")).unwrap();
+    assert_eq!(json["abs"].as_str(), Some(expected.to_string_lossy().as_ref()));
+}
+
+#[tokio::test]
+async fn workspace_resolve_abs_rejects_missing_path() {
+    let root = TempDir::new().unwrap();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.path().to_path_buf()));
+
+    let response = resolve_abs_request(manager, "p1", "/definitely/not/here").await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

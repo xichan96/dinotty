@@ -642,7 +642,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(created.len(), 0, "web leaf should not create PTY");
-        assert!(warnings.is_empty());
+        assert_eq!(warnings, [] as [String; 0]);
         assert_ne!(layout.get("paneId").and_then(|v| v.as_str()), Some("orig"));
         // url preserved
         assert_eq!(layout.get("url").and_then(|v| v.as_str()), Some("http://localhost:5173"));
@@ -680,7 +680,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(layout.get("load_error"), None, "no load_error for installed plugin");
-        assert!(warnings.is_empty());
+        assert_eq!(warnings, [] as [String; 0]);
     }
 
     #[test]

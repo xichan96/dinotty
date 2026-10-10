@@ -18,6 +18,8 @@ export interface ServerEntry {
   hasToken: boolean
   group?: string | null
   lastSeenVersion?: string | null
+  /** Host-owned identity only; plugin configuration is private to the plugin. */
+  transport?: { pluginId: string; transportId: string } | null
   /** The host we are already running on - not stored in settings. */
   local: boolean
 }
@@ -32,6 +34,7 @@ const localEntry: ServerEntry = {
   hasToken: true,
   group: null,
   lastSeenVersion: null,
+  transport: null,
   local: true,
 }
 
@@ -49,6 +52,10 @@ function normalize(raw: any): ServerEntry | null {
     hasToken: !!raw?.has_token,
     group: raw?.group ?? null,
     lastSeenVersion: raw?.last_seen_version ?? null,
+    transport:
+      typeof raw?.transport?.plugin_id === 'string' && typeof raw?.transport?.transport_id === 'string'
+        ? { pluginId: raw.transport.plugin_id, transportId: raw.transport.transport_id }
+        : null,
     local: false,
   }
 }

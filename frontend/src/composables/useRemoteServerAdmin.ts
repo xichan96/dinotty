@@ -46,6 +46,8 @@ export interface RemoteServerDraft {
   group: string | null
   /** Read-only passthrough, same reason. */
   lastSeenVersion: string | null
+  /** Host-owned identity only; plugin configuration stays in plugin storage. */
+  transport?: { pluginId: string; transportId: string } | null
   hasToken: boolean
   /** Raw text in the field. `''` means "typed nothing". */
   tokenInput: string
@@ -62,6 +64,7 @@ export function draftFromEntry(entry: ServerEntry): RemoteServerDraft {
     url: entry.url,
     group: entry.group ?? null,
     lastSeenVersion: entry.lastSeenVersion ?? null,
+    transport: entry.transport ?? null,
     hasToken: entry.hasToken,
     tokenInput: '',
     tokenDirty: false,
@@ -77,6 +80,7 @@ export function newDraft(): RemoteServerDraft {
     url: '',
     group: null,
     lastSeenVersion: null,
+    transport: null,
     hasToken: false,
     tokenInput: '',
     tokenDirty: false,
@@ -119,6 +123,12 @@ export function serializeDraft(draft: RemoteServerDraft): Record<string, unknown
     url: draft.url.trim(),
     group: draft.group,
     last_seen_version: draft.lastSeenVersion,
+  }
+  if (draft.transport) {
+    out.transport = {
+      plugin_id: draft.transport.pluginId,
+      transport_id: draft.transport.transportId,
+    }
   }
   if (draft.tokenCleared) {
     out.token = ''

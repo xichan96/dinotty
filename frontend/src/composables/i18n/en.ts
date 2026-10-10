@@ -843,6 +843,12 @@ export default {
   'server.closeUnsaved': 'You have unsaved changes. Close anyway?',
   'server.discard': 'Discard changes',
   'server.name': 'Name',
+  'server.addMethod': 'Add method',
+  'server.directUrl': 'Direct URL',
+  'server.transportUnavailable': 'unavailable',
+  'server.transportUnavailableDetail': 'This transport is unavailable.',
+  'server.transportUrlInvalid':
+    'This add method needs a connector address on this machine. Pick Direct URL, or prepare the connector again.',
   'server.url': 'Address',
   'server.token': 'Token',
   'server.tokenKeep': 'Leave blank to keep it unchanged',

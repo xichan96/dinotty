@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use super::ssh::SensitiveString;
 
+/// Host-owned identity of a plugin transport. It deliberately contains no
+/// plugin configuration or credentials.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemoteServerTransportRef {
+    pub plugin_id: String,
+    pub transport_id: String,
+}
+
 /// A dinotty server this hub can relay to.
 ///
 /// The roster lives in the hub's `settings.json`; `id` is the stable key the
@@ -58,6 +66,9 @@ pub struct RemoteServer {
     pub group: Option<String>,
     #[serde(default)]
     pub last_seen_version: Option<String>,
+    /// Absent for the built-in direct URL method, preserving old settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<RemoteServerTransportRef>,
     /// Derived from `token` - never trusted from the client. GET handlers
     /// recompute it; PUT handlers recompute it after the token merge.
     #[serde(default)]
@@ -176,5 +187,24 @@ mod tests {
         };
         srv.refresh_has_token();
         assert!(!srv.has_token);
+    }
+
+    #[test]
+    fn transport_reference_is_optional_and_persists_without_secret_plugin_data() {
+        let legacy: RemoteServer =
+            serde_json::from_str(r#"{"id":"a","name":"A","url":"http://h:1"}"#).unwrap();
+        assert!(legacy.transport.is_none());
+
+        let srv: RemoteServer = serde_json::from_str(
+            r#"{"id":"a","name":"A","url":"http://127.0.0.1:8123","transport":{"plugin_id":"connector","transport_id":"loopback"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            srv.transport,
+            Some(RemoteServerTransportRef {
+                plugin_id: "connector".into(),
+                transport_id: "loopback".into()
+            })
+        );
     }
 }

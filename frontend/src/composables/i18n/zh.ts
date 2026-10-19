@@ -765,6 +765,7 @@ export default {
   'split.addFilesPane': '添加文件面板',
   'split.addWebPane': '添加网页面板',
   'workspace.add': '添加工作区',
+  'workspace.resizeList': '拖动调整工作区栏宽度',
   'workspace.editDefault': '编辑默认工作区',
   'overview.closeWorkspaceTabs': '关闭本区所有标签',
   'overview.closeTab': '关闭标签页',

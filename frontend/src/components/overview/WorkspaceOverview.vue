@@ -15,7 +15,9 @@
     >
       <Motion
         key="ws-dual"
+        ref="dualRef"
         class="mc-ws-dual"
+        :style="dualStyle"
         :initial="{ scale: 0.9, opacity: 0 }"
         :animate="{ scale: 1, opacity: 1 }"
         :exit="{ scale: 0.9, opacity: 0 }"
@@ -38,6 +40,21 @@
           @select="onSelectWorkspace"
           @add="onAddWorkspace"
           @rename="onRenameWorkspace"
+        />
+        <div
+          v-if="syncConnected"
+          class="mc-ws-resizer"
+          :class="{ active: resizingWsPane }"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-label="t('workspace.resizeList')"
+          :aria-valuemin="WS_PANE_MIN_WIDTH"
+          :aria-valuemax="wsPaneMaxWidth"
+          :aria-valuenow="wsPaneWidth"
+          tabindex="0"
+          @pointerdown="onResizerPointerDown"
+          @keydown="onResizerKeydown"
+          @dblclick="resetWsPaneWidth"
         />
         <div class="mc-right-panel">
           <div v-if="syncConnected && selectedWorkspacePath" class="mc-right-path">
@@ -141,10 +158,147 @@ const syncConnected = computed(() => ui.syncConnected)
 
 const closing = ref(false)
 const backdropRef = ref<any>(null)
+const dualRef = ref<any>(null)
 const tabOverviewRef = ref<InstanceType<typeof TabOverview> | null>(null)
 const showCreateDialog = ref(false)
 const renamingWorkspace = ref<Workspace | null>(null)
 const switchDirection = ref<'left' | 'right'>('right')
+
+// ── Workspace / tab split resizer ─────────────────────────────
+// The workspace list is user-resizable via a drag handle between the two
+// panes. The width is a device preference, persisted rather than synced: two
+// clients on different screens want different splits. It reaches CSS through
+// `--mc-ws-list-width` so the mobile chip-row layout (max-width: 600px) can
+// keep overriding the width wholesale.
+const WS_PANE_DEFAULT_WIDTH = 200
+const WS_PANE_MIN_WIDTH = 140
+/** Keep at least one column of tab cards visible in the right panel. */
+const WS_PANE_MIN_RIGHT_WIDTH = 320
+/** Keep in sync with `.mc-ws-resizer` in mission-control.css. */
+const WS_RESIZER_WIDTH = 8
+/** Used for clamping until the overlay has been laid out (clientWidth = 0). */
+const WS_PANE_MAX_FALLBACK = 1200
+const WS_PANE_WIDTH_STORAGE_KEY = 'dinotty_mc_ws_width_v1'
+
+const wsPaneWidth = ref(WS_PANE_DEFAULT_WIDTH)
+const dualWidth = ref(0)
+const resizingWsPane = ref(false)
+
+const dualStyle = computed<Record<string, string>>(() => ({
+  '--mc-ws-list-width': `${wsPaneWidth.value}px`,
+}))
+
+const wsPaneMaxWidth = computed(() => {
+  if (dualWidth.value <= 0) return WS_PANE_MAX_FALLBACK
+  return Math.max(WS_PANE_MIN_WIDTH, dualWidth.value - WS_RESIZER_WIDTH - WS_PANE_MIN_RIGHT_WIDTH)
+})
+
+function clampWsPaneWidth(px: number): number {
+  if (!Number.isFinite(px)) return WS_PANE_DEFAULT_WIDTH
+  return Math.round(Math.min(Math.max(px, WS_PANE_MIN_WIDTH), wsPaneMaxWidth.value))
+}
+
+function loadWsPaneWidth() {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(WS_PANE_WIDTH_STORAGE_KEY)
+    const stored = raw === null ? NaN : Number(raw)
+    if (Number.isFinite(stored)) wsPaneWidth.value = clampWsPaneWidth(stored)
+  } catch {
+    // localStorage may be unavailable (private mode); keep the default.
+  }
+}
+
+loadWsPaneWidth()
+
+function persistWsPaneWidth() {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(WS_PANE_WIDTH_STORAGE_KEY, String(wsPaneWidth.value))
+  } catch {
+    // Persistence is best-effort.
+  }
+}
+
+function measureDualWidth() {
+  const el = dualRef.value?.$el as HTMLElement | undefined
+  dualWidth.value = el?.clientWidth ?? 0
+}
+
+function reclampWsPaneWidth() {
+  measureDualWidth()
+  wsPaneWidth.value = clampWsPaneWidth(wsPaneWidth.value)
+}
+
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+function onResizerPointerDown(e: PointerEvent) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  measureDualWidth()
+  resizeStartX = e.clientX
+  resizeStartWidth = wsPaneWidth.value
+  resizingWsPane.value = true
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+  try {
+    ;(e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId)
+  } catch {
+    // Pointer capture is an optimisation; window listeners cover the drag.
+  }
+  window.addEventListener('pointermove', onResizerPointerMove)
+  window.addEventListener('pointerup', stopWsPaneResize)
+  window.addEventListener('pointercancel', stopWsPaneResize)
+}
+
+function onResizerPointerMove(e: PointerEvent) {
+  if (!resizingWsPane.value) return
+  wsPaneWidth.value = clampWsPaneWidth(resizeStartWidth + (e.clientX - resizeStartX))
+}
+
+function stopWsPaneResize() {
+  if (!resizingWsPane.value) return
+  resizingWsPane.value = false
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+  window.removeEventListener('pointermove', onResizerPointerMove)
+  window.removeEventListener('pointerup', stopWsPaneResize)
+  window.removeEventListener('pointercancel', stopWsPaneResize)
+  // Persist once per gesture, not on every pointermove.
+  persistWsPaneWidth()
+}
+
+function onResizerKeydown(e: KeyboardEvent) {
+  const step = e.shiftKey ? 32 : 8
+  let next: number
+  switch (e.key) {
+    case 'ArrowLeft':
+      next = wsPaneWidth.value - step
+      break
+    case 'ArrowRight':
+      next = wsPaneWidth.value + step
+      break
+    case 'Home':
+      next = WS_PANE_MIN_WIDTH
+      break
+    case 'End':
+      next = wsPaneMaxWidth.value
+      break
+    default:
+      return
+  }
+  e.preventDefault()
+  // The overlay's document-level handler turns ArrowLeft/Right into tab
+  // navigation; the separator owns the keys while it has focus.
+  e.stopPropagation()
+  wsPaneWidth.value = clampWsPaneWidth(next)
+  persistWsPaneWidth()
+}
+
+function resetWsPaneWidth() {
+  wsPaneWidth.value = clampWsPaneWidth(WS_PANE_DEFAULT_WIDTH)
+  persistWsPaneWidth()
+}
 
 // Selected workspace derives from the global MC state. `null` selected_workspace_id
 // means the default workspace (`__default__`). Local mutation is intentionally
@@ -160,9 +314,15 @@ const selectedWorkspaceId = computed(() => mcState.selectedWorkspaceId ?? DEFAUL
 // touchscreen keyboard (rendered outside this component) out of it.
 onMounted(() => {
   document.addEventListener('keydown', onDocKeydown)
+  // The overlay is sized from the viewport, so a window resize is the only
+  // thing that changes the space the panes have to share.
+  window.addEventListener('resize', reclampWsPaneWidth)
+  nextTick(reclampWsPaneWidth)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onDocKeydown)
+  window.removeEventListener('resize', reclampWsPaneWidth)
+  stopWsPaneResize()
 })
 
 function onDocKeydown(e: KeyboardEvent) {
@@ -190,7 +350,12 @@ watch(
       // No local workspace-selection seeding: the backend seeds selected_*
       // from the active tab on toggle-open and broadcasts
       // `mission_control_toggled`, which `mcState` mirrors.
-      nextTick(() => backdropRef.value?.$el?.focus?.())
+      nextTick(() => {
+        backdropRef.value?.$el?.focus?.()
+        // The overlay is re-created on each open (v-if), so the split width
+        // has to be measured and re-clamped against the current viewport.
+        reclampWsPaneWidth()
+      })
       // Defer capture so the overlay animation starts without blocking
       setTimeout(() => {
         if (props.visible) {

@@ -51,3 +51,15 @@ describe('mission control mobile layout', () => {
     expect(css).not.toMatch(/\.mc-srv-/)
   })
 })
+
+describe('mission control pane resizer', () => {
+  it('sizes the workspace list from the resizer variable', () => {
+    expect(css).toMatch(/\.mc-ws-list\s*{[^}]*width:\s*var\(--mc-ws-list-width, 200px\);/s)
+    expect(css).toMatch(/\.mc-ws-list\s*{[^}]*min-width:\s*var\(--mc-ws-list-width, 200px\);/s)
+    expect(css).toMatch(/\.mc-ws-resizer\s*{[^}]*cursor:\s*col-resize;/s)
+  })
+
+  it('hides the column resizer in the stacked mobile layout', () => {
+    expect(mobileCss).toMatch(/\.mc-ws-resizer\s*{[^}]*display:\s*none;/s)
+  })
+})

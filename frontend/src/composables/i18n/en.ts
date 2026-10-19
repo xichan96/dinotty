@@ -770,6 +770,7 @@ export default {
   'split.addFilesPane': 'Add Files Pane',
   'split.addWebPane': 'Add Web Pane',
   'workspace.add': 'Add Workspace',
+  'workspace.resizeList': 'Drag to resize the workspace list',
   'workspace.editDefault': 'Edit Default Workspace',
   'overview.closeWorkspaceTabs': 'Close All Tabs in This Workspace',
   'overview.closeTab': 'Close Tab',

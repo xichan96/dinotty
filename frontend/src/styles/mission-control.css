@@ -263,12 +263,48 @@
 
 /* ── Workspace List Selector ─────────────────────────────── */
 .mc-ws-list {
-  width: 200px;
-  min-width: 200px;
+  /* Set by the drag handle in WorkspaceOverview; the fallback is the old
+     fixed width. The mobile override below still wins by declaring
+     width/min-width later with the same specificity. */
+  width: var(--mc-ws-list-width, 200px);
+  min-width: var(--mc-ws-list-width, 200px);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   overflow: hidden;
+}
+
+/* Drag handle between the workspace list and the tab panel. It also draws the
+   divider that used to be `.mc-ws-list`'s border-right. */
+.mc-ws-resizer {
+  flex: 0 0 8px;
+  width: 8px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  z-index: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+.mc-ws-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border);
+  transition:
+    background 0.12s,
+    width 0.12s;
+}
+.mc-ws-resizer:hover::before,
+.mc-ws-resizer:focus-visible::before,
+.mc-ws-resizer.active::before {
+  width: 2px;
+  background: var(--accent);
 }
 
 .mc-ws-list-scroll {
@@ -695,6 +731,10 @@
     padding-right: 56px;
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+  /* The panel stacks vertically here; a column resizer makes no sense. */
+  .mc-ws-resizer {
+    display: none;
   }
   .mc-ws-list-scroll {
     flex: 1 1 auto;

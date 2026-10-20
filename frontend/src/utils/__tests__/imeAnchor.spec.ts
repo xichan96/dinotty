@@ -4,25 +4,46 @@ import {
   attachImeHeuristic,
   computeCellSize,
   findInverseCell,
+  findRowContentEnd,
+  resolveFallbackAnchor,
   resolveImeAnchor,
 } from '../imeAnchor'
 
 type CellMark = 'inv' | 'norm'
 
+// A cell with explicit glyph and/or width. Strings other than the two markers
+// above are plain characters.
+type FakeCell = string | { chars: string; width?: number; inverse?: boolean }
+
 // Pure scan tests use a fake buffer; the real IBuffer is structurally
 // compatible with this shape (see ImeBufferScan in imeAnchor.ts).
-function fakeLine(cells: CellMark[]) {
+function fakeLine(cells: (CellMark | FakeCell)[]) {
   return {
     length: cells.length,
     getCell(x: number) {
       const c = cells[x]
       if (c === undefined) return undefined
-      return { isInverse: () => (c === 'inv' ? 1 : 0) }
+      if (c === 'inv') {
+        // Ink/pi's caret: an inverse-video space.
+        return { isInverse: () => 1, getChars: () => ' ', getWidth: () => 1 }
+      }
+      if (c === 'norm') {
+        // Blank cell (never written).
+        return { isInverse: () => 0, getChars: () => '', getWidth: () => 1 }
+      }
+      if (typeof c === 'string') {
+        return { isInverse: () => 0, getChars: () => c, getWidth: () => 1 }
+      }
+      return {
+        isInverse: () => (c.inverse ? 1 : 0),
+        getChars: () => c.chars,
+        getWidth: () => c.width ?? 1,
+      }
     },
   }
 }
 
-function fakeBuffer(lines: CellMark[][], viewportY = 0) {
+function fakeBuffer(lines: (CellMark | FakeCell)[][], viewportY = 0) {
   const rows = lines.map(fakeLine)
   return {
     viewportY,
@@ -112,6 +133,88 @@ describe('resolveImeAnchor (heuristic vs hardware fallback)', () => {
   })
 })
 
+describe('findRowContentEnd (exclusive content-end column)', () => {
+  it('returns the column after the last visible cell', () => {
+    const line = fakeLine(['>', ' ', 'l', 's', ' ', ' '])
+    expect(findRowContentEnd(line)).toBe(4)
+  })
+
+  it('treats a lone inverse space (a fake caret) as content', () => {
+    const line = fakeLine([' ', ' ', 'inv', ' ', ' '])
+    expect(findRowContentEnd(line)).toBe(3)
+  })
+
+  it('accounts for double-width (CJK) glyphs', () => {
+    // "│ 你" — 你 occupies columns 2-3, so content ends at exclusive col 4.
+    const line = fakeLine(['│', ' ', { chars: '你', width: 2 }, '', ' ', ' '])
+    expect(findRowContentEnd(line)).toBe(4)
+  })
+
+  it('returns null for an entirely blank row', () => {
+    expect(findRowContentEnd(fakeLine(['norm', ' ', ' ', 'norm']))).toBeNull()
+    expect(findRowContentEnd(undefined)).toBeNull()
+  })
+})
+
+describe('resolveFallbackAnchor (ConPTY-parked cursor heuristic, #323)', () => {
+  const ctxFor = (
+    line: (CellMark | FakeCell)[] | undefined,
+    opts: { cols?: number; rows?: number; col?: number; row?: number } = {}
+  ) => ({
+    cols: opts.cols ?? 80,
+    rows: opts.rows ?? 10,
+    viewportY: 0,
+    hardwareCursor: { col: opts.col ?? 79, row: opts.row ?? 2 },
+    lineAt: (r: number) => (line ? fakeLine(line) : undefined),
+  })
+
+  it('keeps the hardware anchor when the cursor parks at the content end (shell)', () => {
+    // "> 你好▮" — cursor exactly after the committed text.
+    const line = ['>', ' ', { chars: '你', width: 2 }, '', { chars: '好', width: 2 }, '']
+    expect(resolveFallbackAnchor(ctxFor(line, { col: 6 }))).toBeNull()
+  })
+
+  it('keeps the hardware anchor when the cursor is one cell past (space-terminated prompt)', () => {
+    const line = ['>', ' ']
+    expect(resolveFallbackAnchor(ctxFor(line, { col: 2 }))).toBeNull()
+  })
+
+  it('anchors at the content end when the cursor is parked at the right edge (pi on ConPTY)', () => {
+    // pi input row "> 你好" with the ConPTY cursor parked at col 79.
+    const line = ['>', ' ', { chars: '你', width: 2 }, '', { chars: '好', width: 2 }, '']
+    expect(resolveFallbackAnchor(ctxFor(line))).toEqual({
+      source: 'contentEnd',
+      col: 6,
+      row: 2,
+    })
+  })
+
+  it('anchors at the row start when the parked row is blank (caret swept away)', () => {
+    expect(resolveFallbackAnchor(ctxFor([' ', ' ', ' ']))).toEqual({
+      source: 'contentEnd',
+      col: 0,
+      row: 2,
+    })
+  })
+
+  it('keeps the hardware anchor on a blank row when the cursor is at/near col 0', () => {
+    expect(resolveFallbackAnchor(ctxFor([' ', ' ', ' '], { col: 0 }))).toBeNull()
+    expect(resolveFallbackAnchor(ctxFor([' ', ' ', ' '], { col: 1 }))).toBeNull()
+  })
+
+  it('keeps the hardware anchor when the content fills the row to the edge', () => {
+    // A full-width input line: the parked cursor (col cols-1) is never past
+    // the content end, so the content-end heuristic has nothing to fix.
+    const line = ['a', 'b', { chars: '你', width: 2 }, '']
+    expect(resolveFallbackAnchor(ctxFor(line, { cols: 4, col: 3 }))).toBeNull()
+  })
+
+  it('ignores a cursor row outside the viewport', () => {
+    expect(resolveFallbackAnchor(ctxFor(['a'], { row: 10 }))).toBeNull()
+    expect(resolveFallbackAnchor(ctxFor(['a'], { row: -1 }))).toBeNull()
+  })
+})
+
 describe('computeCellSize (render-service cell vs rect fallback)', () => {
   it('prefers the render-service CSS cell size (letter_spacing/line_height correct)', () => {
     const screen = { getBoundingClientRect: () => ({ width: 900, height: 300 }) }
@@ -149,7 +252,7 @@ function makeDom() {
 }
 
 function setup(opts: {
-  lines: CellMark[][]
+  lines: (CellMark | FakeCell)[][]
   rows?: number
   cols?: number
   viewportY?: number
@@ -194,7 +297,7 @@ function setup(opts: {
     ...dom,
     terminal,
     buffer,
-    setLine: (y: number, cells: CellMark[]) => {
+    setLine: (y: number, cells: (CellMark | FakeCell)[]) => {
       lines[y] = fakeLine(cells)
     },
     fireRender: () => renderCb?.(),
@@ -245,23 +348,99 @@ describe('attachImeHeuristic (DOM integration)', () => {
     expect(textarea.style.getPropertyPriority('left')).toBe('important')
   })
 
-  it('falls back to the hardware cursor (no style pin) when no inverse cell exists', () => {
+  it('falls back to the hardware cursor (no style pin) when it parks at the content end', () => {
+    // Shell prompt "PS> " with the cursor right after it: hardware anchor is
+    // correct and must stay untouched even though no inverse cell exists.
     const { terminal, textarea, compositionView } = setup({
       lines: [
-        ['norm', 'norm', 'norm'],
-        ['norm', 'norm', 'norm'],
-        ['norm', 'norm', 'norm'],
+        ['norm', 'norm', 'norm', 'norm'],
+        ['P', 'S', '>', ' '],
+        ['norm', 'norm', 'norm', 'norm'],
       ],
-      cursorX: 7,
-      cursorY: 2,
+      cursorX: 4,
+      cursorY: 1,
     })
     const onAnchor = vi.fn()
     attachImeHeuristic(terminal as unknown as Terminal, { onAnchor })
     textarea.dispatchEvent(new Event('compositionstart'))
 
-    expect(onAnchor).toHaveBeenCalledWith({ source: 'hardware', col: 7, row: 2 })
+    expect(onAnchor).toHaveBeenCalledWith({ source: 'hardware', col: 4, row: 1 })
     expect(textarea.style.getPropertyValue('left')).toBe('')
     expect(compositionView.style.getPropertyValue('top')).toBe('')
+  })
+
+  it('anchors at the content end when ConPTY parked the cursor at the right edge (#323)', () => {
+    // pi's editor row "> 你好" — no inverse caret on screen (ConPTY swept the
+    // trailing inverse space away), hardware cursor parked at col cols-1.
+    const { terminal, textarea, compositionView } = setup({
+      lines: [
+        ['norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm'],
+        ['>', ' ', { chars: '你', width: 2 }, '', { chars: '好', width: 2 }, '', ' ', ' ', ' '],
+        ['norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm'],
+      ],
+      cols: 10,
+      cursorX: 9,
+      cursorY: 1,
+      cellW: 8,
+      cellH: 20,
+    })
+    const onAnchor = vi.fn()
+    attachImeHeuristic(terminal as unknown as Terminal, { onAnchor })
+    textarea.dispatchEvent(new Event('compositionstart'))
+
+    // Content ends at exclusive col 6 — right where the caret visually sits.
+    expect(onAnchor).toHaveBeenCalledWith({ source: 'contentEnd', col: 6, row: 1 })
+    expect(textarea.style.getPropertyValue('left')).toBe('48px')
+    expect(textarea.style.getPropertyPriority('left')).toBe('important')
+    expect(compositionView.style.getPropertyValue('left')).toBe('48px')
+    expect(compositionView.style.getPropertyValue('top')).toBe('20px')
+  })
+
+  it('anchors at the row start when the parked row is entirely blank (#323)', () => {
+    // Empty pi input: the inverse-space caret was swept away, only padding
+    // spaces remain on the input row.
+    const { terminal, textarea } = setup({
+      lines: [
+        ['norm', 'norm', 'norm', 'norm'],
+        [' ', ' ', ' ', ' '],
+        ['norm', 'norm', 'norm', 'norm'],
+      ],
+      cols: 4,
+      cursorX: 3,
+      cursorY: 1,
+    })
+    const onAnchor = vi.fn()
+    attachImeHeuristic(terminal as unknown as Terminal, { onAnchor })
+    textarea.dispatchEvent(new Event('compositionstart'))
+
+    expect(onAnchor).toHaveBeenCalledWith({ source: 'contentEnd', col: 0, row: 1 })
+    expect(textarea.style.getPropertyValue('left')).toBe('0px')
+  })
+
+  it('re-pins to the inverse caret once a blinking one comes back on', () => {
+    // Claude Code first-composition case: caret blink-off at composition
+    // start (no inverse cell), then Ink blinks back on mid-composition.
+    const { terminal, textarea, setLine, fireRender } = setup({
+      lines: [
+        ['norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm'],
+        ['>', ' ', ' ', ' ', ' ', ' ', ' '],
+        ['norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm'],
+      ],
+      cols: 7,
+      cursorX: 6,
+      cursorY: 1,
+      cellW: 10,
+      cellH: 20,
+    })
+    attachImeHeuristic(terminal as unknown as Terminal)
+    textarea.dispatchEvent(new Event('compositionstart'))
+    // Parked right edge → contentEnd anchor right after the prompt.
+    expect(textarea.style.getPropertyValue('left')).toBe('10px')
+
+    // Blink-on: the caret appears two cells right — the render hook follows.
+    setLine(1, ['>', ' ', ' ', 'inv', ' ', ' ', ' '])
+    fireRender()
+    expect(textarea.style.getPropertyValue('left')).toBe('30px')
   })
 
   it('follows the caret on render (IME partial commit) but keeps the last pin if it transiently disappears', () => {

@@ -81,27 +81,31 @@ impl Drop for EnvVarGuard {
 
 #[test]
 fn resolve_user_path_expands_temp_tokens() {
-    let tmp = TempDir::new().unwrap();
+    // Point the env tokens at the base std::env::temp_dir() already resolves to.
+    // Setting them to a fresh TempDir made parallel tests' TempDir::new() roots
+    // nest inside it; when this test dropped it, their files vanished mid-test and
+    // tests like prepare_upload_base_maps_unavailable_dir_to_400 flaked in CI.
+    let base = std::env::temp_dir();
 
     #[cfg(windows)]
     {
-        let _temp_guard = EnvVarGuard::set("TEMP", tmp.path());
-        let _tmp_guard = EnvVarGuard::set("TMP", tmp.path());
+        let _temp_guard = EnvVarGuard::set("TEMP", &base);
+        let _tmp_guard = EnvVarGuard::set("TMP", &base);
 
-        assert_eq!(resolve_user_path(None, "%TEMP%"), tmp.path());
-        assert_eq!(resolve_user_path(None, "%temp%\\dinotty"), tmp.path().join("dinotty"));
-        assert_eq!(resolve_user_path(None, "%TMP%/dinotty"), tmp.path().join("dinotty"));
+        assert_eq!(resolve_user_path(None, "%TEMP%"), base);
+        assert_eq!(resolve_user_path(None, "%temp%\\dinotty"), base.join("dinotty"));
+        assert_eq!(resolve_user_path(None, "%TMP%/dinotty"), base.join("dinotty"));
         assert_eq!(resolve_user_path(None, "x%TEMP%\\dinotty"), PathBuf::from("x%TEMP%\\dinotty"));
     }
 
     #[cfg(not(windows))]
     {
-        let _guard = EnvVarGuard::set("TMPDIR", tmp.path());
+        let _guard = EnvVarGuard::set("TMPDIR", &base);
 
-        assert_eq!(resolve_user_path(None, "$TMPDIR"), tmp.path());
-        assert_eq!(resolve_user_path(None, "$TMPDIR/dinotty"), tmp.path().join("dinotty"));
-        assert_eq!(resolve_user_path(None, "${TMPDIR}/dinotty"), tmp.path().join("dinotty"));
-        assert_eq!(resolve_user_path(None, "$TMPDIR//dinotty"), tmp.path().join("dinotty"));
+        assert_eq!(resolve_user_path(None, "$TMPDIR"), base);
+        assert_eq!(resolve_user_path(None, "$TMPDIR/dinotty"), base.join("dinotty"));
+        assert_eq!(resolve_user_path(None, "${TMPDIR}/dinotty"), base.join("dinotty"));
+        assert_eq!(resolve_user_path(None, "$TMPDIR//dinotty"), base.join("dinotty"));
         assert_eq!(
             resolve_user_path(None, "$TMPDIRish/dinotty"),
             PathBuf::from("$TMPDIRish/dinotty")

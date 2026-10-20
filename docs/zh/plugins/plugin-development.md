@@ -13,6 +13,7 @@
 - [全局浮层（overlay）](#全局浮层-overlay)
 - [CSS 样式](#css-样式)
 - [命令面板集成](#命令面板集成)
+- [远程服务器传输方式](#远程服务器传输方式)
 - [持久化存储](#持久化存储)
 - [文件系统访问](#文件系统访问)
 - [调用 CLI 工具](#调用-cli-工具)
@@ -562,6 +563,47 @@ export function activate(ctx) {
 **方式二：仅通过 `ctx.commands.register` 动态注册**（不在 `plugin.json` 声明）
 
 动态注册的命令同样会出现在命令面板中。
+
+---
+
+## 远程服务器传输方式
+
+传输方式为服务器管理贡献一个具名的**添加方式**。它面向的是自己拥有本地连接器（例如代理或隧道）的插件，而不是让插件持有 Dinotty 服务器凭据或已保存的服务器列表。
+
+先显式声明该敏感能力：
+
+```json
+{ "permissions": ["remoteServers.transport"] }
+```
+
+然后在 `activate` 中注册。`component` 会被渲染在宿主的服务器管理面板内，接收 `{ mode, server, onPrepared }`。连接器设置保存在 `ctx.storage`；只有在本地连接器就绪后才调用 `onPrepared({ url })`。返回值还可以提供 `discard()`，供宿主在用户放弃或替换该结果、尚未保存时调用。宿主会把该 URL 校验为 `http(s)` 本地回环**源**（origin），随后自行收集、校验并保存目标 Dinotty URL/令牌。
+
+已保存条目的地址始终是它所声明的那个传输方式产出的源地址，绝不会沿用其他添加方式的地址：切换添加方式会清空地址，并一直禁用「保存」，直到新选中的传输方式报告自己的源地址。切回「直接 URL」时地址仍可编辑，用户想保留此前准备好的值也可以。
+
+```ts
+ctx.remoteServers.registerTransport({
+  id: 'local-connector',
+  label: 'My connector',
+  component: {
+    props: ['mode', 'server', 'onPrepared'],
+    setup(props) {
+      return () => ctx.h('button', {
+        onClick: () => props.onPrepared({ url: 'http://127.0.0.1:8123' }),
+      }, 'Prepare connector')
+    },
+  },
+  async recover(servers) {
+    // Re-establish private connector state for these safe descriptors.
+  },
+  async onDeleted(server) {
+    // Remove private state after the host has removed this roster entry.
+  },
+})
+```
+
+`recover` 在插件加载/重载后针对匹配的已保存条目运行。`onSaved` 在宿主原子地创建/更新列表后运行，`onDeleted` 在其移除后运行，`onUnload` 在该贡献项注销前运行。所有回调只会收到 `{ id, name, url }`，其中 `url` 是本地连接器的源地址。它们永远不会收到远端令牌或任意宿主事件。插件缺失或其恢复失败时，已保存条目仍会显示且可删除；在其插件恢复之前，该传输方式显示为不可用。
+
+内置的「直接 URL」仍是默认方式，不带传输方式元数据。不要调用 `/api/remote-servers`、不要使用绕过鉴权的回环路由、不要猴补丁（monkey-patch）服务器管理面板；这些都是宿主自己的实现细节。
 
 ---
 

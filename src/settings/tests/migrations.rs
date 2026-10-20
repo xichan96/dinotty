@@ -220,6 +220,7 @@ fn a_v15_roster_round_trips_through_save_and_load() {
             token: Some(SensitiveString::new("s3cret".into())),
             group: Some("lab".into()),
             last_seen_version: Some("0.26.0".into()),
+            transport: None,
             has_token: true,
         }],
         ..Settings::default()

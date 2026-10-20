@@ -98,6 +98,17 @@ describe('serializeDraft', () => {
     expect('has_token' in serializeDraft(draft({ hasToken: true }))).toBe(false)
   })
 
+  it('keeps the direct flow byte-compatible by omitting transport when absent', () => {
+    expect('transport' in serializeDraft(draft())).toBe(false)
+  })
+
+  it('preserves the host-owned transport reference without plugin configuration', () => {
+    expect(serializeDraft(draft({ transport: { pluginId: 'plugin-a', transportId: 'connector' } })).transport).toEqual({
+      plugin_id: 'plugin-a',
+      transport_id: 'connector',
+    })
+  })
+
   it('trims the fields the user types', () => {
     const body = serializeDraft(draft({ name: '  Lab  ', url: '  http://h:1  ' }))
     expect(body).toMatchObject({ name: 'Lab', url: 'http://h:1' })

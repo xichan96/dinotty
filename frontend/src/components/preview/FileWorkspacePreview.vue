@@ -115,7 +115,7 @@
             :pane-id="apiPaneId"
             :show-header="editorSplit.isSplit.value"
             @focus="(id: string) => editorSplit.focusEditorPane(id)"
-            @close="(id: string) => editorSplit.closeEditorPane(id)"
+            @close="onCloseEditorPane"
             @file-drop="onEditorFileDrop"
           />
         </div>
@@ -269,7 +269,9 @@ import { useFileNavigation, useSelectedPath } from '../../composables/useFileNav
 import { useFileWorkspaceLayout } from '../../composables/useFileWorkspaceLayout'
 import { useFileWatch } from '../../composables/useFileWatch'
 import { useEditorSplit } from '../../composables/useEditorSplit'
-import { setActiveLeaf } from '../../composables/useEditorRegistry'
+import { setActiveLeaf, getEditorPaneState } from '../../composables/useEditorRegistry'
+import { getAllEditorLeaves } from '../../types/editorPane'
+import { uiConfirm } from '../../composables/useConfirm'
 import {
   saveFileWorkspaceState,
   type PersistedFileWorkspaceState,
@@ -338,8 +340,38 @@ const editorSplit = useEditorSplit({ paneId: () => apiPaneId.value })
 // Derived from active editor pane — keeps tree highlight and context menu working
 const selectedRel = ref<string | null>(null)
 const selectedIsDir = ref(false)
-const meta = ref<any | null>(null)
 const previewErr = ref('')
+
+// Live state of the active pane, exposed by EditorPane via the registry.
+const activeHandle = computed(() => {
+  const leafId = editorSplit.activeLeaf.value?.id
+  return leafId ? getEditorPaneState(leafId) : null
+})
+const activeDirty = computed(() => activeHandle.value?.isDirty() ?? false)
+const activeEditorText = computed({
+  get: () => activeHandle.value?.editorText.value ?? '',
+  set: (v: string) => {
+    const state = activeHandle.value
+    if (state) state.editorText.value = v
+  },
+})
+const activeEditorBaseline = computed({
+  get: () => activeHandle.value?.editorBaseline.value ?? '',
+  set: (v: string) => {
+    const state = activeHandle.value
+    if (state) state.editorBaseline.value = v
+  },
+})
+// Mirror of the active pane's meta for ops/context-menu plumbing that still
+// consumes a single ref. Never written back to the pane.
+const meta = ref<any | null>(null)
+watch(
+  [activeHandle, () => activeHandle.value?.meta.value],
+  () => {
+    meta.value = activeHandle.value?.meta.value ?? null
+  },
+  { immediate: true }
+)
 
 // Keep selectedRel in sync with active editor pane. When focus moves to a
 // different pane (or the displayed file is deleted), the tree highlight
@@ -409,9 +441,9 @@ const ctxMenu = useTreeContextMenu({
   selectedRel,
   selectedIsDir,
   meta,
-  editorDirty: ref(false),
-  editorText: ref(''),
-  editorBaseline: ref(''),
+  editorDirty: activeDirty,
+  editorText: activeEditorText,
+  editorBaseline: activeEditorBaseline,
   childCache,
   expanded,
   inlineCreate,
@@ -465,32 +497,48 @@ const fileWatch = useFileWatch({
   fetchList,
 })
 
-const { reloadAll, expandFirstLevelDirs, captureState, applyState, boot, openFromTerminal } =
-  useFileWorkspaceBoot({
-    paneId: toRef(props, 'paneId'),
-    sourcePaneId: toRef(props, 'sourcePaneId'),
-    visible: toRef(props, 'visible'),
-    shellType: toRef(props, 'shellType'),
-    initialPath: toRef(props, 'initialPath'),
-    childCache,
-    expanded,
-    cwdLabel,
-    previewErr,
-    meta,
-    selectedRel,
-    selectedIsDir,
-    inlineCreate,
-    contextMenu: ctxMenu.contextMenu,
-    editorLayout: editorSplit.editorLayout,
-    activeEditorLeafId: editorSplit.activeEditorLeafId,
-    activeLeaf: editorSplit.activeLeaf,
-    ensureChildren,
-    onSelectFile,
-    onSelectDir,
-    connectTreeWatchSocket: fileWatch.connectTreeWatchSocket,
-    disconnectTreeWatchSocket: fileWatch.disconnectTreeWatchSocket,
-    fetchGitStatus,
-  })
+const {
+  reloadAll,
+  expandFirstLevelDirs,
+  captureState,
+  applyState,
+  boot,
+  openFromTerminal: openFromTerminalFromBoot,
+} = useFileWorkspaceBoot({
+  paneId: toRef(props, 'paneId'),
+  sourcePaneId: toRef(props, 'sourcePaneId'),
+  visible: toRef(props, 'visible'),
+  shellType: toRef(props, 'shellType'),
+  initialPath: toRef(props, 'initialPath'),
+  childCache,
+  expanded,
+  cwdLabel,
+  previewErr,
+  meta,
+  selectedRel,
+  selectedIsDir,
+  inlineCreate,
+  contextMenu: ctxMenu.contextMenu,
+  editorLayout: editorSplit.editorLayout,
+  activeEditorLeafId: editorSplit.activeEditorLeafId,
+  activeLeaf: editorSplit.activeLeaf,
+  ensureChildren,
+  onSelectFile,
+  onSelectDir,
+  connectTreeWatchSocket: fileWatch.connectTreeWatchSocket,
+  disconnectTreeWatchSocket: fileWatch.disconnectTreeWatchSocket,
+  fetchGitStatus,
+})
+
+/**
+ * User-initiated open (terminal path click / recent list). Boot restores,
+ * rename reselects and delete reselects call `onSelectFile` directly, so they
+ * never arrive here and never prompt.
+ */
+async function openFromTerminal(path: string): Promise<void> {
+  if (await shouldBlockNavigate()) return
+  await openFromTerminalFromBoot(path)
+}
 
 // --- Computed ---
 const cwdShort = computed(() => {
@@ -539,14 +587,16 @@ function ctxOpenToSide() {
   recentFiles.recordFile(ops.absolutePath(rel), rel.split('/').pop() || rel)
 }
 
-function onEditorFileDrop(leafId: string, rel: string, position: DropPosition) {
+async function onEditorFileDrop(leafId: string, rel: string, position: DropPosition) {
   if (position === 'center') {
+    // Replacing this pane's file would drop its unsaved buffer.
+    if (!(await confirmDiscardForLeaf(leafId))) return
     editorSplit.focusEditorPane(leafId)
-    onSelectFile(rel)
+    await onSelectFile(rel)
   } else {
     const direction = position === 'left' || position === 'right' ? 'horizontal' : 'vertical'
     editorSplit.openFileInNewPane(rel, false, direction)
-    onSelectFile(rel)
+    await onSelectFile(rel)
   }
 }
 
@@ -583,7 +633,12 @@ function ensureParentsExpanded(rel: string) {
   expanded.value = next
 }
 
-function doGoBack() {
+async function doGoBack() {
+  if (!nav.canGoBack.value) return
+  // A directory entry only moves the tree selection; a file entry replaces
+  // the active pane's file.
+  const target = nav.navHistory.value[nav.navIndex.value - 1]
+  if (target && !target.isDir && (await shouldBlockNavigate())) return
   const entry = nav.goBack()
   if (!entry) return
   ensureParentsExpanded(entry.rel)
@@ -591,7 +646,10 @@ function doGoBack() {
   else void onSelectFile(entry.rel)
 }
 
-function doGoForward() {
+async function doGoForward() {
+  if (!nav.canGoForward.value) return
+  const target = nav.navHistory.value[nav.navIndex.value + 1]
+  if (target && !target.isDir && (await shouldBlockNavigate())) return
   const entry = nav.goForward()
   if (!entry) return
   ensureParentsExpanded(entry.rel)
@@ -604,24 +662,49 @@ function bumpTreePointerTs() {
   lastTreePointerTs.value = Date.now()
 }
 
-function shouldBlockNavigate(): boolean {
-  return false
+/** Ask before dropping a dirty buffer. Returns true when it is safe to proceed. */
+async function confirmDiscardForLeaf(leafId: string | null | undefined): Promise<boolean> {
+  if (!leafId) return true
+  if (!getEditorPaneState(leafId)?.isDirty()) return true
+  return uiConfirm(t('filePreview.discardChanges'), {
+    confirmText: t('filePreview.discardChanges'),
+    cancelText: t('filePreview.cancel'),
+  })
+}
+
+async function shouldBlockNavigate(): Promise<boolean> {
+  return !(await confirmDiscardForLeaf(editorSplit.activeLeaf.value?.id))
 }
 
 async function trySelectFile(rel: string, ev?: MouseEvent) {
-  if (shouldBlockNavigate()) return
   // Cmd (macOS) / Ctrl (Windows/Linux) + Click → open in new split pane
   if (ev?.metaKey || ev?.ctrlKey) {
     editorSplit.openFileInNewPane(rel, false, 'horizontal')
     await loadMetaForActivePane(rel)
     return
   }
+  if (await shouldBlockNavigate()) return
   await onSelectFile(rel)
 }
 
 function trySelectDir(rel: string) {
-  if (shouldBlockNavigate()) return
+  // Directory selection does not replace the editor buffer.
   onSelectDir(rel)
+}
+
+/** Close a pane after checking every shown buffer (not just the active one). */
+async function onCloseEditorPane(leafId: string) {
+  const hasDirty = getAllEditorLeaves(editorSplit.editorLayout.value).some((leaf) =>
+    getEditorPaneState(leaf.id)?.isDirty()
+  )
+  if (hasDirty) {
+    const ok = await uiConfirm(t('filePreview.discardChanges'), {
+      confirmText: t('filePreview.discardChanges'),
+      cancelText: t('filePreview.cancel'),
+    })
+    if (!ok) return
+  }
+  editorSplit.closeEditorPane(leafId)
 }
 
 const { selectedPath: globalSelectedPath } = useSelectedPath()
@@ -745,7 +828,7 @@ function close() {
 
 function onRecentSelect(path: string) {
   recentDropdownOpen.value = false
-  openFromTerminal(path)
+  void openFromTerminal(path)
 }
 
 // --- Keyboard ---

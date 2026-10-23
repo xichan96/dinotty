@@ -151,74 +151,61 @@ export const TreeRows = defineComponent({
       return null
     }
 
-    function makeLongPressHandlers(rel: string, isDir: boolean) {
+    // One gesture recognizer per row: a left swipe reveals the action buttons,
+    // a still hold opens the context menu. Mutually exclusive by design — once
+    // the long press fires, movement no longer turns the gesture into a swipe.
+    function makeTouchHandlers(rel: string, isDir: boolean) {
+      const LONG_PRESS_MS = 500
+      const MOVE_CANCEL_PX = 10
+      const SWIPE_THRESHOLD = 30
       let timer: ReturnType<typeof setTimeout> | null = null
       let startX = 0
       let startY = 0
-      let fired = false
-      return {
-        onTouchstart: (e: TouchEvent) => {
-          if (e.touches.length !== 1) return
-          const touch = e.touches[0]
-          startX = touch.clientX
-          startY = touch.clientY
-          fired = false
-          timer = setTimeout(() => {
-            fired = true
-            emit('long-press', { clientX: startX, clientY: startY }, rel, isDir)
-          }, 500)
-        },
-        onTouchmove: (e: TouchEvent) => {
-          if (!timer) return
-          const touch = e.touches[0]
-          if (Math.abs(touch.clientX - startX) > 10 || Math.abs(touch.clientY - startY) > 10) {
-            if (timer) clearTimeout(timer)
-            timer = null
-          }
-        },
-        onTouchend: (e: TouchEvent) => {
-          if (timer) clearTimeout(timer)
-          timer = null
-          if (fired) e.preventDefault()
-        },
-        onTouchcancel: () => {
-          if (timer) clearTimeout(timer)
-          timer = null
-        },
-      }
-    }
-
-    function makeSwipeHandlers(rel: string) {
-      let startX = 0
-      let startY = 0
+      let longPressFired = false
       let swiping = false
-      const SWIPE_THRESHOLD = 30
+
+      function clearTimer() {
+        if (timer) clearTimeout(timer)
+        timer = null
+      }
+
       return {
         onTouchstart: (e: TouchEvent) => {
           if (e.touches.length !== 1) return
+          clearTimer()
           const touch = e.touches[0]
           startX = touch.clientX
           startY = touch.clientY
+          longPressFired = false
           swiping = false
+          timer = setTimeout(() => {
+            timer = null
+            longPressFired = true
+            emit('long-press', { clientX: startX, clientY: startY }, rel, isDir)
+          }, LONG_PRESS_MS)
         },
         onTouchmove: (e: TouchEvent) => {
           if (e.touches.length !== 1) return
+          if (longPressFired) return
           const touch = e.touches[0]
-          const dx = startX - touch.clientX
-          const dy = Math.abs(touch.clientY - startY)
-          if (!swiping && swipedRel.value === rel) return
-          if (!swiping && dx > SWIPE_THRESHOLD && dy < dx * 0.5) {
+          const dx = touch.clientX - startX
+          const dy = touch.clientY - startY
+          if (timer && (Math.abs(dx) > MOVE_CANCEL_PX || Math.abs(dy) > MOVE_CANCEL_PX)) {
+            clearTimer()
+          }
+          if (!swiping && dx < -SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 2) {
             swiping = true
             swipedRel.value = rel
-            e.preventDefault()
           }
           if (swiping) e.preventDefault()
         },
         onTouchend: (e: TouchEvent) => {
-          if (swiping) e.preventDefault()
+          clearTimer()
+          if (swiping || longPressFired) e.preventDefault()
           swiping = false
         },
         onTouchcancel: () => {
+          clearTimer()
           swiping = false
         },
       }
@@ -275,7 +262,7 @@ export const TreeRows = defineComponent({
                 style: rowPad,
                 draggable: true,
                 'data-rel': rel,
-                ...makeSwipeHandlers(rel),
+                ...makeTouchHandlers(rel, true),
                 onContextmenu: (ev: MouseEvent) => {
                   ev.preventDefault()
                   ev.stopPropagation()
@@ -328,7 +315,6 @@ export const TreeRows = defineComponent({
                     emit('upload-to-dir', rel, ev)
                   }
                 },
-                ...makeLongPressHandlers(rel, true),
               },
               [
                 h(
@@ -450,7 +436,7 @@ export const TreeRows = defineComponent({
                 key: rel,
                 style: rowPad,
                 draggable: true,
-                ...makeSwipeHandlers(rel),
+                ...makeTouchHandlers(rel, false),
                 onContextmenu: (ev: MouseEvent) => {
                   ev.preventDefault()
                   ev.stopPropagation()
@@ -468,7 +454,6 @@ export const TreeRows = defineComponent({
                 onDragend: () => {
                   setTimeout(clearInternalDrag, 200)
                 },
-                ...makeLongPressHandlers(rel, false),
               },
               [
                 h('span', {

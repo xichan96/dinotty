@@ -205,6 +205,7 @@
         ></div>
         <div class="file-workspace-preview-wrap">
           <button
+            v-if="!layout.narrow.value"
             type="button"
             class="tree-collapse-btn"
             :title="collapseToggleTitle"
@@ -973,6 +974,9 @@ async function loadMetaForActivePane(rel: string) {
 }
 
 async function onSelectFile(rel: string) {
+  // On narrow panes the drawer covers the preview; picking a file should
+  // reveal it. Directory selection keeps the drawer open for continued browsing.
+  if (layout.narrow.value) layout.closeDrawer()
   selectedRel.value = rel
   selectedIsDir.value = false
   editorSplit.openFileInActivePane(rel, false)

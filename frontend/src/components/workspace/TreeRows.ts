@@ -535,6 +535,11 @@ export const TreeRows = defineComponent({
                 key: rel,
                 style: rowPad,
                 draggable: true,
+                tabindex: '-1',
+                role: 'treeitem',
+                'aria-level': p.depth + 1,
+                'aria-selected': p.selectedRel === rel ? 'true' : 'false',
+                'aria-expanded': isExp ? 'true' : 'false',
                 'data-rel': rel,
                 ...makeTouchHandlers(rel, true),
                 onContextmenu: (ev: MouseEvent) => {
@@ -605,6 +610,7 @@ export const TreeRows = defineComponent({
                   'button',
                   {
                     type: 'button',
+                    tabindex: -1,
                     class: ['tree-twistie', { open: isExp }],
                     onClick: () => emit('toggle', rel),
                   },
@@ -627,6 +633,7 @@ export const TreeRows = defineComponent({
                         'button',
                         {
                           type: 'button',
+                          tabindex: -1,
                           class: 'tree-swipe-btn',
                           onClick: (ev: Event) => {
                             ev.stopPropagation()
@@ -639,6 +646,7 @@ export const TreeRows = defineComponent({
                         'button',
                         {
                           type: 'button',
+                          tabindex: -1,
                           class: 'tree-swipe-btn tree-swipe-btn-accent',
                           onClick: (ev: Event) => {
                             ev.stopPropagation()
@@ -725,6 +733,10 @@ export const TreeRows = defineComponent({
                 key: rel,
                 style: rowPad,
                 draggable: true,
+                tabindex: '-1',
+                role: 'treeitem',
+                'aria-level': p.depth + 1,
+                'aria-selected': p.selectedRel === rel ? 'true' : 'false',
                 'data-rel': rel,
                 ...makeTouchHandlers(rel, false),
                 onContextmenu: (ev: MouseEvent) => {
@@ -767,6 +779,7 @@ export const TreeRows = defineComponent({
                         'button',
                         {
                           type: 'button',
+                          tabindex: -1,
                           class: 'tree-swipe-btn',
                           onClick: (ev: Event) => {
                             ev.stopPropagation()
@@ -779,6 +792,7 @@ export const TreeRows = defineComponent({
                         'button',
                         {
                           type: 'button',
+                          tabindex: -1,
                           class: 'tree-swipe-btn tree-swipe-btn-accent',
                           onClick: (ev: Event) => {
                             ev.stopPropagation()
@@ -803,6 +817,9 @@ export const TreeRows = defineComponent({
         'div',
         {
           class: 'tree-rows',
+          // Flatten the recursion wrappers out of the accessibility tree so
+          // the treeitems read as direct children of the role="tree" host.
+          role: 'presentation',
           onDragover: (ev: DragEvent) => {
             if (hasType(ev.dataTransfer, 'application/x-tree-move')) {
               ev.preventDefault()

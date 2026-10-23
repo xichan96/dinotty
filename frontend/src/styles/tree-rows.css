@@ -65,6 +65,16 @@
   outline-offset: -1px;
 }
 
+/* Keyboard focus lives on the row, not the container: the container is only
+   the tab stop (focus moves to a row as soon as it is focused). */
+.tree-host .tree-row:focus-visible {
+  outline: 1px solid var(--accent, #89b4fa);
+  outline-offset: -1px;
+}
+.tree-host:focus-visible {
+  outline: none;
+}
+
 /* One 1px rule per ancestor level, rendered before the row content. */
 .tree-host .tree-guides {
   display: flex;

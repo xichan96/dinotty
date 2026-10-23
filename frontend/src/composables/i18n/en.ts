@@ -34,6 +34,7 @@ export default {
   'filePreview.moveToRoot': 'Root directory',
   'filePreview.cancel': 'Cancel',
   'filePreview.explorer': 'Explorer',
+  'filePreview.treeAriaLabel': 'File explorer',
   'filePreview.closeTree': 'Close file tree',
   'filePreview.newFile': 'New file',
   'filePreview.newFolder': 'New folder',

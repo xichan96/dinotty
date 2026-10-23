@@ -167,9 +167,15 @@
             </button>
           </div>
           <div
+            ref="treeHostRef"
             class="file-workspace-tree tree-host"
+            tabindex="0"
+            role="tree"
+            :aria-label="t('filePreview.treeAriaLabel')"
             @click.stop
             @pointerdown.capture="bumpTreePointerTs"
+            @pointerdown="onTreePointerDown"
+            @focus="onTreeFocus"
             @contextmenu.prevent="ctxMenu.onTreeBgContextMenu"
           >
             <TreeRows
@@ -459,6 +465,7 @@ const recentDropdownOpen = ref(false)
 const refreshBusy = ref(false)
 const fileWorkspaceBodyRef = ref<HTMLElement | null>(null)
 const treeWrapRef = ref<HTMLElement | null>(null)
+const treeHostRef = ref<HTMLElement | null>(null)
 
 // --- Composables ---
 const nav = useFileNavigation()
@@ -912,6 +919,35 @@ async function doGoForward() {
 // --- Tree interactions ---
 function bumpTreePointerTs() {
   lastTreePointerTs.value = Date.now()
+}
+
+/** Rows are the keyboard targets, so a pointer interaction has to put DOM
+ *  focus on the row it hit. The twistie/swipe buttons still receive their
+ *  click; only the focus destination changes. */
+function onTreePointerDown(ev: PointerEvent) {
+  const row = (ev.target as HTMLElement | null)?.closest<HTMLElement>('.tree-row[data-rel]')
+  if (row) row.focus({ preventScroll: true })
+}
+
+/** The container is the tree's single tab stop. Tab lands on it, then focus
+ *  moves to the selected row (or the first row) so arrow keys have a target. */
+function onTreeFocus(ev: FocusEvent) {
+  const host = treeHostRef.value
+  if (!host || ev.target !== host) return
+  const rows = host.querySelectorAll<HTMLElement>('.tree-row[data-rel]')
+  if (!rows.length) return
+  let target = rows[0]
+  const selected = selectedRel.value
+  if (selected) {
+    for (const row of rows) {
+      if (row.dataset.rel === selected) {
+        target = row
+        break
+      }
+    }
+  }
+  target.focus({ preventScroll: true })
+  target.scrollIntoView({ block: 'nearest' })
 }
 
 /** Ask before dropping a dirty buffer. Returns true when it is safe to proceed. */

@@ -28,18 +28,85 @@ export function treeFolderIcon(expanded: boolean): VNode {
   ])
 }
 
-export function treeFileIcon(): VNode {
-  return h('span', { class: 'tree-kind-icon tree-kind-icon-file' }, [
-    h(
-      'svg',
-      { viewBox: '0 0 16 16', class: 'tree-svg', fill: 'currentColor', 'aria-hidden': 'true' },
-      [
-        h('path', {
-          d: 'M4 2h5.2L13 5.8V14H4V2zm1 1v10h7V6.5H8.5L9 6 8 5H5zm5.2 0L12 5.8h-2V3h-.8z',
-        }),
-      ]
-    ),
-  ])
+const DEFAULT_FILE_ICON_COLOR = '#9aa0a6'
+
+// Same palette as the UX prototype (file-tree-ux.html). No extra icon assets:
+// only the fill of the existing document glyph changes.
+const FILE_EXT_COLORS: Record<string, string> = {
+  ts: '#6fa8dc',
+  tsx: '#6fa8dc',
+  js: '#d6c85a',
+  jsx: '#d6c85a',
+  mjs: '#d6c85a',
+  cjs: '#d6c85a',
+  vue: '#41b883',
+  rs: '#dea584',
+  json: '#cbcb41',
+  md: '#8cb4d9',
+  mdx: '#8cb4d9',
+  css: '#a074c4',
+  scss: '#a074c4',
+  sass: '#a074c4',
+  less: '#a074c4',
+  html: '#e37933',
+  htm: '#e37933',
+  toml: '#9c6b3f',
+  yml: '#c97b63',
+  yaml: '#c97b63',
+  svg: '#e9b35a',
+  png: '#b78fd6',
+  jpg: '#b78fd6',
+  jpeg: '#b78fd6',
+  gif: '#b78fd6',
+  webp: '#b78fd6',
+  ico: '#b78fd6',
+  py: '#3572a5',
+  go: '#00add8',
+  java: '#b07219',
+  sh: '#89e051',
+  bash: '#89e051',
+  zsh: '#89e051',
+  lock: '#8a8a8a',
+  gitignore: '#8a8a8a',
+}
+
+function fileIconColor(name: string): string {
+  const base = name.slice(name.lastIndexOf('/') + 1)
+  if (base === '.gitignore') return FILE_EXT_COLORS.gitignore
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0) return DEFAULT_FILE_ICON_COLOR
+  return FILE_EXT_COLORS[base.slice(dot + 1).toLowerCase()] ?? DEFAULT_FILE_ICON_COLOR
+}
+
+export function treeFileIcon(name = ''): VNode {
+  return h(
+    'span',
+    {
+      class: 'tree-kind-icon tree-kind-icon-file',
+      style: name ? { color: fileIconColor(name) } : undefined,
+    },
+    [
+      h(
+        'svg',
+        { viewBox: '0 0 16 16', class: 'tree-svg', fill: 'currentColor', 'aria-hidden': 'true' },
+        [
+          h('path', {
+            d: 'M4 2h5.2L13 5.8V14H4V2zm1 1v10h7V6.5H8.5L9 6 8 5H5zm5.2 0L12 5.8h-2V3h-.8z',
+          }),
+        ]
+      ),
+    ]
+  )
+}
+
+/** One 1px vertical rule per ancestor level; rows carry their own depth. */
+export function treeGuides(depth: number): VNode | null {
+  if (depth <= 0) return null
+  return h(
+    'span',
+    { class: 'tree-guides', 'aria-hidden': 'true' },
+    Array.from({ length: depth }, (_, i) => h('i', { key: i }))
+  )
 }
 
 export function absJoinWorkspaceRoot(root: string, rel: string): string {
@@ -352,9 +419,9 @@ export const TreeRows = defineComponent({
         return null
       }
       const rows: ReturnType<typeof h>[] = []
-      const rowPad = {
-        paddingLeft: `calc(var(--tree-base-hpad) + var(--tree-indent-step) * ${p.depth})`,
-      }
+      // Indentation comes from rendered guide spans, not padding, so each
+      // level's 1px rule lines up with the content that follows it.
+      const rowPad = { paddingLeft: 'var(--tree-base-hpad)' }
       const stateRow = (kind: 'loading' | 'empty') =>
         h(
           'div',
@@ -364,6 +431,7 @@ export const TreeRows = defineComponent({
             style: rowPad,
           },
           [
+            treeGuides(p.depth),
             h('span', { class: 'tree-twistie-placeholder' }),
             h(
               'span',
@@ -381,6 +449,7 @@ export const TreeRows = defineComponent({
       if (ic && ic.parentRel === p.relPath) {
         rows.push(
           h('div', { class: 'tree-row tree-inline-create', key: '__ic__', style: rowPad }, [
+            treeGuides(p.depth),
             h('span', { class: 'tree-twistie-placeholder' }),
             h(TreeInlineInput, {
               placeholder: p.inlinePlaceholder as string,
@@ -408,11 +477,14 @@ export const TreeRows = defineComponent({
                 onCommit: (name: string) => emit('inline-rename-commit', name),
                 onCancel: () => emit('inline-rename-cancel'),
               })
-            : h(
-                'span',
-                { class: ['tree-label', gitInfo?.cls, { sel: p.selectedRel === rel }] },
-                e.name
-              )
+            : h('span', { class: ['tree-label', { sel: p.selectedRel === rel }] }, [
+                h('span', { class: 'tree-label-text' }, e.name),
+                // Directories report changes with a dot; the label itself
+                // keeps the normal foreground (prototype behaviour).
+                gitInfo
+                  ? h('span', { class: 'tree-dir-dot', title: t('filePreview.modified') })
+                  : null,
+              ])
           rows.push(
             h(
               'div',
@@ -492,6 +564,7 @@ export const TreeRows = defineComponent({
                 },
               },
               [
+                treeGuides(p.depth),
                 h(
                   'button',
                   {
@@ -639,8 +712,9 @@ export const TreeRows = defineComponent({
                     onClick: isRenaming ? undefined : () => emit('select-file', rel),
                   },
                   [
+                    treeGuides(p.depth),
                     h('span', { class: 'tree-twistie-placeholder' }),
-                    treeFileIcon(),
+                    treeFileIcon(e.name),
                     fileLabelContent,
                   ]
                 ),

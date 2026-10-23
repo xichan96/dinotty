@@ -3,7 +3,8 @@
   --tree-indent-step: 8px;
   --tree-icon-size: 16px;
   --tree-twistie-size: 16px;
-  --tree-row-height: 22px;
+  --tree-row-height: 28px;
+  --tree-guide: rgba(255, 255, 255, 0.1);
   --tree-row-hover: var(--list-hover-bg, var(--bg-hover));
   --tree-row-selected: var(--list-selection-bg, var(--accent));
   --tree-row-selected-fg: var(--list-selection-fg, #ffffff);
@@ -56,6 +57,20 @@
 }
 .tree-host .tree-row:has(.tree-label.sel):hover {
   background: var(--tree-row-selected);
+}
+
+/* One 1px rule per ancestor level, rendered before the row content. */
+.tree-host .tree-guides {
+  display: flex;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.tree-host .tree-guides i {
+  display: block;
+  box-sizing: border-box;
+  width: var(--tree-indent-step);
+  border-left: 1px solid var(--tree-guide);
 }
 
 .tree-host .tree-twistie {
@@ -201,6 +216,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  white-space: nowrap;
+}
+
+.tree-host .tree-dir-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #e2b36a;
 }
 .tree-host .tree-git-badge {
   margin-left: auto;
@@ -235,6 +260,7 @@
 .tree-host .tree-inline-input {
   flex: 1;
   min-width: 0;
+  height: 20px;
   font-size: 13px;
   padding: 2px 6px;
   border: 1px solid var(--accent);

@@ -15,10 +15,12 @@ TreeRows 交互与视觉：触摸手势状态机、整行命中、内联输入 b
 - [x] 3 TreeInlineInput：blur 提交（空名取消）、composition 守卫、Enter/Escape 去重。
 - [x] 4 拖拽：悬停 600ms emit toggle 自动展开（已展开跳过）；上下 24px 自动滚动（closest .file-workspace-tree-wrap，回退 overflow 祖先）；dragleave/drop/dragend 清理。
 - [x] 5 加载/空态：expanded 且 cache undefined → 缩进 loading 行；entries=[]（含根）→ 空文件夹；复用 filePreview.loading，新增 filePreview.emptyFolder（en/zh）。
-- [ ] 6 导引线/28px/彩色图标/目录变更点
+- [x] 6 外观：depth 条带导引线（8px/层，border-box 对齐内容）、行高 28px、扩展名彩色 file 图标（原型色板）、目录变更 6px 圆点；真实 Chrome 实测行高 28、导引线 x=8/16、图标起点 40。
 
 ## 测试结果
 - npm test：191 passed / 1 skipped（1932 tests）；prettier check、vue-tsc -b 通过。
+- Chrome 几何夹具（/tmp/tree-fixture）：dir/file/state/inline 行高均 28；guides 8/16；icon x=40；.ts 图标 rgb(111,168,220)；圆点 6x6。
 
 ## 未完成
-- 第 6 项。
+- 无（六项已完成）。
+- 未在真实应用里跑交互回归（需要服务端/8999 端口与桌面壳），仅做 Chrome 静态几何验证。

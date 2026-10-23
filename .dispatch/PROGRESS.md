@@ -12,7 +12,7 @@ TreeRows 交互与视觉：触摸手势状态机、整行命中、内联输入 b
 ## 改动
 - [x] 1 触摸手势状态机：makeTouchHandlers 合并 swipe/longpress，长按后禁滑动。
 - [x] 2 文件行整行命中：tree-file-hit 包住占位+图标+文字。
-- [ ] 3 TreeInlineInput blur commit + 输入法守卫
+- [x] 3 TreeInlineInput：blur 提交（空名取消）、composition 守卫、Enter/Escape 去重。
 - [ ] 4 拖拽悬停 600ms 展开 + 边缘自动滚动
 - [ ] 5 加载/空态 + i18n
 - [ ] 6 导引线/28px/彩色图标/目录变更点
@@ -21,4 +21,4 @@ TreeRows 交互与视觉：触摸手势状态机、整行命中、内联输入 b
 - npm test：191 passed / 1 skipped（1932 tests）；prettier check 通过。
 
 ## 未完成
-- 第 3–6 项。
+- 第 4–6 项。

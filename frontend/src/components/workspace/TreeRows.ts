@@ -61,7 +61,26 @@ export const TreeInlineInput = defineComponent({
   setup(props, { emit }) {
     const model = ref('')
     const inputRef = ref<HTMLInputElement | null>(null)
+    const composing = ref(false)
+    // Once a decision is made the input is about to unmount; a trailing blur
+    // must not emit a second commit/cancel pair.
+    let finished = false
     onMounted(() => nextTick(() => inputRef.value?.focus()))
+
+    function commit() {
+      if (finished) return
+      finished = true
+      const name = model.value.trim()
+      if (name) emit('commit', name)
+      else emit('cancel')
+    }
+
+    function cancel() {
+      if (finished) return
+      finished = true
+      emit('cancel')
+    }
+
     return () =>
       h('input', {
         ref: inputRef,
@@ -74,15 +93,29 @@ export const TreeInlineInput = defineComponent({
         onInput: (e: Event) => {
           model.value = (e.target as HTMLInputElement).value
         },
+        onCompositionstart: () => {
+          composing.value = true
+        },
+        onCompositionend: (e: CompositionEvent) => {
+          composing.value = false
+          model.value = (e.target as HTMLInputElement).value
+        },
         onKeydown: (e: KeyboardEvent) => {
+          // Enter/Escape while an IME candidate window is open belongs to the
+          // IME, not to us — committing here would submit a half-typed name.
+          if (composing.value || e.isComposing) return
           if (e.key === 'Enter') {
             e.preventDefault()
-            emit('commit', model.value.trim())
+            commit()
           }
           if (e.key === 'Escape') {
             e.preventDefault()
-            emit('cancel')
+            cancel()
           }
+        },
+        onBlur: () => {
+          if (composing.value) return
+          commit()
         },
       })
   },

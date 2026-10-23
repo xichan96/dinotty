@@ -42,6 +42,8 @@ export default {
   'filePreview.cancel': 'Cancel',
   'filePreview.explorer': 'Explorer',
   'filePreview.treeAriaLabel': 'File explorer',
+  'filePreview.symlink': 'Symbolic link',
+  'filePreview.symlinkCycle': 'Symbolic link loops back to an ancestor folder; expansion blocked',
   'filePreview.closeTree': 'Close file tree',
   'filePreview.newFile': 'New file',
   'filePreview.newFolder': 'New folder',

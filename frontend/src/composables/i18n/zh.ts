@@ -42,6 +42,8 @@ export default {
   'filePreview.cancel': '取消',
   'filePreview.explorer': '资源管理器',
   'filePreview.treeAriaLabel': '文件资源管理器',
+  'filePreview.symlink': '符号链接',
+  'filePreview.symlinkCycle': '符号链接成环，已阻止展开',
   'filePreview.closeTree': '关闭文件树',
   'filePreview.newFile': '新建文件',
   'filePreview.newFolder': '新建文件夹',

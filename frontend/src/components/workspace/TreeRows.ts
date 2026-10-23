@@ -13,6 +13,38 @@ export interface DirEntry {
   name: string
   is_dir: boolean
   size: number
+  /** The entry itself is a symlink (is_dir/size describe the target). */
+  is_symlink?: boolean
+  /** A symlink pointing back at the listed directory or one of its
+   *  ancestors: expanding it would recurse forever. */
+  is_cycle?: boolean
+}
+
+/** Directories only expand when they are not symlink cycles. */
+export function canExpandEntry(e: { is_dir: boolean; is_cycle?: boolean }): boolean {
+  return !!e.is_dir && !e.is_cycle
+}
+
+function treeSymlinkBadge(title: string): VNode {
+  return h('span', { class: 'tree-symlink-badge', title, 'aria-label': title }, [
+    h(
+      'svg',
+      {
+        viewBox: '0 0 16 16',
+        class: 'tree-symlink-icon',
+        fill: 'none',
+        stroke: 'currentColor',
+        'stroke-width': '1.4',
+        'stroke-linecap': 'round',
+        'aria-hidden': 'true',
+      },
+      [
+        h('path', { d: 'M6.6 9.4 9.4 6.6' }),
+        h('path', { d: 'M7.3 5.3 8.6 4a2.6 2.6 0 0 1 3.7 3.7l-1.3 1.3' }),
+        h('path', { d: 'M8.7 10.7 7.4 12a2.6 2.6 0 0 1-3.7-3.7l1.3-1.3' }),
+      ]
+    ),
+  ])
 }
 
 export function treeFolderIcon(expanded: boolean): VNode {
@@ -500,7 +532,8 @@ export const TreeRows = defineComponent({
         | undefined
       for (const e of entries ?? []) {
         const rel = p.relPath ? `${p.relPath}/${e.name}` : e.name
-        const isExp = (p.expanded as Set<string>).has(rel)
+        const expandable = canExpandEntry(e)
+        const isExp = expandable && (p.expanded as Set<string>).has(rel)
         const isRenaming = !!(ir && ir.rel === rel)
         const gitInfo = getGitBadge(rel, e.is_dir)
         if (e.is_dir) {
@@ -514,6 +547,7 @@ export const TreeRows = defineComponent({
               })
             : h('span', { class: ['tree-label', { sel: p.selectedRel === rel }] }, [
                 h('span', { class: 'tree-label-text' }, e.name),
+                e.is_symlink ? treeSymlinkBadge(t('filePreview.symlink')) : null,
                 // Directories report changes with a dot; the label itself
                 // keeps the normal foreground (prototype behaviour).
                 gitInfo
@@ -530,6 +564,7 @@ export const TreeRows = defineComponent({
                   {
                     'tree-row-swipe': !isRenaming && swipedRel.value === rel,
                     'ctx-target': p.ctxTargetRel === rel,
+                    'tree-row-cycle': !expandable,
                   },
                 ],
                 key: rel,
@@ -540,6 +575,7 @@ export const TreeRows = defineComponent({
                 'aria-level': p.depth + 1,
                 'aria-selected': p.selectedRel === rel ? 'true' : 'false',
                 'aria-expanded': isExp ? 'true' : 'false',
+                ...(expandable ? {} : { 'aria-disabled': 'true' }),
                 'data-rel': rel,
                 ...makeTouchHandlers(rel, true),
                 onContextmenu: (ev: MouseEvent) => {
@@ -574,7 +610,9 @@ export const TreeRows = defineComponent({
                     return
                   }
                   installDragCleanup()
-                  scheduleHoverExpand(rel, isExp, () => emit('toggle', rel))
+                  // Never hover-expand a cycle: it would re-list an ancestor
+                  // and can keep re-arming the timer as rows reappear.
+                  if (expandable) scheduleHoverExpand(rel, isExp, () => emit('toggle', rel))
                 },
                 onDragleave: (ev: DragEvent) => {
                   ;(ev.currentTarget as HTMLElement).classList.remove(
@@ -611,8 +649,12 @@ export const TreeRows = defineComponent({
                   {
                     type: 'button',
                     tabindex: -1,
-                    class: ['tree-twistie', { open: isExp }],
-                    onClick: () => emit('toggle', rel),
+                    class: ['tree-twistie', { open: isExp, disabled: !expandable }],
+                    disabled: !expandable,
+                    title: expandable ? undefined : t('filePreview.symlinkCycle'),
+                    onClick: () => {
+                      if (expandable) emit('toggle', rel)
+                    },
                   },
                   isExp ? '▼' : '▶'
                 ),
@@ -620,8 +662,9 @@ export const TreeRows = defineComponent({
                   'span',
                   {
                     class: 'tree-folder-hit',
+                    title: expandable ? undefined : t('filePreview.symlinkCycle'),
                     onClick: () => {
-                      emit('toggle', rel)
+                      if (expandable) emit('toggle', rel)
                       emit('select-dir', rel)
                     },
                   },
@@ -713,6 +756,7 @@ export const TreeRows = defineComponent({
                 },
                 [
                   h('span', { class: 'tree-label-text' }, e.name),
+                  e.is_symlink ? treeSymlinkBadge(t('filePreview.symlink')) : null,
                   gitInfo?.badge
                     ? h('span', { class: `tree-git-badge git-${gitInfo.badge}` }, gitInfo.badge)
                     : null,

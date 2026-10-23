@@ -85,6 +85,48 @@
           :class="{ narrow: layout.narrow.value }"
           :style="layout.treeWrapStyle.value"
         >
+          <div class="file-workspace-tree-head">
+            <span class="file-workspace-tree-title">{{ t('filePreview.explorer') }}</span>
+            <div class="file-workspace-tree-actions">
+              <button
+                type="button"
+                data-testid="tree-head-new-file"
+                :title="t('filePreview.newFile')"
+                :aria-label="t('filePreview.newFile')"
+                @click="startNewFile"
+              >
+                <FilePlus :size="14" />
+              </button>
+              <button
+                type="button"
+                data-testid="tree-head-new-folder"
+                :title="t('filePreview.newFolder')"
+                :aria-label="t('filePreview.newFolder')"
+                @click="startNewFolder"
+              >
+                <FolderPlus :size="14" />
+              </button>
+              <button
+                type="button"
+                data-testid="tree-head-refresh"
+                :class="{ spinning: refreshBusy }"
+                :title="t('filePreview.refresh')"
+                :aria-label="t('filePreview.refresh')"
+                @click="refreshTree"
+              >
+                <RotateCw :size="14" />
+              </button>
+              <button
+                type="button"
+                data-testid="tree-head-collapse-all"
+                :title="t('filePreview.collapseAll')"
+                :aria-label="t('filePreview.collapseAll')"
+                @click="collapseAll"
+              >
+                <ChevronsDownUp :size="14" />
+              </button>
+            </div>
+          </div>
           <div v-if="previewErr" class="file-workspace-error" role="alert">
             <span class="file-workspace-error-text">{{ previewErrText }}</span>
             <button
@@ -332,6 +374,9 @@ import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronsDownUp,
+  FilePlus,
+  FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
   RotateCw,
@@ -377,6 +422,7 @@ const expanded = ref<Set<string>>(new Set())
 const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
 const recentDropdownOpen = ref(false)
+const refreshBusy = ref(false)
 const fileWorkspaceBodyRef = ref<HTMLElement | null>(null)
 const treeWrapRef = ref<HTMLElement | null>(null)
 
@@ -966,6 +1012,22 @@ function onToggle(rel: string) {
   if (next.has(rel)) void ensureChildren(rel)
 }
 
+/** Explorer "collapse all": close every directory but keep the selection so
+ *  the highlighted row stays revealed under its collapsed ancestors. */
+function collapseAll() {
+  expanded.value = new Set()
+}
+
+async function refreshTree() {
+  if (refreshBusy.value) return
+  refreshBusy.value = true
+  try {
+    await reloadAll()
+  } finally {
+    refreshBusy.value = false
+  }
+}
+
 // --- Inline create/rename ---
 // (Extracted to useInlineCreateRename composable)
 
@@ -1246,15 +1308,83 @@ defineExpose({
 }
 
 .file-workspace-tree-wrap {
+  --tree-head-h: 30px;
   min-width: 120px;
   overflow: auto;
   flex-shrink: 0;
   background: var(--bg, #1a1a1a);
 }
 
-.file-workspace-error {
+.file-workspace-tree-head {
   position: sticky;
   top: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: var(--tree-head-h);
+  padding: 0 4px 0 12px;
+  background: var(--bg, #1a1a1a);
+  border-bottom: 1px solid var(--border, #333);
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.file-workspace-tree-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-workspace-tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0.78;
+}
+
+.file-workspace-tree-head:hover .file-workspace-tree-actions {
+  opacity: 1;
+}
+
+.file-workspace-tree-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+}
+
+.file-workspace-tree-actions button:hover {
+  background: var(--tab-hover-bg, #333);
+  color: var(--fg, #ccc);
+}
+
+.file-workspace-tree-actions button.spinning svg {
+  animation: tree-head-spin 0.7s linear infinite;
+}
+
+@keyframes tree-head-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.file-workspace-error {
+  position: sticky;
+  top: var(--tree-head-h, 0);
   z-index: 3;
   display: flex;
   align-items: center;

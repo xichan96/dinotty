@@ -1,6 +1,6 @@
 .tree-host {
   --tree-base-hpad: 8px;
-  --tree-indent-step: 8px;
+  --tree-indent-step: 12px;
   --tree-icon-size: 16px;
   --tree-twistie-size: 16px;
   --tree-row-height: 28px;

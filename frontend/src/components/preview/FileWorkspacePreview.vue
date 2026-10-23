@@ -471,6 +471,18 @@ function panesShowing(rel: string) {
   return getAllEditorLeaves(editorSplit.editorLayout.value).filter((leaf) => leaf.filePath === rel)
 }
 
+// Bulk writes (checkout, branch switch, agent rewrites) produce one watcher
+// event per path. Coalesce the git-status refresh so a 100-file change runs
+// one `git status`, not 100.
+let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleGitRefresh() {
+  if (gitRefreshTimer) clearTimeout(gitRefreshTimer)
+  gitRefreshTimer = setTimeout(() => {
+    gitRefreshTimer = null
+    void fetchGitStatus()
+  }, 400)
+}
+
 function onWatchedFileChanged(rel: string) {
   for (const leaf of panesShowing(rel)) {
     const state = getEditorPaneState(leaf.id)
@@ -478,7 +490,7 @@ function onWatchedFileChanged(rel: string) {
     if (state.isDirty()) state.markDiskChanged()
     else void state.reloadFromDisk()
   }
-  fetchGitStatus()
+  scheduleGitRefresh()
 }
 
 function onWatchedFileDeleted(rel: string) {
@@ -488,7 +500,7 @@ function onWatchedFileDeleted(rel: string) {
       leaf.isDir = false
     }
   }
-  fetchGitStatus()
+  scheduleGitRefresh()
 }
 
 /** SSH panes have no local watcher behind them; don't open a socket at all. */
@@ -907,6 +919,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (gitRefreshTimer) {
+    clearTimeout(gitRefreshTimer)
+    gitRefreshTimer = null
+  }
   if (props.paneId) saveFileWorkspaceState(props.paneId, captureState())
   window.removeEventListener('resize', layout.onResize)
   if (!props.isWindow) {

@@ -124,18 +124,42 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     fetchGitStatus,
   } = opts
 
+  /**
+   * Refresh without collapsing the tree: keep `expanded` and `selectedRel`,
+   * clear the cache for the root and every expanded directory, then re-fetch
+   * them all in parallel. A directory that fails keeps its previous listing so
+   * the user is not left with a permanent spinner; the first failure is
+   * reported through `previewErr` (whose Retry re-runs this).
+   */
   async function reloadAll(): Promise<void> {
     inlineCreate.value = null
     contextMenu.value = null
-    childCache.value = {}
-    expanded.value = new Set()
     previewErr.value = null
-    meta.value = null
-    try {
-      await ensureChildren('')
-    } catch (e) {
-      previewErr.value = withWorkspaceErrorRel(e, '')
-    }
+    const dirs = [...new Set(['', ...expanded.value])]
+    const previous = childCache.value
+    const cleared = { ...previous }
+    for (const dir of dirs) delete cleared[dir]
+    childCache.value = cleared
+    let firstError: WorkspaceError | null = null
+    let firstErrorDir = ''
+    await Promise.all(
+      dirs.map(async (dir) => {
+        try {
+          // Cleared above, so this actually hits the backend.
+          await ensureChildren(dir)
+        } catch (e) {
+          if (previous[dir] !== undefined) {
+            childCache.value = { ...childCache.value, [dir]: previous[dir] }
+          }
+          if (!firstError) {
+            firstError = asWorkspaceError(e)
+            firstErrorDir = dir
+          }
+        }
+      })
+    )
+    if (firstError) previewErr.value = withWorkspaceErrorRel(firstError, firstErrorDir)
+    await fetchGitStatus()
   }
 
   async function expandFirstLevelDirs(): Promise<void> {

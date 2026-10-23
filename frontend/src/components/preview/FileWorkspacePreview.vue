@@ -58,6 +58,7 @@
         </div>
         <div
           v-if="!treeCollapsed"
+          ref="treeWrapRef"
           class="file-workspace-tree-wrap"
           :class="{ narrow: layout.narrow.value }"
           :style="layout.treeWrapStyle.value"
@@ -346,6 +347,7 @@ const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
 const recentDropdownOpen = ref(false)
 const fileWorkspaceBodyRef = ref<HTMLElement | null>(null)
+const treeWrapRef = ref<HTMLElement | null>(null)
 
 // --- Composables ---
 const nav = useFileNavigation()
@@ -596,6 +598,26 @@ const {
 async function openFromTerminal(path: string): Promise<void> {
   if (await shouldBlockNavigate()) return
   await openFromTerminalFromBoot(path)
+  await scrollSelectedIntoView()
+}
+
+/**
+ * Bring the selected row into view after it was opened programmatically
+ * (terminal link, recent list, history). Rows are identified by `data-rel`
+ * rather than index because expansions shift the flat DOM order.
+ */
+async function scrollSelectedIntoView(): Promise<void> {
+  await nextTick()
+  const rel = selectedRel.value
+  const wrap = treeWrapRef.value
+  if (!rel || !wrap) return
+  const rows = wrap.querySelectorAll<HTMLElement>('[data-rel]')
+  for (const row of rows) {
+    if (row.dataset.rel === rel) {
+      row.scrollIntoView({ block: 'nearest' })
+      return
+    }
+  }
 }
 
 /**
@@ -713,18 +735,22 @@ function onWorkspaceDrop(ev: DragEvent) {
 }
 
 // --- Navigation ---
-function ensureParentsExpanded(rel: string) {
+/** Expand every ancestor that is not open yet and wait for its listing, so
+ *  the target row exists in the DOM before we try to scroll to it. */
+async function ensureParentsExpanded(rel: string): Promise<void> {
   const parts = rel.split('/')
   const next = new Set(expanded.value)
   next.add('')
+  const loads: Promise<unknown>[] = []
   for (let i = 1; i < parts.length; i++) {
     const ancestor = parts.slice(0, i).join('/')
     if (!next.has(ancestor)) {
       next.add(ancestor)
-      void ensureChildren(ancestor)
+      loads.push(ensureChildren(ancestor).catch(() => {}))
     }
   }
   expanded.value = next
+  await Promise.all(loads)
 }
 
 async function doGoBack() {
@@ -735,9 +761,10 @@ async function doGoBack() {
   if (target && !target.isDir && (await shouldBlockNavigate())) return
   const entry = nav.goBack()
   if (!entry) return
-  ensureParentsExpanded(entry.rel)
+  await ensureParentsExpanded(entry.rel)
   if (entry.isDir) onSelectDir(entry.rel)
-  else void onSelectFile(entry.rel)
+  else await onSelectFile(entry.rel)
+  await scrollSelectedIntoView()
 }
 
 async function doGoForward() {
@@ -746,9 +773,10 @@ async function doGoForward() {
   if (target && !target.isDir && (await shouldBlockNavigate())) return
   const entry = nav.goForward()
   if (!entry) return
-  ensureParentsExpanded(entry.rel)
+  await ensureParentsExpanded(entry.rel)
   if (entry.isDir) onSelectDir(entry.rel)
-  else void onSelectFile(entry.rel)
+  else await onSelectFile(entry.rel)
+  await scrollSelectedIntoView()
 }
 
 // --- Tree interactions ---
@@ -867,10 +895,29 @@ async function fetchGitStatus() {
   }
 }
 
-async function ensureChildren(rel: string) {
-  if (childCache.value[rel]) return
-  const entries = await fetchList(rel)
-  childCache.value = { ...childCache.value, [rel]: entries }
+// One listing request per directory: concurrent expanders (hover-expand,
+// ensureParentsExpanded, rapid toggles) share the in-flight promise.
+const pendingChildren = new Map<string, Promise<void>>()
+
+function ensureChildren(rel: string): Promise<void> {
+  if (childCache.value[rel]) return Promise.resolve()
+  const inFlight = pendingChildren.get(rel)
+  if (inFlight) return inFlight
+  const request = (async () => {
+    try {
+      const entries = await fetchList(rel)
+      childCache.value = { ...childCache.value, [rel]: entries }
+    } finally {
+      pendingChildren.delete(rel)
+    }
+  })()
+  // Fire-and-forget callers (toggle, context menu, drag hover) must not
+  // produce an unhandled rejection; show the first failure in the error bar.
+  request.catch((e) => {
+    if (!previewErr.value) previewErr.value = withWorkspaceErrorRel(e, rel)
+  })
+  pendingChildren.set(rel, request)
+  return request
 }
 
 function onToggle(rel: string) {

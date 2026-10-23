@@ -719,6 +719,7 @@ export const TreeRows = defineComponent({
                 key: rel,
                 style: rowPad,
                 draggable: true,
+                'data-rel': rel,
                 ...makeTouchHandlers(rel, false),
                 onContextmenu: (ev: MouseEvent) => {
                   ev.preventDefault()

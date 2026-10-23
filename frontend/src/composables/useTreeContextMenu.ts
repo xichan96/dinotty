@@ -43,6 +43,10 @@ export function useTreeContextMenu(opts: {
   t: (key: string) => string
 }) {
   const contextMenu = ref<{ x: number; y: number; rel: string; isDir: boolean } | null>(null)
+  /** Menu element, bound by the view, so placement uses the real rendered size
+   *  instead of a guessed one and keyboard nav can reach its items. */
+  const menuEl = ref<HTMLElement | null>(null)
+  const menuSize = ref<{ width: number; height: number } | null>(null)
   const moveConfirm = ref<{ src: string; destDir: string } | null>(null)
   const deleteConfirm = ref<{ rel: string; isDir: boolean; discardNeeded: boolean } | null>(null)
 
@@ -67,19 +71,81 @@ export function useTreeContextMenu(opts: {
     if (!m) return {}
     if (opts.narrow.value) return { left: '0', right: '0', bottom: '0' }
     const pad = 8
-    const mw = 220
-    const mh = 400
+    // Before the first measurement there is nothing to clamp against; render
+    // at the pointer position for one frame, then clamp with the real size.
+    const mw = menuSize.value?.width ?? 0
+    const mh = menuSize.value?.height ?? 0
     let left = m.x
     let top = m.y
     if (typeof window !== 'undefined') {
-      if (left + mw > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - mw - pad)
-      if (top + mh > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - mh - pad)
+      if (mw && left + mw > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - mw - pad)
+      }
+      if (mh && top + mh > window.innerHeight - pad) {
+        top = Math.max(pad, window.innerHeight - mh - pad)
+      }
     }
     return { left: `${left}px`, top: `${top}px` }
   })
 
+  function setMenuEl(el: unknown) {
+    menuEl.value = el instanceof HTMLElement ? el : null
+  }
+
+  function enabledMenuItems(): HTMLElement[] {
+    const el = menuEl.value
+    if (!el) return []
+    return Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'))
+  }
+
+  /** Open at the pointer, then measure the rendered menu, clamp it into the
+   *  viewport and hand keyboard focus to the first available action. */
+  function showMenu(x: number, y: number, rel: string, isDir: boolean) {
+    contextMenu.value = { x, y, rel, isDir }
+    menuSize.value = null
+    void nextTick(() => {
+      if (!contextMenu.value) return
+      const el = menuEl.value
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        menuSize.value = { width: rect.width, height: rect.height }
+      }
+      enabledMenuItems()[0]?.focus()
+    })
+  }
+
+  function onMenuKeydown(ev: KeyboardEvent) {
+    if (!contextMenu.value) return
+    const items = enabledMenuItems()
+    if (!items.length) return
+    const current = items.indexOf(document.activeElement as HTMLElement)
+    switch (ev.key) {
+      case 'ArrowDown':
+        ev.preventDefault()
+        items[current < 0 ? 0 : (current + 1) % items.length].focus()
+        break
+      case 'ArrowUp':
+        ev.preventDefault()
+        items[current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length].focus()
+        break
+      case 'Home':
+        ev.preventDefault()
+        items[0].focus()
+        break
+      case 'End':
+        ev.preventDefault()
+        items[items.length - 1].focus()
+        break
+      case 'Escape':
+        ev.preventDefault()
+        closeContextMenu()
+        break
+    }
+  }
+
   function closeContextMenu() {
     contextMenu.value = null
+    menuSize.value = null
   }
 
   async function shouldBlockNavigate(): Promise<boolean> {
@@ -97,21 +163,16 @@ export function useTreeContextMenu(opts: {
 
   function onTreeContextMenu(payload: { ev: MouseEvent; rel: string; isDir: boolean }) {
     payload.ev.preventDefault()
-    contextMenu.value = {
-      x: payload.ev.clientX,
-      y: payload.ev.clientY,
-      rel: payload.rel,
-      isDir: payload.isDir,
-    }
+    showMenu(payload.ev.clientX, payload.ev.clientY, payload.rel, payload.isDir)
   }
 
   function onTreeBgContextMenu(ev: MouseEvent) {
     ev.preventDefault()
-    contextMenu.value = { x: ev.clientX, y: ev.clientY, rel: '', isDir: true }
+    showMenu(ev.clientX, ev.clientY, '', true)
   }
 
   function onTreeLongPress(pos: { clientX: number; clientY: number }, rel: string, isDir: boolean) {
-    contextMenu.value = { x: pos.clientX, y: pos.clientY, rel, isDir }
+    showMenu(pos.clientX, pos.clientY, rel, isDir)
   }
 
   async function ctxNewFile() {
@@ -334,6 +395,8 @@ export function useTreeContextMenu(opts: {
     isRemote,
     canRunCode,
     contextMenuStyle,
+    setMenuEl,
+    onMenuKeydown,
     closeContextMenu,
     shouldBlockNavigate,
     onTreeContextMenu,

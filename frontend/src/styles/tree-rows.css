@@ -59,6 +59,12 @@
   background: var(--tree-row-selected);
 }
 
+/* Context-menu target: a dashed outline layered over any selection colour. */
+.tree-host .tree-row.ctx-target {
+  outline: 1px dashed rgba(137, 180, 250, 0.75);
+  outline-offset: -1px;
+}
+
 /* One 1px rule per ancestor level, rendered before the row content. */
 .tree-host .tree-guides {
   display: flex;

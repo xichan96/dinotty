@@ -322,6 +322,9 @@ export const TreeRows = defineComponent({
     cache: { type: Object, required: true },
     expanded: { type: Object, required: true },
     selectedRel: { type: String, default: undefined },
+    /** Row currently targeted by the context menu; shown with a dashed
+     *  outline that is independent of the blue selection. */
+    ctxTargetRel: { type: String, default: undefined },
     inlineCreate: { type: Object, default: null },
     inlinePlaceholder: { type: String, default: '' },
     inlineRename: { type: Object, default: undefined },
@@ -524,7 +527,10 @@ export const TreeRows = defineComponent({
                 class: [
                   'tree-row',
                   'dir',
-                  { 'tree-row-swipe': !isRenaming && swipedRel.value === rel },
+                  {
+                    'tree-row-swipe': !isRenaming && swipedRel.value === rel,
+                    'ctx-target': p.ctxTargetRel === rel,
+                  },
                 ],
                 key: rel,
                 style: rowPad,
@@ -656,6 +662,7 @@ export const TreeRows = defineComponent({
                 cache: p.cache,
                 expanded: p.expanded,
                 selectedRel: p.selectedRel,
+                ctxTargetRel: p.ctxTargetRel,
                 inlineCreate: p.inlineCreate,
                 inlinePlaceholder: p.inlinePlaceholder,
                 inlineRename: p.inlineRename,
@@ -710,7 +717,10 @@ export const TreeRows = defineComponent({
                 class: [
                   'tree-row',
                   'file',
-                  { 'tree-row-swipe': !isRenaming && swipedRel.value === rel },
+                  {
+                    'tree-row-swipe': !isRenaming && swipedRel.value === rel,
+                    'ctx-target': p.ctxTargetRel === rel,
+                  },
                 ],
                 key: rel,
                 style: rowPad,

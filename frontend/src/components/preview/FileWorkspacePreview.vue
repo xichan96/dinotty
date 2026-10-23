@@ -180,6 +180,7 @@
               :cache="childCache"
               :expanded="expanded"
               :selected-rel="selectedRel ?? undefined"
+              :ctx-target-rel="ctxMenu.contextMenu.value?.rel || undefined"
               :inline-create="inlineCreateForTree"
               :inline-placeholder="inlineInputPlaceholder"
               :git-status="gitStatusMap"
@@ -235,8 +236,10 @@
       v-if="ctxMenu.contextMenu.value && visible"
       class="tree-ctx-menu"
       :class="{ 'tree-ctx-menu--bottom': layout.narrow.value }"
+      :ref="ctxMenu.setMenuEl"
       role="menu"
       :style="ctxMenu.contextMenuStyle.value"
+      @keydown="ctxMenu.onMenuKeydown"
       @mousedown.stop
       @touchstart.stop
     >
@@ -1629,6 +1632,8 @@ defineExpose({
   z-index: 100001;
   min-width: 216px;
   max-width: 320px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px 0;
   margin: 0;
   border-radius: 6px;

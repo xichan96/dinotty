@@ -1,5 +1,5 @@
-import { ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, ref } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const transportMocks = vi.hoisted(() => ({ tauriInvoke: vi.fn() }))
 
@@ -127,5 +127,95 @@ describe('tree context menu open folder', () => {
     await contextMenu.ctxOpenFolder()
 
     expect(transportMocks.tauriInvoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('tree context menu placement and keyboard', () => {
+  const menus: HTMLElement[] = []
+
+  function installMenu(items: number, disabledFirst = false): HTMLElement {
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    for (let i = 0; i < items; i++) {
+      const item = document.createElement('button')
+      item.setAttribute('role', 'menuitem')
+      item.textContent = `item ${i}`
+      if (disabledFirst && i === 0) item.disabled = true
+      menu.appendChild(item)
+    }
+    document.body.appendChild(menu)
+    menus.push(menu)
+    return menu
+  }
+
+  function setViewport(width: number, height: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+  }
+
+  function key(name: string): KeyboardEvent {
+    return new KeyboardEvent('keydown', { key: name, cancelable: true })
+  }
+
+  afterEach(() => {
+    for (const menu of menus.splice(0)) menu.remove()
+  })
+
+  it('clamps the menu into the viewport using its measured size', async () => {
+    // 步骤1：菜单实际 220×300，指针在右下角 (1000, 700)。
+    setViewport(1024, 768)
+    const { contextMenu } = createContextMenu()
+    const menu = installMenu(3)
+    menu.getBoundingClientRect = () =>
+      ({ width: 220, height: 300, left: 0, top: 0, right: 220, bottom: 300 }) as DOMRect
+    contextMenu.setMenuEl(menu)
+
+    contextMenu.onTreeContextMenu({
+      ev: new MouseEvent('contextmenu', { clientX: 1000, clientY: 700 }),
+      rel: 'src',
+      isDir: true,
+    })
+    await nextTick()
+
+    // 步骤2：8px 边距内贴住右下边缘，而不是按固定 400px 估算。
+    expect(contextMenu.contextMenuStyle.value).toEqual({ left: '796px', top: '460px' })
+  })
+
+  it('focuses the first enabled item and cycles with the arrow keys', async () => {
+    const { contextMenu } = createContextMenu()
+    const menu = installMenu(3, true)
+    contextMenu.setMenuEl(menu)
+    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src', isDir: true })
+    await nextTick()
+
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    // 步骤1：跳过禁用的第一项。
+    expect(document.activeElement).toBe(items[1])
+
+    // 步骤2：上下循环，Home/End 到两端。
+    contextMenu.onMenuKeydown(key('ArrowDown'))
+    expect(document.activeElement).toBe(items[2])
+    contextMenu.onMenuKeydown(key('ArrowDown'))
+    expect(document.activeElement).toBe(items[1])
+    contextMenu.onMenuKeydown(key('ArrowUp'))
+    expect(document.activeElement).toBe(items[2])
+    contextMenu.onMenuKeydown(key('Home'))
+    expect(document.activeElement).toBe(items[1])
+    contextMenu.onMenuKeydown(key('End'))
+    expect(document.activeElement).toBe(items[2])
+  })
+
+  it('closes on Escape', async () => {
+    const { contextMenu } = createContextMenu()
+    contextMenu.setMenuEl(installMenu(2))
+    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src', isDir: true })
+    await nextTick()
+
+    const ev = key('Escape')
+    contextMenu.onMenuKeydown(ev)
+
+    expect(ev.defaultPrevented).toBe(true)
+    expect(contextMenu.contextMenu.value).toBeNull()
+    expect(contextMenu.contextMenuStyle.value).toEqual({})
   })
 })

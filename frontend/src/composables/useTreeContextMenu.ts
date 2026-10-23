@@ -161,9 +161,15 @@ export function useTreeContextMenu(opts: {
     }))
   }
 
+  /** Open the menu for an explicit target and position. Pointer and keyboard
+   *  entry points share it so both get the same clamping/focus behaviour. */
+  function openMenuAt(rel: string, isDir: boolean, x: number, y: number) {
+    showMenu(x, y, rel, isDir)
+  }
+
   function onTreeContextMenu(payload: { ev: MouseEvent; rel: string; isDir: boolean }) {
     payload.ev.preventDefault()
-    showMenu(payload.ev.clientX, payload.ev.clientY, payload.rel, payload.isDir)
+    openMenuAt(payload.rel, payload.isDir, payload.ev.clientX, payload.ev.clientY)
   }
 
   function onTreeBgContextMenu(ev: MouseEvent) {
@@ -212,6 +218,19 @@ export function useTreeContextMenu(opts: {
     }
   }
 
+  /** Ask for confirmation before deleting a known target. The keyboard
+   *  shortcut calls this directly — it must not depend on an open menu. */
+  function requestDelete(rel: string, isDir: boolean) {
+    if (!rel) return
+    closeContextMenu()
+    const discardNeeded = !!(
+      opts.editorDirty.value &&
+      opts.meta.value &&
+      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
+    )
+    deleteConfirm.value = { rel, isDir, discardNeeded }
+  }
+
   function ctxDelete() {
     if (!contextMenu.value) return
     const { rel, isDir } = contextMenu.value
@@ -219,12 +238,7 @@ export function useTreeContextMenu(opts: {
     const targetRel = rel || opts.selectedRel.value
     const targetIsDir = rel ? isDir : opts.selectedIsDir.value
     if (!targetRel) return
-    const discardNeeded = !!(
-      opts.editorDirty.value &&
-      opts.meta.value &&
-      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
-    )
-    deleteConfirm.value = { rel: targetRel, isDir: targetIsDir, discardNeeded }
+    requestDelete(targetRel, targetIsDir)
   }
 
   async function executeDelete() {
@@ -399,6 +413,8 @@ export function useTreeContextMenu(opts: {
     onMenuKeydown,
     closeContextMenu,
     shouldBlockNavigate,
+    openMenuAt,
+    requestDelete,
     onTreeContextMenu,
     onTreeBgContextMenu,
     onTreeLongPress,

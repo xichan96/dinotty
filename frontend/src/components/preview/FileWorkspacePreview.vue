@@ -281,6 +281,7 @@
         <div class="tree-ctx-sep" />
         <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxRename">
           <span class="tree-ctx-label">{{ t('filePreview.ctxRename') }}</span>
+          <span class="tree-ctx-kbd" aria-hidden="true">F2</span>
         </button>
         <div class="tree-ctx-sep" />
         <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxCopyPath">
@@ -347,6 +348,7 @@
           @click="ctxMenu.ctxDelete"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxDelete') }}</span>
+          <span class="tree-ctx-kbd" aria-hidden="true">{{ deleteKbdLabel }}</span>
         </button>
       </template>
     </div>
@@ -394,7 +396,11 @@ import { setEditorSplitForCursorGroup } from '../../composables/useCursorGroup'
 import { useFileOperations } from '../../composables/useFileOperations'
 import type { DropPosition } from '../../types/pane'
 import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
-import { useTreeKeyboard } from '../../composables/useTreeKeyboard'
+import {
+  useTreeKeyboard,
+  deleteShortcutLabel,
+  isMacPlatform,
+} from '../../composables/useTreeKeyboard'
 import { useInlineCreateRename } from '../../composables/useInlineCreateRename'
 import {
   useFileWorkspaceBoot,
@@ -600,6 +606,9 @@ const ctxMenu = useTreeContextMenu({
   paneId: () => apiPaneId.value,
   t,
 })
+
+/** Shortcut hints in the context menu follow the platform the UI runs on. */
+const deleteKbdLabel = deleteShortcutLabel(isMacPlatform())
 
 const treeKeyboard = useTreeKeyboard({
   container: treeHostRef,

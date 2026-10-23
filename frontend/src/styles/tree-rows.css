@@ -325,3 +325,19 @@
 .tree-host .tree-swipe-btn:active {
   opacity: 0.85;
 }
+
+/* Shortcut hint at the trailing edge of a tree context-menu row. */
+.tree-ctx-kbd {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: #8f8f8f;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.tree-ctx-item:hover .tree-ctx-kbd,
+.tree-ctx-item:focus-visible .tree-ctx-kbd {
+  color: #c8c8c8;
+}

@@ -69,6 +69,11 @@ pub async fn remote_list(session: Arc<Session>, q: WorkspaceListQuery) -> Respon
                         name: e.file_name(),
                         is_dir: ft.is_dir(),
                         size: meta.size.unwrap_or(0),
+                        is_symlink: ft.is_symlink(),
+                        // No remote cycle detection: resolving each link
+                        // target would cost an extra SFTP round trip per
+                        // entry. The frontend still renders the link marker.
+                        is_cycle: false,
                     }
                 })
                 .collect();

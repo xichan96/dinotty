@@ -144,33 +144,69 @@ fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Respo
         Ok(rd) => rd.filter_map(std::result::Result::ok).collect::<Vec<_>>(),
         Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let listed_dir = target.canonicalize().unwrap_or_else(|_| target.clone());
     let mut list = entries
         .into_iter()
         .filter_map(|e| {
-            let entry_path = if outside_pane_jail {
-                let raw = e.path();
-                if is_sensitive(&raw) {
+            let raw_path = e.path();
+            if outside_pane_jail {
+                if is_sensitive(&raw_path) {
                     return None;
                 }
-                let canonical = raw.canonicalize().ok()?;
-                if is_sensitive(&canonical) {
-                    return None;
+                // Follow the link only for the sensitivity check. A broken
+                // link has no canonical target and is still listed below.
+                if let Ok(canonical) = raw_path.canonicalize() {
+                    if is_sensitive(&canonical) {
+                        return None;
+                    }
                 }
-                canonical
-            } else {
-                e.path()
-            };
-            let meta = std::fs::metadata(entry_path).ok()?;
+            }
+            let (is_dir, size, is_symlink, is_cycle) = entry_flags(&raw_path, &listed_dir)?;
             Some(DirEntry {
                 name: e.file_name().to_string_lossy().into_owned(),
-                is_dir: meta.is_dir(),
-                size: meta.len(),
+                is_dir,
+                size,
+                is_symlink,
+                is_cycle,
             })
         })
         .collect::<Vec<_>>();
     sort_dir_entries(&mut list);
     let path_display = q.path.trim().trim_start_matches('/').to_string();
     Json(ListResponse { cwd: cwd_display, path: path_display, entries: list }).into_response()
+}
+
+/// Type/size/cycle flags for one directory listing entry.
+///
+/// `is_dir` and `size` follow symlinks (they describe what opening the entry
+/// would show). A symlink whose target is the listed directory itself or one
+/// of its ancestors is a cycle: expanding it would re-list a directory already
+/// on the path, so the frontend must not recurse into it.
+///
+/// Returns `None` for a non-symlink that vanished or cannot be stat'ed. Broken
+/// and looping symlinks stay listed with `is_dir = false` instead of being
+/// dropped or panicking.
+fn entry_flags(entry_path: &Path, listed_dir: &Path) -> Option<(bool, u64, bool, bool)> {
+    let is_symlink =
+        std::fs::symlink_metadata(entry_path).is_ok_and(|m| m.file_type().is_symlink());
+    let meta = std::fs::metadata(entry_path).ok();
+    if meta.is_none() && !is_symlink {
+        return None;
+    }
+    let mut is_dir = meta.as_ref().is_some_and(std::fs::Metadata::is_dir);
+    let mut size = meta.as_ref().map_or(0, std::fs::Metadata::len);
+    let mut is_cycle = false;
+    if is_symlink && is_dir {
+        if let Ok(target) = entry_path.canonicalize() {
+            is_cycle = listed_dir.starts_with(&target);
+        } else {
+            // Link loop or an unresolvable target: keep the row visible but
+            // never offer it as a directory the tree can descend into.
+            is_dir = false;
+            size = 0;
+        }
+    }
+    Some((is_dir, size, is_symlink, is_cycle))
 }
 
 /// Cross-workspace text search via ripgrep.

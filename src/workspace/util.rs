@@ -409,7 +409,7 @@ mod tests {
     use super::*;
 
     fn entry(name: &str, is_dir: bool) -> DirEntry {
-        DirEntry { name: name.to_string(), is_dir, size: 0 }
+        DirEntry { name: name.to_string(), is_dir, size: 0, is_symlink: false, is_cycle: false }
     }
 
     #[test]

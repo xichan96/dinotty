@@ -79,10 +79,29 @@
           {{ t('filePreview.dropHint') }}
         </div>
         <div
-          v-if="!treeCollapsed"
+          v-if="layout.narrow.value && layout.drawerOpen.value"
+          class="file-workspace-drawer-backdrop"
+          @click="layout.closeDrawer"
+        ></div>
+        <button
+          v-if="layout.narrow.value && !layout.drawerOpen.value"
+          type="button"
+          class="file-workspace-drawer-fab"
+          :title="t('app.fileWorkspace')"
+          :aria-label="t('app.fileWorkspace')"
+          @click="layout.openDrawer"
+        >
+          <Menu :size="14" />
+          <span>{{ t('app.fileWorkspace') }}</span>
+        </button>
+        <div
+          v-if="treeVisible"
           ref="treeWrapRef"
           class="file-workspace-tree-wrap"
-          :class="{ narrow: layout.narrow.value }"
+          :class="{
+            narrow: layout.narrow.value,
+            'drawer-open': layout.narrow.value && layout.drawerOpen.value,
+          }"
           :style="layout.treeWrapStyle.value"
         >
           <div class="file-workspace-tree-head">
@@ -126,6 +145,16 @@
                 <ChevronsDownUp :size="14" />
               </button>
             </div>
+            <button
+              v-if="layout.narrow.value"
+              type="button"
+              class="file-workspace-tree-close"
+              :title="t('filePreview.closeTree')"
+              :aria-label="t('filePreview.closeTree')"
+              @click="layout.closeDrawer"
+            >
+              <X :size="14" />
+            </button>
           </div>
           <div v-if="previewErr" class="file-workspace-error" role="alert">
             <span class="file-workspace-error-text">{{ previewErrText }}</span>
@@ -168,7 +197,7 @@
           </div>
         </div>
         <div
-          v-if="!treeCollapsed"
+          v-if="treeVisible && !layout.narrow.value"
           class="file-workspace-tree-splitter"
           @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
           @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
@@ -177,10 +206,10 @@
           <button
             type="button"
             class="tree-collapse-btn"
-            :title="treeCollapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')"
-            @click="treeCollapsed = !treeCollapsed"
+            :title="collapseToggleTitle"
+            @click="toggleTreeVisibility"
           >
-            <component :is="treeCollapsed ? PanelLeftOpen : PanelLeftClose" :size="12" />
+            <component :is="collapseIcon" :size="12" />
           </button>
           <EditorSplitContainer
             :layout="editorSplit.editorLayout.value"
@@ -377,6 +406,7 @@ import {
   ChevronsDownUp,
   FilePlus,
   FolderPlus,
+  Menu,
   PanelLeftClose,
   PanelLeftOpen,
   RotateCw,
@@ -747,6 +777,25 @@ const inlineInputPlaceholder = computed(() => {
   return inlineCreate.value.kind === 'dir' ? t('filePreview.nameFolder') : t('filePreview.nameFile')
 })
 
+/** On narrow panes the tree is a drawer that exists independently of the
+ *  desktop collapse flag; otherwise it follows that flag as before. */
+const treeVisible = computed(() => !treeCollapsed.value || layout.narrow.value)
+
+const collapseIcon = computed(() => {
+  const collapsed = layout.narrow.value ? !layout.drawerOpen.value : treeCollapsed.value
+  return collapsed ? PanelLeftOpen : PanelLeftClose
+})
+
+const collapseToggleTitle = computed(() => {
+  const collapsed = layout.narrow.value ? !layout.drawerOpen.value : treeCollapsed.value
+  return collapsed ? t('previewPanel.expandTree') : t('previewPanel.collapseTree')
+})
+
+function toggleTreeVisibility() {
+  if (layout.narrow.value) layout.toggleDrawer()
+  else treeCollapsed.value = !treeCollapsed.value
+}
+
 const ctxIsBookmarked = computed(() => {
   const rel = ctxMenu.contextMenu.value?.rel || selectedRel.value
   if (!rel) return false
@@ -1092,10 +1141,6 @@ function onCloseContextScroll() {
 }
 
 // --- Watchers ---
-watch(layout.narrow, (isNarrow) => {
-  if (isNarrow) treeCollapsed.value = false
-})
-
 watch(
   () => props.paneId,
   (_newId, oldId) => {
@@ -1115,8 +1160,14 @@ watch(
 // --- Lifecycle ---
 const { startDrag } = usePaneResize('.file-workspace', layout.direction)
 
+function onWindowResize() {
+  layout.onResize()
+  layout.clampTreePaneWidth(fileWorkspaceBodyRef.value)
+}
+
 onMounted(() => {
-  window.addEventListener('resize', layout.onResize)
+  window.addEventListener('resize', onWindowResize)
+  void nextTick(() => layout.clampTreePaneWidth(fileWorkspaceBodyRef.value))
   if (!props.isWindow) {
     window.addEventListener('keydown', onEditorSaveKeydown, true)
     window.addEventListener('scroll', onCloseContextScroll, true)
@@ -1132,7 +1183,7 @@ onBeforeUnmount(() => {
     gitRefreshTimer = null
   }
   if (props.paneId) saveFileWorkspaceState(props.paneId, captureState())
-  window.removeEventListener('resize', layout.onResize)
+  window.removeEventListener('resize', onWindowResize)
   if (!props.isWindow) {
     window.removeEventListener('keydown', onEditorSaveKeydown, true)
     window.removeEventListener('scroll', onCloseContextScroll, true)
@@ -1460,8 +1511,83 @@ defineExpose({
   background: var(--accent, #89b4fa);
 }
 
+/* Narrow panes: the tree is an overlay drawer over the full-width preview. */
 .file-workspace-tree-wrap.narrow {
+  --tree-head-h: 40px;
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(84%, 320px);
+  min-width: 0;
+  max-width: 100%;
+  transform: translateX(-100%);
+  transition: transform 0.18s ease;
+  box-shadow: 18px 0 40px rgba(0, 0, 0, 0.45);
   border-right: 1px solid var(--border, #333);
+}
+
+.file-workspace-tree-wrap.narrow.drawer-open {
+  transform: none;
+}
+
+.file-workspace-tree-wrap.narrow .file-workspace-tree-head {
+  font-size: 12px;
+}
+
+.file-workspace-tree-wrap.narrow .file-workspace-tree-actions {
+  opacity: 1;
+}
+
+.file-workspace-tree-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+}
+
+.file-workspace-tree-close:hover {
+  background: var(--tab-hover-bg, #333);
+  color: var(--fg, #ccc);
+}
+
+.file-workspace-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.file-workspace-drawer-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  position: absolute;
+  left: 10px;
+  bottom: 12px;
+  z-index: 18;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #3b3b42);
+  border-radius: 999px;
+  background: var(--tab-bg, #232328);
+  color: var(--fg, #ddd);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.file-workspace-drawer-fab:hover {
+  background: var(--tab-hover-bg, #333);
+  color: #fff;
 }
 </style>
 

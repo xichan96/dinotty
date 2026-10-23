@@ -16,6 +16,7 @@ export interface FileWorkspaceLayout {
   onResize: () => void
   toggleDrawer: () => void
   openDrawer: () => void
+  closeDrawer: () => void
 }
 
 function loadTreePaneWidth(): number {
@@ -42,8 +43,10 @@ export function useFileWorkspaceLayout(): FileWorkspaceLayout {
     () => (isLandscape.value ? 'horizontal' : 'vertical') as 'horizontal' | 'vertical'
   )
 
+  // Narrow panes turn the tree into an overlay drawer whose width is owned by
+  // CSS; a drag width would fight the drawer transition.
   const treeWrapStyle = computed((): Record<string, string> => {
-    if (narrow.value) return { width: `${treePaneWidth.value}px` }
+    if (narrow.value) return {}
     return { width: `${treePaneWidth.value}px` }
   })
 
@@ -112,6 +115,10 @@ export function useFileWorkspaceLayout(): FileWorkspaceLayout {
     drawerOpen.value = true
   }
 
+  function closeDrawer() {
+    drawerOpen.value = false
+  }
+
   return {
     narrow,
     isLandscape,
@@ -125,5 +132,6 @@ export function useFileWorkspaceLayout(): FileWorkspaceLayout {
     onResize,
     toggleDrawer,
     openDrawer,
+    closeDrawer,
   }
 }

@@ -415,7 +415,6 @@ export const TreeRows = defineComponent({
                 'span',
                 {
                   class: ['tree-label', gitInfo?.cls, { sel: p.selectedRel === rel }],
-                  onClick: () => emit('select-file', rel),
                 },
                 [
                   h('span', { class: 'tree-label-text' }, e.name),
@@ -456,11 +455,18 @@ export const TreeRows = defineComponent({
                 },
               },
               [
-                h('span', {
-                  class: 'tree-twistie-placeholder',
-                }),
-                treeFileIcon(),
-                fileLabelContent,
+                h(
+                  'span',
+                  {
+                    class: 'tree-file-hit',
+                    onClick: isRenaming ? undefined : () => emit('select-file', rel),
+                  },
+                  [
+                    h('span', { class: 'tree-twistie-placeholder' }),
+                    treeFileIcon(),
+                    fileLabelContent,
+                  ]
+                ),
                 !isRenaming
                   ? h('div', { class: 'tree-swipe-actions' }, [
                       h(

@@ -90,10 +90,12 @@
   pointer-events: none;
 }
 
-.tree-host .tree-folder-hit {
+.tree-host .tree-folder-hit,
+.tree-host .tree-file-hit {
   display: flex;
   flex: 1 1 0;
   align-items: center;
+  align-self: stretch;
   min-width: 0;
   cursor: pointer;
 }

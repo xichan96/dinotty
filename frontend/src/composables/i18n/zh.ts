@@ -23,6 +23,7 @@ export default {
   'devtools.evalPlaceholder': '执行 JavaScript...',
   'devtools.toggleDevtools': '切换 DevTools',
   'filePreview.loading': '加载中…',
+  'filePreview.emptyFolder': '空文件夹',
   'filePreview.pickFile': '请选择要预览的文件',
   'filePreview.unsupported': '该类型无法预览',
   'filePreview.delete': '删除',

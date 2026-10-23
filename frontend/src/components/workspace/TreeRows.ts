@@ -28,18 +28,85 @@ export function treeFolderIcon(expanded: boolean): VNode {
   ])
 }
 
-export function treeFileIcon(): VNode {
-  return h('span', { class: 'tree-kind-icon tree-kind-icon-file' }, [
-    h(
-      'svg',
-      { viewBox: '0 0 16 16', class: 'tree-svg', fill: 'currentColor', 'aria-hidden': 'true' },
-      [
-        h('path', {
-          d: 'M4 2h5.2L13 5.8V14H4V2zm1 1v10h7V6.5H8.5L9 6 8 5H5zm5.2 0L12 5.8h-2V3h-.8z',
-        }),
-      ]
-    ),
-  ])
+const DEFAULT_FILE_ICON_COLOR = '#9aa0a6'
+
+// Same palette as the UX prototype (file-tree-ux.html). No extra icon assets:
+// only the fill of the existing document glyph changes.
+const FILE_EXT_COLORS: Record<string, string> = {
+  ts: '#6fa8dc',
+  tsx: '#6fa8dc',
+  js: '#d6c85a',
+  jsx: '#d6c85a',
+  mjs: '#d6c85a',
+  cjs: '#d6c85a',
+  vue: '#41b883',
+  rs: '#dea584',
+  json: '#cbcb41',
+  md: '#8cb4d9',
+  mdx: '#8cb4d9',
+  css: '#a074c4',
+  scss: '#a074c4',
+  sass: '#a074c4',
+  less: '#a074c4',
+  html: '#e37933',
+  htm: '#e37933',
+  toml: '#9c6b3f',
+  yml: '#c97b63',
+  yaml: '#c97b63',
+  svg: '#e9b35a',
+  png: '#b78fd6',
+  jpg: '#b78fd6',
+  jpeg: '#b78fd6',
+  gif: '#b78fd6',
+  webp: '#b78fd6',
+  ico: '#b78fd6',
+  py: '#3572a5',
+  go: '#00add8',
+  java: '#b07219',
+  sh: '#89e051',
+  bash: '#89e051',
+  zsh: '#89e051',
+  lock: '#8a8a8a',
+  gitignore: '#8a8a8a',
+}
+
+function fileIconColor(name: string): string {
+  const base = name.slice(name.lastIndexOf('/') + 1)
+  if (base === '.gitignore') return FILE_EXT_COLORS.gitignore
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0) return DEFAULT_FILE_ICON_COLOR
+  return FILE_EXT_COLORS[base.slice(dot + 1).toLowerCase()] ?? DEFAULT_FILE_ICON_COLOR
+}
+
+export function treeFileIcon(name = ''): VNode {
+  return h(
+    'span',
+    {
+      class: 'tree-kind-icon tree-kind-icon-file',
+      style: name ? { color: fileIconColor(name) } : undefined,
+    },
+    [
+      h(
+        'svg',
+        { viewBox: '0 0 16 16', class: 'tree-svg', fill: 'currentColor', 'aria-hidden': 'true' },
+        [
+          h('path', {
+            d: 'M4 2h5.2L13 5.8V14H4V2zm1 1v10h7V6.5H8.5L9 6 8 5H5zm5.2 0L12 5.8h-2V3h-.8z',
+          }),
+        ]
+      ),
+    ]
+  )
+}
+
+/** One 1px vertical rule per ancestor level; rows carry their own depth. */
+export function treeGuides(depth: number): VNode | null {
+  if (depth <= 0) return null
+  return h(
+    'span',
+    { class: 'tree-guides', 'aria-hidden': 'true' },
+    Array.from({ length: depth }, (_, i) => h('i', { key: i }))
+  )
 }
 
 export function absJoinWorkspaceRoot(root: string, rel: string): string {
@@ -52,6 +119,107 @@ export function absJoinWorkspaceRoot(root: string, rel: string): string {
   return r + '/' + parts.join('/')
 }
 
+// --- Drag-and-drop helpers -------------------------------------------------
+// TreeRows recurses, so the hover timer and the auto-scroll loop must live at
+// module scope: the row being hovered can belong to a different recursion
+// instance than the row being dragged.
+
+const HOVER_EXPAND_MS = 600
+const AUTOSCROLL_EDGE_PX = 24
+
+let hoverExpandTimer: ReturnType<typeof setTimeout> | null = null
+let hoverExpandRel: string | null = null
+let dragCleanupInstalled = false
+
+function clearHoverExpand() {
+  if (hoverExpandTimer) clearTimeout(hoverExpandTimer)
+  hoverExpandTimer = null
+  hoverExpandRel = null
+}
+
+function scheduleHoverExpand(rel: string, isExpanded: boolean, expand: () => void) {
+  if (isExpanded) {
+    clearHoverExpand()
+    return
+  }
+  if (hoverExpandRel === rel && hoverExpandTimer) return
+  clearHoverExpand()
+  hoverExpandRel = rel
+  hoverExpandTimer = setTimeout(() => {
+    hoverExpandTimer = null
+    hoverExpandRel = null
+    expand()
+  }, HOVER_EXPAND_MS)
+}
+
+let autoScrollFrame: number | null = null
+let autoScrollEl: HTMLElement | null = null
+let autoScrollSpeed = 0
+
+function findScrollContainer(el: HTMLElement): HTMLElement | null {
+  const wrap = el.closest('.file-workspace-tree-wrap')
+  if (wrap instanceof HTMLElement) return wrap
+  let node = el.parentElement
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (/(auto|scroll)/.test(overflowY) && node.scrollHeight > node.clientHeight) return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function stopAutoScroll() {
+  if (autoScrollFrame !== null) cancelAnimationFrame(autoScrollFrame)
+  autoScrollFrame = null
+  autoScrollEl = null
+  autoScrollSpeed = 0
+}
+
+function autoScrollTick() {
+  autoScrollFrame = null
+  if (!autoScrollEl) return
+  autoScrollEl.scrollTop += autoScrollSpeed
+  autoScrollFrame = requestAnimationFrame(autoScrollTick)
+}
+
+function updateAutoScroll(clientY: number, sourceEl: HTMLElement) {
+  const container = findScrollContainer(sourceEl)
+  if (!container) {
+    stopAutoScroll()
+    return
+  }
+  const rect = container.getBoundingClientRect()
+  let speed = 0
+  if (clientY < rect.top + AUTOSCROLL_EDGE_PX) {
+    speed = -Math.ceil((rect.top + AUTOSCROLL_EDGE_PX - clientY) / 4)
+  } else if (clientY > rect.bottom - AUTOSCROLL_EDGE_PX) {
+    speed = Math.ceil((clientY - (rect.bottom - AUTOSCROLL_EDGE_PX)) / 4)
+  }
+  if (!speed) {
+    stopAutoScroll()
+    return
+  }
+  autoScrollEl = container
+  autoScrollSpeed = Math.max(-18, Math.min(18, speed))
+  if (autoScrollFrame === null) autoScrollFrame = requestAnimationFrame(autoScrollTick)
+}
+
+function installDragCleanup() {
+  if (dragCleanupInstalled) return
+  dragCleanupInstalled = true
+  const cleanup = () => {
+    clearHoverExpand()
+    stopAutoScroll()
+  }
+  document.addEventListener('dragend', cleanup, true)
+  document.addEventListener('drop', cleanup, true)
+}
+
+function leftElement(ev: DragEvent): boolean {
+  const to = ev.relatedTarget as Node | null
+  return !to || !(ev.currentTarget as HTMLElement).contains(to)
+}
+
 export const TreeInlineInput = defineComponent({
   name: 'TreeInlineInput',
   props: {
@@ -61,7 +229,26 @@ export const TreeInlineInput = defineComponent({
   setup(props, { emit }) {
     const model = ref('')
     const inputRef = ref<HTMLInputElement | null>(null)
+    const composing = ref(false)
+    // Once a decision is made the input is about to unmount; a trailing blur
+    // must not emit a second commit/cancel pair.
+    let finished = false
     onMounted(() => nextTick(() => inputRef.value?.focus()))
+
+    function commit() {
+      if (finished) return
+      finished = true
+      const name = model.value.trim()
+      if (name) emit('commit', name)
+      else emit('cancel')
+    }
+
+    function cancel() {
+      if (finished) return
+      finished = true
+      emit('cancel')
+    }
+
     return () =>
       h('input', {
         ref: inputRef,
@@ -74,15 +261,29 @@ export const TreeInlineInput = defineComponent({
         onInput: (e: Event) => {
           model.value = (e.target as HTMLInputElement).value
         },
+        onCompositionstart: () => {
+          composing.value = true
+        },
+        onCompositionend: (e: CompositionEvent) => {
+          composing.value = false
+          model.value = (e.target as HTMLInputElement).value
+        },
         onKeydown: (e: KeyboardEvent) => {
+          // Enter/Escape while an IME candidate window is open belongs to the
+          // IME, not to us — committing here would submit a half-typed name.
+          if (composing.value || e.isComposing) return
           if (e.key === 'Enter') {
             e.preventDefault()
-            emit('commit', model.value.trim())
+            commit()
           }
           if (e.key === 'Escape') {
             e.preventDefault()
-            emit('cancel')
+            cancel()
           }
+        },
+        onBlur: () => {
+          if (composing.value) return
+          commit()
         },
       })
   },
@@ -151,74 +352,61 @@ export const TreeRows = defineComponent({
       return null
     }
 
-    function makeLongPressHandlers(rel: string, isDir: boolean) {
+    // One gesture recognizer per row: a left swipe reveals the action buttons,
+    // a still hold opens the context menu. Mutually exclusive by design — once
+    // the long press fires, movement no longer turns the gesture into a swipe.
+    function makeTouchHandlers(rel: string, isDir: boolean) {
+      const LONG_PRESS_MS = 500
+      const MOVE_CANCEL_PX = 10
+      const SWIPE_THRESHOLD = 30
       let timer: ReturnType<typeof setTimeout> | null = null
       let startX = 0
       let startY = 0
-      let fired = false
-      return {
-        onTouchstart: (e: TouchEvent) => {
-          if (e.touches.length !== 1) return
-          const touch = e.touches[0]
-          startX = touch.clientX
-          startY = touch.clientY
-          fired = false
-          timer = setTimeout(() => {
-            fired = true
-            emit('long-press', { clientX: startX, clientY: startY }, rel, isDir)
-          }, 500)
-        },
-        onTouchmove: (e: TouchEvent) => {
-          if (!timer) return
-          const touch = e.touches[0]
-          if (Math.abs(touch.clientX - startX) > 10 || Math.abs(touch.clientY - startY) > 10) {
-            if (timer) clearTimeout(timer)
-            timer = null
-          }
-        },
-        onTouchend: (e: TouchEvent) => {
-          if (timer) clearTimeout(timer)
-          timer = null
-          if (fired) e.preventDefault()
-        },
-        onTouchcancel: () => {
-          if (timer) clearTimeout(timer)
-          timer = null
-        },
-      }
-    }
-
-    function makeSwipeHandlers(rel: string) {
-      let startX = 0
-      let startY = 0
+      let longPressFired = false
       let swiping = false
-      const SWIPE_THRESHOLD = 30
+
+      function clearTimer() {
+        if (timer) clearTimeout(timer)
+        timer = null
+      }
+
       return {
         onTouchstart: (e: TouchEvent) => {
           if (e.touches.length !== 1) return
+          clearTimer()
           const touch = e.touches[0]
           startX = touch.clientX
           startY = touch.clientY
+          longPressFired = false
           swiping = false
+          timer = setTimeout(() => {
+            timer = null
+            longPressFired = true
+            emit('long-press', { clientX: startX, clientY: startY }, rel, isDir)
+          }, LONG_PRESS_MS)
         },
         onTouchmove: (e: TouchEvent) => {
           if (e.touches.length !== 1) return
+          if (longPressFired) return
           const touch = e.touches[0]
-          const dx = startX - touch.clientX
-          const dy = Math.abs(touch.clientY - startY)
-          if (!swiping && swipedRel.value === rel) return
-          if (!swiping && dx > SWIPE_THRESHOLD && dy < dx * 0.5) {
+          const dx = touch.clientX - startX
+          const dy = touch.clientY - startY
+          if (timer && (Math.abs(dx) > MOVE_CANCEL_PX || Math.abs(dy) > MOVE_CANCEL_PX)) {
+            clearTimer()
+          }
+          if (!swiping && dx < -SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 2) {
             swiping = true
             swipedRel.value = rel
-            e.preventDefault()
           }
           if (swiping) e.preventDefault()
         },
         onTouchend: (e: TouchEvent) => {
-          if (swiping) e.preventDefault()
+          clearTimer()
+          if (swiping || longPressFired) e.preventDefault()
           swiping = false
         },
         onTouchcancel: () => {
+          clearTimer()
           swiping = false
         },
       }
@@ -226,15 +414,42 @@ export const TreeRows = defineComponent({
 
     return () => {
       const entries = (p.cache as Record<string, DirEntry[]>)[p.relPath]
-      if (entries === undefined) return null
-      const rows: ReturnType<typeof h>[] = []
-      const rowPad = {
-        paddingLeft: `calc(var(--tree-base-hpad) + var(--tree-indent-step) * ${p.depth})`,
+      const isRoot = p.relPath === ''
+      if (entries === undefined && !isRoot && !(p.expanded as Set<string>).has(p.relPath)) {
+        return null
       }
+      const rows: ReturnType<typeof h>[] = []
+      // Indentation comes from rendered guide spans, not padding, so each
+      // level's 1px rule lines up with the content that follows it.
+      const rowPad = { paddingLeft: 'var(--tree-base-hpad)' }
+      const stateRow = (kind: 'loading' | 'empty') =>
+        h(
+          'div',
+          {
+            class: ['tree-state-row', `tree-state-row-${kind}`],
+            key: `__state_${kind}__`,
+            style: rowPad,
+          },
+          [
+            treeGuides(p.depth),
+            h('span', { class: 'tree-twistie-placeholder' }),
+            h(
+              'span',
+              { class: 'tree-state-icon' },
+              kind === 'loading' ? [h('span', { class: 'tree-state-spinner' })] : []
+            ),
+            h(
+              'span',
+              { class: 'tree-state-text' },
+              kind === 'loading' ? t('filePreview.loading') : t('filePreview.emptyFolder')
+            ),
+          ]
+        )
       const ic = p.inlineCreate as { parentRel: string; kind: 'file' | 'dir' } | null
       if (ic && ic.parentRel === p.relPath) {
         rows.push(
           h('div', { class: 'tree-row tree-inline-create', key: '__ic__', style: rowPad }, [
+            treeGuides(p.depth),
             h('span', { class: 'tree-twistie-placeholder' }),
             h(TreeInlineInput, {
               placeholder: p.inlinePlaceholder as string,
@@ -244,8 +459,13 @@ export const TreeRows = defineComponent({
           ])
         )
       }
+      if (entries === undefined) {
+        rows.push(stateRow('loading'))
+      } else if (entries.length === 0) {
+        rows.push(stateRow('empty'))
+      }
       const ir = p.inlineRename as { rel: string; isDir: boolean } | undefined
-      for (const e of entries) {
+      for (const e of entries ?? []) {
         const rel = p.relPath ? `${p.relPath}/${e.name}` : e.name
         const isExp = (p.expanded as Set<string>).has(rel)
         const isRenaming = !!(ir && ir.rel === rel)
@@ -257,11 +477,14 @@ export const TreeRows = defineComponent({
                 onCommit: (name: string) => emit('inline-rename-commit', name),
                 onCancel: () => emit('inline-rename-cancel'),
               })
-            : h(
-                'span',
-                { class: ['tree-label', gitInfo?.cls, { sel: p.selectedRel === rel }] },
-                e.name
-              )
+            : h('span', { class: ['tree-label', { sel: p.selectedRel === rel }] }, [
+                h('span', { class: 'tree-label-text' }, e.name),
+                // Directories report changes with a dot; the label itself
+                // keeps the normal foreground (prototype behaviour).
+                gitInfo
+                  ? h('span', { class: 'tree-dir-dot', title: t('filePreview.modified') })
+                  : null,
+              ])
           rows.push(
             h(
               'div',
@@ -275,7 +498,7 @@ export const TreeRows = defineComponent({
                 style: rowPad,
                 draggable: true,
                 'data-rel': rel,
-                ...makeSwipeHandlers(rel),
+                ...makeTouchHandlers(rel, true),
                 onContextmenu: (ev: MouseEvent) => {
                   ev.preventDefault()
                   ev.stopPropagation()
@@ -291,6 +514,8 @@ export const TreeRows = defineComponent({
                   setInternalDrag(rel)
                 },
                 onDragend: () => {
+                  clearHoverExpand()
+                  stopAutoScroll()
                   setTimeout(clearInternalDrag, 200)
                 },
                 onDragover: (ev: DragEvent) => {
@@ -303,16 +528,25 @@ export const TreeRows = defineComponent({
                     ev.dataTransfer!.dropEffect = 'copy'
                     ;(ev.currentTarget as HTMLElement).classList.add('drop-target-upload')
                     if (p.onDirDragEnter) p.onDirDragEnter(rel)
+                  } else {
+                    return
                   }
+                  installDragCleanup()
+                  scheduleHoverExpand(rel, isExp, () => emit('toggle', rel))
                 },
                 onDragleave: (ev: DragEvent) => {
                   ;(ev.currentTarget as HTMLElement).classList.remove(
                     'drop-target',
                     'drop-target-upload'
                   )
-                  if (p.onDirDragLeave) p.onDirDragLeave()
+                  if (leftElement(ev)) {
+                    if (hoverExpandRel === rel) clearHoverExpand()
+                    if (p.onDirDragLeave) p.onDirDragLeave()
+                  }
                 },
                 onDrop: (ev: DragEvent) => {
+                  clearHoverExpand()
+                  stopAutoScroll()
                   ev.preventDefault()
                   ev.stopPropagation()
                   ;(ev.currentTarget as HTMLElement).classList.remove(
@@ -328,9 +562,9 @@ export const TreeRows = defineComponent({
                     emit('upload-to-dir', rel, ev)
                   }
                 },
-                ...makeLongPressHandlers(rel, true),
               },
               [
+                treeGuides(p.depth),
                 h(
                   'button',
                   {
@@ -429,7 +663,6 @@ export const TreeRows = defineComponent({
                 'span',
                 {
                   class: ['tree-label', gitInfo?.cls, { sel: p.selectedRel === rel }],
-                  onClick: () => emit('select-file', rel),
                 },
                 [
                   h('span', { class: 'tree-label-text' }, e.name),
@@ -450,7 +683,7 @@ export const TreeRows = defineComponent({
                 key: rel,
                 style: rowPad,
                 draggable: true,
-                ...makeSwipeHandlers(rel),
+                ...makeTouchHandlers(rel, false),
                 onContextmenu: (ev: MouseEvent) => {
                   ev.preventDefault()
                   ev.stopPropagation()
@@ -466,16 +699,25 @@ export const TreeRows = defineComponent({
                   setInternalDrag(rel)
                 },
                 onDragend: () => {
+                  clearHoverExpand()
+                  stopAutoScroll()
                   setTimeout(clearInternalDrag, 200)
                 },
-                ...makeLongPressHandlers(rel, false),
               },
               [
-                h('span', {
-                  class: 'tree-twistie-placeholder',
-                }),
-                treeFileIcon(),
-                fileLabelContent,
+                h(
+                  'span',
+                  {
+                    class: 'tree-file-hit',
+                    onClick: isRenaming ? undefined : () => emit('select-file', rel),
+                  },
+                  [
+                    treeGuides(p.depth),
+                    h('span', { class: 'tree-twistie-placeholder' }),
+                    treeFileIcon(e.name),
+                    fileLabelContent,
+                  ]
+                ),
                 !isRenaming
                   ? h('div', { class: 'tree-swipe-actions' }, [
                       h(
@@ -525,9 +767,22 @@ export const TreeRows = defineComponent({
             } else if (hasType(ev.dataTransfer, 'Files')) {
               ev.preventDefault()
               ev.dataTransfer!.dropEffect = 'copy'
+            } else {
+              return
+            }
+            if (p.depth === 0) {
+              installDragCleanup()
+              updateAutoScroll(ev.clientY, ev.currentTarget as HTMLElement)
             }
           },
+          onDragleave: (ev: DragEvent) => {
+            if (p.depth !== 0 || !leftElement(ev)) return
+            clearHoverExpand()
+            stopAutoScroll()
+          },
           onDrop: (ev: DragEvent) => {
+            clearHoverExpand()
+            stopAutoScroll()
             ev.preventDefault()
             const srcRel = ev.dataTransfer?.getData('application/x-tree-move')
             if (srcRel !== undefined && srcRel.includes('/')) {

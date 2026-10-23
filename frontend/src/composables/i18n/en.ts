@@ -23,6 +23,7 @@ export default {
   'devtools.evalPlaceholder': 'Evaluate JavaScript...',
   'devtools.toggleDevtools': 'Toggle DevTools',
   'filePreview.loading': 'Loading…',
+  'filePreview.emptyFolder': 'Empty folder',
   'filePreview.pickFile': 'Select a file to preview',
   'filePreview.unsupported': 'Preview not available for this type',
   'filePreview.delete': 'Delete',

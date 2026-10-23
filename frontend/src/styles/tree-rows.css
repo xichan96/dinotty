@@ -3,7 +3,8 @@
   --tree-indent-step: 8px;
   --tree-icon-size: 16px;
   --tree-twistie-size: 16px;
-  --tree-row-height: 22px;
+  --tree-row-height: 28px;
+  --tree-guide: rgba(255, 255, 255, 0.1);
   --tree-row-hover: var(--list-hover-bg, var(--bg-hover));
   --tree-row-selected: var(--list-selection-bg, var(--accent));
   --tree-row-selected-fg: var(--list-selection-fg, #ffffff);
@@ -58,6 +59,20 @@
   background: var(--tree-row-selected);
 }
 
+/* One 1px rule per ancestor level, rendered before the row content. */
+.tree-host .tree-guides {
+  display: flex;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.tree-host .tree-guides i {
+  display: block;
+  box-sizing: border-box;
+  width: var(--tree-indent-step);
+  border-left: 1px solid var(--tree-guide);
+}
+
 .tree-host .tree-twistie {
   border: none;
   background: none;
@@ -90,10 +105,12 @@
   pointer-events: none;
 }
 
-.tree-host .tree-folder-hit {
+.tree-host .tree-folder-hit,
+.tree-host .tree-file-hit {
   display: flex;
   flex: 1 1 0;
   align-items: center;
+  align-self: stretch;
   min-width: 0;
   cursor: pointer;
 }
@@ -153,10 +170,62 @@
   align-items: center;
 }
 
+.tree-host .tree-state-row {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--tree-row-height);
+  min-height: var(--tree-row-height);
+  padding-right: 8px;
+  color: var(--fg-muted, #858585);
+  font-size: 12px;
+}
+
+.tree-host .tree-state-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tree-icon-size);
+  height: var(--tree-icon-size);
+  margin-right: 6px;
+}
+
+.tree-host .tree-state-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border, #4a4a50);
+  border-top-color: var(--accent, #89b4fa);
+  animation: tree-state-spin 0.7s linear infinite;
+}
+
+.tree-host .tree-state-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes tree-state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .tree-host .tree-label-text {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  white-space: nowrap;
+}
+
+.tree-host .tree-dir-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #e2b36a;
 }
 .tree-host .tree-git-badge {
   margin-left: auto;
@@ -191,6 +260,7 @@
 .tree-host .tree-inline-input {
   flex: 1;
   min-width: 0;
+  height: 20px;
   font-size: 13px;
   padding: 2px 6px;
   border: 1px solid var(--accent);

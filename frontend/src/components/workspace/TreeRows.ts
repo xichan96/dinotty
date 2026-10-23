@@ -1,4 +1,4 @@
-import { defineComponent, ref, h, onMounted, nextTick } from 'vue'
+import { defineComponent, ref, h, onMounted, nextTick, watch } from 'vue'
 import type { VNode } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { setInternalDrag, clearInternalDrag } from '../../composables/internalDragState'
@@ -224,16 +224,34 @@ export const TreeInlineInput = defineComponent({
   name: 'TreeInlineInput',
   props: {
     placeholder: { type: String, default: '' },
+    /** Prefilled text (rename starts with the current name). */
+    initialValue: { type: String, default: '' },
+    /** Commit failed: keep the row mounted and show this next to the input. */
+    error: { type: String, default: '' },
   },
   emits: ['commit', 'cancel'],
   setup(props, { emit }) {
-    const model = ref('')
+    const model = ref(props.initialValue)
     const inputRef = ref<HTMLInputElement | null>(null)
     const composing = ref(false)
     // Once a decision is made the input is about to unmount; a trailing blur
     // must not emit a second commit/cancel pair.
     let finished = false
-    onMounted(() => nextTick(() => inputRef.value?.focus()))
+    // A failed async commit re-arms the input so Enter/blur can retry.
+    watch(
+      () => props.error,
+      (err) => {
+        if (err) finished = false
+      }
+    )
+    onMounted(() =>
+      nextTick(() => {
+        const el = inputRef.value
+        if (!el) return
+        el.focus()
+        el.setSelectionRange(el.value.length, el.value.length)
+      })
+    )
 
     function commit() {
       if (finished) return
@@ -250,42 +268,47 @@ export const TreeInlineInput = defineComponent({
     }
 
     return () =>
-      h('input', {
-        ref: inputRef,
-        class: 'tree-inline-input',
-        type: 'text',
-        autocomplete: 'off',
-        spellcheck: false,
-        placeholder: props.placeholder,
-        value: model.value,
-        onInput: (e: Event) => {
-          model.value = (e.target as HTMLInputElement).value
-        },
-        onCompositionstart: () => {
-          composing.value = true
-        },
-        onCompositionend: (e: CompositionEvent) => {
-          composing.value = false
-          model.value = (e.target as HTMLInputElement).value
-        },
-        onKeydown: (e: KeyboardEvent) => {
-          // Enter/Escape while an IME candidate window is open belongs to the
-          // IME, not to us — committing here would submit a half-typed name.
-          if (composing.value || e.isComposing) return
-          if (e.key === 'Enter') {
-            e.preventDefault()
+      h('span', { class: 'tree-inline-field' }, [
+        h('input', {
+          ref: inputRef,
+          class: 'tree-inline-input',
+          type: 'text',
+          autocomplete: 'off',
+          spellcheck: false,
+          placeholder: props.placeholder,
+          value: model.value,
+          onInput: (e: Event) => {
+            model.value = (e.target as HTMLInputElement).value
+          },
+          onCompositionstart: () => {
+            composing.value = true
+          },
+          onCompositionend: (e: CompositionEvent) => {
+            composing.value = false
+            model.value = (e.target as HTMLInputElement).value
+          },
+          onKeydown: (e: KeyboardEvent) => {
+            // Enter/Escape while an IME candidate window is open belongs to the
+            // IME, not to us — committing here would submit a half-typed name.
+            if (composing.value || e.isComposing) return
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          },
+          onBlur: () => {
+            if (composing.value) return
             commit()
-          }
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            cancel()
-          }
-        },
-        onBlur: () => {
-          if (composing.value) return
-          commit()
-        },
-      })
+          },
+        }),
+        props.error
+          ? h('span', { class: 'tree-inline-error', title: props.error }, props.error)
+          : null,
+      ])
   },
 })
 
@@ -445,7 +468,12 @@ export const TreeRows = defineComponent({
             ),
           ]
         )
-      const ic = p.inlineCreate as { parentRel: string; kind: 'file' | 'dir' } | null
+      const ic = p.inlineCreate as {
+        parentRel: string
+        kind: 'file' | 'dir'
+        value?: string
+        error?: string
+      } | null
       if (ic && ic.parentRel === p.relPath) {
         rows.push(
           h('div', { class: 'tree-row tree-inline-create', key: '__ic__', style: rowPad }, [
@@ -453,6 +481,8 @@ export const TreeRows = defineComponent({
             h('span', { class: 'tree-twistie-placeholder' }),
             h(TreeInlineInput, {
               placeholder: p.inlinePlaceholder as string,
+              initialValue: ic.value ?? '',
+              error: ic.error ?? '',
               onCommit: (name: string) => emit('inline-create-commit', name),
               onCancel: () => emit('inline-create-cancel'),
             }),
@@ -464,7 +494,9 @@ export const TreeRows = defineComponent({
       } else if (entries.length === 0) {
         rows.push(stateRow('empty'))
       }
-      const ir = p.inlineRename as { rel: string; isDir: boolean } | undefined
+      const ir = p.inlineRename as
+        | { rel: string; isDir: boolean; value?: string; error?: string }
+        | undefined
       for (const e of entries ?? []) {
         const rel = p.relPath ? `${p.relPath}/${e.name}` : e.name
         const isExp = (p.expanded as Set<string>).has(rel)
@@ -474,6 +506,8 @@ export const TreeRows = defineComponent({
           const labelContent = isRenaming
             ? h(TreeInlineInput, {
                 placeholder: e.name,
+                initialValue: ir?.value ?? e.name,
+                error: ir?.error ?? '',
                 onCommit: (name: string) => emit('inline-rename-commit', name),
                 onCancel: () => emit('inline-rename-cancel'),
               })
@@ -656,6 +690,8 @@ export const TreeRows = defineComponent({
           const fileLabelContent = isRenaming
             ? h(TreeInlineInput, {
                 placeholder: e.name,
+                initialValue: ir?.value ?? e.name,
+                error: ir?.error ?? '',
                 onCommit: (name: string) => emit('inline-rename-commit', name),
                 onCancel: () => emit('inline-rename-cancel'),
               })

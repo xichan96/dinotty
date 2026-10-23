@@ -62,6 +62,16 @@
           :class="{ narrow: layout.narrow.value }"
           :style="layout.treeWrapStyle.value"
         >
+          <div v-if="previewErr" class="file-workspace-error" role="alert">
+            <span class="file-workspace-error-text">{{ previewErrText }}</span>
+            <button
+              type="button"
+              class="file-workspace-error-retry"
+              @click="retryPreviewErr"
+            >
+              {{ t('filePreview.retry') }}
+            </button>
+          </div>
           <div
             class="file-workspace-tree tree-host"
             @click.stop
@@ -281,7 +291,14 @@ import { useFileOperations } from '../../composables/useFileOperations'
 import type { DropPosition } from '../../types/pane'
 import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
 import { useInlineCreateRename } from '../../composables/useInlineCreateRename'
-import { useFileWorkspaceBoot } from '../../composables/useFileWorkspaceBoot'
+import {
+  useFileWorkspaceBoot,
+  asWorkspaceError,
+  workspaceErrorFromResponse,
+  workspaceErrorKind,
+  withWorkspaceErrorRel,
+  type WorkspaceError,
+} from '../../composables/useFileWorkspaceBoot'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
@@ -340,7 +357,7 @@ const editorSplit = useEditorSplit({ paneId: () => apiPaneId.value })
 // Derived from active editor pane — keeps tree highlight and context menu working
 const selectedRel = ref<string | null>(null)
 const selectedIsDir = ref(false)
-const previewErr = ref('')
+const previewErr = ref<WorkspaceError | null>(null)
 
 // Live state of the active pane, exposed by EditorPane via the registry.
 const activeHandle = computed(() => {
@@ -416,11 +433,11 @@ const {
   selectedIsDir,
   childCache,
   expanded,
-  previewErr,
   parentRelPath,
   ensureChildren,
   onSelectFile,
   onSelectDir,
+  t,
 })
 
 const ops = useFileOperations({
@@ -581,7 +598,43 @@ async function openFromTerminal(path: string): Promise<void> {
   await openFromTerminalFromBoot(path)
 }
 
+/**
+ * Retry the operation behind the visible error. A failed directory listing is
+ * retried for that directory; anything else (resolve/boot) reloads the tree.
+ */
+async function retryPreviewErr() {
+  const err = previewErr.value
+  if (!err) return
+  previewErr.value = null
+  const rel = err.rel ?? ''
+  if (!rel) {
+    await reloadAll()
+    return
+  }
+  const next = { ...childCache.value }
+  delete next[rel]
+  childCache.value = next
+  try {
+    await ensureChildren(rel)
+  } catch (e) {
+    previewErr.value = withWorkspaceErrorRel(e, rel)
+  }
+}
+
 // --- Computed ---
+const previewErrText = computed(() => {
+  switch (workspaceErrorKind(previewErr.value)) {
+    case 'forbidden':
+      return t('filePreview.errPermission')
+    case 'notFound':
+      return t('filePreview.errNotFound')
+    case 'network':
+      return t('filePreview.errNetwork')
+    default:
+      return t('filePreview.errUnknown')
+  }
+})
+
 const cwdShort = computed(() => {
   const s = cwdLabel.value
   if (s.length <= 36) return s
@@ -778,8 +831,16 @@ async function fetchList(rel: string): Promise<DirEntry[]> {
   await getApiBase()
   const q = new URLSearchParams({ pane_id: apiPaneId.value, path: rel })
   if (cwdLabel.value) q.set('root', cwdLabel.value)
-  const res = await authFetch(apiUrl(`/api/workspace/list?${q}`))
-  if (!res.ok) throw new Error('list failed')
+  let res: Response
+  try {
+    res = await authFetch(apiUrl(`/api/workspace/list?${q}`))
+  } catch (e) {
+    // Transport failure: status 0 so the UI reports a network error.
+    throw asWorkspaceError(e)
+  }
+  // Keep the server's status and `{ error }` body — the error bar maps them to
+  // localized text and decides whether Retry is useful.
+  if (!res.ok) throw await workspaceErrorFromResponse(res)
   const data = await res.json()
   cwdLabel.value = data.cwd || ''
   return data.entries || []
@@ -1106,6 +1167,44 @@ defineExpose({
   background: var(--bg, #1a1a1a);
 }
 
+.file-workspace-error {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(244, 135, 113, 0.12);
+  border-bottom: 1px solid rgba(244, 135, 113, 0.35);
+  color: #f48771;
+  font-size: 12px;
+}
+
+.file-workspace-error-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-workspace-error-retry {
+  flex-shrink: 0;
+  border: 1px solid #4a4a50;
+  background: #26262b;
+  color: #cfcfd4;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.file-workspace-error-retry:hover {
+  border-color: var(--accent, #89b4fa);
+  color: #fff;
+}
+
 .file-workspace-preview-wrap {
   flex: 1;
   min-width: 0;
@@ -1153,6 +1252,29 @@ defineExpose({
 
 <style>
 @import '../../styles/tree-rows.css';
+
+/* Inline create/rename: the input and its error share one flex row. */
+.tree-inline-field {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-inline-field .tree-inline-input {
+  flex: 1 1 auto;
+}
+
+.tree-inline-error {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #f48771;
+}
 
 .tree-ctx-backdrop {
   position: fixed;

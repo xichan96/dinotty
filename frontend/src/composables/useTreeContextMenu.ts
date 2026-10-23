@@ -22,8 +22,8 @@ export function useTreeContextMenu(opts: {
   editorBaseline: Ref<string>
   childCache: Ref<Record<string, DirEntry[]>>
   expanded: Ref<Set<string>>
-  inlineCreate: Ref<{ parentRel: string; kind: 'file' | 'dir' } | null>
-  inlineRename: Ref<{ rel: string; isDir: boolean } | null>
+  inlineCreate: Ref<{ parentRel: string; kind: 'file' | 'dir'; value?: string; error?: string } | null>
+  inlineRename: Ref<{ rel: string; isDir: boolean; value?: string; error?: string } | null>
   narrow: Ref<boolean>
   absolutePath: (rel: string) => string
   parentRelPath: (rel: string) => string
@@ -121,7 +121,7 @@ export function useTreeContextMenu(opts: {
     closeContextMenu()
     if (await shouldBlockNavigate()) return
     const parentRel = isDir ? rel : opts.parentRelPath(rel)
-    opts.inlineCreate.value = { parentRel, kind: 'file' }
+    opts.inlineCreate.value = { parentRel, kind: 'file', value: '', error: '' }
     opts.expanded.value = new Set([...opts.expanded.value, parentRel])
     void opts.ensureChildren(parentRel)
   }
@@ -132,7 +132,7 @@ export function useTreeContextMenu(opts: {
     closeContextMenu()
     if (await shouldBlockNavigate()) return
     const parentRel = isDir ? rel : opts.parentRelPath(rel)
-    opts.inlineCreate.value = { parentRel, kind: 'dir' }
+    opts.inlineCreate.value = { parentRel, kind: 'dir', value: '', error: '' }
     opts.expanded.value = new Set([...opts.expanded.value, parentRel])
     void opts.ensureChildren(parentRel)
   }
@@ -144,7 +144,12 @@ export function useTreeContextMenu(opts: {
     const targetRel = rel || opts.selectedRel.value
     if (!targetRel) return
     const targetIsDir = rel ? isDir : opts.selectedIsDir.value
-    opts.inlineRename.value = { rel: targetRel, isDir: targetIsDir }
+    opts.inlineRename.value = {
+      rel: targetRel,
+      isDir: targetIsDir,
+      value: targetRel.split('/').pop() || targetRel,
+      error: '',
+    }
   }
 
   function ctxDelete() {

@@ -18,13 +18,15 @@
         {{ displayTitle || t('filePreview.pickFile') }}
         <span v-if="editor.editorDirty.value" class="editor-pane-dirty">●</span>
       </span>
-      <span
+      <button
         v-if="diskChanged"
+        type="button"
         class="editor-pane-disk-changed"
-        :title="t('filePreview.diskChanged')"
+        :title="t('filePreview.diskChangedHint')"
+        @click.stop="onDiskChangedClick"
       >
         {{ t('filePreview.diskChanged') }}
-      </span>
+      </button>
       <button
         type="button"
         class="editor-pane-close"
@@ -85,6 +87,7 @@ import { useI18n } from '../../composables/useI18n'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
 import type { DropPosition } from '../../types/pane'
 import { isTauri } from '../../composables/useTransport'
+import { uiConfirm } from '../../composables/useConfirm'
 import { createFileEditor } from '../../composables/useFileEditor'
 import { useOfficePreview } from '../../composables/useOfficePreview'
 import { useAudioPlayer } from '../../composables/useAudioPlayer'
@@ -293,6 +296,29 @@ function markDiskChanged(): void {
   diskChanged.value = true
 }
 
+/**
+ * The "changed on disk" badge is an action: reload from disk. A dirty buffer
+ * would be overwritten, so ask first; a clean buffer reloads immediately.
+ */
+async function onDiskChangedClick(): Promise<void> {
+  const filePath = props.filePath
+  if (!filePath || props.isDir) return
+  if (editor.editorDirty.value) {
+    const ok = await uiConfirm(t('filePreview.discardChanges'), {
+      confirmText: t('filePreview.discardChanges'),
+      cancelText: t('filePreview.cancel'),
+    })
+    if (!ok) return
+  }
+  diskChanged.value = false
+  // `reset` re-fetches meta; the meta watcher replaces text and baseline, which
+  // is the discard the user just confirmed.
+  await loadFile(filePath, { reset: true })
+  if (meta.value?.kind && meta.value.kind !== 'text' && meta.value.kind !== 'markdown') {
+    rawBust.value = Date.now()
+  }
+}
+
 /** Save then clear the disk-changed flag when the buffer is clean again. */
 async function onSaveEditor(): Promise<void> {
   await editor.saveEditor()
@@ -432,12 +458,19 @@ onBeforeUnmount(() => {
 .editor-pane-disk-changed {
   flex-shrink: 0;
   padding: 1px 6px;
+  border: 1px solid transparent;
   border-radius: 3px;
   background: rgba(209, 154, 102, 0.16);
   color: var(--color-orange, #d19a66);
+  font-family: inherit;
   font-size: 10px;
   line-height: 16px;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.editor-pane-disk-changed:hover {
+  border-color: rgba(209, 154, 102, 0.55);
 }
 
 .editor-pane-close {

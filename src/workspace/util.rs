@@ -3,12 +3,13 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::session::{Session, SessionManager};
 
-use super::types::SearchMatch;
+use super::types::{DirEntry, SearchMatch};
 
 pub(crate) const MAX_TEXT_PREVIEW: usize = 512 * 1024;
 pub(crate) const MAX_DOWNLOAD: u64 = 500 * 1024 * 1024;
@@ -80,6 +81,52 @@ pub(crate) fn path_must_be_under(root: &Path, candidate: &Path) -> Result<(), Re
 
 pub(crate) fn rel_from_root(root: &Path, full: &Path) -> Option<String> {
     full.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"))
+}
+
+/// Case-insensitive natural ordering for file names: digit runs compare by
+/// numeric value (`file2` < `file10`), every other character by lowercase
+/// order.
+pub(crate) fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let a: Vec<char> = a.chars().flat_map(char::to_lowercase).collect();
+    let b: Vec<char> = b.chars().flat_map(char::to_lowercase).collect();
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i].is_ascii_digit() && b[j].is_ascii_digit() {
+            let a_start = i;
+            while i < a.len() && a[i].is_ascii_digit() {
+                i += 1;
+            }
+            let b_start = j;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            let a_run = trim_leading_zeros(&a[a_start..i]);
+            let b_run = trim_leading_zeros(&b[b_start..j]);
+            let ord = a_run.len().cmp(&b_run.len()).then_with(|| a_run.cmp(b_run));
+            if ord != Ordering::Equal {
+                return ord;
+            }
+            continue;
+        }
+        let ord = a[i].cmp(&b[j]);
+        if ord != Ordering::Equal {
+            return ord;
+        }
+        i += 1;
+        j += 1;
+    }
+    (a.len() - i).cmp(&(b.len() - j))
+}
+
+fn trim_leading_zeros(digits: &[char]) -> &[char] {
+    let start = digits.iter().position(|c| *c != '0').unwrap_or(digits.len());
+    &digits[start..]
+}
+
+/// Sort directory entries for display: directories first, then natural,
+/// case-insensitive name order.
+pub(crate) fn sort_dir_entries(entries: &mut [DirEntry]) {
+    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
 }
 
 pub(crate) fn validate_entry_name(name: &str) -> Result<&str, Response> {
@@ -355,4 +402,52 @@ pub(crate) fn byte_offset_to_column(line_bytes: &[u8], byte_offset: usize) -> u3
         i += 1;
     }
     col
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, is_dir: bool) -> DirEntry {
+        DirEntry { name: name.to_string(), is_dir, size: 0 }
+    }
+
+    #[test]
+    fn natural_cmp_orders_digit_runs_numerically() {
+        assert_eq!(natural_cmp("file2", "file10"), Ordering::Less);
+        assert_eq!(natural_cmp("file10", "file2"), Ordering::Greater);
+        assert_eq!(natural_cmp("file2", "file2"), Ordering::Equal);
+    }
+
+    #[test]
+    fn natural_cmp_is_case_insensitive() {
+        assert_eq!(natural_cmp("README.md", "readme.md"), Ordering::Equal);
+        assert_eq!(natural_cmp("Alpha", "beta"), Ordering::Less);
+    }
+
+    #[test]
+    fn natural_cmp_handles_leading_zeros_and_unicode() {
+        assert_eq!(natural_cmp("file02", "file2"), Ordering::Equal);
+        assert_eq!(natural_cmp("file002", "file10"), Ordering::Less);
+        assert_eq!(natural_cmp("第2章", "第10章"), Ordering::Less);
+    }
+
+    #[test]
+    fn natural_cmp_short_prefix_sorts_first() {
+        assert_eq!(natural_cmp("a", "a.txt"), Ordering::Less);
+        assert_eq!(natural_cmp("a.txt", "a"), Ordering::Greater);
+    }
+
+    #[test]
+    fn sort_dir_entries_puts_directories_first_then_natural() {
+        let mut entries = vec![
+            entry("file10.txt", false),
+            entry("src", true),
+            entry("file2.txt", false),
+            entry("Assets", true),
+        ];
+        sort_dir_entries(&mut entries);
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["Assets", "src", "file2.txt", "file10.txt"]);
+    }
 }

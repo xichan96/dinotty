@@ -23,8 +23,8 @@ use super::types::{
 use super::util::{
     detect_language, get_root, json_err, media_kind, normalize_join, office_kind,
     parent_dir_must_be_in_workspace, parse_rg_json, path_must_be_under, rel_from_root,
-    resolve_byte_range, resolve_user_path, skip_text_preview, ssh_session, try_res,
-    ByteRangeResult, MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
+    resolve_byte_range, resolve_user_path, skip_text_preview, sort_dir_entries, ssh_session,
+    try_res, ByteRangeResult, MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
 };
 
 #[allow(clippy::unused_async)]
@@ -168,7 +168,7 @@ fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Respo
             })
         })
         .collect::<Vec<_>>();
-    list.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
+    sort_dir_entries(&mut list);
     let path_display = q.path.trim().trim_start_matches('/').to_string();
     Json(ListResponse { cwd: cwd_display, path: path_display, entries: list }).into_response()
 }

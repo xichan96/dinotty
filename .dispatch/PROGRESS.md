@@ -19,12 +19,16 @@
 - 响应结构 `is_git_repo/files/status` 不变。
 - 新增 7 个单测：仓库根、子目录、rename（根/子目录）、Unicode、文件名含 ` -> `、非仓库。
 
-### 2. 自然序（待做）
+### 2. 自然序（已完成，提交 feat(workspace)）
+- `util.rs`: `natural_cmp`（大小写不敏感、数字段按数值、前导零归一）+ `sort_dir_entries`（目录优先）。
+- `handlers.rs` 本地列表、`remote/mod.rs` 两处 SFTP/sudo 列表改用 `sort_dir_entries`。
+- 单测 5 个：数字序、大小写、前导零/Unicode、前缀长度、目录优先。
+
 ### 3. watcher（待做）
 
 ## 测试
 - `cargo test --lib git_status`：7 passed。
+- `cargo test --lib natural_cmp` / `sort_dir_entries`：5 passed。
 
 ## 未完成
-- 自然序比较函数 + 两处调用替换 + 单测。
 - watcher SSH 守卫 + 忽略目录过滤 + 单测。

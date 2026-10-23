@@ -19,6 +19,7 @@ use crate::workspace::{
     MetaResponse, PanePathQuery, ResolveResponse, WorkspaceListQuery, MAX_DOWNLOAD,
     MAX_TEXT_PREVIEW,
 };
+use super::util::sort_dir_entries;
 use exec::{list_via_ssh_exec, read_via_ssh_exec};
 use path::{normalize_remote_join, resolve_remote_rel};
 use sftp::{is_permission_error, remove_dir_recursive, sftp, sftp_err, should_use_sudo};
@@ -71,7 +72,7 @@ pub async fn remote_list(session: Arc<Session>, q: WorkspaceListQuery) -> Respon
                     }
                 })
                 .collect();
-            list.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
+            sort_dir_entries(&mut list);
             Json(ListResponse { cwd: target.clone(), path: String::new(), entries: list })
                 .into_response()
         }
@@ -81,7 +82,7 @@ pub async fn remote_list(session: Arc<Session>, q: WorkspaceListQuery) -> Respon
                 // Fallback: list via SSH exec with sudo
                 match list_via_ssh_exec(&session, &target).await {
                     Ok(mut list) => {
-                        list.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
+                        sort_dir_entries(&mut list);
                         Json(ListResponse {
                             cwd: target.clone(),
                             path: String::new(),

@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use crate::{platform::process::CommandNoWindowExt, session::SessionManager};
 
@@ -30,39 +30,75 @@ pub struct GitStatusResponse {
     pub files: Vec<GitFileStatus>,
 }
 
+/// Collect workspace-relative git status entries for `root`.
+///
+/// `git status` reports paths relative to the repository root, while the file
+/// tree keys are relative to the pane cwd (which may be a subdirectory). The
+/// `--show-prefix` value (also root-relative) is stripped from each path so the
+/// two coordinate systems agree. Returns `None` when `root` is not a git
+/// repository (or `git` itself failed).
+fn git_status_files(root: &Path) -> Option<Vec<GitFileStatus>> {
+    let prefix_out =
+        git_command().args(["rev-parse", "--show-prefix"]).current_dir(root).output().ok()?;
+    if !prefix_out.status.success() {
+        return None;
+    }
+    let prefix = String::from_utf8_lossy(&prefix_out.stdout);
+    let prefix = prefix.trim_end_matches(['\r', '\n']);
+
+    let status_out =
+        git_command().args(["status", "--porcelain", "-z"]).current_dir(root).output().ok()?;
+    if !status_out.status.success() {
+        return None;
+    }
+    Some(parse_porcelain_z(&status_out.stdout, prefix))
+}
+
+/// Parse `git status --porcelain -z` output.
+///
+/// `-z` separates entries with NUL and reports paths verbatim (no C-quoting),
+/// so non-ASCII names and names containing `" -> "` survive intact. Rename and
+/// copy entries carry the destination path in the entry itself and the source
+/// path as the following NUL-delimited record; the latter is consumed and
+/// discarded.
+fn parse_porcelain_z(stdout: &[u8], prefix: &str) -> Vec<GitFileStatus> {
+    let mut files = Vec::new();
+    let mut records = stdout.split(|b| *b == 0).filter(|r| !r.is_empty());
+    while let Some(record) = records.next() {
+        if record.len() < 4 {
+            continue;
+        }
+        let (x, y) = (record[0], record[1]);
+        if x == b'R' || y == b'R' || x == b'C' || y == b'C' {
+            records.next();
+        }
+        let raw_path = String::from_utf8_lossy(&record[3..]);
+        let Some(path) = raw_path.strip_prefix(prefix) else {
+            continue; // outside the pane's cwd
+        };
+        let status = match (x, y) {
+            (b'?', b'?') => "untracked",
+            (b'A', b' ') | (b'A', b'M') => "staged_new",
+            (b'M', b' ') | (b'M', b'M') => "staged_modified",
+            (b'D', b' ') => "staged_deleted",
+            (b' ', b'D') => "deleted",
+            (b'R', _) | (_, b'R') => "renamed",
+            _ => "modified",
+        };
+        files.push(GitFileStatus { path: path.to_string(), status: status.to_string() });
+    }
+    files
+}
+
 pub async fn workspace_git_status(
     State(manager): State<Arc<SessionManager>>,
     Query(q): Query<PaneQuery>,
 ) -> impl IntoResponse {
     let root = try_res!(get_root(&manager, &q.pane_id));
-    let output = match tokio::task::spawn_blocking(move || {
-        git_command().args(["status", "--porcelain"]).current_dir(&root).output()
-    })
-    .await
-    {
-        Ok(Ok(o)) if o.status.success() => o,
+    let files = match tokio::task::spawn_blocking(move || git_status_files(&root)).await {
+        Ok(Some(files)) => files,
         _ => return Json(GitStatusResponse { is_git_repo: false, files: vec![] }).into_response(),
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let files: Vec<GitFileStatus> = stdout
-        .lines()
-        .filter(|l| l.len() >= 4)
-        .map(|line| {
-            let xy = &line[..2];
-            let path = line[3..].trim_start_matches('"').trim_end_matches('"');
-            let path = path.split(" -> ").last().unwrap_or(path).to_string();
-            let status = match xy {
-                "??" => "untracked",
-                "A " | "AM" => "staged_new",
-                "M " | "MM" => "staged_modified",
-                " D" => "deleted",
-                "D " => "staged_deleted",
-                "R " | "RM" => "renamed",
-                _ => "modified",
-            };
-            GitFileStatus { path, status: status.to_string() }
-        })
-        .collect();
     Json(GitStatusResponse { is_git_repo: true, files }).into_response()
 }
 
@@ -323,4 +359,130 @@ pub async fn workspace_git_revert_lines(
         return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
     Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git").args(args).current_dir(dir).output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn init_repo() -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        git(tmp.path(), &["init", "-q"]);
+        git(tmp.path(), &["config", "user.email", "test@example.com"]);
+        git(tmp.path(), &["config", "user.name", "test"]);
+        tmp
+    }
+
+    /// Status entries as sorted `(path, status)` pairs.
+    fn status_pairs(dir: &Path) -> Vec<(String, String)> {
+        let mut files = git_status_files(dir).expect("expected a git repository");
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        files.into_iter().map(|f| (f.path, f.status)).collect()
+    }
+
+    fn pair(path: &str, status: &str) -> (String, String) {
+        (path.to_string(), status.to_string())
+    }
+
+    #[test]
+    fn git_status_paths_are_relative_to_repo_root() {
+        let tmp = init_repo();
+        let root = tmp.path();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/a.txt"), "a\n").unwrap();
+        fs::write(root.join("b.txt"), "b\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+
+        fs::write(root.join("sub/a.txt"), "a2\n").unwrap();
+        fs::write(root.join("new.txt"), "n\n").unwrap();
+
+        assert_eq!(
+            status_pairs(root),
+            vec![pair("new.txt", "untracked"), pair("sub/a.txt", "modified")]
+        );
+    }
+
+    #[test]
+    fn git_status_from_subdirectory_is_relative_to_cwd() {
+        let tmp = init_repo();
+        let root = tmp.path();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/a.txt"), "a\n").unwrap();
+        fs::write(root.join("b.txt"), "b\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+
+        fs::write(root.join("sub/a.txt"), "a2\n").unwrap();
+        fs::write(root.join("b.txt"), "b2\n").unwrap();
+
+        let sub = root.join("sub");
+        assert_eq!(status_pairs(&sub), vec![pair("a.txt", "modified")]);
+    }
+
+    #[test]
+    fn git_status_rename_uses_destination_path() {
+        let tmp = init_repo();
+        let root = tmp.path();
+        fs::write(root.join("old.txt"), "content long enough for rename detection 0123456789\n")
+            .unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        git(root, &["mv", "old.txt", "renamed.txt"]);
+
+        assert_eq!(status_pairs(root), vec![pair("renamed.txt", "renamed")]);
+    }
+
+    #[test]
+    fn git_status_rename_inside_subdirectory() {
+        let tmp = init_repo();
+        let root = tmp.path();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/old.txt"), "content long enough for rename detection 0123456789\n")
+            .unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        git(root, &["mv", "sub/old.txt", "sub/new.txt"]);
+
+        assert_eq!(status_pairs(&root.join("sub")), vec![pair("new.txt", "renamed")]);
+    }
+
+    #[test]
+    fn git_status_preserves_unicode_paths() {
+        let tmp = init_repo();
+        let root = tmp.path();
+        fs::write(root.join("中文文件.txt"), "u\n").unwrap();
+
+        assert_eq!(status_pairs(root), vec![pair("中文文件.txt", "untracked")]);
+    }
+
+    #[test]
+    fn git_status_preserves_paths_containing_arrow() {
+        let tmp = init_repo();
+        let root = tmp.path();
+        fs::write(root.join("weird -> name.txt"), "w\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("weird -> name.txt"), "w2\n").unwrap();
+
+        assert_eq!(status_pairs(root), vec![pair("weird -> name.txt", "modified")]);
+    }
+
+    #[test]
+    fn git_status_outside_repository_is_none() {
+        let tmp = TempDir::new().unwrap();
+        assert!(git_status_files(tmp.path()).is_none());
+    }
 }

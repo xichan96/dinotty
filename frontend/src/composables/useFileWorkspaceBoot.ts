@@ -92,7 +92,6 @@ export interface FileWorkspaceBootOptions {
 
 export interface FileWorkspaceBoot {
   reloadAll: () => Promise<void>
-  expandFirstLevelDirs: () => Promise<void>
   captureState: () => PersistedFileWorkspaceState
   applyState: (s: PersistedFileWorkspaceState) => void
   boot: () => Promise<void>
@@ -160,16 +159,6 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     )
     if (firstError) previewErr.value = withWorkspaceErrorRel(firstError, firstErrorDir)
     await fetchGitStatus()
-  }
-
-  async function expandFirstLevelDirs(): Promise<void> {
-    const entries = childCache.value['']
-    if (!entries) return
-    const dirs = entries.filter((e) => e.is_dir)
-    if (!dirs.length) return
-    const dirPaths = dirs.map((d) => d.name)
-    expanded.value = new Set(dirPaths)
-    await Promise.all(dirPaths.map((p) => ensureChildren(p)))
   }
 
   function captureState(): PersistedFileWorkspaceState {
@@ -332,7 +321,6 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
 
   return {
     reloadAll,
-    expandFirstLevelDirs,
     captureState,
     applyState,
     boot,

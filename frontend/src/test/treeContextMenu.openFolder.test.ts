@@ -7,7 +7,7 @@ vi.mock('../composables/useTransport', () => ({ tauriInvoke: transportMocks.taur
 
 import { useTreeContextMenu } from '../composables/useTreeContextMenu'
 
-function createContextMenu() {
+function createContextMenu(isSsh = ref(false)) {
   // 步骤1：创建文件树右键菜单所需的最小状态。
   const selectedRel = ref<string | null>(null)
   const selectedIsDir = ref(false)
@@ -51,6 +51,7 @@ function createContextMenu() {
     inlineCreate,
     inlineRename,
     narrow,
+    isSsh,
     absolutePath,
     parentRelPath,
     ensureChildren,
@@ -107,6 +108,17 @@ describe('tree context menu open folder', () => {
     expect(transportMocks.tauriInvoke).toHaveBeenCalledWith('reveal_path', {
       path: '/workspace/README.md',
     })
+  })
+
+  it('is unavailable on SSH panes, where there is no local folder to open', async () => {
+    const { contextMenu } = createContextMenu(ref(true))
+    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src', isDir: true })
+
+    expect(contextMenu.isRemote.value).toBe(true)
+    await contextMenu.ctxOpenFolder()
+    await contextMenu.ctxReveal()
+
+    expect(transportMocks.tauriInvoke).not.toHaveBeenCalled()
   })
 
   it('does nothing when the background menu has no selection', async () => {

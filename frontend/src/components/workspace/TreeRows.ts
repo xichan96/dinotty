@@ -326,8 +326,6 @@ export const TreeRows = defineComponent({
     inlinePlaceholder: { type: String, default: '' },
     inlineRename: { type: Object, default: undefined },
     gitStatus: { type: Object, default: () => ({}) },
-    onDirDragEnter: { type: Function, default: undefined },
-    onDirDragLeave: { type: Function, default: undefined },
   },
   emits: [
     'toggle',
@@ -561,7 +559,6 @@ export const TreeRows = defineComponent({
                     ev.preventDefault()
                     ev.dataTransfer!.dropEffect = 'copy'
                     ;(ev.currentTarget as HTMLElement).classList.add('drop-target-upload')
-                    if (p.onDirDragEnter) p.onDirDragEnter(rel)
                   } else {
                     return
                   }
@@ -575,7 +572,6 @@ export const TreeRows = defineComponent({
                   )
                   if (leftElement(ev)) {
                     if (hoverExpandRel === rel) clearHoverExpand()
-                    if (p.onDirDragLeave) p.onDirDragLeave()
                   }
                 },
                 onDrop: (ev: DragEvent) => {

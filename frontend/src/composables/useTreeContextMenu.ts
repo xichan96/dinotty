@@ -25,6 +25,8 @@ export function useTreeContextMenu(opts: {
   inlineCreate: Ref<{ parentRel: string; kind: 'file' | 'dir'; value?: string; error?: string } | null>
   inlineRename: Ref<{ rel: string; isDir: boolean; value?: string; error?: string } | null>
   narrow: Ref<boolean>
+  /** Remote (SSH) panes have no local file manager to reveal into. */
+  isSsh?: Ref<boolean>
   absolutePath: (rel: string) => string
   parentRelPath: (rel: string) => string
   ensureChildren: (rel: string) => Promise<void>
@@ -41,15 +43,12 @@ export function useTreeContextMenu(opts: {
   t: (key: string) => string
 }) {
   const contextMenu = ref<{ x: number; y: number; rel: string; isDir: boolean } | null>(null)
-  const addMenuOpen = ref(false)
   const moveConfirm = ref<{ src: string; destDir: string } | null>(null)
   const deleteConfirm = ref<{ rel: string; isDir: boolean; discardNeeded: boolean } | null>(null)
 
-  const ctxDeleteKeyHint = computed(() =>
-    typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/i.test(navigator.platform)
-      ? '⌘⌫'
-      : 'Del'
-  )
+  /** SSH has no local file manager: hide actions that would operate on the
+   *  server host (the backend would answer 400). */
+  const isRemote = computed(() => opts.isSsh?.value ?? false)
 
   const canRunCode = computed(function computeCanRunCode() {
     // 步骤1：读取当前右键目标，背景菜单则使用已选文件。
@@ -212,7 +211,7 @@ export function useTreeContextMenu(opts: {
   }
 
   async function ctxReveal() {
-    if (!contextMenu.value) return
+    if (!contextMenu.value || isRemote.value) return
     const { rel } = contextMenu.value
     closeContextMenu()
     const targetRel = rel || opts.selectedRel.value
@@ -229,7 +228,7 @@ export function useTreeContextMenu(opts: {
    *  rather than the workspace HTTP endpoint, so it stays on the desktop
    *  machine (the endpoint would open the file manager on the server host). */
   async function ctxOpenFolder() {
-    if (!contextMenu.value) return
+    if (!contextMenu.value || isRemote.value) return
     const { rel } = contextMenu.value
     closeContextMenu()
     const targetRel = rel || opts.selectedRel.value
@@ -330,10 +329,9 @@ export function useTreeContextMenu(opts: {
 
   return {
     contextMenu,
-    addMenuOpen,
     moveConfirm,
     deleteConfirm,
-    ctxDeleteKeyHint,
+    isRemote,
     canRunCode,
     contextMenuStyle,
     closeContextMenu,

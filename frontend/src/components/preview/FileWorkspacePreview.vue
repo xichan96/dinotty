@@ -12,18 +12,32 @@
     ></div>
     <div class="file-workspace-panel">
       <div class="file-workspace-toolbar">
-        <button type="button" :disabled="!nav.canGoBack.value" title="Back" @click="doGoBack">
-          ←
+        <button
+          type="button"
+          :disabled="!nav.canGoBack.value"
+          :title="t('filePreview.back')"
+          :aria-label="t('filePreview.back')"
+          @click="doGoBack"
+        >
+          <ArrowLeft :size="12" />
         </button>
         <button
           type="button"
           :disabled="!nav.canGoForward.value"
-          title="Forward"
+          :title="t('filePreview.forward')"
+          :aria-label="t('filePreview.forward')"
           @click="doGoForward"
         >
-          →
+          <ArrowRight :size="12" />
         </button>
-        <button type="button" title="Refresh" @click="reloadAll">↻</button>
+        <button
+          type="button"
+          :title="t('filePreview.refresh')"
+          :aria-label="t('filePreview.refresh')"
+          @click="reloadAll"
+        >
+          <RotateCw :size="12" />
+        </button>
         <div class="file-workspace-cwd-wrap">
           <span
             class="file-workspace-cwd"
@@ -42,7 +56,15 @@
             @close="recentDropdownOpen = false"
           />
         </div>
-        <button v-if="!inLeaf" type="button" title="Close" @click="close">✕</button>
+        <button
+          v-if="!inLeaf"
+          type="button"
+          :title="t('filePreview.close')"
+          :aria-label="t('filePreview.close')"
+          @click="close"
+        >
+          <X :size="12" />
+        </button>
       </div>
       <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
       <div
@@ -90,9 +112,7 @@
               :inline-create="inlineCreateForTree"
               :inline-placeholder="inlineInputPlaceholder"
               :git-status="gitStatusMap"
-              :on-dir-drag-enter="ops.setHoveredDir"
               @toggle="onToggle"
-              :on-dir-drag-leave="ops.clearHoveredDir"
               @select-file="trySelectFile"
               @select-dir="trySelectDir"
               @inline-create-commit="onInlineCreateCommit"
@@ -155,7 +175,17 @@
       <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxNewFolder">
         <span class="tree-ctx-label">{{ t('filePreview.ctxNewFolder') }}</span>
       </button>
-      <template v-if="ctxMenu.contextMenu.value?.rel || selectedRel">
+      <!-- Blank-area menu: only the three creation actions, no selection fallback. -->
+      <button
+        v-if="!ctxMenu.contextMenu.value?.rel"
+        type="button"
+        class="tree-ctx-item"
+        role="menuitem"
+        @click="ctxMenu.ctxUpload"
+      >
+        <span class="tree-ctx-label">{{ t('filePreview.ctxUpload') }}</span>
+      </button>
+      <template v-if="ctxMenu.contextMenu.value?.rel">
         <div class="tree-ctx-sep" />
         <button
           v-if="!ctxMenu.contextMenu.value?.isDir"
@@ -167,31 +197,24 @@
           <span class="tree-ctx-label">{{ t('filePreview.ctxOpenToSide') }}</span>
         </button>
         <div class="tree-ctx-sep" />
-        <button
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          :disabled="!ctxMenu.contextMenu.value?.rel && !selectedRel"
-          @click="ctxMenu.ctxRename"
-        >
+        <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxRename">
           <span class="tree-ctx-label">{{ t('filePreview.ctxRename') }}</span>
-          <span class="tree-ctx-kbd">F2</span>
         </button>
         <div class="tree-ctx-sep" />
         <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxCopyPath">
           <span class="tree-ctx-label">{{ t('filePreview.ctxCopyPath') }}</span>
         </button>
         <button
+          v-if="!ctxMenu.isRemote.value"
           type="button"
           class="tree-ctx-item"
           role="menuitem"
-          :disabled="!ctxMenu.contextMenu.value?.rel && !selectedRel"
           @click="ctxMenu.ctxReveal"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxReveal') }}</span>
         </button>
         <button
-          v-if="isTauri()"
+          v-if="isTauri() && !ctxMenu.isRemote.value"
           type="button"
           class="tree-ctx-item"
           role="menuitem"
@@ -239,11 +262,9 @@
           type="button"
           class="tree-ctx-item tree-ctx-item-danger"
           role="menuitem"
-          :disabled="!ctxMenu.contextMenu.value?.rel && !selectedRel"
           @click="ctxMenu.ctxDelete"
         >
           <span class="tree-ctx-label">{{ t('filePreview.ctxDelete') }}</span>
-          <span class="tree-ctx-kbd">{{ ctxMenu.ctxDeleteKeyHint.value }}</span>
         </button>
       </template>
     </div>
@@ -308,7 +329,14 @@ import ConfirmModal from '../ui/ConfirmModal.vue'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import {
+  ArrowLeft,
+  ArrowRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RotateCw,
+  X,
+} from 'lucide-vue-next'
 
 const props = withDefaults(
   defineProps<{
@@ -338,6 +366,9 @@ const { t } = useI18n()
 // (list/cwd/git-status) which look up the PTY session. Falls back to the
 // leaf's own paneId for legacy leaves without sourcePaneId.
 const apiPaneId = computed(() => props.sourcePaneId || props.paneId)
+
+/** Remote panes browse the SSH host; local-only affordances must hide. */
+const isSsh = computed(() => props.shellType === 'ssh')
 
 // --- Shared state ---
 const cwdLabel = ref('')
@@ -468,6 +499,7 @@ const ctxMenu = useTreeContextMenu({
   inlineCreate,
   inlineRename,
   narrow: layout.narrow,
+  isSsh,
   absolutePath: ops.absolutePath,
   parentRelPath: ops.parentRelPath,
   ensureChildren,
@@ -523,7 +555,7 @@ function onWatchedFileDeleted(rel: string) {
 }
 
 /** SSH panes have no local watcher behind them; don't open a socket at all. */
-const canWatch = computed(() => props.shellType !== 'ssh')
+const canWatch = computed(() => !isSsh.value)
 
 /** After a local reconnect, catch up on anything missed while offline. */
 async function refreshAfterWatchReconnect() {
@@ -559,7 +591,6 @@ function connectTreeWatchSocket() {
 
 const {
   reloadAll,
-  expandFirstLevelDirs,
   captureState,
   applyState,
   boot,
@@ -870,7 +901,14 @@ async function fetchList(rel: string): Promise<DirEntry[]> {
   // localized text and decides whether Retry is useful.
   if (!res.ok) throw await workspaceErrorFromResponse(res)
   const data = await res.json()
-  cwdLabel.value = data.cwd || ''
+  if (isSsh.value) {
+    // The remote backend reports the directory it just listed; tree rel paths
+    // are always relative to the initial root '/', so following it would make
+    // cwdLabel drift on every navigation.
+    cwdLabel.value = '/'
+  } else {
+    cwdLabel.value = data.cwd || ''
+  }
   return data.entries || []
 }
 
@@ -1399,16 +1437,6 @@ defineExpose({
 .tree-ctx-label {
   flex: 1;
   min-width: 0;
-}
-.tree-ctx-kbd {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: #888;
-  font-variant-numeric: tabular-nums;
-}
-.tree-ctx-item:hover .tree-ctx-kbd,
-.tree-ctx-item:focus-visible .tree-ctx-kbd {
-  color: rgba(255, 255, 255, 0.75);
 }
 .tree-ctx-sep {
   height: 1px;

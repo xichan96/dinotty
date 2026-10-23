@@ -41,12 +41,16 @@ export function useTreeContextMenu(opts: {
   downloadFile: (rel: string) => Promise<void>
   paneId: () => string
   t: (key: string) => string
+  /** Return focus to the menu's target row after Escape (keyboard a11y). */
+  onMenuClosed?: (rel: string) => void
 }) {
   const contextMenu = ref<{ x: number; y: number; rel: string; isDir: boolean } | null>(null)
   /** Menu element, bound by the view, so placement uses the real rendered size
    *  instead of a guessed one and keyboard nav can reach its items. */
   const menuEl = ref<HTMLElement | null>(null)
   const menuSize = ref<{ width: number; height: number } | null>(null)
+  /** Target of the open menu, used to hand focus back to its row on Escape. */
+  let lastMenuRel = ''
   const moveConfirm = ref<{ src: string; destDir: string } | null>(null)
   const deleteConfirm = ref<{ rel: string; isDir: boolean; discardNeeded: boolean } | null>(null)
 
@@ -102,6 +106,7 @@ export function useTreeContextMenu(opts: {
    *  viewport and hand keyboard focus to the first available action. */
   function showMenu(x: number, y: number, rel: string, isDir: boolean) {
     contextMenu.value = { x, y, rel, isDir }
+    lastMenuRel = rel
     menuSize.value = null
     void nextTick(() => {
       if (!contextMenu.value) return
@@ -138,7 +143,7 @@ export function useTreeContextMenu(opts: {
         break
       case 'Escape':
         ev.preventDefault()
-        closeContextMenu()
+        closeContextMenuAndRestoreFocus()
         break
     }
   }
@@ -146,6 +151,14 @@ export function useTreeContextMenu(opts: {
   function closeContextMenu() {
     contextMenu.value = null
     menuSize.value = null
+  }
+
+  /** Escape from a keyboard-opened menu should return to the row it opened
+   *  from, not drop focus on <body>. Outside clicks deliberately do not. */
+  function closeContextMenuAndRestoreFocus() {
+    const rel = lastMenuRel
+    closeContextMenu()
+    if (rel) opts.onMenuClosed?.(rel)
   }
 
   async function shouldBlockNavigate(): Promise<boolean> {

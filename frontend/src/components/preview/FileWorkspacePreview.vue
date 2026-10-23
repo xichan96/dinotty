@@ -605,6 +605,8 @@ const ctxMenu = useTreeContextMenu({
   downloadFile: ops.downloadFile,
   paneId: () => apiPaneId.value,
   t,
+  // Escape from a keyboard-opened menu returns focus to its row.
+  onMenuClosed: (rel: string) => treeKeyboard.focusRow(rel),
 })
 
 /** Shortcut hints in the context menu follow the platform the UI runs on. */

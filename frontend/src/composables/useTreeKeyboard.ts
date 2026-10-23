@@ -229,7 +229,14 @@ export function useTreeKeyboard(opts: UseTreeKeyboardOptions) {
    *  must still receive their click. */
   function onTreePointerDown(ev: PointerEvent) {
     const row = (ev.target as HTMLElement | null)?.closest<HTMLElement>('.tree-row[data-rel]')
-    if (row) row.focus({ preventScroll: true })
+    if (!row) return
+    row.focus({ preventScroll: true })
+    // A button under the pointer (twistie, swipe action) takes focus on the
+    // default mousedown action after this handler. Take it back once that has
+    // happened so arrow keys keep acting on the row.
+    requestAnimationFrame(() => {
+      if (document.activeElement !== row && row.isConnected) row.focus({ preventScroll: true })
+    })
   }
 
   /** Tab lands on the container; hand focus to the selected or first row. */

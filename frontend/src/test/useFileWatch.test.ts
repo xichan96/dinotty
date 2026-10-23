@@ -259,6 +259,55 @@ describe('useFileWatch', () => {
     expect(mockInstances).toHaveLength(1)
   })
 
+  it('does not connect when watching is unavailable (SSH panes)', async () => {
+    const opts = makeOpts({ canWatch: () => false })
+    const fw = useFileWatch(opts)
+    await fw.connectTreeWatchSocket()
+
+    expect(mockInstances).toHaveLength(0)
+
+    fw.disconnectTreeWatchSocket()
+  })
+
+  it('stops reconnecting after the server reports an error', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const opts = makeOpts()
+    const fw = useFileWatch(opts)
+    await fw.connectTreeWatchSocket()
+
+    const ws = mockInstances[0]
+    ws.onmessage!({
+      data: JSON.stringify({ type: 'error', message: 'unknown pane' }),
+    })
+    ws.onclose!()
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(mockInstances).toHaveLength(1)
+    expect(warn).toHaveBeenCalled()
+
+    warn.mockRestore()
+    fw.disconnectTreeWatchSocket()
+  })
+
+  it('notifies on reconnect but not on the first open', async () => {
+    const onReconnected = vi.fn()
+    const opts = makeOpts({ onReconnected })
+    const fw = useFileWatch(opts)
+    await fw.connectTreeWatchSocket()
+
+    // Initial open happened in a microtask above.
+    expect(onReconnected).not.toHaveBeenCalled()
+
+    mockInstances[0].onclose!()
+    await vi.advanceTimersByTimeAsync(1200)
+
+    expect(mockInstances).toHaveLength(2)
+    expect(onReconnected).toHaveBeenCalledTimes(1)
+
+    fw.disconnectTreeWatchSocket()
+  })
+
   it('reconnect delay resets on successful connection', async () => {
     const opts = makeOpts()
     const fw = useFileWatch(opts)

@@ -12,11 +12,18 @@
     <div v-if="dropZone" class="editor-pane-drop-zone" :class="`zone-${dropZone}`">
       {{ dropZone === 'center' ? t('filePreview.dropReplace') : t('filePreview.dropSplit') }}
     </div>
-    <div v-if="showHeader" class="editor-pane-header">
+    <div v-if="showHeader || diskChanged" class="editor-pane-header">
       <span v-if="isInActiveGroup" class="editor-pane-group-band"></span>
       <span class="editor-pane-title" :title="displayTitle">
         {{ displayTitle || t('filePreview.pickFile') }}
         <span v-if="editor.editorDirty.value" class="editor-pane-dirty">●</span>
+      </span>
+      <span
+        v-if="diskChanged"
+        class="editor-pane-disk-changed"
+        :title="t('filePreview.diskChanged')"
+      >
+        {{ t('filePreview.diskChanged') }}
       </span>
       <button
         type="button"
@@ -65,7 +72,7 @@
       @update:md-show-preview="editor.mdShowPreview.value = $event"
       @update:html-show-preview="editor.htmlShowPreview.value = $event"
       @update:editor-text="editor.editorText.value = $event"
-      @save-editor="editor.saveEditor"
+      @save-editor="onSaveEditor"
       @selection-change="editor.onEditorSelectionChange"
     />
   </div>
@@ -81,7 +88,11 @@ import { isTauri } from '../../composables/useTransport'
 import { createFileEditor } from '../../composables/useFileEditor'
 import { useOfficePreview } from '../../composables/useOfficePreview'
 import { useAudioPlayer } from '../../composables/useAudioPlayer'
-import { whenEditorReady } from '../../composables/useEditorRegistry'
+import {
+  whenEditorReady,
+  registerEditorPaneState,
+  unregisterEditorPaneState,
+} from '../../composables/useEditorRegistry'
 import { useCursorGroup, isCursorBroadcasting } from '../../composables/useCursorGroup'
 import FilePreviewContent from './FilePreviewContent.vue'
 
@@ -150,6 +161,8 @@ const { t } = useI18n()
 const meta = ref<any | null>(null)
 const previewLoading = ref(false)
 const previewErr = ref('')
+const diskChanged = ref(false)
+const rawBust = ref(0)
 
 const selectedRel: Ref<string | null> = computed(() => props.filePath)
 const selectedIsDir: Ref<boolean> = computed(() => props.isDir)
@@ -187,6 +200,7 @@ const rawUrl = computed(() => {
     const token = getAuthToken()
     if (token) q.set('token', token)
   }
+  if (rawBust.value) q.set('_t', String(rawBust.value))
   return apiUrl(`/api/workspace/raw?${q}`)
 })
 
@@ -196,45 +210,107 @@ const displayTitle = computed(() => {
 })
 
 // --- Load file when filePath changes ---
+// A token guards against a slow response for a previous file landing after the
+// pane has already switched to a new one.
+let loadToken = 0
+
+async function loadFile(
+  filePath: string,
+  opts: { reset: boolean; skipIfDirty?: boolean }
+): Promise<void> {
+  const token = ++loadToken
+  previewLoading.value = true
+  if (opts.reset) {
+    previewErr.value = ''
+    meta.value = null
+    office.officeLoading.value = false
+    office.officeErr.value = ''
+    office.officeHtml.value = ''
+  }
+
+  try {
+    await getApiBase()
+    const q = new URLSearchParams({ pane_id: props.paneId, path: filePath })
+    const res = await authFetch(apiUrl(`/api/workspace/meta?${q}`))
+    if (token !== loadToken || props.filePath !== filePath) return
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}))
+      previewErr.value = j.error || 'error'
+      return
+    }
+    const next = await res.json()
+    if (token !== loadToken || props.filePath !== filePath) return
+    // The user started typing while the reload was in flight — keep their
+    // buffer and surface the on-disk change instead of clobbering it.
+    if (opts.skipIfDirty && editor.editorDirty.value) {
+      diskChanged.value = true
+      return
+    }
+    previewErr.value = ''
+    meta.value = next
+    if (next?.kind === 'office') void office.loadOfficePreview(filePath)
+    if (opts.reset) editor.mdShowPreview.value = next?.kind === 'markdown'
+  } catch {
+    if (token === loadToken && props.filePath === filePath) previewErr.value = 'network'
+  } finally {
+    if (token === loadToken) previewLoading.value = false
+  }
+}
+
 watch(
   () => [props.filePath, props.isDir] as const,
-  async ([newPath, isDir]) => {
+  ([newPath, isDir]) => {
+    diskChanged.value = false
+    rawBust.value = 0
     if (!newPath || isDir) {
+      loadToken++
+      previewLoading.value = false
       meta.value = null
       previewErr.value = ''
       editor.editorText.value = ''
       editor.editorBaseline.value = ''
       return
     }
-
-    const filePath = newPath as string
-    previewLoading.value = true
-    previewErr.value = ''
-    meta.value = null
-    office.officeLoading.value = false
-    office.officeErr.value = ''
-    office.officeHtml.value = ''
-
-    try {
-      await getApiBase()
-      const q = new URLSearchParams({ pane_id: props.paneId, path: filePath })
-      const res = await authFetch(apiUrl(`/api/workspace/meta?${q}`))
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        previewErr.value = j.error || 'error'
-        return
-      }
-      meta.value = await res.json()
-      if (meta.value?.kind === 'office') void office.loadOfficePreview(filePath)
-      editor.mdShowPreview.value = meta.value?.kind === 'markdown'
-    } catch {
-      previewErr.value = 'network'
-    } finally {
-      previewLoading.value = false
-    }
+    void loadFile(newPath as string, { reset: true })
   },
   { immediate: true }
 )
+
+/** Re-read the current file from disk, keeping unsaved buffers untouched. */
+async function reloadFromDisk(): Promise<void> {
+  const filePath = props.filePath
+  if (!filePath || props.isDir) return
+  diskChanged.value = false
+  await loadFile(filePath, { reset: false, skipIfDirty: true })
+  // Media/PDF/etc. are rendered straight from the raw endpoint; the URL is
+  // otherwise unchanged, so bust the browser cache after an external edit.
+  if (meta.value?.kind && meta.value.kind !== 'text' && meta.value.kind !== 'markdown') {
+    rawBust.value = Date.now()
+  }
+}
+
+function markDiskChanged(): void {
+  diskChanged.value = true
+}
+
+/** Save then clear the disk-changed flag when the buffer is clean again. */
+async function onSaveEditor(): Promise<void> {
+  await editor.saveEditor()
+  if (!editor.editorDirty.value) diskChanged.value = false
+}
+
+// Expose this pane's live state to FileWorkspacePreview (navigation guards,
+// external-change refresh, close checks) without lifting the editor state up.
+registerEditorPaneState(props.leafId, {
+  filePath: () => props.filePath,
+  isDirty: () => editor.editorDirty.value,
+  meta,
+  editorText: editor.editorText,
+  editorBaseline: editor.editorBaseline,
+  diskChanged,
+  reloadFromDisk,
+  markDiskChanged,
+})
 
 // --- Sync editor text from meta ---
 watch(
@@ -296,6 +372,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  unregisterEditorPaneState(props.leafId)
   for (const d of editorEventDisposers) d.dispose()
   editorEventDisposers.length = 0
 })
@@ -350,6 +427,17 @@ onBeforeUnmount(() => {
 .editor-pane-dirty {
   color: var(--color-orange, #d19a66);
   margin-left: 4px;
+}
+
+.editor-pane-disk-changed {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(209, 154, 102, 0.16);
+  color: var(--color-orange, #d19a66);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .editor-pane-close {

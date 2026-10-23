@@ -721,12 +721,10 @@ function trySelectDir(rel: string) {
   onSelectDir(rel)
 }
 
-/** Close a pane after checking every shown buffer (not just the active one). */
+/** Close one pane after checking only the buffer it is about to drop. */
 async function onCloseEditorPane(leafId: string) {
-  const hasDirty = getAllEditorLeaves(editorSplit.editorLayout.value).some((leaf) =>
-    getEditorPaneState(leaf.id)?.isDirty()
-  )
-  if (hasDirty) {
+  const state = getEditorPaneState(leafId)
+  if (state?.isDirty()) {
     const ok = await uiConfirm(t('filePreview.discardChanges'), {
       confirmText: t('filePreview.discardChanges'),
       cancelText: t('filePreview.cancel'),

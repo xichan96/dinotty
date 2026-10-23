@@ -491,15 +491,40 @@ function onWatchedFileDeleted(rel: string) {
   fetchGitStatus()
 }
 
+/** SSH panes have no local watcher behind them; don't open a socket at all. */
+const canWatch = computed(() => props.shellType !== 'ssh')
+
+/** After a local reconnect, catch up on anything missed while offline. */
+async function refreshAfterWatchReconnect() {
+  const dirs = [...new Set(['', ...expanded.value])]
+  await Promise.all(
+    dirs.map(async (dir) => {
+      try {
+        const entries = await fetchList(dir)
+        childCache.value = { ...childCache.value, [dir]: entries }
+      } catch {}
+    })
+  )
+  await fetchGitStatus()
+}
+
 const fileWatch = useFileWatch({
   paneId: () => apiPaneId.value,
   cwdLabel,
   expanded,
   childCache,
   fetchList,
+  canWatch: () => canWatch.value,
   onFileChanged: onWatchedFileChanged,
   onFileDeleted: onWatchedFileDeleted,
+  onReconnected: () => void refreshAfterWatchReconnect(),
 })
+
+/** Boot connects through this, so SSH never even schedules a watcher. */
+function connectTreeWatchSocket() {
+  if (!canWatch.value) return
+  return fileWatch.connectTreeWatchSocket()
+}
 
 const {
   reloadAll,
@@ -529,7 +554,7 @@ const {
   ensureChildren,
   onSelectFile,
   onSelectDir,
-  connectTreeWatchSocket: fileWatch.connectTreeWatchSocket,
+  connectTreeWatchSocket,
   disconnectTreeWatchSocket: fileWatch.disconnectTreeWatchSocket,
   fetchGitStatus,
 })

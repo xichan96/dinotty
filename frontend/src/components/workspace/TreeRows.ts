@@ -52,6 +52,107 @@ export function absJoinWorkspaceRoot(root: string, rel: string): string {
   return r + '/' + parts.join('/')
 }
 
+// --- Drag-and-drop helpers -------------------------------------------------
+// TreeRows recurses, so the hover timer and the auto-scroll loop must live at
+// module scope: the row being hovered can belong to a different recursion
+// instance than the row being dragged.
+
+const HOVER_EXPAND_MS = 600
+const AUTOSCROLL_EDGE_PX = 24
+
+let hoverExpandTimer: ReturnType<typeof setTimeout> | null = null
+let hoverExpandRel: string | null = null
+let dragCleanupInstalled = false
+
+function clearHoverExpand() {
+  if (hoverExpandTimer) clearTimeout(hoverExpandTimer)
+  hoverExpandTimer = null
+  hoverExpandRel = null
+}
+
+function scheduleHoverExpand(rel: string, isExpanded: boolean, expand: () => void) {
+  if (isExpanded) {
+    clearHoverExpand()
+    return
+  }
+  if (hoverExpandRel === rel && hoverExpandTimer) return
+  clearHoverExpand()
+  hoverExpandRel = rel
+  hoverExpandTimer = setTimeout(() => {
+    hoverExpandTimer = null
+    hoverExpandRel = null
+    expand()
+  }, HOVER_EXPAND_MS)
+}
+
+let autoScrollFrame: number | null = null
+let autoScrollEl: HTMLElement | null = null
+let autoScrollSpeed = 0
+
+function findScrollContainer(el: HTMLElement): HTMLElement | null {
+  const wrap = el.closest('.file-workspace-tree-wrap')
+  if (wrap instanceof HTMLElement) return wrap
+  let node = el.parentElement
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (/(auto|scroll)/.test(overflowY) && node.scrollHeight > node.clientHeight) return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function stopAutoScroll() {
+  if (autoScrollFrame !== null) cancelAnimationFrame(autoScrollFrame)
+  autoScrollFrame = null
+  autoScrollEl = null
+  autoScrollSpeed = 0
+}
+
+function autoScrollTick() {
+  autoScrollFrame = null
+  if (!autoScrollEl) return
+  autoScrollEl.scrollTop += autoScrollSpeed
+  autoScrollFrame = requestAnimationFrame(autoScrollTick)
+}
+
+function updateAutoScroll(clientY: number, sourceEl: HTMLElement) {
+  const container = findScrollContainer(sourceEl)
+  if (!container) {
+    stopAutoScroll()
+    return
+  }
+  const rect = container.getBoundingClientRect()
+  let speed = 0
+  if (clientY < rect.top + AUTOSCROLL_EDGE_PX) {
+    speed = -Math.ceil((rect.top + AUTOSCROLL_EDGE_PX - clientY) / 4)
+  } else if (clientY > rect.bottom - AUTOSCROLL_EDGE_PX) {
+    speed = Math.ceil((clientY - (rect.bottom - AUTOSCROLL_EDGE_PX)) / 4)
+  }
+  if (!speed) {
+    stopAutoScroll()
+    return
+  }
+  autoScrollEl = container
+  autoScrollSpeed = Math.max(-18, Math.min(18, speed))
+  if (autoScrollFrame === null) autoScrollFrame = requestAnimationFrame(autoScrollTick)
+}
+
+function installDragCleanup() {
+  if (dragCleanupInstalled) return
+  dragCleanupInstalled = true
+  const cleanup = () => {
+    clearHoverExpand()
+    stopAutoScroll()
+  }
+  document.addEventListener('dragend', cleanup, true)
+  document.addEventListener('drop', cleanup, true)
+}
+
+function leftElement(ev: DragEvent): boolean {
+  const to = ev.relatedTarget as Node | null
+  return !to || !(ev.currentTarget as HTMLElement).contains(to)
+}
+
 export const TreeInlineInput = defineComponent({
   name: 'TreeInlineInput',
   props: {
@@ -311,6 +412,8 @@ export const TreeRows = defineComponent({
                   setInternalDrag(rel)
                 },
                 onDragend: () => {
+                  clearHoverExpand()
+                  stopAutoScroll()
                   setTimeout(clearInternalDrag, 200)
                 },
                 onDragover: (ev: DragEvent) => {
@@ -323,16 +426,25 @@ export const TreeRows = defineComponent({
                     ev.dataTransfer!.dropEffect = 'copy'
                     ;(ev.currentTarget as HTMLElement).classList.add('drop-target-upload')
                     if (p.onDirDragEnter) p.onDirDragEnter(rel)
+                  } else {
+                    return
                   }
+                  installDragCleanup()
+                  scheduleHoverExpand(rel, isExp, () => emit('toggle', rel))
                 },
                 onDragleave: (ev: DragEvent) => {
                   ;(ev.currentTarget as HTMLElement).classList.remove(
                     'drop-target',
                     'drop-target-upload'
                   )
-                  if (p.onDirDragLeave) p.onDirDragLeave()
+                  if (leftElement(ev)) {
+                    if (hoverExpandRel === rel) clearHoverExpand()
+                    if (p.onDirDragLeave) p.onDirDragLeave()
+                  }
                 },
                 onDrop: (ev: DragEvent) => {
+                  clearHoverExpand()
+                  stopAutoScroll()
                   ev.preventDefault()
                   ev.stopPropagation()
                   ;(ev.currentTarget as HTMLElement).classList.remove(
@@ -484,6 +596,8 @@ export const TreeRows = defineComponent({
                   setInternalDrag(rel)
                 },
                 onDragend: () => {
+                  clearHoverExpand()
+                  stopAutoScroll()
                   setTimeout(clearInternalDrag, 200)
                 },
               },
@@ -549,9 +663,22 @@ export const TreeRows = defineComponent({
             } else if (hasType(ev.dataTransfer, 'Files')) {
               ev.preventDefault()
               ev.dataTransfer!.dropEffect = 'copy'
+            } else {
+              return
+            }
+            if (p.depth === 0) {
+              installDragCleanup()
+              updateAutoScroll(ev.clientY, ev.currentTarget as HTMLElement)
             }
           },
+          onDragleave: (ev: DragEvent) => {
+            if (p.depth !== 0 || !leftElement(ev)) return
+            clearHoverExpand()
+            stopAutoScroll()
+          },
           onDrop: (ev: DragEvent) => {
+            clearHoverExpand()
+            stopAutoScroll()
             ev.preventDefault()
             const srcRel = ev.dataTransfer?.getData('application/x-tree-move')
             if (srcRel !== undefined && srcRel.includes('/')) {

@@ -14,11 +14,11 @@ TreeRows 交互与视觉：触摸手势状态机、整行命中、内联输入 b
 - [x] 2 文件行整行命中：tree-file-hit 包住占位+图标+文字。
 - [x] 3 TreeInlineInput：blur 提交（空名取消）、composition 守卫、Enter/Escape 去重。
 - [x] 4 拖拽：悬停 600ms emit toggle 自动展开（已展开跳过）；上下 24px 自动滚动（closest .file-workspace-tree-wrap，回退 overflow 祖先）；dragleave/drop/dragend 清理。
-- [ ] 5 加载/空态 + i18n
+- [x] 5 加载/空态：expanded 且 cache undefined → 缩进 loading 行；entries=[]（含根）→ 空文件夹；复用 filePreview.loading，新增 filePreview.emptyFolder（en/zh）。
 - [ ] 6 导引线/28px/彩色图标/目录变更点
 
 ## 测试结果
 - npm test：191 passed / 1 skipped（1932 tests）；prettier check、vue-tsc -b 通过。
 
 ## 未完成
-- 第 5–6 项。
+- 第 6 项。

@@ -155,6 +155,48 @@
   align-items: center;
 }
 
+.tree-host .tree-state-row {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--tree-row-height);
+  min-height: var(--tree-row-height);
+  padding-right: 8px;
+  color: var(--fg-muted, #858585);
+  font-size: 12px;
+}
+
+.tree-host .tree-state-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tree-icon-size);
+  height: var(--tree-icon-size);
+  margin-right: 6px;
+}
+
+.tree-host .tree-state-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border, #4a4a50);
+  border-top-color: var(--accent, #89b4fa);
+  animation: tree-state-spin 0.7s linear infinite;
+}
+
+.tree-host .tree-state-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes tree-state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .tree-host .tree-label-text {
   overflow: hidden;
   text-overflow: ellipsis;

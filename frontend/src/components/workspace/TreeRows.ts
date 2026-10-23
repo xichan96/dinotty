@@ -347,11 +347,36 @@ export const TreeRows = defineComponent({
 
     return () => {
       const entries = (p.cache as Record<string, DirEntry[]>)[p.relPath]
-      if (entries === undefined) return null
+      const isRoot = p.relPath === ''
+      if (entries === undefined && !isRoot && !(p.expanded as Set<string>).has(p.relPath)) {
+        return null
+      }
       const rows: ReturnType<typeof h>[] = []
       const rowPad = {
         paddingLeft: `calc(var(--tree-base-hpad) + var(--tree-indent-step) * ${p.depth})`,
       }
+      const stateRow = (kind: 'loading' | 'empty') =>
+        h(
+          'div',
+          {
+            class: ['tree-state-row', `tree-state-row-${kind}`],
+            key: `__state_${kind}__`,
+            style: rowPad,
+          },
+          [
+            h('span', { class: 'tree-twistie-placeholder' }),
+            h(
+              'span',
+              { class: 'tree-state-icon' },
+              kind === 'loading' ? [h('span', { class: 'tree-state-spinner' })] : []
+            ),
+            h(
+              'span',
+              { class: 'tree-state-text' },
+              kind === 'loading' ? t('filePreview.loading') : t('filePreview.emptyFolder')
+            ),
+          ]
+        )
       const ic = p.inlineCreate as { parentRel: string; kind: 'file' | 'dir' } | null
       if (ic && ic.parentRel === p.relPath) {
         rows.push(
@@ -365,8 +390,13 @@ export const TreeRows = defineComponent({
           ])
         )
       }
+      if (entries === undefined) {
+        rows.push(stateRow('loading'))
+      } else if (entries.length === 0) {
+        rows.push(stateRow('empty'))
+      }
       const ir = p.inlineRename as { rel: string; isDir: boolean } | undefined
-      for (const e of entries) {
+      for (const e of entries ?? []) {
         const rel = p.relPath ? `${p.relPath}/${e.name}` : e.name
         const isExp = (p.expanded as Set<string>).has(rel)
         const isRenaming = !!(ir && ir.rel === rel)

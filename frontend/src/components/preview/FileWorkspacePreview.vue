@@ -465,36 +465,40 @@ watch(nav.canGoBack, (v) => emit('update:canGoBack', v), { immediate: true })
 watch(nav.canGoForward, (v) => emit('update:canGoForward', v), { immediate: true })
 
 // --- File Watch ---
-// File watch tracks the file currently displayed in the active editor pane,
-// not the tree selection - so clicking a directory doesn't stop the right
-// pane from refreshing when the displayed file changes on disk.
-const displayedFileRel = computed(() => editorSplit.activeLeaf.value?.filePath ?? null)
-const displayedFileIsDir = computed(() => editorSplit.activeLeaf.value?.isDir ?? false)
+// Every pane showing the changed path is refreshed — not just the active one.
+// Dirty buffers keep their content and show a "changed on disk" marker instead.
+function panesShowing(rel: string) {
+  return getAllEditorLeaves(editorSplit.editorLayout.value).filter((leaf) => leaf.filePath === rel)
+}
+
+function onWatchedFileChanged(rel: string) {
+  for (const leaf of panesShowing(rel)) {
+    const state = getEditorPaneState(leaf.id)
+    if (!state) continue
+    if (state.isDirty()) state.markDiskChanged()
+    else void state.reloadFromDisk()
+  }
+  fetchGitStatus()
+}
+
+function onWatchedFileDeleted(rel: string) {
+  for (const leaf of getAllEditorLeaves(editorSplit.editorLayout.value)) {
+    if (leaf.filePath === rel || leaf.filePath?.startsWith(`${rel}/`)) {
+      leaf.filePath = null
+      leaf.isDir = false
+    }
+  }
+  fetchGitStatus()
+}
+
 const fileWatch = useFileWatch({
   paneId: () => apiPaneId.value,
   cwdLabel,
   expanded,
   childCache,
-  selectedRel: displayedFileRel,
-  selectedIsDir: displayedFileIsDir,
-  meta,
-  editorDirty: () => false,
-  onFileDeleted: () => {
-    const leaf = editorSplit.activeLeaf.value
-    if (leaf) {
-      leaf.filePath = null
-      leaf.isDir = false
-    }
-    meta.value = null
-  },
-  onFileChanged: (newMeta) => {
-    meta.value = newMeta
-    fetchGitStatus()
-  },
-  onBinaryChanged: () => {
-    ops.cacheBustTs.value = Date.now()
-  },
   fetchList,
+  onFileChanged: onWatchedFileChanged,
+  onFileDeleted: onWatchedFileDeleted,
 })
 
 const {

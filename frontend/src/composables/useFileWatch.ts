@@ -1,19 +1,16 @@
 import { ref, type Ref } from 'vue'
-import { getApiBase, apiUrl, authFetch, wsUrl } from './apiBase'
+import { getApiBase, wsUrl } from './apiBase'
 
 export interface FileWatchOptions {
   paneId: () => string
   cwdLabel: Ref<string>
   expanded: Ref<Set<string>>
   childCache: Ref<Record<string, any[]>>
-  selectedRel: Readonly<Ref<string | null>>
-  selectedIsDir: Readonly<Ref<boolean>>
-  meta: Ref<any>
-  editorDirty: () => boolean
-  onFileDeleted: () => void
-  onFileChanged: (newMeta: any) => void
-  onBinaryChanged: () => void
   fetchList: (rel: string) => Promise<any[]>
+  /** A file was created or changed; `rel` is workspace-relative. */
+  onFileChanged: (rel: string) => void
+  /** A file or directory was removed; `rel` is workspace-relative. */
+  onFileDeleted: (rel: string) => void
 }
 
 export interface FileWatch {
@@ -71,16 +68,11 @@ export function useFileWatch(opts: FileWatchOptions): FileWatch {
     const parentDir = parentRelPath(rel)
     const kind = event.kind || 'changed'
 
-    if (opts.selectedRel.value && !opts.selectedIsDir.value && rel === opts.selectedRel.value) {
-      if (kind === 'deleted') {
-        opts.onFileDeleted()
-      } else if (!opts.editorDirty()) {
-        void refreshCurrentFile()
-      }
-    }
-
     if (kind === 'deleted') {
+      opts.onFileDeleted(rel)
       clearCacheForPath(rel)
+    } else {
+      opts.onFileChanged(rel)
     }
 
     if (kind === 'created' || kind === 'deleted') {
@@ -111,22 +103,6 @@ export function useFileWatch(opts: FileWatchOptions): FileWatch {
     try {
       const entries = await opts.fetchList(dir)
       opts.childCache.value = { ...opts.childCache.value, [dir]: entries }
-    } catch {}
-  }
-
-  async function refreshCurrentFile() {
-    if (!opts.selectedRel.value || opts.selectedIsDir.value) return
-    try {
-      await getApiBase()
-      const q = new URLSearchParams({ pane_id: opts.paneId(), path: opts.selectedRel.value })
-      const res = await authFetch(apiUrl(`/api/workspace/meta?${q}`))
-      if (!res.ok) return
-      const newMeta = await res.json()
-      if (newMeta?.kind === 'text' || newMeta?.kind === 'markdown') {
-        opts.onFileChanged(newMeta)
-      } else {
-        opts.onBinaryChanged()
-      }
     } catch {}
   }
 

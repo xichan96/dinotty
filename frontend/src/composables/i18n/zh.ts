@@ -38,6 +38,7 @@ export default {
   'filePreview.preview': '预览',
   'filePreview.source': '源代码',
   'filePreview.discardChanges': '放弃未保存的更改？',
+  'filePreview.diskChanged': '磁盘已变更',
   'filePreview.nameFile': '文件名',
   'filePreview.nameFolder': '文件夹名',
   'filePreview.modified': '已修改',

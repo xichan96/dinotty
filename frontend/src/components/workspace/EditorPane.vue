@@ -12,11 +12,18 @@
     <div v-if="dropZone" class="editor-pane-drop-zone" :class="`zone-${dropZone}`">
       {{ dropZone === 'center' ? t('filePreview.dropReplace') : t('filePreview.dropSplit') }}
     </div>
-    <div v-if="showHeader" class="editor-pane-header">
+    <div v-if="showHeader || diskChanged" class="editor-pane-header">
       <span v-if="isInActiveGroup" class="editor-pane-group-band"></span>
       <span class="editor-pane-title" :title="displayTitle">
         {{ displayTitle || t('filePreview.pickFile') }}
         <span v-if="editor.editorDirty.value" class="editor-pane-dirty">●</span>
+      </span>
+      <span
+        v-if="diskChanged"
+        class="editor-pane-disk-changed"
+        :title="t('filePreview.diskChanged')"
+      >
+        {{ t('filePreview.diskChanged') }}
       </span>
       <button
         type="button"
@@ -420,6 +427,17 @@ onBeforeUnmount(() => {
 .editor-pane-dirty {
   color: var(--color-orange, #d19a66);
   margin-left: 4px;
+}
+
+.editor-pane-disk-changed {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(209, 154, 102, 0.16);
+  color: var(--color-orange, #d19a66);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .editor-pane-close {

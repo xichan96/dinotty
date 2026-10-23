@@ -38,6 +38,7 @@ export default {
   'filePreview.preview': 'Preview',
   'filePreview.source': 'Source',
   'filePreview.discardChanges': 'Discard unsaved changes?',
+  'filePreview.diskChanged': 'Changed on disk',
   'filePreview.nameFile': 'Filename',
   'filePreview.nameFolder': 'Folder name',
   'filePreview.modified': 'Modified',

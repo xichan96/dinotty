@@ -12,6 +12,7 @@ use axum_extra::extract::Multipart;
 use std::path::Path;
 use std::sync::Arc;
 
+use super::util::sort_dir_entries;
 use crate::session::Session;
 use crate::workspace::upload::upload_cap_label_bytes;
 use crate::workspace::{
@@ -19,7 +20,6 @@ use crate::workspace::{
     MetaResponse, PanePathQuery, ResolveResponse, WorkspaceListQuery, MAX_DOWNLOAD,
     MAX_TEXT_PREVIEW,
 };
-use super::util::sort_dir_entries;
 use exec::{list_via_ssh_exec, read_via_ssh_exec};
 use path::{normalize_remote_join, resolve_remote_rel};
 use sftp::{is_permission_error, remove_dir_recursive, sftp, sftp_err, should_use_sudo};

@@ -24,11 +24,21 @@
 - `handlers.rs` 本地列表、`remote/mod.rs` 两处 SFTP/sudo 列表改用 `sort_dir_entries`。
 - 单测 5 个：数字序、大小写、前导零/Unicode、前缀长度、目录优先。
 
-### 3. watcher（待做）
+### 3. watcher（已完成，提交 fix(watcher)）
+- `handle_watch_socket` 取到 session 后先判 `is_ssh()`，发 `WatchMessage::Error{message:"watch_unsupported_for_ssh"}` 并 return，不进入 watch/订阅。
+- 新增 `is_ignored_path()`：任一路径组件命中 node_modules/.git/target/dist/.venv/__pycache__/.next/build（ASCII 大小写不敏感）即丢弃；在事件回调构造 WatchMessage 前过滤，被丢弃的路径不发 WS、不 publish EventBus。
+- 单测 3 个：命中目录、近似名不误伤（build.rs / targeting / node_modules_extra）、大小写。
 
 ## 测试
-- `cargo test --lib git_status`：7 passed。
-- `cargo test --lib natural_cmp` / `sort_dir_entries`：5 passed。
+- `cargo test`：全部通过（lib 834 passed, 11 ignored；集成测试全绿）。
+- `cargo clippy --all-targets`：0 warning / 0 error。
+- `cargo fmt --check`：clean。
+
+## 提交
+1. `fix(workspace): normalize git status paths to pane cwd`
+2. `feat(workspace): sort directory listings in natural order`
+3. `fix(watcher): skip SSH panes and ignore build/VCS directories`
 
 ## 未完成
-- watcher SSH 守卫 + 忽略目录过滤 + 单测。
+- 无（三项均完成）。
+

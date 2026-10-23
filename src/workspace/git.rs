@@ -78,8 +78,8 @@ fn parse_porcelain_z(stdout: &[u8], prefix: &str) -> Vec<GitFileStatus> {
         };
         let status = match (x, y) {
             (b'?', b'?') => "untracked",
-            (b'A', b' ') | (b'A', b'M') => "staged_new",
-            (b'M', b' ') | (b'M', b'M') => "staged_modified",
+            (b'A', b' ' | b'M') => "staged_new",
+            (b'M', b' ' | b'M') => "staged_modified",
             (b'D', b' ') => "staged_deleted",
             (b' ', b'D') => "deleted",
             (b'R', _) | (_, b'R') => "renamed",
@@ -95,9 +95,8 @@ pub async fn workspace_git_status(
     Query(q): Query<PaneQuery>,
 ) -> impl IntoResponse {
     let root = try_res!(get_root(&manager, &q.pane_id));
-    let files = match tokio::task::spawn_blocking(move || git_status_files(&root)).await {
-        Ok(Some(files)) => files,
-        _ => return Json(GitStatusResponse { is_git_repo: false, files: vec![] }).into_response(),
+    let Ok(Some(files)) = tokio::task::spawn_blocking(move || git_status_files(&root)).await else {
+        return Json(GitStatusResponse { is_git_repo: false, files: vec![] }).into_response();
     };
     Json(GitStatusResponse { is_git_repo: true, files }).into_response()
 }
@@ -450,8 +449,11 @@ mod tests {
         let tmp = init_repo();
         let root = tmp.path();
         fs::create_dir(root.join("sub")).unwrap();
-        fs::write(root.join("sub/old.txt"), "content long enough for rename detection 0123456789\n")
-            .unwrap();
+        fs::write(
+            root.join("sub/old.txt"),
+            "content long enough for rename detection 0123456789\n",
+        )
+        .unwrap();
         git(root, &["add", "."]);
         git(root, &["commit", "-qm", "init"]);
         git(root, &["mv", "sub/old.txt", "sub/new.txt"]);

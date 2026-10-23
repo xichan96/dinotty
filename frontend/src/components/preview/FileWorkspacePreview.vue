@@ -283,6 +283,15 @@
           <span class="tree-ctx-label">{{ t('filePreview.ctxRename') }}</span>
           <span class="tree-ctx-kbd" aria-hidden="true">F2</span>
         </button>
+        <button
+          type="button"
+          class="tree-ctx-item"
+          data-testid="tree-context-move"
+          role="menuitem"
+          @click="ctxMenu.ctxMove"
+        >
+          <span class="tree-ctx-label">{{ t('filePreview.ctxMoveTo') }}</span>
+        </button>
         <div class="tree-ctx-sep" />
         <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxCopyPath">
           <span class="tree-ctx-label">{{ t('filePreview.ctxCopyPath') }}</span>
@@ -371,6 +380,15 @@
     @confirm="ctxMenu.executeDelete"
     @cancel="ctxMenu.cancelDelete"
   />
+  <MoveToDialog
+    :visible="!!ctxMenu.moveSource.value"
+    :source-rel="ctxMenu.moveSource.value?.rel ?? ''"
+    :is-dir="ctxMenu.moveSource.value?.isDir ?? false"
+    :pane-id="apiPaneId"
+    :fetch-dirs="fetchList"
+    :move="async (src, dest) => { await ctxMenu.moveTo(src, dest) }"
+    @close="ctxMenu.closeMoveTo"
+  />
   <SelectionToolbar :selected-text="''" :anchor-rect="null" @dismiss="() => {}" />
 </template>
 
@@ -415,6 +433,7 @@ import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
 import SelectionToolbar from '../workspace/SelectionToolbar.vue'
 import ConfirmModal from '../ui/ConfirmModal.vue'
+import MoveToDialog from '../workspace/MoveToDialog.vue'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'

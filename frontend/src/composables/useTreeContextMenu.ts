@@ -4,6 +4,7 @@ import { uiConfirm } from './useConfirm'
 import type { DirEntry } from '../components/workspace/TreeRows'
 import { isRunnableCodeFile } from '../utils/runCodeCommand'
 import { tauriInvoke } from './useTransport'
+import { asWorkspaceError, workspaceErrorFromResponse } from './useFileWorkspaceBoot'
 
 interface Meta {
   kind: string
@@ -52,6 +53,8 @@ export function useTreeContextMenu(opts: {
   /** Target of the open menu, used to hand focus back to its row on Escape. */
   let lastMenuRel = ''
   const moveConfirm = ref<{ src: string; destDir: string } | null>(null)
+  /** Entry the "Move to…" dialog is picking a destination for. */
+  const moveSource = ref<{ rel: string; isDir: boolean } | null>(null)
   const deleteConfirm = ref<{ rel: string; isDir: boolean; discardNeeded: boolean } | null>(null)
 
   /** SSH has no local file manager: hide actions that would operate on the
@@ -231,6 +234,22 @@ export function useTreeContextMenu(opts: {
     }
   }
 
+  /** Open the destination picker for the menu target (or the selection when
+   *  the menu was opened on blank space). */
+  function ctxMove() {
+    if (!contextMenu.value) return
+    const { rel, isDir } = contextMenu.value
+    closeContextMenu()
+    const targetRel = rel || opts.selectedRel.value
+    if (!targetRel) return
+    const targetIsDir = rel ? isDir : opts.selectedIsDir.value
+    moveSource.value = { rel: targetRel, isDir: targetIsDir }
+  }
+
+  function closeMoveTo() {
+    moveSource.value = null
+  }
+
   /** Ask for confirmation before deleting a known target. The keyboard
    *  shortcut calls this directly — it must not depend on an open menu. */
   function requestDelete(rel: string, isDir: boolean) {
@@ -377,21 +396,31 @@ export function useTreeContextMenu(opts: {
     moveConfirm.value = { src, destDir }
   }
 
-  async function executeMove() {
-    const info = moveConfirm.value
-    if (!info) return
-    moveConfirm.value = null
-    const { src, destDir } = info
+  /** Move one entry into `destDir` (a workspace-relative directory, '' = root).
+   *  Resolves true when the move ran; a same-parent target is a no-op that
+   *  resolves false. API failures throw a WorkspaceError so callers can show
+   *  the localized reason. */
+  async function moveTo(src: string, destDir: string): Promise<boolean> {
+    if (!src) return false
     const srcParent = opts.parentRelPath(src)
+    if (srcParent === destDir) return false
     const { getApiBase, apiUrl, authFetch } = await import('./apiBase')
     await getApiBase()
-    const q = new URLSearchParams({ path: src })
-    const res = await authFetch(apiUrl(`/api/workspace/move?${q}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dest: destDir }),
-    })
-    if (!res.ok) return
+    // `pane_id` selects the SSH session; local panes still require the param.
+    const q = new URLSearchParams({ pane_id: opts.paneId(), path: src })
+    let res: Response
+    try {
+      res = await authFetch(apiUrl(`/api/workspace/move?${q}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dest: destDir }),
+      })
+    } catch (e) {
+      throw asWorkspaceError(e)
+    }
+    if (!res.ok) throw await workspaceErrorFromResponse(res)
+    // Both listings are stale now; drop them (plus anything cached under the
+    // moved directory) and reload only what the tree is actually showing.
     const next = { ...opts.childCache.value }
     delete next[srcParent]
     delete next[destDir]
@@ -402,6 +431,19 @@ export function useTreeContextMenu(opts: {
     try {
       await Promise.all([opts.ensureChildren(srcParent), opts.ensureChildren(destDir)])
     } catch {}
+    return true
+  }
+
+  async function executeMove() {
+    const info = moveConfirm.value
+    if (!info) return
+    moveConfirm.value = null
+    try {
+      await moveTo(info.src, info.destDir)
+    } catch {
+      // The drag-and-drop confirm dialog has no error surface; the tree's
+      // error bar already reports the next listing failure.
+    }
   }
 
   function onMoveConfirm() {
@@ -418,6 +460,7 @@ export function useTreeContextMenu(opts: {
   return {
     contextMenu,
     moveConfirm,
+    moveSource,
     deleteConfirm,
     isRemote,
     canRunCode,
@@ -434,6 +477,8 @@ export function useTreeContextMenu(opts: {
     ctxNewFile,
     ctxNewFolder,
     ctxRename,
+    ctxMove,
+    closeMoveTo,
     ctxDelete,
     executeDelete,
     cancelDelete,
@@ -447,6 +492,7 @@ export function useTreeContextMenu(opts: {
     onMoveEntry,
     onMoveConfirm,
     onMoveCancel,
+    moveTo,
     onCloseContextScroll,
   }
 }

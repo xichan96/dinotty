@@ -51,6 +51,7 @@ export default {
   'filePreview.save': '保存',
   'filePreview.preview': '预览',
   'filePreview.source': '源代码',
+  'filePreview.mermaidError': '图表渲染失败',
   'filePreview.discardChanges': '放弃未保存的更改？',
   'filePreview.diskChanged': '磁盘已变更',
   'filePreview.diskChangedHint': '从磁盘重新加载',

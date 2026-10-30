@@ -51,6 +51,7 @@ export default {
   'filePreview.save': 'Save',
   'filePreview.preview': 'Preview',
   'filePreview.source': 'Source',
+  'filePreview.mermaidError': 'Diagram failed to render',
   'filePreview.discardChanges': 'Discard unsaved changes?',
   'filePreview.diskChanged': 'Changed on disk',
   'filePreview.diskChangedHint': 'Reload from disk',

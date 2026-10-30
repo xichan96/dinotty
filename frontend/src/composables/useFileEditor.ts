@@ -1,6 +1,9 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
 import { isTauri } from './useTransport'
+import { esc, renderMarkdownCode } from '../utils/markdownCode'
+
+export { esc }
 
 interface Meta {
   kind: string
@@ -14,10 +17,6 @@ interface Meta {
 let _markedPromise: Promise<typeof import('marked')> | null = null
 let _domPurifyPromise: Promise<typeof import('dompurify')> | null = null
 
-export function esc(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
 export function getMarked() {
   if (!_markedPromise) {
     _markedPromise = import('marked').then((m) => {
@@ -25,11 +24,7 @@ export function getMarked() {
         gfm: true,
         breaks: true,
         renderer: {
-          code({ text, lang }: { text: string; lang?: string }) {
-            const language = (lang || 'plaintext').trim() || 'plaintext'
-            const safeLang = language.replace(/[^a-z0-9_-]/gi, '') || 'plaintext'
-            return `<pre><code class="language-${safeLang}">${esc(text)}</code></pre>`
-          },
+          code: renderMarkdownCode,
         },
       })
       return m

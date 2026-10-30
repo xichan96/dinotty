@@ -170,6 +170,7 @@
           </div>
           <div
             v-if="meta?.kind === 'markdown' && mdShowPreview"
+            ref="mdPreviewEl"
             class="file-md file-md-body file-editor-preview"
             v-html="markdownEditorHtml"
           ></div>
@@ -202,9 +203,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, defineAsyncComponent, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { isCsvPreviewFile } from '../../utils/csvPreview'
+import { renderMermaidBlocks } from '../../composables/mermaidPreview'
 import CsvPreview from './CsvPreview.vue'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
 
@@ -273,6 +275,24 @@ function showCsvTable() {
   // 步骤1：切回 CSV 表格视图。
   csvShowTable.value = true
 }
+
+// Mermaid placeholders are inert until the DOM exists, so render them after
+// v-html has committed (and again whenever the preview is toggled back on).
+const mdPreviewEl = ref<HTMLElement | null>(null)
+
+function renderDiagrams() {
+  const container = mdPreviewEl.value
+  if (!container || props.meta?.kind !== 'markdown' || !props.mdShowPreview) return
+  void renderMermaidBlocks(container, { errorLabel: t('filePreview.mermaidError') })
+}
+
+watch(
+  () => [props.markdownEditorHtml, props.mdShowPreview, props.meta?.kind] as const,
+  renderDiagrams,
+  { flush: 'post' }
+)
+
+onMounted(renderDiagrams)
 
 defineEmits<{
   audioTimeUpdate: [e: Event]
@@ -682,6 +702,52 @@ video.file-media {
   max-width: 100%;
   height: auto;
   vertical-align: middle;
+}
+
+/* Mermaid: the source stays visible until the diagram (or its error) is ready. */
+.file-md-body :deep(.md-mermaid) {
+  margin: 0.75em 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface, #141414);
+  text-align: center;
+  overflow-x: auto;
+}
+
+.file-md-body :deep(.md-mermaid-src) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--preview-code-fs);
+  line-height: 1.45;
+  text-align: left;
+}
+
+.file-md-body :deep(.md-mermaid[data-mermaid-state='done'] .md-mermaid-src) {
+  display: none;
+}
+
+/* Must be a block: mermaid emits `width="100%"` SVGs, and a percentage width
+   inside a shrink-to-fit inline-block falls back to the 300px replaced-element
+   default instead of filling the preview. */
+.file-md-body :deep(.md-mermaid-canvas) {
+  display: block;
+  max-width: 100%;
+}
+
+.file-md-body :deep(.md-mermaid-canvas svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+.file-md-body :deep(.md-mermaid-error) {
+  margin-bottom: 8px;
+  color: var(--color-red, #c91b00);
+  font-size: 0.92em;
+  text-align: left;
 }
 .file-md-body :deep(input[type='checkbox']) {
   margin-right: 0.35em;

@@ -4,6 +4,7 @@ import { uiConfirm } from './useConfirm'
 import type { DirEntry } from '../components/workspace/TreeRows'
 import { isRunnableCodeFile } from '../utils/runCodeCommand'
 import { tauriInvoke } from './useTransport'
+import { asWorkspaceError, workspaceErrorFromResponse } from './useFileWorkspaceBoot'
 
 interface Meta {
   kind: string
@@ -22,9 +23,11 @@ export function useTreeContextMenu(opts: {
   editorBaseline: Ref<string>
   childCache: Ref<Record<string, DirEntry[]>>
   expanded: Ref<Set<string>>
-  inlineCreate: Ref<{ parentRel: string; kind: 'file' | 'dir' } | null>
-  inlineRename: Ref<{ rel: string; isDir: boolean } | null>
+  inlineCreate: Ref<{ parentRel: string; kind: 'file' | 'dir'; value?: string; error?: string } | null>
+  inlineRename: Ref<{ rel: string; isDir: boolean; value?: string; error?: string } | null>
   narrow: Ref<boolean>
+  /** Remote (SSH) panes have no local file manager to reveal into. */
+  isSsh?: Ref<boolean>
   absolutePath: (rel: string) => string
   parentRelPath: (rel: string) => string
   ensureChildren: (rel: string) => Promise<void>
@@ -39,17 +42,24 @@ export function useTreeContextMenu(opts: {
   downloadFile: (rel: string) => Promise<void>
   paneId: () => string
   t: (key: string) => string
+  /** Return focus to the menu's target row after Escape (keyboard a11y). */
+  onMenuClosed?: (rel: string) => void
 }) {
   const contextMenu = ref<{ x: number; y: number; rel: string; isDir: boolean } | null>(null)
-  const addMenuOpen = ref(false)
+  /** Menu element, bound by the view, so placement uses the real rendered size
+   *  instead of a guessed one and keyboard nav can reach its items. */
+  const menuEl = ref<HTMLElement | null>(null)
+  const menuSize = ref<{ width: number; height: number } | null>(null)
+  /** Target of the open menu, used to hand focus back to its row on Escape. */
+  let lastMenuRel = ''
   const moveConfirm = ref<{ src: string; destDir: string } | null>(null)
+  /** Entry the "Move to…" dialog is picking a destination for. */
+  const moveSource = ref<{ rel: string; isDir: boolean } | null>(null)
   const deleteConfirm = ref<{ rel: string; isDir: boolean; discardNeeded: boolean } | null>(null)
 
-  const ctxDeleteKeyHint = computed(() =>
-    typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/i.test(navigator.platform)
-      ? '⌘⌫'
-      : 'Del'
-  )
+  /** SSH has no local file manager: hide actions that would operate on the
+   *  server host (the backend would answer 400). */
+  const isRemote = computed(() => opts.isSsh?.value ?? false)
 
   const canRunCode = computed(function computeCanRunCode() {
     // 步骤1：读取当前右键目标，背景菜单则使用已选文件。
@@ -68,19 +78,90 @@ export function useTreeContextMenu(opts: {
     if (!m) return {}
     if (opts.narrow.value) return { left: '0', right: '0', bottom: '0' }
     const pad = 8
-    const mw = 220
-    const mh = 400
+    // Before the first measurement there is nothing to clamp against; render
+    // at the pointer position for one frame, then clamp with the real size.
+    const mw = menuSize.value?.width ?? 0
+    const mh = menuSize.value?.height ?? 0
     let left = m.x
     let top = m.y
     if (typeof window !== 'undefined') {
-      if (left + mw > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - mw - pad)
-      if (top + mh > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - mh - pad)
+      if (mw && left + mw > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - mw - pad)
+      }
+      if (mh && top + mh > window.innerHeight - pad) {
+        top = Math.max(pad, window.innerHeight - mh - pad)
+      }
     }
     return { left: `${left}px`, top: `${top}px` }
   })
 
+  function setMenuEl(el: unknown) {
+    menuEl.value = el instanceof HTMLElement ? el : null
+  }
+
+  function enabledMenuItems(): HTMLElement[] {
+    const el = menuEl.value
+    if (!el) return []
+    return Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'))
+  }
+
+  /** Open at the pointer, then measure the rendered menu, clamp it into the
+   *  viewport and hand keyboard focus to the first available action. */
+  function showMenu(x: number, y: number, rel: string, isDir: boolean) {
+    contextMenu.value = { x, y, rel, isDir }
+    lastMenuRel = rel
+    menuSize.value = null
+    void nextTick(() => {
+      if (!contextMenu.value) return
+      const el = menuEl.value
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        menuSize.value = { width: rect.width, height: rect.height }
+      }
+      enabledMenuItems()[0]?.focus()
+    })
+  }
+
+  function onMenuKeydown(ev: KeyboardEvent) {
+    if (!contextMenu.value) return
+    const items = enabledMenuItems()
+    if (!items.length) return
+    const current = items.indexOf(document.activeElement as HTMLElement)
+    switch (ev.key) {
+      case 'ArrowDown':
+        ev.preventDefault()
+        items[current < 0 ? 0 : (current + 1) % items.length].focus()
+        break
+      case 'ArrowUp':
+        ev.preventDefault()
+        items[current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length].focus()
+        break
+      case 'Home':
+        ev.preventDefault()
+        items[0].focus()
+        break
+      case 'End':
+        ev.preventDefault()
+        items[items.length - 1].focus()
+        break
+      case 'Escape':
+        ev.preventDefault()
+        closeContextMenuAndRestoreFocus()
+        break
+    }
+  }
+
   function closeContextMenu() {
     contextMenu.value = null
+    menuSize.value = null
+  }
+
+  /** Escape from a keyboard-opened menu should return to the row it opened
+   *  from, not drop focus on <body>. Outside clicks deliberately do not. */
+  function closeContextMenuAndRestoreFocus() {
+    const rel = lastMenuRel
+    closeContextMenu()
+    if (rel) opts.onMenuClosed?.(rel)
   }
 
   async function shouldBlockNavigate(): Promise<boolean> {
@@ -96,23 +177,24 @@ export function useTreeContextMenu(opts: {
     }))
   }
 
+  /** Open the menu for an explicit target and position. Pointer and keyboard
+   *  entry points share it so both get the same clamping/focus behaviour. */
+  function openMenuAt(rel: string, isDir: boolean, x: number, y: number) {
+    showMenu(x, y, rel, isDir)
+  }
+
   function onTreeContextMenu(payload: { ev: MouseEvent; rel: string; isDir: boolean }) {
     payload.ev.preventDefault()
-    contextMenu.value = {
-      x: payload.ev.clientX,
-      y: payload.ev.clientY,
-      rel: payload.rel,
-      isDir: payload.isDir,
-    }
+    openMenuAt(payload.rel, payload.isDir, payload.ev.clientX, payload.ev.clientY)
   }
 
   function onTreeBgContextMenu(ev: MouseEvent) {
     ev.preventDefault()
-    contextMenu.value = { x: ev.clientX, y: ev.clientY, rel: '', isDir: true }
+    showMenu(ev.clientX, ev.clientY, '', true)
   }
 
   function onTreeLongPress(pos: { clientX: number; clientY: number }, rel: string, isDir: boolean) {
-    contextMenu.value = { x: pos.clientX, y: pos.clientY, rel, isDir }
+    showMenu(pos.clientX, pos.clientY, rel, isDir)
   }
 
   async function ctxNewFile() {
@@ -121,7 +203,7 @@ export function useTreeContextMenu(opts: {
     closeContextMenu()
     if (await shouldBlockNavigate()) return
     const parentRel = isDir ? rel : opts.parentRelPath(rel)
-    opts.inlineCreate.value = { parentRel, kind: 'file' }
+    opts.inlineCreate.value = { parentRel, kind: 'file', value: '', error: '' }
     opts.expanded.value = new Set([...opts.expanded.value, parentRel])
     void opts.ensureChildren(parentRel)
   }
@@ -132,7 +214,7 @@ export function useTreeContextMenu(opts: {
     closeContextMenu()
     if (await shouldBlockNavigate()) return
     const parentRel = isDir ? rel : opts.parentRelPath(rel)
-    opts.inlineCreate.value = { parentRel, kind: 'dir' }
+    opts.inlineCreate.value = { parentRel, kind: 'dir', value: '', error: '' }
     opts.expanded.value = new Set([...opts.expanded.value, parentRel])
     void opts.ensureChildren(parentRel)
   }
@@ -144,7 +226,41 @@ export function useTreeContextMenu(opts: {
     const targetRel = rel || opts.selectedRel.value
     if (!targetRel) return
     const targetIsDir = rel ? isDir : opts.selectedIsDir.value
-    opts.inlineRename.value = { rel: targetRel, isDir: targetIsDir }
+    opts.inlineRename.value = {
+      rel: targetRel,
+      isDir: targetIsDir,
+      value: targetRel.split('/').pop() || targetRel,
+      error: '',
+    }
+  }
+
+  /** Open the destination picker for the menu target (or the selection when
+   *  the menu was opened on blank space). */
+  function ctxMove() {
+    if (!contextMenu.value) return
+    const { rel, isDir } = contextMenu.value
+    closeContextMenu()
+    const targetRel = rel || opts.selectedRel.value
+    if (!targetRel) return
+    const targetIsDir = rel ? isDir : opts.selectedIsDir.value
+    moveSource.value = { rel: targetRel, isDir: targetIsDir }
+  }
+
+  function closeMoveTo() {
+    moveSource.value = null
+  }
+
+  /** Ask for confirmation before deleting a known target. The keyboard
+   *  shortcut calls this directly — it must not depend on an open menu. */
+  function requestDelete(rel: string, isDir: boolean) {
+    if (!rel) return
+    closeContextMenu()
+    const discardNeeded = !!(
+      opts.editorDirty.value &&
+      opts.meta.value &&
+      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
+    )
+    deleteConfirm.value = { rel, isDir, discardNeeded }
   }
 
   function ctxDelete() {
@@ -154,12 +270,7 @@ export function useTreeContextMenu(opts: {
     const targetRel = rel || opts.selectedRel.value
     const targetIsDir = rel ? isDir : opts.selectedIsDir.value
     if (!targetRel) return
-    const discardNeeded = !!(
-      opts.editorDirty.value &&
-      opts.meta.value &&
-      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
-    )
-    deleteConfirm.value = { rel: targetRel, isDir: targetIsDir, discardNeeded }
+    requestDelete(targetRel, targetIsDir)
   }
 
   async function executeDelete() {
@@ -207,7 +318,7 @@ export function useTreeContextMenu(opts: {
   }
 
   async function ctxReveal() {
-    if (!contextMenu.value) return
+    if (!contextMenu.value || isRemote.value) return
     const { rel } = contextMenu.value
     closeContextMenu()
     const targetRel = rel || opts.selectedRel.value
@@ -224,7 +335,7 @@ export function useTreeContextMenu(opts: {
    *  rather than the workspace HTTP endpoint, so it stays on the desktop
    *  machine (the endpoint would open the file manager on the server host). */
   async function ctxOpenFolder() {
-    if (!contextMenu.value) return
+    if (!contextMenu.value || isRemote.value) return
     const { rel } = contextMenu.value
     closeContextMenu()
     const targetRel = rel || opts.selectedRel.value
@@ -285,21 +396,31 @@ export function useTreeContextMenu(opts: {
     moveConfirm.value = { src, destDir }
   }
 
-  async function executeMove() {
-    const info = moveConfirm.value
-    if (!info) return
-    moveConfirm.value = null
-    const { src, destDir } = info
+  /** Move one entry into `destDir` (a workspace-relative directory, '' = root).
+   *  Resolves true when the move ran; a same-parent target is a no-op that
+   *  resolves false. API failures throw a WorkspaceError so callers can show
+   *  the localized reason. */
+  async function moveTo(src: string, destDir: string): Promise<boolean> {
+    if (!src) return false
     const srcParent = opts.parentRelPath(src)
+    if (srcParent === destDir) return false
     const { getApiBase, apiUrl, authFetch } = await import('./apiBase')
     await getApiBase()
-    const q = new URLSearchParams({ path: src })
-    const res = await authFetch(apiUrl(`/api/workspace/move?${q}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dest: destDir }),
-    })
-    if (!res.ok) return
+    // `pane_id` selects the SSH session; local panes still require the param.
+    const q = new URLSearchParams({ pane_id: opts.paneId(), path: src })
+    let res: Response
+    try {
+      res = await authFetch(apiUrl(`/api/workspace/move?${q}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dest: destDir }),
+      })
+    } catch (e) {
+      throw asWorkspaceError(e)
+    }
+    if (!res.ok) throw await workspaceErrorFromResponse(res)
+    // Both listings are stale now; drop them (plus anything cached under the
+    // moved directory) and reload only what the tree is actually showing.
     const next = { ...opts.childCache.value }
     delete next[srcParent]
     delete next[destDir]
@@ -310,6 +431,19 @@ export function useTreeContextMenu(opts: {
     try {
       await Promise.all([opts.ensureChildren(srcParent), opts.ensureChildren(destDir)])
     } catch {}
+    return true
+  }
+
+  async function executeMove() {
+    const info = moveConfirm.value
+    if (!info) return
+    moveConfirm.value = null
+    try {
+      await moveTo(info.src, info.destDir)
+    } catch {
+      // The drag-and-drop confirm dialog has no error surface; the tree's
+      // error bar already reports the next listing failure.
+    }
   }
 
   function onMoveConfirm() {
@@ -325,20 +459,26 @@ export function useTreeContextMenu(opts: {
 
   return {
     contextMenu,
-    addMenuOpen,
     moveConfirm,
+    moveSource,
     deleteConfirm,
-    ctxDeleteKeyHint,
+    isRemote,
     canRunCode,
     contextMenuStyle,
+    setMenuEl,
+    onMenuKeydown,
     closeContextMenu,
     shouldBlockNavigate,
+    openMenuAt,
+    requestDelete,
     onTreeContextMenu,
     onTreeBgContextMenu,
     onTreeLongPress,
     ctxNewFile,
     ctxNewFolder,
     ctxRename,
+    ctxMove,
+    closeMoveTo,
     ctxDelete,
     executeDelete,
     cancelDelete,
@@ -352,6 +492,7 @@ export function useTreeContextMenu(opts: {
     onMoveEntry,
     onMoveConfirm,
     onMoveCancel,
+    moveTo,
     onCloseContextScroll,
   }
 }

@@ -12,6 +12,7 @@ use axum_extra::extract::Multipart;
 use std::path::Path;
 use std::sync::Arc;
 
+use super::util::sort_dir_entries;
 use crate::session::Session;
 use crate::workspace::upload::upload_cap_label_bytes;
 use crate::workspace::{
@@ -68,10 +69,15 @@ pub async fn remote_list(session: Arc<Session>, q: WorkspaceListQuery) -> Respon
                         name: e.file_name(),
                         is_dir: ft.is_dir(),
                         size: meta.size.unwrap_or(0),
+                        is_symlink: ft.is_symlink(),
+                        // No remote cycle detection: resolving each link
+                        // target would cost an extra SFTP round trip per
+                        // entry. The frontend still renders the link marker.
+                        is_cycle: false,
                     }
                 })
                 .collect();
-            list.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
+            sort_dir_entries(&mut list);
             Json(ListResponse { cwd: target.clone(), path: String::new(), entries: list })
                 .into_response()
         }
@@ -81,7 +87,7 @@ pub async fn remote_list(session: Arc<Session>, q: WorkspaceListQuery) -> Respon
                 // Fallback: list via SSH exec with sudo
                 match list_via_ssh_exec(&session, &target).await {
                     Ok(mut list) => {
-                        list.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
+                        sort_dir_entries(&mut list);
                         Json(ListResponse {
                             cwd: target.clone(),
                             path: String::new(),

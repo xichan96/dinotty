@@ -64,28 +64,6 @@ export function useFileOperations(opts: {
   const fileInputRef = ref<HTMLInputElement>()
   const dragCounter = ref(0)
   const dragging = computed(() => dragCounter.value > 0)
-  const cacheBustTs = ref<number | null>(null)
-
-  const rawUrl = computed(() => {
-    if (!opts.selectedRel.value || opts.selectedIsDir.value) return ''
-    const q = new URLSearchParams({ pane_id: opts.paneId(), path: opts.selectedRel.value })
-    if (opts.cwdLabel.value) q.set('cwd', opts.cwdLabel.value)
-    // Browser: same-origin requests include cookies automatically.
-    // Tauri: need token in URL for tauri_fetch or direct image loads.
-    if (isTauri()) {
-      const token = getAuthToken()
-      if (token) q.set('token', token)
-    }
-    if (cacheBustTs.value) q.set('_t', String(cacheBustTs.value))
-    return apiUrl(`/api/workspace/raw?${q}`)
-  })
-
-  const canDownload = computed(
-    () =>
-      !!opts.selectedRel.value &&
-      !opts.selectedIsDir.value &&
-      opts.meta.value?.kind !== 'unsupported'
-  )
 
   function parentRelPath(rel: string): string {
     const i = rel.lastIndexOf('/')
@@ -398,8 +376,6 @@ export function useFileOperations(opts: {
   // callers; the actual upload path is onDrop / onUploadToDir.
   function setActiveWorkspace() {}
   function clearActiveWorkspace() {}
-  function setHoveredDir(_dir: string | undefined) {}
-  function clearHoveredDir() {}
   function teardownWorkspaceDragDrop() {}
 
   function onWorkspaceDragEnter() {
@@ -417,9 +393,6 @@ export function useFileOperations(opts: {
     fileInputRef,
     dragCounter,
     dragging,
-    cacheBustTs,
-    rawUrl,
-    canDownload,
     parentRelPath,
     absolutePath,
     triggerUpload,
@@ -432,8 +405,6 @@ export function useFileOperations(opts: {
     deleteSelected,
     setActiveWorkspace,
     clearActiveWorkspace,
-    setHoveredDir,
-    clearHoveredDir,
     onWorkspaceDragEnter,
     onWorkspaceDragLeave,
     onWorkspaceDrop,

@@ -10,7 +10,16 @@ import { useI18n, type Locale } from './useI18n'
 import { describeHttpError } from '../utils/httpError'
 import { KEYBOARD_API_VERSION } from '../keyboard/createKeyboardContext'
 import { useKeyboardProviders } from './useKeyboardProviders'
-import type { KeyboardContribution, OverlayContribution } from '../../../plugin-api/index'
+import type { KeyboardContribution, OverlayContribution, RemoteServerTransport } from '../../../plugin-api/index'
+import {
+  REMOTE_SERVER_TRANSPORT_PERMISSION,
+  hasRemoteServerTransports,
+  recoverRemoteServerTransport,
+  registerRemoteServerTransport,
+  unloadRemoteServerTransports,
+  unregisterRemoteServerTransports,
+} from './useRemoteServerTransports'
+import { refreshRemoteServers, useRemoteServers } from './useRemoteServers'
 
 // Bypass Vite's static analysis of import()
 
@@ -156,6 +165,10 @@ export interface PluginContext {
   commands: {
     register(id: string, handler: () => void): Disposable
     registerQuickPick(id: string, options: QuickPickOptions): Disposable
+  }
+
+  remoteServers: {
+    registerTransport(transport: RemoteServerTransport): Disposable
   }
 
   ui: {
@@ -347,7 +360,7 @@ function buildAssetUrl(pluginId: string, relativePath: string): string {
   return apiUrl(`/api/plugins/${pluginId}/${segments.join('/')}`)
 }
 
-function createPluginContext(pluginId: string): PluginContext {
+function createPluginContext(pluginId: string, permissions: string[] = []): PluginContext {
   const { locale } = useI18n()
   const exec: PluginContext['exec'] = {
     async run(args, options) {
@@ -652,6 +665,14 @@ function createPluginContext(pluginId: string): PluginContext {
     },
     storage,
     commands,
+    remoteServers: {
+      registerTransport(transport) {
+        if (!permissions.includes(REMOTE_SERVER_TRANSPORT_PERMISSION)) {
+          throw new Error(`Plugin ${pluginId}: registerTransport requires '${REMOTE_SERVER_TRANSPORT_PERMISSION}'`)
+        }
+        return registerRemoteServerTransport(pluginId, transport)
+      },
+    },
     workspace,
     ui: {
       notify: window.__dinotty_ui_notify ?? (() => {}),
@@ -747,7 +768,7 @@ async function loadPlugin(id: string): Promise<LoadedPlugin> {
   }
 
   // 4. Activate
-  const context = createPluginContext(id)
+  const context = createPluginContext(id, manifest.permissions ?? [])
   let exports: PluginExports | null = null
   try {
     const ACTIVATE_TIMEOUT_MS = 10_000
@@ -770,6 +791,7 @@ async function loadPlugin(id: string): Promise<LoadedPlugin> {
     for (const [qpId, entry] of pluginQuickPicks) {
       if (entry.pluginId === id) pluginQuickPicks.delete(qpId)
     }
+    unregisterRemoteServerTransports(id)
     throw Object.assign(new Error(`Plugin ${id}: activate() threw: ${e.message}`), { cause: e })
   }
 
@@ -808,6 +830,16 @@ async function loadPlugin(id: string): Promise<LoadedPlugin> {
     keyboardContributionId,
   }
   loadedPlugins.set(id, plugin)
+  // Recovery is host-driven and receives only saved local connector URLs, not
+  // target credentials. It also runs after a hot reload because that unloads
+  // and re-activates the contribution.
+  if (hasRemoteServerTransports(id)) {
+    await refreshRemoteServers()
+    const remoteServers = useRemoteServers()
+    if (remoteServers.status.value === 'ready') {
+      await recoverRemoteServerTransport(id, remoteServers.servers.value.filter((server) => !server.local))
+    }
+  }
   return plugin
 }
 
@@ -823,6 +855,8 @@ async function unloadPlugin(id: string, options: { stopUiProcesses?: boolean } =
       throw new Error(await describeHttpError(res, 'Unable to stop plugin UI processes'))
     }
   }
+
+  await unloadRemoteServerTransports(id, useRemoteServers().servers.value.filter((server) => !server.local))
 
   // Unregister monitor series first so sampling stops touching plugin state
   usePluginMonitorStore().unregister(id)
@@ -977,7 +1011,7 @@ export function usePluginLoader() {
   }
 
   function getPluginContext(pluginId: string): PluginContext {
-    return createPluginContext(pluginId)
+    return createPluginContext(pluginId, loadedPlugins.get(pluginId)?.manifest.permissions ?? [])
   }
 
   const allCommands = computed(() => {

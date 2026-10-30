@@ -2,6 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent } from 'vue'
 
+vi.hoisted(() => {
+  const values = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+    clear: () => values.clear(),
+  })
+})
+
 const api = vi.hoisted(() => ({
   authFetch: vi.fn(),
   getApiBase: vi.fn().mockResolvedValue(''),
@@ -25,6 +35,10 @@ import {
 } from '../composables/usePluginLoader'
 import { useKeyboardProviders } from '../composables/useKeyboardProviders'
 import { usePluginOverlaysStore } from '../stores/pluginOverlays'
+import {
+  getRemoteServerTransport,
+  unregisterRemoteServerTransports,
+} from '../composables/useRemoteServerTransports'
 
 function loadedPlugin(manifest: PluginManifest): LoadedPlugin {
   return {
@@ -46,6 +60,39 @@ describe('usePluginLoader lifecycle', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    unregisterRemoteServerTransports('native-plugin')
+  })
+
+  it('does not grant the sensitive remote-server transport capability to an undeclared context', () => {
+    const context = usePluginLoader().getPluginContext('native-plugin')
+    expect(() =>
+      context.remoteServers.registerTransport({
+        id: 'connector',
+        label: 'Connector',
+        component: defineComponent({ template: '<div />' }),
+      })
+    ).toThrow("requires 'remoteServers.transport'")
+  })
+
+  it('grants remote-server transport registration only when the active manifest declares it', () => {
+    loadedPlugins.set(
+      'native-plugin',
+      loadedPlugin({
+        id: 'native-plugin',
+        name: 'Native',
+        version: '1.0.0',
+        permissions: ['remoteServers.transport'],
+      })
+    )
+    const context = usePluginLoader().getPluginContext('native-plugin')
+    context.remoteServers.registerTransport({
+      id: 'connector',
+      label: 'Connector',
+      component: defineComponent({ template: '<div />' }),
+    })
+    expect(
+      getRemoteServerTransport({ pluginId: 'native-plugin', transportId: 'connector' })?.label
+    ).toBe('Connector')
   })
 
   it('does not activate a plugin rejected by the backend', async () => {

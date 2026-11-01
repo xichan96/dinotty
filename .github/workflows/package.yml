@@ -120,6 +120,10 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.should_build == 'true'
     runs-on: ${{ matrix.os }}
+    env:
+      # Tauri's beforeBuildCommand runs `pnpm build`; Mermaid enlarged the module
+      # graph enough to exceed the default ~2 GB V8 heap on some runners.
+      NODE_OPTIONS: --max-old-space-size=4096
     strategy:
       fail-fast: false
       matrix:

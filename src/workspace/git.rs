@@ -364,11 +364,10 @@ pub async fn workspace_git_revert_lines(
 mod tests {
     use super::*;
     use std::fs;
-    use std::process::Command;
     use tempfile::TempDir;
 
     fn git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git").args(args).current_dir(dir).output().unwrap();
+        let out = git_command().args(args).current_dir(dir).output().unwrap();
         assert!(
             out.status.success(),
             "git {args:?} failed: {}",

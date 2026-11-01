@@ -470,7 +470,10 @@ mod tests {
         assert_eq!(status_pairs(root), vec![pair("中文文件.txt", "untracked")]);
     }
 
+    // `>` is not a legal filename character on Windows, so such paths cannot
+    // exist there and this scenario is only reachable on Unix.
     #[test]
+    #[cfg(not(windows))]
     fn git_status_preserves_paths_containing_arrow() {
         let tmp = init_repo();
         let root = tmp.path();

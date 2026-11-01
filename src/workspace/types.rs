@@ -84,6 +84,15 @@ pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    /// The entry itself is a symlink. `is_dir`/`size` still describe the link
+    /// target, matching what opening the entry would show.
+    #[serde(default)]
+    pub is_symlink: bool,
+    /// The symlink resolves to the listed directory itself or one of its
+    /// ancestors, so expanding it would re-list a directory already on the
+    /// path. Always false for non-symlinks.
+    #[serde(default)]
+    pub is_cycle: bool,
 }
 
 #[derive(Serialize)]

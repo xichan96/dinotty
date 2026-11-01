@@ -478,6 +478,96 @@ async fn free_browse_rejects_sensitive_dir() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
+#[cfg(unix)]
+async fn list_workspace(root: &Path, rel: &str) -> serde_json::Value {
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.to_path_buf()));
+    let q = WorkspaceListQuery { pane_id: "p1".into(), path: rel.into(), root: None, free: false };
+    let resp = workspace_list(State(manager), axum::extract::Query(q)).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    response_json(resp).await
+}
+
+#[cfg(unix)]
+fn listed_entry<'a>(json: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
+    json["entries"]
+        .as_array()
+        .expect("entries array")
+        .iter()
+        .find(|e| e["name"] == name)
+        .unwrap_or_else(|| panic!("entry {name} not listed"))
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_flags_symlink_to_ancestor_as_cycle() {
+    use std::os::unix::fs::symlink;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let sub = root.join("sub");
+    fs::create_dir(&sub).unwrap();
+    symlink(root, sub.join("up")).unwrap();
+
+    let json = list_workspace(root, "sub").await;
+    let entry = listed_entry(&json, "up");
+
+    assert_eq!(entry["is_symlink"], true);
+    assert_eq!(entry["is_dir"], true);
+    assert_eq!(entry["is_cycle"], true);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_flags_self_symlink_as_cycle() {
+    use std::os::unix::fs::symlink;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    // Resolves to the listed directory itself.
+    symlink(".", root.join("self")).unwrap();
+
+    let json = list_workspace(root, "").await;
+    let entry = listed_entry(&json, "self");
+
+    assert_eq!(entry["is_symlink"], true);
+    assert_eq!(entry["is_dir"], true);
+    assert_eq!(entry["is_cycle"], true);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_does_not_flag_sibling_symlink_as_cycle() {
+    use std::os::unix::fs::symlink;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let a = root.join("a");
+    fs::create_dir(&a).unwrap();
+    fs::create_dir(root.join("b")).unwrap();
+    symlink("../b", a.join("to_b")).unwrap();
+
+    let json = list_workspace(root, "a").await;
+    let entry = listed_entry(&json, "to_b");
+
+    assert_eq!(entry["is_symlink"], true);
+    assert_eq!(entry["is_dir"], true);
+    assert_eq!(entry["is_cycle"], false);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_keeps_broken_symlink_without_panicking() {
+    use std::os::unix::fs::symlink;
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    symlink("missing-target", root.join("dangling")).unwrap();
+
+    let json = list_workspace(root, "").await;
+    let entry = listed_entry(&json, "dangling");
+
+    assert_eq!(entry["is_symlink"], true);
+    assert_eq!(entry["is_dir"], false);
+    assert_eq!(entry["is_cycle"], false);
+}
+
 #[tokio::test]
 async fn free_browse_allows_normal_dir() {
     let tmp = TempDir::new().unwrap();

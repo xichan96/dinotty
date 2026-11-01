@@ -29,6 +29,7 @@
     "dompurify": "^3.4.2",
     "lucide-vue-next": "^1.0.0",
     "marked": "^18.0.3",
+    "mermaid": "^12.2.0",
     "monaco-editor": "^0.55.1",
     "motion-v": "^2.3.0",
     "officeparser": "^6.1.0",

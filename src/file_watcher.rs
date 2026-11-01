@@ -10,7 +10,12 @@ use axum::{
 use futures_util::StreamExt;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info};
 
@@ -130,6 +135,7 @@ impl FileWatcherState {
                         Some(k) => event
                             .paths
                             .into_iter()
+                            .filter(|p| !is_ignored_path(p))
                             .map(|p| {
                                 WatchMessage::FileEvent(FileEvent {
                                     path: p.to_string_lossy().to_string(),
@@ -163,6 +169,25 @@ impl FileWatcherState {
         info!("Watcher stopped: {}", key);
         Ok(())
     }
+}
+
+/// Directory names whose contents are never worth broadcasting: dependency
+/// trees, build outputs and VCS metadata would otherwise flood every client
+/// (and the event bus) with churn the file tree does not render.
+const IGNORED_DIRS: &[&str] =
+    &["node_modules", ".git", "target", "dist", ".venv", "__pycache__", ".next", "build"];
+
+/// True when any component of `path` is an ignored directory name.
+/// Compared ASCII case-insensitively so Windows-mangled casing still matches.
+fn is_ignored_path(path: &Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        name.to_str().is_some_and(|name| {
+            IGNORED_DIRS.iter().any(|ignored| name.eq_ignore_ascii_case(ignored))
+        })
+    })
 }
 
 #[derive(Deserialize)]
@@ -212,6 +237,21 @@ async fn handle_watch_socket(
             .await;
         return;
     };
+
+    // The watcher runs on the server host; an SSH pane's cwd is a remote path
+    // that does not exist locally. Reporting instead of watching keeps the
+    // client from reconnecting forever against a path that can never resolve.
+    if session.is_ssh() {
+        let _ = socket
+            .send(Message::Text(
+                serde_json::to_string(&WatchMessage::Error {
+                    message: "watch_unsupported_for_ssh".to_string(),
+                })
+                .unwrap(),
+            ))
+            .await;
+        return;
+    }
 
     let Some(cwd) = session.cwd_for_workspace() else {
         let _ = socket
@@ -282,4 +322,44 @@ async fn handle_watch_socket(
 
     watcher_state.unsubscribe(&watch_key).await;
     info!("WebSocket watch disconnected: pane={}, path={}", pane_id, path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignored_paths_cover_dependency_and_build_dirs() {
+        for path in [
+            "/w/node_modules/react/index.js",
+            "/w/.git/objects/ab/cdef",
+            "/w/target/debug/dinotty",
+            "/w/dist/assets/app.js",
+            "/w/.venv/bin/python",
+            "/w/pkg/__pycache__/mod.cpython-312.pyc",
+            "/w/.next/server/page.js",
+            "/w/build/output.bin",
+        ] {
+            assert!(is_ignored_path(Path::new(path)), "{path} should be ignored");
+        }
+    }
+
+    #[test]
+    fn ignored_paths_leave_regular_and_similarly_named_entries_alone() {
+        for path in [
+            "/w/src/main.rs",
+            "/w/targeting/notes.md",
+            "/w/build.rs",
+            "/w/node_modules_extra/file.js",
+            "/w/docs/distributed.md",
+        ] {
+            assert!(!is_ignored_path(Path::new(path)), "{path} should pass");
+        }
+    }
+
+    #[test]
+    fn ignored_paths_match_case_insensitively() {
+        assert!(is_ignored_path(Path::new("/w/Node_Modules/pkg/index.js")));
+        assert!(is_ignored_path(Path::new("/w/.GIT/HEAD")));
+    }
 }

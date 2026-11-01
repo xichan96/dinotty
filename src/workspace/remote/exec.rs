@@ -37,9 +37,9 @@ fn parse_ls_la_entries(output: &str, _target: &str) -> Vec<DirEntry> {
         if line.is_empty() {
             continue;
         }
-        if let Some((name, is_dir, size)) = parse_ls_la_full(line) {
+        if let Some((name, is_dir, size, is_symlink)) = parse_ls_la_full(line) {
             if name != "." && name != ".." {
-                entries.push(DirEntry { name, is_dir, size });
+                entries.push(DirEntry { name, is_dir, size, is_symlink, is_cycle: false });
             }
         }
     }
@@ -47,8 +47,8 @@ fn parse_ls_la_entries(output: &str, _target: &str) -> Vec<DirEntry> {
     entries
 }
 
-/// Parse a full `ls -la` line to extract name, type, and size.
-fn parse_ls_la_full(line: &str) -> Option<(String, bool, u64)> {
+/// Parse a full `ls -la` line to extract name, type, size, and symlink flag.
+fn parse_ls_la_full(line: &str) -> Option<(String, bool, u64, bool)> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 9 {
         return None;
@@ -62,10 +62,13 @@ fn parse_ls_la_full(line: &str) -> Option<(String, bool, u64)> {
         return None;
     }
     let is_dir = ft_char == b'd';
+    // `ls -la` prints `l` for symlinks but does not stat the target, so a
+    // symlinked directory stays a non-directory row in the sudo fallback.
+    let is_symlink = ft_char == b'l';
     let size: u64 = parts[4].parse().unwrap_or(0);
     let name = parts[8..].join(" ");
     let name = name.split(" -> ").next().unwrap_or(&name).to_string();
-    Some((name, is_dir, size))
+    Some((name, is_dir, size, is_symlink))
 }
 
 /// Read file via SSH exec with sudo. Returns the file content as bytes.

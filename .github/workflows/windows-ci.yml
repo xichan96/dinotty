@@ -101,6 +101,10 @@ jobs:
 
       - name: Build frontend assets for Rust tests
         working-directory: frontend
+        env:
+          # Mermaid roughly triples the module graph; the self-hosted runner's
+          # default ~2 GB V8 heap is not enough to render the chunks.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm run build
 
       - name: Check Rust formatting

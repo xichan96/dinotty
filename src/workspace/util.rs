@@ -158,6 +158,14 @@ pub(crate) fn parent_dir_must_be_in_workspace(
     Ok(())
 }
 
+/// True when `raw` names a user path (`/abs`, `~`, `~/...`) rather than a
+/// workspace-relative path. Used by the resolve handlers so `~/notes.md` is
+/// expanded instead of being joined under the workspace root.
+pub(crate) fn is_user_path(raw: &str) -> bool {
+    let raw = raw.trim();
+    Path::new(raw).is_absolute() || raw == "~" || raw.starts_with("~/")
+}
+
 pub(crate) fn resolve_user_path(home: Option<PathBuf>, raw: &str) -> PathBuf {
     let raw = raw.trim();
     if let Some(path) = expand_temp_token(raw) {

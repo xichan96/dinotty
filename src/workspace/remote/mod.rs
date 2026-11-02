@@ -21,7 +21,7 @@ use crate::workspace::{
     MAX_TEXT_PREVIEW,
 };
 use exec::{list_via_ssh_exec, read_via_ssh_exec};
-use path::{normalize_remote_join, resolve_remote_rel};
+use path::{normalize_remote_join, resolve_remote_rel, resolve_remote_terminal_path};
 use sftp::{is_permission_error, remove_dir_recursive, sftp, sftp_err, should_use_sudo};
 
 // ── list ──────────────────────────────────────────────────────────────────
@@ -457,11 +457,16 @@ pub async fn remote_move(session: Arc<Session>, q: PanePathQuery, dest_dir: Stri
 // ── resolve ───────────────────────────────────────────────────────────────
 
 pub async fn remote_resolve(session: Arc<Session>, path: String) -> Response {
+    // Match the local resolver's security posture: `..` is rejected instead of
+    // being silently collapsed by normalize_remote_join.
+    if path.split('/').any(|p| p == "..") {
+        return json_err(StatusCode::BAD_REQUEST, "invalid path");
+    }
     let sftp = match sftp(&session).await {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let target = resolve_remote_rel(&session, &path, None);
+    let target = resolve_remote_terminal_path(&session, &path);
     let canon = match sftp.canonicalize(&target).await {
         Ok(p) => p,
         Err(e) => return sftp_err(e),

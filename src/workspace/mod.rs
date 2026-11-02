@@ -51,7 +51,7 @@ pub(crate) use upload::{
     INSUFFICIENT_STORAGE,
 };
 #[cfg(test)]
-pub(crate) use util::{byte_offset_to_column, parse_rg_json, path_must_be_under};
+pub(crate) use util::{byte_offset_to_column, is_user_path, parse_rg_json, path_must_be_under};
 
 #[cfg(test)]
 mod tests;

@@ -76,7 +76,10 @@
       @title-change="(id: string, title: string) => emit('titleChange', id, title)"
       @shell-info="(id: string, shell: string) => emit('shellInfo', id, shell)"
       @input="(id: string, data: string) => emit('input', id, data)"
-      @file-click="(path: string) => emit('fileClick', path)"
+      @file-click="
+        (path: string, line?: number, column?: number, paneId?: string) =>
+          emit('fileClick', path, line, column, paneId)
+      "
       @preview-link="(id: string, url: string) => emit('previewLink', id, url)"
       @link-activate="emit('linkActivate')"
       @close="(id: string) => emit('close', id)"
@@ -112,7 +115,10 @@
         @focus="(id: string) => emit('focus', id)"
         @close="(id: string) => emit('close', id)"
         @input="(id: string, data: string) => emit('input', id, data)"
-        @file-click="(path: string) => emit('fileClick', path)"
+        @file-click="
+          (path: string, line?: number, column?: number, paneId?: string) =>
+            emit('fileClick', path, line, column, paneId)
+        "
         @preview-link="(id: string, url: string) => emit('previewLink', id, url)"
         @link-activate="emit('linkActivate')"
         @reorder="(src: string, tgt: string, pos: DropPosition) => emit('reorder', src, tgt, pos)"
@@ -179,7 +185,7 @@ const emit = defineEmits<{
   focus: [paneId: string]
   close: [paneId: string]
   input: [paneId: string, data: string]
-  fileClick: [path: string]
+  fileClick: [path: string, line?: number, column?: number, paneId?: string]
   previewLink: [paneId: string, url: string]
   linkActivate: []
   reorder: [sourcePaneId: string, targetPaneId: string, position: DropPosition]

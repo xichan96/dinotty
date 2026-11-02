@@ -123,6 +123,7 @@ import EditorBreadcrumbs from './EditorBreadcrumbs.vue'
 export interface EditorRevealTarget {
   path: string
   line: number
+  column?: number
   seq: number
 }
 
@@ -393,8 +394,10 @@ function maybeReveal(): void {
     if (target.path !== activeFilePath.value) return
     const model = monaco.getModel()
     const line = Math.max(1, Math.min(target.line, model?.getLineCount() ?? target.line))
+    const maxColumn = model?.getLineMaxColumn(line) ?? 1
+    const column = Math.max(1, Math.min(target.column ?? 1, maxColumn))
     monaco.revealLineInCenter(line)
-    monaco.setPosition({ lineNumber: line, column: 1 })
+    monaco.setPosition({ lineNumber: line, column })
     monaco.focus()
   })
 }

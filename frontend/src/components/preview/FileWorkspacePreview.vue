@@ -328,6 +328,7 @@ import {
 import { useFileWorkspaceTree } from '../../composables/useFileWorkspaceTree'
 import { useFileWorkspaceTabs } from '../../composables/useFileWorkspaceTabs'
 import { useFileWorkspaceSearch } from '../../composables/useFileWorkspaceSearch'
+import { takePendingFileReveal } from '../../composables/pendingFileReveal'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
@@ -612,6 +613,7 @@ const {
   searchOpen,
   searchPanelRef,
   searchReveal,
+  revealFileAt,
   openSearch,
   closeSearch,
   onSearchOpenFile,
@@ -702,9 +704,14 @@ const {
  * rename reselects and delete reselects call `selectFile` directly, so they
  * never arrive here and never prompt.
  */
-async function openFromTerminal(path: string): Promise<void> {
-  await openFromTerminalFromBoot(path)
+async function openFromTerminal(
+  path: string,
+  reveal?: { line?: number; column?: number },
+  resolvePaneId?: string
+): Promise<void> {
+  const rel = await openFromTerminalFromBoot(path, resolvePaneId)
   await tree.scrollSelectedIntoView()
+  if (rel && reveal?.line) revealFileAt(rel, reveal.line, reveal.column)
 }
 
 /**
@@ -925,8 +932,13 @@ watch(
 
 watch(
   () => [props.visible, props.paneId, props.inLeaf],
-  () => {
-    if (props.visible && props.paneId) void boot()
+  async () => {
+    if (!props.visible || !props.paneId) return
+    await boot()
+    // A freshly inserted files pane only carries its path; consume the
+    // line/column stashed by the terminal link click after boot opened it.
+    const pending = takePendingFileReveal(props.paneId)
+    if (pending) await openFromTerminal(pending.path, pending)
   },
   { immediate: true }
 )

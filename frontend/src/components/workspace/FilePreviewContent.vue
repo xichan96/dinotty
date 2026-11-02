@@ -130,6 +130,21 @@
           />
         </div>
       </template>
+      <LogPreview
+        v-else-if="isLogFile && meta?.kind === 'text'"
+        :meta="meta"
+        :raw-url="rawUrl"
+        :file-path="filePath"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :editor-text="editorText"
+        :editor-dirty="editorDirty"
+        :show-save="showSave"
+        :can-save-editor="canSaveEditor"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(p) => $emit('selection-change', p)"
+      />
       <template v-else-if="meta?.kind === 'text' || meta?.kind === 'markdown'">
         <div class="file-editor-root">
           <div class="file-editor-chrome">
@@ -248,6 +263,7 @@ import {
 } from '../../composables/markdownEnhance'
 import CsvPreview from './CsvPreview.vue'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
+const LogPreview = defineAsyncComponent(() => import('./LogPreview.vue'))
 
 const { t } = useI18n()
 
@@ -301,6 +317,11 @@ const csvFilePath = computed(function computeCsvFilePath() {
 const isCsvFile = computed(function computeIsCsvFile() {
   // 步骤1：按当前文件路径判断是否启用 CSV 预览。
   return isCsvPreviewFile(csvFilePath.value)
+})
+const isLogFile = computed(function computeIsLogFile() {
+  // Only the explicit `.log` extension gets the ANSI log viewer; every other
+  // text file keeps the generic editor branch.
+  return csvFilePath.value.toLowerCase().endsWith('.log')
 })
 
 const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {

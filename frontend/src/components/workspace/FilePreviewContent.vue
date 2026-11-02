@@ -145,6 +145,22 @@
         @save-editor="$emit('saveEditor')"
         @selection-change="(p) => $emit('selection-change', p)"
       />
+      <IpynbPreview
+        v-else-if="isIpynb && meta?.kind === 'text'"
+        :content="meta?.content ?? editorText"
+        :file-path="ipynbFilePath"
+        :raw-url="rawUrl"
+        :truncated="!!meta?.truncated"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :show-save="showSave"
+        :editor-text="editorText"
+        :editor-dirty="editorDirty"
+        :can-save-editor="canSaveEditor"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(payload) => $emit('selection-change', payload)"
+      />
       <template v-else-if="meta?.kind === 'text' || meta?.kind === 'markdown'">
         <div class="file-editor-root">
           <div class="file-editor-chrome">
@@ -262,8 +278,10 @@ import {
   handleMarkdownPreviewClick,
 } from '../../composables/markdownEnhance'
 import CsvPreview from './CsvPreview.vue'
+import { isIpynbFile as isIpynbPath } from '../../utils/ipynb'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
 const LogPreview = defineAsyncComponent(() => import('./LogPreview.vue'))
+const IpynbPreview = defineAsyncComponent(() => import('./IpynbPreview.vue'))
 
 const { t } = useI18n()
 
@@ -322,6 +340,14 @@ const isLogFile = computed(function computeIsLogFile() {
   // Only the explicit `.log` extension gets the ANSI log viewer; every other
   // text file keeps the generic editor branch.
   return csvFilePath.value.toLowerCase().endsWith('.log')
+})
+
+const ipynbFilePath = computed(function computeIpynbFilePath() {
+  return props.filePath || props.selectedRel || ''
+})
+const isIpynb = computed(function computeIsIpynb() {
+  // Jupyter notebooks arrive as kind 'text'; their extension picks the viewer.
+  return isIpynbPath(ipynbFilePath.value)
 })
 
 const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {

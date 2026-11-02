@@ -34,7 +34,17 @@ function errorLineOf(error: unknown, source: string): number {
   if (lineMatch) return Number(lineMatch[1])
 
   const positionMatch = /\bposition (\d+)\b/i.exec(message)
-  if (!positionMatch) return 1
+  if (!positionMatch) {
+    // Newer V8 embeds a quoted source snippet instead of a position (e.g.
+    // Node 20's `... is not valid JSON`). Re-scan the document ourselves so
+    // the reported line does not depend on the engine's message format.
+    try {
+      new JsonScanner(source).parseDocument()
+    } catch (scanError) {
+      if (scanError instanceof JsonScanError) return scanError.line
+    }
+    return 1
+  }
 
   const position = Number(positionMatch[1])
   let line = 1

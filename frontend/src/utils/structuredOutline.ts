@@ -30,9 +30,12 @@ export interface StructuredOutlineResult {
   errorMessage?: string
 }
 
+/** Node cap applied by the YAML/TOML outline walkers. */
+export const STRUCTURED_MAX_NODES = 4000
+
 /** Defensive caps for alias-heavy YAML and pathological inline values. */
 const MAX_DEPTH = 32
-const MAX_NODES = 4000
+const MAX_NODES = STRUCTURED_MAX_NODES
 
 export function structuredFormatForLanguage(
   language: string | null | undefined
@@ -48,6 +51,20 @@ export function structuredFormatForLanguage(
     default:
       return null
   }
+}
+
+/**
+ * Pick a structured format from a file path (case-insensitive, query strings
+ * and fragments ignored). Used by the preview pane, where the workspace may
+ * report a generic `text` kind for `.json`/`.yaml`/`.toml`.
+ */
+export function structuredFormatForPath(path: string | null | undefined): StructuredFormat | null {
+  if (!path) return null
+  const clean = path.split(/[?#]/)[0].trim().toLowerCase()
+  if (clean.endsWith('.json')) return 'json'
+  if (clean.endsWith('.yaml') || clean.endsWith('.yml')) return 'yaml'
+  if (clean.endsWith('.toml')) return 'toml'
+  return null
 }
 
 export function parseStructuredOutline(

@@ -161,6 +161,27 @@
         @save-editor="$emit('saveEditor')"
         @selection-change="(payload) => $emit('selection-change', payload)"
       />
+      <StructuredPreview
+        v-else-if="structuredFormat !== null && meta?.kind === 'text'"
+        :content="meta?.content ?? editorText"
+        :file-path="structuredFilePath"
+        :format="structuredFormat"
+        :raw-url="rawUrl"
+        :truncated="!!meta?.truncated"
+        :editor-text="editorText"
+        :editor-dirty="editorDirty"
+        :show-save="showSave"
+        :can-save-editor="canSaveEditor"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :outline-open="outlineOpen"
+        :outline-available="outlineAvailable"
+        :outline-panel-id="outlinePanelId"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(payload) => $emit('selection-change', payload)"
+        @toggle-outline="$emit('toggle-outline')"
+      />
       <template v-else-if="meta?.kind === 'text' || meta?.kind === 'markdown'">
         <div class="file-editor-root">
           <div class="file-editor-chrome">
@@ -279,9 +300,11 @@ import {
 } from '../../composables/markdownEnhance'
 import CsvPreview from './CsvPreview.vue'
 import { isIpynbFile as isIpynbPath } from '../../utils/ipynb'
+import { structuredFormatForPath } from '../../utils/structuredOutline'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
 const LogPreview = defineAsyncComponent(() => import('./LogPreview.vue'))
 const IpynbPreview = defineAsyncComponent(() => import('./IpynbPreview.vue'))
+const StructuredPreview = defineAsyncComponent(() => import('./StructuredPreview.vue'))
 
 const { t } = useI18n()
 
@@ -348,6 +371,17 @@ const ipynbFilePath = computed(function computeIpynbFilePath() {
 const isIpynb = computed(function computeIsIpynb() {
   // Jupyter notebooks arrive as kind 'text'; their extension picks the viewer.
   return isIpynbPath(ipynbFilePath.value)
+})
+
+const structuredFilePath = computed(function computeStructuredFilePath() {
+  return props.filePath || props.selectedRel || ''
+})
+const structuredFormat = computed(function computeStructuredFormat() {
+  // JSON/YAML/TOML arrive as generic text; the extension picks the tree view.
+  // Notebooks, logs and CSV keep their dedicated viewers.
+  if (props.meta?.kind !== 'text') return null
+  if (isIpynb.value || isLogFile.value || isCsvFile.value) return null
+  return structuredFormatForPath(structuredFilePath.value)
 })
 
 const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {

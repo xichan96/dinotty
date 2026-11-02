@@ -303,7 +303,7 @@
               <template v-else>{{ part.text }}</template>
             </template>
           </span>
-          <span class="row-meta" :class="{ value: source.mode === 'json' }">{{
+          <span class="row-meta" :class="{ value: isStructuredMode(source.mode) }">{{
             metaFor(row.item)
           }}</span>
         </div>
@@ -348,7 +348,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import FileGlyph from './FileGlyph.vue'
-import type { OutlineItem, OutlineMode, OutlineSource } from '../../types/outline'
+import {
+  isStructuredMode,
+  type OutlineItem,
+  type OutlineMode,
+  type OutlineSource,
+} from '../../types/outline'
 import {
   defaultExpandedIds,
   expandableIds,
@@ -459,19 +464,19 @@ const errorDetail = computed(() => {
 
 const placeholder = computed(() => {
   if (props.mode === 'markdown') return t('outline.filterHeadings')
-  if (props.mode === 'json') return t('outline.filterKeys')
+  if (isStructuredMode(props.mode)) return t('outline.filterKeys')
   return t('outline.filterSymbols')
 })
 
 const emptyTitle = computed(() => {
   if (props.mode === 'markdown') return t('outline.emptyHeadings')
-  if (props.mode === 'json') return t('outline.emptyKeys')
+  if (isStructuredMode(props.mode)) return t('outline.emptyKeys')
   return t('outline.emptySymbols')
 })
 
 const emptyDesc = computed(() => {
   if (props.mode === 'markdown') return t('outline.emptyHeadingsDesc')
-  if (props.mode === 'json') return t('outline.emptyKeysDesc')
+  if (isStructuredMode(props.mode)) return t('outline.emptyKeysDesc')
   return t('outline.emptySymbolsDesc')
 })
 
@@ -480,6 +485,8 @@ const typeLabel = computed(() => {
   if (props.languageLabel) return props.languageLabel
   if (props.mode === 'markdown') return t('outline.typeMarkdown')
   if (props.mode === 'json') return t('outline.typeJson')
+  if (props.mode === 'yaml') return t('outline.typeYaml')
+  if (props.mode === 'toml') return t('outline.typeToml')
   return t('outline.typeCode')
 })
 const hint = computed(() => (props.mobile ? t('outline.closeHintMobile') : t('outline.closeHint')))
@@ -808,7 +815,7 @@ function labelSegments(label: string): LabelSegment[] {
 }
 
 function metaFor(item: OutlineItem): string {
-  if (props.source.mode === 'json') return item.value ?? ''
+  if (isStructuredMode(props.source.mode)) return item.value ?? ''
   return String(item.line)
 }
 

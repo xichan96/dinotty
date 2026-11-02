@@ -302,6 +302,8 @@ const outlinePanelMode = computed<Exclude<OutlineMode, 'none'>>(() =>
 const outlineLanguageLabel = computed(() => {
   if (outlineSource.value.mode === 'markdown') return t('outline.typeMarkdown')
   if (outlineSource.value.mode === 'json') return t('outline.typeJson')
+  if (outlineSource.value.mode === 'yaml') return t('outline.typeYaml')
+  if (outlineSource.value.mode === 'toml') return t('outline.typeToml')
   const labels: Record<string, string> = {
     typescript: 'TypeScript',
     javascript: 'JavaScript',

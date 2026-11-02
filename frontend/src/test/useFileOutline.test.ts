@@ -109,6 +109,41 @@ describe('useFileOutline', () => {
     expect(outline.source.value.items).toEqual([])
   })
 
+  it('detects YAML and TOML as structured modes', async () => {
+    const yaml = setup({ language: 'yml', text: 'a: 1\nb:\n  - x\n' })
+    await flush()
+    expect(yaml.source.value).toMatchObject({
+      mode: 'yaml',
+      status: 'ok',
+      provider: 'structured',
+    })
+    expect(yaml.source.value.items.map((item) => item.label)).toEqual(['a', 'b'])
+    expect(yaml.source.value.items[1].children?.[0]).toMatchObject({
+      id: '$.b[0]',
+      label: '[0]',
+      value: '"x"',
+    })
+
+    const toml = setup({ language: 'toml', text: '[server]\nhost = "x"\n' })
+    await flush()
+    expect(toml.source.value).toMatchObject({
+      mode: 'toml',
+      status: 'ok',
+      provider: 'structured',
+    })
+    expect(toml.source.value.items[0]).toMatchObject({ id: '$.server', kind: 'object' })
+  })
+
+  it('surfaces YAML/TOML errors with the source line', async () => {
+    const yaml = setup({ language: 'yaml', text: 'a: 1\na: 2\n' })
+    await flush()
+    expect(yaml.source.value).toMatchObject({ mode: 'yaml', status: 'error', errorLine: 2 })
+
+    const toml = setup({ language: 'toml', text: 'a = 1\nb = 2\nc =' })
+    await flush()
+    expect(toml.source.value).toMatchObject({ mode: 'toml', status: 'error', errorLine: 3 })
+  })
+
   it('consumes Markdown tokens from the shared lexer pass', async () => {
     const tokens: OutlineItem[] = [
       {

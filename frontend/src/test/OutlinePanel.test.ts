@@ -325,4 +325,42 @@ describe('OutlinePanel', () => {
     expect(pills[0].text()).toBe('Monaco TS')
     expect(pills[0].classes()).toContain('monaco')
   })
+
+  it('renders structured key trees without the regex pill', () => {
+    const wrapper = mountPanel({
+      mode: 'yaml',
+      languageLabel: '',
+      source: {
+        mode: 'yaml',
+        items: [
+          {
+            id: '$.a',
+            label: 'a',
+            kind: 'object',
+            line: 1,
+            value: '{1}',
+            children: [{ id: '$.a.b', label: 'b', kind: 'scalar', line: 2, value: '1' }],
+          },
+        ],
+        status: 'ok',
+        loading: false,
+        provider: 'structured',
+      },
+    })
+    expect(wrapper.find('.type-pill').text()).toBe('YAML')
+    expect(wrapper.find('.source-pill').exists()).toBe(false)
+    expect(wrapper.find('.search-wrap input').attributes('placeholder')).toBe('Filter keys…')
+    expect(wrapper.findAll('.row-meta').map((node) => node.text())).toEqual(['{1}', '1'])
+    expect(wrapper.findAll('.row-meta')[0].classes()).toContain('value')
+  })
+
+  it('uses the keys empty state for structured files', () => {
+    const wrapper = mountPanel({
+      mode: 'toml',
+      languageLabel: '',
+      source: { mode: 'toml', items: [], status: 'empty', loading: false, provider: 'structured' },
+    })
+    expect(wrapper.find('.type-pill').text()).toBe('TOML')
+    expect(wrapper.find('.empty-title').text()).toBe('No keys found')
+  })
 })

@@ -16,8 +16,15 @@ import {
   watch,
   type MaybeRefOrGetter,
 } from 'vue'
-import type { OutlineItem, OutlineMode, OutlineSource } from '../types/outline'
+import {
+  isStructuredMode,
+  type OutlineItem,
+  type OutlineMode,
+  type OutlineSource,
+} from '../types/outline'
 import { normalizeCodeLanguage } from '../utils/codeSymbols'
+import { parseJsonOutline } from '../utils/jsonOutline'
+import { parseStructuredOutline, structuredFormatForLanguage } from '../utils/structuredOutline'
 import {
   buildOutlineSync,
   type OutlineWorkerMode,
@@ -50,7 +57,8 @@ export function outlineModeFor(
 ): OutlineMode {
   if (kind === 'markdown') return 'markdown'
   const tag = (language ?? '').trim().toLowerCase()
-  if (tag === 'json') return 'json'
+  const structured = structuredFormatForLanguage(tag)
+  if (structured) return structured
   return normalizeCodeLanguage(tag) ? 'code' : 'none'
 }
 
@@ -134,6 +142,31 @@ export function useFileOutline(options: UseFileOutlineOptions) {
         loading: false,
         provider: 'monaco',
         language: language ?? undefined,
+      }
+    }
+
+    if (isStructuredMode(current)) {
+      // JSON keeps its dedicated scanner; YAML/TOML share the structured one.
+      const provider = current === 'json' ? 'json' : 'structured'
+      const result =
+        current === 'json' ? parseJsonOutline(text) : parseStructuredOutline(text, current)
+      if (result.errorLine !== undefined) {
+        return {
+          mode: current,
+          items: [],
+          status: 'error',
+          loading: false,
+          provider,
+          message: result.errorMessage,
+          errorLine: result.errorLine,
+        }
+      }
+      return {
+        mode: current,
+        items: result.items,
+        status: result.items.length > 0 ? 'ok' : 'empty',
+        loading: false,
+        provider,
       }
     }
 
@@ -305,7 +338,7 @@ export function useFileOutline(options: UseFileOutlineOptions) {
       items: source.value.mode === current ? source.value.items : [],
       status: 'ok',
       loading: true,
-      provider: current === 'json' ? 'json' : 'regex',
+      provider: isStructuredMode(current) ? (current === 'json' ? 'json' : 'structured') : 'regex',
       language: normalizeCodeLanguage(toValue(options.language)) ?? undefined,
     }
     timer = setTimeout(() => {

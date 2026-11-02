@@ -28,7 +28,12 @@ export interface OutlineItem {
   children?: OutlineItem[]
 }
 
-export type OutlineMode = 'markdown' | 'code' | 'json' | 'none'
+export type OutlineMode = 'markdown' | 'code' | 'json' | 'yaml' | 'toml' | 'none'
+
+/** Modes that render a key tree instead of headings or code symbols. */
+export function isStructuredMode(mode: OutlineMode): mode is 'json' | 'yaml' | 'toml' {
+  return mode === 'json' || mode === 'yaml' || mode === 'toml'
+}
 
 export type OutlineStatus = 'ok' | 'empty' | 'error'
 
@@ -51,7 +56,7 @@ export interface OutlineSource {
   /** True while a debounced scan is still pending. */
   loading: boolean
   /** Where the items came from; `regex` is surfaced in the UI. */
-  provider?: 'lexer' | 'regex' | 'monaco' | 'json'
+  provider?: 'lexer' | 'regex' | 'monaco' | 'json' | 'structured'
   /** Normalized code language, when applicable. */
   language?: string
   /** Error headline or detail (JSON parse errors). */

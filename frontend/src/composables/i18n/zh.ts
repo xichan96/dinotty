@@ -94,6 +94,8 @@ export default {
   'outline.closeHintMobile': '下滑、点击外部或按 Esc 关闭',
   'outline.typeMarkdown': 'Markdown',
   'outline.typeJson': 'JSON',
+  'outline.typeYaml': 'YAML',
+  'outline.typeToml': 'TOML',
   'outline.typeCode': '代码',
   'editorTabs.close': '关闭',
   'editorTabs.pin': '固定标签',

@@ -4,6 +4,7 @@ import type { DirEntry } from '../components/workspace/TreeRows'
 import { isRunnableCodeFile } from '../utils/runCodeCommand'
 import { tauriInvoke } from './useTransport'
 import { asWorkspaceError, workspaceErrorFromResponse } from './useFileWorkspaceBoot'
+import { isEditableTextKind } from './useFileEditor'
 
 interface Meta {
   kind: string
@@ -22,7 +23,12 @@ export function useTreeContextMenu(opts: {
   editorBaseline: Ref<string>
   childCache: Ref<Record<string, DirEntry[]>>
   expanded: Ref<Set<string>>
-  inlineCreate: Ref<{ parentRel: string; kind: 'file' | 'dir'; value?: string; error?: string } | null>
+  inlineCreate: Ref<{
+    parentRel: string
+    kind: 'file' | 'dir'
+    value?: string
+    error?: string
+  } | null>
   inlineRename: Ref<{ rel: string; isDir: boolean; value?: string; error?: string } | null>
   narrow: Ref<boolean>
   /** Remote (SSH) panes have no local file manager to reveal into. */
@@ -249,11 +255,7 @@ export function useTreeContextMenu(opts: {
     // tab alone is no longer the whole story once editor groups hold tabs.
     const discardNeeded = opts.isPathDirty
       ? opts.isPathDirty(rel, isDir)
-      : !!(
-          opts.editorDirty.value &&
-          opts.meta.value &&
-          (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
-        )
+      : !!(opts.editorDirty.value && opts.meta.value && isEditableTextKind(opts.meta.value.kind))
     deleteConfirm.value = { rel, isDir, discardNeeded }
   }
 

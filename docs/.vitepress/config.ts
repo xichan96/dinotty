@@ -73,7 +73,8 @@ const zhSidebar = [
         items: [
           { text: 'Event Bus', link: '/zh/internals/event-bus' },
           { text: 'Token 权限系统', link: '/zh/internals/token-system' },
-          { text: '审计与 Webhook', link: '/zh/internals/audit-webhook' }
+          { text: '审计与 Webhook', link: '/zh/internals/audit-webhook' },
+          { text: '游离终端窗口（设计稿）', link: '/zh/internals/detached-terminal-window' }
         ]
       },
       { text: '贡献指南', link: '/zh/getting-started/contributing' },

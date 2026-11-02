@@ -89,7 +89,7 @@ export default {
   'outline.regexHint': '符号由正则回退提取，并非语言服务器。',
   'outline.width': '{width} px',
   'outline.closeHint': 'Esc 关闭 · 拖拽边缘调整宽度 · / 过滤',
-  'outline.closeHintMobile': '点击外部或按 Esc 关闭',
+  'outline.closeHintMobile': '下滑、点击外部或按 Esc 关闭',
   'outline.typeMarkdown': 'Markdown',
   'outline.typeJson': 'JSON',
   'outline.typeCode': '代码',

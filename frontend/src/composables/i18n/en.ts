@@ -92,7 +92,7 @@ export default {
   'outline.regexHint': 'Symbols extracted by the regex fallback, not a language server.',
   'outline.width': '{width} px',
   'outline.closeHint': 'Esc close · drag edge to resize · / to filter',
-  'outline.closeHintMobile': 'Tap outside or Esc to close',
+  'outline.closeHintMobile': 'Swipe down, tap outside or Esc to close',
   'outline.typeMarkdown': 'Markdown',
   'outline.typeJson': 'JSON',
   'outline.typeCode': 'Code',

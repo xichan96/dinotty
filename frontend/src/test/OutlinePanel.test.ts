@@ -82,6 +82,12 @@ function manyItems(count: number): OutlineItem[] {
   }))
 }
 
+function firePointer(element: Element, type: string, init: PointerEventInit): void {
+  element.dispatchEvent(
+    new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, ...init })
+  )
+}
+
 afterEach(() => {
   for (const wrapper of wrappers.splice(0)) wrapper.unmount()
 })
@@ -246,6 +252,42 @@ describe('OutlinePanel', () => {
     const scroller = wrapper.find('.outline-scroll').element as HTMLElement
     expect(scroller.scrollTop).toBe(2000 * OUTLINE_ROW_HEIGHT)
     expect(wrapper.find('[data-outline-id="n2000"]').exists()).toBe(true)
+  })
+
+  it('closes the mobile sheet after a downward swipe on the header', async () => {
+    const wrapper = mountPanel({ mobile: true, open: true })
+    const head = wrapper.find('.panel-head').element
+
+    firePointer(head, 'pointerdown', { clientY: 100 })
+    firePointer(head, 'pointermove', { clientY: 240 })
+    firePointer(head, 'pointerup', { clientY: 240 })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('ignores upward swipes and keeps the sheet open', async () => {
+    const wrapper = mountPanel({ mobile: true, open: true })
+    const head = wrapper.find('.panel-head').element
+
+    firePointer(head, 'pointerdown', { clientY: 240 })
+    firePointer(head, 'pointermove', { clientY: 120 })
+    firePointer(head, 'pointerup', { clientY: 120 })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  it('does not attach swipe-to-close on desktop', async () => {
+    const wrapper = mountPanel({ mobile: false, open: true })
+    const head = wrapper.find('.panel-head').element
+
+    firePointer(head, 'pointerdown', { clientY: 100 })
+    firePointer(head, 'pointermove', { clientY: 300 })
+    firePointer(head, 'pointerup', { clientY: 300 })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
   })
 
   it('labels regex-derived code symbols', () => {

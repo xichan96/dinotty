@@ -11,11 +11,11 @@
     :id="panelId"
     ref="panelEl"
     class="outline-panel"
-    :class="{ open, mobile, resizing }"
+    :class="{ open, mobile, resizing, swiping }"
     :aria-hidden="open ? 'false' : 'true'"
     :inert="!open"
     :aria-label="t('outline.title')"
-    :style="{ '--panel-w': `${width}px` }"
+    :style="{ '--panel-w': `${width}px`, '--panel-drag': `${swipeOffset}px` }"
   >
     <div
       class="resize-handle"
@@ -23,9 +23,22 @@
       @pointerdown="onResizeStart"
       @dblclick="resetWidth"
     ></div>
-    <div class="panel-grip" aria-hidden="true"></div>
+    <div
+      class="panel-grip"
+      aria-hidden="true"
+      @pointerdown="onSwipeStart"
+      @pointermove="onSwipeMove"
+      @pointerup="onSwipeEnd"
+      @pointercancel="onSwipeEnd"
+    ></div>
 
-    <header class="panel-head">
+    <header
+      class="panel-head"
+      @pointerdown="onSwipeStart"
+      @pointermove="onSwipeMove"
+      @pointerup="onSwipeEnd"
+      @pointercancel="onSwipeEnd"
+    >
       <span class="panel-title">
         <svg
           viewBox="0 0 24 24"
@@ -331,6 +344,7 @@ import {
   findOutlineEntry,
   outlineRows,
 } from '../../utils/outlineTree'
+import { shouldCloseOnSwipe } from '../../utils/outlineSwipe'
 import {
   OUTLINE_ROW_HEIGHT,
   OUTLINE_ROW_HEIGHT_MOBILE,
@@ -384,6 +398,7 @@ let expansionReady = false
 
 let scrollFrame: number | null = null
 let resizeObserver: ResizeObserver | null = null
+let swipeState: { pointerId: number; startY: number; startTime: number; dy: number } | null = null
 
 const needle = computed(() => query.value.trim())
 const stats = computed(() => outlineRows(props.source.items, expanded.value, query.value))
@@ -391,6 +406,8 @@ const rows = computed(() => stats.value.rows)
 
 const scrollTop = ref(0)
 const viewportHeight = ref(0)
+const swipeOffset = ref(0)
+const swiping = ref(false)
 
 const virtualized = computed(() => rows.value.length > OUTLINE_VIRTUALIZE_THRESHOLD)
 const rowHeight = computed(() =>
@@ -475,7 +492,7 @@ watch(
   { immediate: true }
 )
 
-// Do not leave focus inside an aria-hidden/inert subtree.
+// Do not leave focus inside an aria-hidden/inert subtree; reset swipe state.
 watch(
   () => props.open,
   (open) => {
@@ -483,6 +500,9 @@ watch(
       void nextTick(syncScrollMetrics)
       return
     }
+    swipeOffset.value = 0
+    swiping.value = false
+    swipeState = null
     const active = document.activeElement
     if (active instanceof HTMLElement && panelEl.value?.contains(active)) active.blur()
   }
@@ -660,6 +680,65 @@ async function ensureActiveRowVisible(id: string): Promise<void> {
   if (row) await ensureRowVisible(row.item)
 }
 
+/* ── Mobile swipe-to-close ─────────────────────────────────────────────── */
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return !!target.closest('button, input, a, [role="button"]')
+}
+
+function onSwipeStart(event: PointerEvent): void {
+  if (!props.mobile || !props.open) return
+  if (event.button !== 0 || isInteractiveTarget(event.target)) return
+  swipeState = {
+    pointerId: event.pointerId,
+    startY: event.clientY,
+    startTime: performance.now(),
+    dy: 0,
+  }
+  swiping.value = true
+  swipeOffset.value = 0
+  event.preventDefault()
+  try {
+    ;(event.currentTarget as HTMLElement | null)?.setPointerCapture(event.pointerId)
+  } catch {
+    // Pointer capture is an optimization; the handlers still work without it.
+  }
+}
+
+function onSwipeMove(event: PointerEvent): void {
+  if (!swipeState || event.pointerId !== swipeState.pointerId) return
+  const dy = Math.max(0, event.clientY - swipeState.startY)
+  swipeState.dy = dy
+  swipeOffset.value = dy
+  if (dy > 0) event.preventDefault()
+}
+
+function onSwipeEnd(event: PointerEvent): void {
+  if (!swipeState || event.pointerId !== swipeState.pointerId) return
+  const state = swipeState
+  swipeState = null
+  swiping.value = false
+
+  const surface = event.currentTarget as HTMLElement | null
+  try {
+    if (surface?.hasPointerCapture?.(event.pointerId)) {
+      surface.releasePointerCapture(event.pointerId)
+    }
+  } catch {
+    // Already released.
+  }
+
+  const elapsed = Math.max(1, performance.now() - state.startTime)
+  if (shouldCloseOnSwipe(state.dy, state.dy / elapsed)) {
+    // Keep the dragged offset until the `open` watcher resets it, so the
+    // sheet animates out from where the finger left it.
+    emit('close')
+    return
+  }
+  swipeOffset.value = 0
+}
+
 function iconText(item: OutlineItem): string {
   if (item.kind === 'heading') return `H${item.level ?? 1}`
   switch (item.kind) {
@@ -820,7 +899,8 @@ onBeforeUnmount(() => {
   background: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.22));
 }
 
-.outline-panel.resizing {
+.outline-panel.resizing,
+.outline-panel.swiping {
   transition: none;
   user-select: none;
 }
@@ -1442,9 +1522,19 @@ onBeforeUnmount(() => {
 }
 
 .outline-panel.mobile.open {
-  transform: translateY(0);
+  transform: translateY(var(--panel-drag, 0px));
   visibility: visible;
   transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.outline-panel.mobile .panel-grip,
+.outline-panel.mobile .panel-head {
+  touch-action: none;
+}
+
+/* Beat `.outline-panel.mobile.open`'s transition while a drag is live. */
+.outline-panel.mobile.swiping {
+  transition: none;
 }
 
 .outline-panel.mobile .resize-handle {

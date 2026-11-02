@@ -582,6 +582,19 @@ impl Session {
         }
     }
 
+    /// Release the Tauri IPC forwarder client, if one is registered, by
+    /// dropping its event channel. The PTY and any other clients are left
+    /// untouched. Returns true when no clients remain, so the caller can mark
+    /// the session detached.
+    pub fn release_tauri_client(&self) -> bool {
+        let client_id =
+            self.tauri_client_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some(client_id) = client_id {
+            self.remove_client(client_id);
+        }
+        !self.has_clients()
+    }
+
     pub fn on_pty_output(&self, data: &[u8]) {
         if matches!(self.shell_launch_kind, crate::platform::shell::ShellLaunchKind::Wsl { .. }) {
             return;

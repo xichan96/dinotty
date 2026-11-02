@@ -1,0 +1,365 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+pub const LABEL_PREFIX: &str = "tab-";
+pub const CLOSED_EVENT: &str = "tab-window-closed";
+
+const DEFAULT_TITLE: &str = "Dinotty";
+const WINDOW_WIDTH: f64 = 1000.0;
+const WINDOW_HEIGHT: f64 = 700.0;
+const MIN_WINDOW_WIDTH: f64 = 600.0;
+const MIN_WINDOW_HEIGHT: f64 = 400.0;
+
+/// Metadata about one detached tab window. Serialized as-is (snake_case), so
+/// the `tab-window-closed` payload and list results stay consistent.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DetachedWindowInfo {
+    pub tab_id: String,
+    pub label: String,
+    pub title: Option<String>,
+}
+
+/// Tab ids become part of a window label and a URL query, so keep them to a
+/// conservative character set. Generated ids (UUIDs) qualify.
+#[must_use]
+pub fn is_valid_tab_id(tab_id: &str) -> bool {
+    !tab_id.is_empty()
+        && tab_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+pub fn label_for_tab(tab_id: &str) -> Result<String, String> {
+    if !is_valid_tab_id(tab_id) {
+        return Err(format!("invalid tab id: {tab_id:?}"));
+    }
+    Ok(format!("{LABEL_PREFIX}{tab_id}"))
+}
+
+#[must_use]
+pub fn tab_id_from_label(label: &str) -> Option<String> {
+    let tab_id = label.strip_prefix(LABEL_PREFIX)?;
+    is_valid_tab_id(tab_id).then(|| tab_id.to_string())
+}
+
+#[derive(Default)]
+struct Registry {
+    /// Keyed by tab id; the label is derivable but stored for direct responses.
+    windows: BTreeMap<String, DetachedWindowInfo>,
+    /// Reservations for windows whose creation is still in flight.
+    creating: BTreeSet<String>,
+}
+
+/// Tauri-managed registry of detached tab windows.
+///
+/// All methods are pure Rust and take no `AppHandle`, so they can be unit
+/// tested without a running application.
+#[derive(Default)]
+pub struct DetachedTabWindows {
+    inner: Mutex<Registry>,
+}
+
+impl DetachedTabWindows {
+    fn lock(&self) -> MutexGuard<'_, Registry> {
+        self.inner.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Reserve a creation slot. Returns false when the tab already has a
+    /// window or another creation is in flight.
+    fn begin_create(&self, tab_id: &str) -> bool {
+        let mut registry = self.lock();
+        if registry.windows.contains_key(tab_id) || registry.creating.contains(tab_id) {
+            return false;
+        }
+        registry.creating.insert(tab_id.to_string());
+        true
+    }
+
+    fn finish_create(&self, info: DetachedWindowInfo) {
+        let mut registry = self.lock();
+        registry.creating.remove(&info.tab_id);
+        registry.windows.insert(info.tab_id.clone(), info);
+    }
+
+    fn abort_create(&self, tab_id: &str) {
+        self.lock().creating.remove(tab_id);
+    }
+
+    /// Record a window that already exists outside the registry (for example
+    /// after the registry was lost) and refresh its title when one is given.
+    fn remember_existing(&self, tab_id: &str, label: &str, title: Option<String>) {
+        let mut registry = self.lock();
+        registry.creating.remove(tab_id);
+        match registry.windows.get_mut(tab_id) {
+            Some(info) => {
+                if title.is_some() {
+                    info.title = title;
+                }
+            }
+            None => {
+                registry.windows.insert(
+                    tab_id.to_string(),
+                    DetachedWindowInfo {
+                        tab_id: tab_id.to_string(),
+                        label: label.to_string(),
+                        title,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Remove a tab's entry. Idempotent: returns the removed entry, if any.
+    fn remove(&self, tab_id: &str) -> Option<DetachedWindowInfo> {
+        let mut registry = self.lock();
+        registry.creating.remove(tab_id);
+        registry.windows.remove(tab_id)
+    }
+
+    fn list(&self) -> Vec<DetachedWindowInfo> {
+        self.lock().windows.values().cloned().collect()
+    }
+}
+
+fn focus_window(window: &WebviewWindow) -> Result<(), String> {
+    let mut failures = Vec::new();
+    if let Err(error) = window.show() {
+        failures.push(format!("show: {error}"));
+    }
+    if let Err(error) = window.unminimize() {
+        failures.push(format!("unminimize: {error}"));
+    }
+    if let Err(error) = window.set_focus() {
+        failures.push(format!("set_focus: {error}"));
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("failed to focus detached window: {}", failures.join(", ")))
+    }
+}
+
+/// Run a task on the Tauri main thread and wait for its result. The runtime
+/// executes the task inline when called from the main thread and queues it
+/// otherwise, so this is safe from both command threads and event callbacks.
+fn run_on_main_thread_blocking<T, F>(app: &AppHandle, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(task());
+    })
+    .map_err(|error| format!("failed to schedule window task: {error}"))?;
+    rx.recv().map_err(|error| format!("window task failed: {error}"))
+}
+
+/// Create the detached window for `tab_id`, or focus it when it already exists.
+#[tauri::command]
+pub fn open_tab_window(
+    app: AppHandle,
+    state: State<'_, DetachedTabWindows>,
+    tab_id: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let label = label_for_tab(&tab_id)?;
+
+    if let Some(window) = app.get_webview_window(&label) {
+        state.remember_existing(&tab_id, &label, title.clone());
+        if let Some(title) = title.as_deref() {
+            if let Err(error) = window.set_title(title) {
+                tracing::warn!(%error, tab_id, "failed to update detached window title");
+            }
+        }
+        return focus_window(&window);
+    }
+
+    if !state.begin_create(&tab_id) {
+        tracing::info!(tab_id, "detached window creation already in progress");
+        return Ok(());
+    }
+
+    let window_title = title.clone().unwrap_or_else(|| DEFAULT_TITLE.to_string());
+    let url = PathBuf::from(format!("detached.html?tabId={tab_id}"));
+    let app_for_create = app.clone();
+    let label_for_create = label.clone();
+    let tab_id_for_log = tab_id.clone();
+
+    let created = run_on_main_thread_blocking(&app, move || {
+        if let Some(window) = app_for_create.get_webview_window(&label_for_create) {
+            return Ok(window);
+        }
+        WebviewWindowBuilder::new(&app_for_create, &label_for_create, WebviewUrl::App(url))
+            .title(window_title)
+            .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
+            .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+            .decorations(true)
+            // Equivalent of `dragDropEnabled: false`: keep HTML5 drag and drop.
+            .disable_drag_drop_handler()
+            .build()
+            .map_err(|error| format!("failed to create detached window: {error}"))
+    });
+
+    let window = match created {
+        Ok(Ok(window)) => window,
+        Ok(Err(error)) | Err(error) => {
+            state.abort_create(&tab_id);
+            tracing::error!(tab_id = %tab_id_for_log, %error, "detached window creation failed");
+            return Err(error);
+        }
+    };
+
+    state.finish_create(DetachedWindowInfo { tab_id, label, title });
+    tracing::info!(tab_id = %tab_id_for_log, "detached window opened");
+    focus_window(&window)
+}
+
+#[tauri::command]
+pub fn focus_tab_window(app: AppHandle, tab_id: String) -> Result<(), String> {
+    let label = label_for_tab(&tab_id)?;
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("detached window for tab {tab_id} not found"))?;
+    focus_window(&window)
+}
+
+#[tauri::command]
+pub fn list_detached_tab_windows(
+    state: State<'_, DetachedTabWindows>,
+) -> Result<Vec<DetachedWindowInfo>, String> {
+    Ok(state.list())
+}
+
+/// Programmatically recall a detached window. Closing is idempotent: when the
+/// window is already gone the registry entry is dropped and the main window is
+/// notified, matching the normal close path.
+#[tauri::command]
+pub fn close_tab_window(
+    app: AppHandle,
+    state: State<'_, DetachedTabWindows>,
+    tab_id: String,
+) -> Result<(), String> {
+    let label = label_for_tab(&tab_id)?;
+    if let Some(window) = app.get_webview_window(&label) {
+        return window.close().map_err(|error| format!("failed to close detached window: {error}"));
+    }
+    if state.remove(&tab_id).is_some() {
+        notify_main_window_closed(&app, &tab_id);
+    }
+    Ok(())
+}
+
+fn notify_main_window_closed(app: &AppHandle, tab_id: &str) {
+    if let Err(error) = app.emit_to("main", CLOSED_EVENT, serde_json::json!({ "tab_id": tab_id })) {
+        tracing::warn!(%error, tab_id, "failed to notify main window of detached close");
+    }
+}
+
+/// Lifecycle hook for `tab-*` windows.
+///
+/// Returns true when the event belonged to a detached window. Close requests
+/// are allowed to proceed; the registry entry is removed and the main window is
+/// notified. `Destroyed` runs the same idempotent cleanup so crashed or
+/// programmatically destroyed windows do not leak registry entries.
+pub fn handle_detached_window_event(window: &tauri::Window, event: &tauri::WindowEvent) -> bool {
+    let Some(tab_id) = tab_id_from_label(window.label()) else {
+        return false;
+    };
+    match event {
+        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+            let app = window.app_handle();
+            if app.state::<DetachedTabWindows>().remove(&tab_id).is_some() {
+                notify_main_window_closed(app, &tab_id);
+            }
+        }
+        _ => {}
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(tab_id: &str, title: Option<&str>) -> DetachedWindowInfo {
+        DetachedWindowInfo {
+            tab_id: tab_id.to_string(),
+            label: format!("tab-{tab_id}"),
+            title: title.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn labels_round_trip_and_accept_uuid_shape() {
+        let id = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+        assert_eq!(label_for_tab(id).unwrap(), format!("tab-{id}"));
+        assert_eq!(tab_id_from_label(&format!("tab-{id}")).as_deref(), Some(id));
+        assert_eq!(label_for_tab("pane_1-A").unwrap(), "tab-pane_1-A");
+        assert_eq!(tab_id_from_label("tab-pane_1-A").as_deref(), Some("pane_1-A"));
+    }
+
+    #[test]
+    fn invalid_tab_ids_are_rejected() {
+        for id in ["", "has space", "a/b", "a.b", "a:b", "café", "a?b", "a#b"] {
+            assert!(!is_valid_tab_id(id), "{id:?} should be rejected");
+            assert!(label_for_tab(id).is_err(), "{id:?} should be rejected");
+        }
+        assert!(label_for_tab("").is_err());
+    }
+
+    #[test]
+    fn non_detached_labels_are_ignored() {
+        assert_eq!(tab_id_from_label("main"), None);
+        assert_eq!(tab_id_from_label("tab-"), None);
+        assert_eq!(tab_id_from_label("tab-a b"), None);
+        assert_eq!(tab_id_from_label("other-abc"), None);
+        assert_eq!(tab_id_from_label("tab/tab-id"), None);
+    }
+
+    #[test]
+    fn duplicate_open_is_deduplicated_until_the_window_is_removed() {
+        let registry = DetachedTabWindows::default();
+        assert!(registry.begin_create("one"));
+        assert!(!registry.begin_create("one"), "in-flight creation must be deduplicated");
+        registry.finish_create(info("one", Some("One")));
+        assert!(!registry.begin_create("one"), "existing window must be deduplicated");
+        assert_eq!(registry.list(), vec![info("one", Some("One"))]);
+
+        registry.remove("one");
+        assert!(registry.begin_create("one"), "closed tab can be reopened");
+        registry.abort_create("one");
+    }
+
+    #[test]
+    fn aborting_a_create_allows_retry() {
+        let registry = DetachedTabWindows::default();
+        assert!(registry.begin_create("retry"));
+        registry.abort_create("retry");
+        assert!(registry.begin_create("retry"));
+    }
+
+    #[test]
+    fn list_is_sorted_and_remove_is_idempotent() {
+        let registry = DetachedTabWindows::default();
+        registry.finish_create(info("b", None));
+        registry.finish_create(info("a", Some("Alpha")));
+
+        assert_eq!(registry.list(), vec![info("a", Some("Alpha")), info("b", None)]);
+        assert_eq!(registry.remove("a"), Some(info("a", Some("Alpha"))));
+        assert_eq!(registry.remove("a"), None, "close cleanup must be idempotent");
+        assert_eq!(registry.list(), vec![info("b", None)]);
+    }
+
+    #[test]
+    fn remembering_an_existing_window_keeps_the_old_title_when_none_is_given() {
+        let registry = DetachedTabWindows::default();
+        registry.remember_existing("t", "tab-t", Some("Terminal".into()));
+        registry.remember_existing("t", "tab-t", None);
+        assert_eq!(registry.list(), vec![info("t", Some("Terminal"))]);
+        registry.remember_existing("t", "tab-t", Some("Renamed".into()));
+        assert_eq!(registry.list(), vec![info("t", Some("Renamed"))]);
+    }
+}

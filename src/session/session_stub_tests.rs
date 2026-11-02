@@ -502,3 +502,49 @@ fn detected_bell_passes_through_to_bell_pipeline_when_window_elapsed_content_dif
 
     assert_eq!(drain_message_count(&mut rx), 4);
 }
+
+#[test]
+fn release_tauri_client_ends_the_forwarder_thread_and_reports_no_clients() {
+    let session = stub_session();
+    let (client_id, mut rx) = session.add_client();
+    *session.tauri_client_id.lock().unwrap() = Some(client_id);
+
+    // Stand-in for spawn_tauri_output_forwarder: it blocks on the client
+    // channel until the endpoint is removed.
+    let (done_tx, done_rx) = std_mpsc::channel();
+    let forwarder = std::thread::spawn(move || {
+        while rx.blocking_recv().is_some() {}
+        let _ = done_tx.send(());
+    });
+
+    assert!(session.release_tauri_client(), "no clients should remain");
+    assert!(session.tauri_client_id.lock().unwrap().is_none());
+    done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("removing the client must terminate the forwarder thread");
+    forwarder.join().unwrap();
+    assert!(!session.has_clients());
+    assert!(matches!(*session.status.lock().unwrap(), SessionStatus::Connected));
+}
+
+#[test]
+fn release_tauri_client_keeps_websocket_clients_attached() {
+    let session = stub_session();
+    let (tauri_id, mut tauri_rx) = session.add_client();
+    let (ws_id, _ws_rx) = session.add_client();
+    *session.tauri_client_id.lock().unwrap() = Some(tauri_id);
+
+    assert!(!session.release_tauri_client(), "a WebSocket client remains");
+    assert!(session.tauri_client_id.lock().unwrap().is_none());
+    assert!(tauri_rx.blocking_recv().is_none());
+    assert!(session.has_clients());
+    assert_eq!(session.clients.lock().unwrap().len(), 1);
+    assert_eq!(session.clients.lock().unwrap()[0].id, ws_id);
+}
+
+#[test]
+fn release_tauri_client_is_idempotent_without_a_tauri_client() {
+    let session = stub_session();
+    assert!(session.release_tauri_client());
+    assert!(session.release_tauri_client());
+}

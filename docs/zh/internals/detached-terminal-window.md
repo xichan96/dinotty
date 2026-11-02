@@ -153,7 +153,7 @@ struct DetachedTabWindows {
 创建时：
 
 - 使用 `WebviewWindowBuilder`（可参考 `src-tauri/src/window_actions.rs:120-172` 的主窗口创建模式）；
-- URL：`WebviewUrl::App("index.html?detachedTab=<tab_id>".into())`，dev/prod 都可用；
+- URL：`WebviewUrl::App("detached.html?tabId=<tab_id>".into())`，dev/prod 都可用；
 - 原生标题栏、正常最小尺寸、不可用 `dragDropEnabled`（保持 false，避免破坏现有 HTML5 拖拽，`src-tauri/tauri.conf.json:22`）；
 - 同一 tab 已有窗口时只聚焦，不重复创建；
 - 窗口关闭时从 registry 移除，并向主窗口发 `tab-window-closed`。
@@ -244,7 +244,7 @@ frontend/src/DetachedApp.vue
 
 ### 6.2 单 tab 模式
 
-- 启动时读取 `?detachedTab=<id>`；
+- 启动时读取 `?tabId=<id>`；
 - 只渲染该 tab 的 `SplitContainer`；
 - 不渲染 TabBar、StatusBar、NotificationPanel、CommandPalette、SettingsPanel、Mission Control、PluginFloatWindowHost、移动端键盘；
 - 不写 `dinotty_tabs` 持久化（`useTabPersistence.ts:22-48` 的 key 是主窗口共用的）；
@@ -312,7 +312,7 @@ WebSocket 路径本来就是多客户端设计：
 2. 主窗口调用 `open_tab_window(tab_id, title)`。
 3. Rust 创建或聚焦 `tab-<id>` 窗口。
 4. 主窗口把 tab 加入 `detachedTabIds`，并从渲染树卸载对应 `TerminalPane`。
-5. 游离窗口加载 `index.html?detachedTab=<id>`，等待 apiBase/auth 就绪。
+5. 游离窗口加载 `detached.html?tabId=<id>`，等待 apiBase/auth 就绪。
 6. 游离窗口通过 REST/sync 获取 tab，挂载终端，使用 WebSocket attach。
 7. 服务端执行 resize + snapshot 回放，终端内容恢复。
 8. 主窗口本地选择相邻 tab 作为显示项；**不调用 `apiActivatePane`**。

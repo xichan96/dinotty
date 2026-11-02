@@ -34,7 +34,7 @@
           type="button"
           :title="t('filePreview.refresh')"
           :aria-label="t('filePreview.refresh')"
-          @click="reloadAll"
+          @click="onHeaderRefresh"
         >
           <RotateCw :size="12" />
         </button>
@@ -104,88 +104,33 @@
           }"
           :style="layout.treeWrapStyle.value"
         >
-          <div class="file-workspace-tree-head">
-            <span class="file-workspace-tree-title">{{
-              searchOpen ? t('workspaceSearch.title') : t('filePreview.explorer')
-            }}</span>
-            <div v-if="!searchOpen" class="file-workspace-tree-actions">
-              <button
-                type="button"
-                data-testid="tree-head-search"
-                :title="t('workspaceSearch.open')"
-                :aria-label="t('workspaceSearch.open')"
-                @click="openSearch(true)"
-              >
-                <Search :size="14" />
-              </button>
-              <button
-                type="button"
-                data-testid="tree-head-new-file"
-                :title="t('filePreview.newFile')"
-                :aria-label="t('filePreview.newFile')"
-                @click="startNewFile"
-              >
-                <FilePlus :size="14" />
-              </button>
-              <button
-                type="button"
-                data-testid="tree-head-new-folder"
-                :title="t('filePreview.newFolder')"
-                :aria-label="t('filePreview.newFolder')"
-                @click="startNewFolder"
-              >
-                <FolderPlus :size="14" />
-              </button>
-              <button
-                type="button"
-                data-testid="tree-head-refresh"
-                :class="{ spinning: refreshBusy }"
-                :title="t('filePreview.refresh')"
-                :aria-label="t('filePreview.refresh')"
-                @click="refreshTree"
-              >
-                <RotateCw :size="14" />
-              </button>
-              <button
-                type="button"
-                data-testid="tree-head-collapse-all"
-                :title="t('filePreview.collapseAll')"
-                :aria-label="t('filePreview.collapseAll')"
-                @click="collapseAll"
-              >
-                <ChevronsDownUp :size="14" />
-              </button>
-            </div>
-            <button
-              v-if="searchOpen"
-              type="button"
-              class="file-workspace-tree-close"
-              data-testid="tree-head-search-close"
-              :title="t('workspaceSearch.close')"
-              :aria-label="t('workspaceSearch.close')"
-              @click="closeSearch"
-            >
-              <X :size="14" />
-            </button>
-            <button
-              v-if="layout.narrow.value"
-              type="button"
-              class="file-workspace-tree-close"
-              :title="t('filePreview.closeTree')"
-              :aria-label="t('filePreview.closeTree')"
-              @click="layout.closeDrawer"
-            >
-              <X :size="14" />
-            </button>
-          </div>
-          <div v-if="previewErr && !searchOpen" class="file-workspace-error" role="alert">
+          <FileWorkspaceLeftHeader
+            :mode="leftHeaderMode"
+            :change-count="changeCount"
+            :refresh-busy="leftHeaderMode === 'changes' ? changesLoading : refreshBusy"
+            :narrow="layout.narrow.value"
+            @switch-files="switchToFiles"
+            @switch-changes="switchToChanges"
+            @open-search="openSearch(true)"
+            @new-file="startNewFile"
+            @new-folder="startNewFolder"
+            @refresh="onHeaderRefresh"
+            @collapse-all="collapseAll"
+            @close-search="closeSearch"
+            @close-drawer="layout.closeDrawer"
+          />
+          <div
+            v-if="previewErr && !searchOpen && leftViewMode === 'tree'"
+            class="file-workspace-error"
+            role="alert"
+          >
             <span class="file-workspace-error-text">{{ previewErrText }}</span>
             <button type="button" class="file-workspace-error-retry" @click="retryPreviewErr">
               {{ t('filePreview.retry') }}
             </button>
           </div>
           <div
-            v-show="!searchOpen"
+            v-show="!searchOpen && leftViewMode === 'tree'"
             ref="treeHostRef"
             class="file-workspace-tree tree-host"
             tabindex="0"
@@ -233,6 +178,21 @@
             :is-ssh="isSsh"
             @open-file="onSearchOpenFile"
             @close="closeSearch"
+          />
+          <ChangesPanel
+            v-if="leftViewMode === 'changes'"
+            :state="changesState"
+            :data="changesData"
+            :groups="changeGroups"
+            :selected-path="selectedChangePath"
+            :error="changesError"
+            :root-hint="rootHint"
+            :staged-count="stagedCount"
+            @open="openChange"
+            @retry="refresh"
+            @back="switchToFiles"
+            @move="moveSelection"
+            @open-selected="openSelected"
           />
         </div>
         <div
@@ -328,26 +288,26 @@ import {
 import { useFileWorkspaceTree } from '../../composables/useFileWorkspaceTree'
 import { useFileWorkspaceTabs } from '../../composables/useFileWorkspaceTabs'
 import { useFileWorkspaceSearch } from '../../composables/useFileWorkspaceSearch'
+import { useChangesView } from '../../composables/useChangesView'
+import { bumpDiffEpoch } from '../../composables/useDiffView'
 import { takePendingFileReveal } from '../../composables/pendingFileReveal'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
 import FileWorkspaceOverlays from '../workspace/FileWorkspaceOverlays.vue'
 import FileSearchPanel from '../workspace/FileSearchPanel.vue'
+import ChangesPanel from '../workspace/ChangesPanel.vue'
+import FileWorkspaceLeftHeader from '../workspace/FileWorkspaceLeftHeader.vue'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
 import {
   ArrowLeft,
   ArrowRight,
-  ChevronsDownUp,
-  FilePlus,
-  FolderPlus,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
   RotateCw,
-  Search,
   X,
 } from 'lucide-vue-next'
 
@@ -489,7 +449,13 @@ const tabs = useFileWorkspaceTabs({
   closeDrawer: layout.closeDrawer,
   isNarrow: () => layout.narrow.value,
   t,
-  onGitChange: () => void tree.fetchGitStatus(),
+  // Watcher bursts already debounce here; the changes list coalesces again on
+  // its own schedule, and open diff viewers re-read the epoch.
+  onGitChange: () => {
+    void tree.fetchGitStatus()
+    changes.scheduleRefresh()
+    bumpDiffEpoch()
+  },
 })
 
 const {
@@ -628,6 +594,28 @@ const {
   selectFile: tabs.selectFile,
   scrollSelectedIntoView: tree.scrollSelectedIntoView,
 })
+
+const changes = useChangesView({
+  paneId: () => apiPaneId.value,
+  editorSplit,
+  cwdLabel,
+  t,
+  openFromChanges: tabs.openFromChanges,
+  searchOpen,
+  closeSearch,
+  gitStatusMap,
+  reloadTree: refreshTree,
+})
+// Search (including ⇧⌘F) is a Files sub-view; the composable keeps the modes
+// exclusive. These names are what the template binds to.
+// prettier-ignore
+const {
+  leftView: leftViewMode, headerMode: leftHeaderMode, changeCount, groups: changeGroups,
+  selectedPath: selectedChangePath, rootHint, stagedCount, refresh, openChange,
+  moveSelection, openSelected, switchToFiles, switchToChanges, onHeaderRefresh,
+  restore: restoreLeftView, state: changesState, data: changesData, error: changesError,
+  loading: changesLoading,
+} = changes
 
 watch(nav.canGoBack, (v) => emit('update:canGoBack', v), { immediate: true })
 watch(nav.canGoForward, (v) => emit('update:canGoForward', v), { immediate: true })
@@ -922,10 +910,18 @@ function onCloseContextScroll() {
 }
 
 // --- Watchers ---
+/** Persist the pane state together with the left-list mode (the boot capture
+ *  belongs to the shared seam and does not know about the changes view). */
+function saveStateFor(paneId: string) {
+  const state = captureState()
+  state.leftView = leftViewMode.value
+  saveFileWorkspaceState(paneId, state)
+}
+
 watch(
   () => props.paneId,
   (_newId, oldId) => {
-    if (oldId) saveFileWorkspaceState(oldId, captureState())
+    if (oldId) saveStateFor(oldId)
   },
   { flush: 'sync' }
 )
@@ -935,6 +931,8 @@ watch(
   async () => {
     if (!props.visible || !props.paneId) return
     await boot()
+    // Boot restores editor/tree state but deliberately ignores leftView.
+    restoreLeftView()
     // A freshly inserted files pane only carries its path; consume the
     // line/column stashed by the terminal link click after boot opened it.
     const pending = takePendingFileReveal(props.paneId)
@@ -965,7 +963,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (props.paneId) saveFileWorkspaceState(props.paneId, captureState())
+  if (props.paneId) saveStateFor(props.paneId)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onWorkspaceSearchKeydown)
   if (!props.isWindow) {

@@ -1,0 +1,225 @@
+/* Left-pane "Changes" list. Sits inside .file-workspace-tree-wrap, which owns
+   the scrolling and the sticky header, so this panel only lays out content. */
+.changes-panel {
+  outline: none;
+  color: var(--fg, #ccc);
+  font-size: 12px;
+}
+
+.changes-panel:focus-visible {
+  outline: 1px solid var(--accent, #89b4fa);
+  outline-offset: -1px;
+}
+
+.changes-root-hint {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border, #333);
+  color: var(--fg-muted, #888);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.changes-summary {
+  position: sticky;
+  top: var(--tree-head-h, 30px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--bg, #1a1a1a);
+  border-bottom: 1px solid var(--border, #333);
+  color: var(--fg-muted, #999);
+  font-size: 11px;
+}
+
+.changes-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-staged-count {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--badge-bg, rgba(255, 255, 255, 0.1));
+  color: var(--fg-muted, #aaa);
+}
+
+.changes-error-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: rgba(244, 135, 113, 0.12);
+  border-bottom: 1px solid rgba(244, 135, 113, 0.35);
+  color: #f48771;
+  font-size: 11px;
+}
+
+.changes-error-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.changes-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px;
+  color: var(--fg-muted, #888);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.changes-state-error {
+  color: #f48771;
+}
+
+.changes-link-btn {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent, #89b4fa);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.changes-link-btn:hover {
+  color: #fff;
+}
+
+.changes-group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted, #8a8a92);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-group-head:hover {
+  background: var(--tree-row-hover, var(--tab-hover-bg, #333));
+  color: var(--fg, #ccc);
+}
+
+.changes-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-group-count {
+  flex-shrink: 0;
+  color: var(--fg-muted, #777);
+  font-weight: 400;
+}
+
+.changes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: var(--tree-row-height, 24px);
+  padding: 0 8px 0 18px;
+  border: 0;
+  background: transparent;
+  color: var(--fg, #ccc);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-row:hover {
+  background: var(--tree-row-hover, var(--tab-hover-bg, #333));
+}
+
+.changes-row.selected {
+  background: var(--list-selection-bg, var(--accent, #89b4fa));
+  color: var(--list-selection-fg, #fff);
+}
+
+.changes-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-status {
+  flex-shrink: 0;
+  width: 13px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-modified,
+.status-typechange {
+  color: #e2c08d;
+}
+
+.status-added,
+.status-untracked {
+  color: #7ec699;
+}
+
+.status-deleted {
+  color: #f48771;
+}
+
+.status-renamed {
+  color: #89b4fa;
+}
+
+.status-conflicted {
+  color: #f38ba8;
+}
+
+.changes-row.selected .changes-status {
+  color: inherit;
+}
+
+.changes-counts {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-additions {
+  color: #7ec699;
+}
+
+.changes-deletions {
+  color: #f48771;
+}
+
+.changes-row.selected .changes-additions,
+.changes-row.selected .changes-deletions {
+  color: inherit;
+}
+
+.changes-staged-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #89b4fa);
+}

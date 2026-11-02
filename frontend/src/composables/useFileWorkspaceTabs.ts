@@ -237,6 +237,24 @@ export function useFileWorkspaceTabs(opts: UseFileWorkspaceTabsOptions) {
     opts.recordRecent(abs, rel.split('/').pop() || rel)
   }
 
+  /**
+   * Open a file from the Changes list.
+   *
+   * Unlike `selectFile` this is a transient peek: it uses a preview tab and
+   * deliberately does not push navigation history or record a recent file, so
+   * arrowing through rows does not flood either stack. The caller attaches a
+   * diff target to the active leaf afterwards.
+   */
+  function openFromChanges(rel: string): void {
+    if (opts.isNarrow()) opts.closeDrawer()
+    opts.selectedRel.value = rel
+    opts.selectedIsDir.value = false
+    opts.split.openFileInActivePane(rel, false, { pin: false })
+    const abs = opts.absolutePath(rel)
+    opts.globalSelectedPath.value = abs
+    opts.emitNavigate(abs)
+  }
+
   async function trySelectFile(rel: string, ev?: MouseEvent) {
     // Cmd (macOS) / Ctrl (Windows/Linux) + Click → open in a new split pane.
     if (ev?.metaKey || ev?.ctrlKey) {
@@ -294,6 +312,7 @@ export function useFileWorkspaceTabs(opts: UseFileWorkspaceTabsOptions) {
     onCloseGroup,
     selectDir,
     selectFile,
+    openFromChanges,
     trySelectFile,
     trySelectDir,
     openInNewPane,

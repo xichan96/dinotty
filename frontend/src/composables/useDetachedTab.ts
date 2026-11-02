@@ -1,0 +1,293 @@
+import { computed, nextTick, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import type { DropPosition, TerminalTab } from '../types/pane'
+import { ensureSplitRoot, findFirstLeaf, findLeaf, getAllLeaves } from '../types/pane'
+import { initializePaneMru } from '../types/paneMru'
+import type TerminalPane from '../components/terminal/TerminalPane.vue'
+import { apiCloseTab, apiListTabs, type ListTabsResult } from './useTabApi'
+import { useSyncWebSocket } from './useSyncWebSocket'
+import { useSshAuth } from './useSshAuth'
+import { useSplitPane } from './useSplitPane'
+import { useSessionStore } from '../stores/sessionStore'
+import { setActivePaneId } from './useTerminal'
+import { isTauri, tauriInvoke } from './useTransport'
+import { setTauriWindowTitle } from '../utils/windowTitle'
+import { useI18n } from './useI18n'
+
+type LoadResult = 'ok' | 'not-found'
+
+/**
+ * Single-tab state and actions for a detached terminal window.
+ *
+ * The window is a second view of one tab: it reads the tab over REST once,
+ * mirrors server changes through the sync WebSocket in `detached` mode, and
+ * never touches the main window's `dinotty_tabs` persistence or global active
+ * pane. Layout mutations (split/close/focus/resize) go through the same
+ * `useSplitPane` logic as the main window but sync only — `persist` is a no-op.
+ *
+ * Broadcast mode is not part of the sync protocol today, so a window opened
+ * while the main window has broadcast enabled starts with it off. The title
+ * indicator reflects this window's own state; wiring it through sync belongs to
+ * the split/broadcast follow-up task.
+ */
+export function useDetachedTab(tabId: string) {
+  const session = useSessionStore()
+  const { tabs, activePaneId } = storeToRefs(session)
+  const { t } = useI18n()
+
+  const termRefs: Record<string, InstanceType<typeof TerminalPane>> = {}
+
+  const tab = computed<TerminalTab | null>(() => {
+    const found = tabs.value.find((candidate) => candidate.paneId === tabId)
+    return found && found.type === 'terminal' ? found : null
+  })
+
+  /** Tab title follows the active leaf, like the main window's tab bar. */
+  const tabTitle = computed(() => {
+    const current = tab.value
+    if (!current) return ''
+    return (
+      current.customTitle || findLeaf(current.layout, current.activePaneId)?.title || 'Terminal'
+    )
+  })
+
+  const broadcastActive = computed(() => {
+    const current = tab.value
+    return !!current && current.broadcastMode && getAllLeaves(current.layout).length > 1
+  })
+
+  const allowClose = computed(() => {
+    const current = tab.value
+    return !!current && getAllLeaves(current.layout).length > 1
+  })
+
+  async function closeWindow(): Promise<void> {
+    // The command is the only reliable cross-platform way to close a Tauri
+    // window. In a plain browser (dev/test) it is unavailable — fall back.
+    try {
+      await tauriInvoke('close_tab_window', { tabId })
+    } catch {
+      try {
+        window.close()
+      } catch {
+        // Nothing else to do; the tab is already gone.
+      }
+    }
+  }
+
+  function focusActive(): void {
+    const paneId = tab.value?.activePaneId
+    if (!paneId) return
+    void nextTick(() => termRefs[paneId]?.focus())
+  }
+
+  const syncWs = useSyncWebSocket({
+    termRefs,
+    // The detached window must never write the main window's tab snapshot.
+    persist: () => {},
+    focusActive,
+    // A detached window never creates tabs; new splits happen inside its tab.
+    newTab: async () => {},
+    detached: {
+      tabId,
+      onTabClosed: () => closeWindow(),
+    },
+  })
+
+  const sshAuth = useSshAuth({ syncWs })
+  syncWs.setSshAuthPromptHandler((paneId, prompts) => {
+    const current = tab.value
+    const leaf = current ? findLeaf(current.layout, paneId) : null
+    sshAuth.showPrompt(paneId, prompts, leaf?.title || paneId)
+  })
+
+  const splitPane = useSplitPane({
+    tabs,
+    activePaneId,
+    termRefs,
+    genPaneId,
+    sendSync: (msg) => syncWs.sendSync(msg),
+    sendLayoutSync: syncWs.sendLayoutSync,
+    persist: () => {},
+    showSplitTerminalError: (error) => console.error('[detached] split failed:', error),
+  })
+
+  function genPaneId(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0
+      return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+    })
+  }
+
+  function buildTab(info: ListTabsResult['tabs'][number]): TerminalTab {
+    const layout = ensureSplitRoot(
+      info.layout ?? {
+        type: 'leaf',
+        paneId: info.pane_id,
+        title: 'Terminal',
+        ratio: 1,
+        zoomed: false,
+      }
+    )
+    const leaves = getAllLeaves(layout)
+    const preferredPaneId =
+      info.active_pane_id && findLeaf(layout, info.active_pane_id)
+        ? info.active_pane_id
+        : findFirstLeaf(layout).paneId
+    return {
+      type: 'terminal',
+      paneId: info.tab_id,
+      layout,
+      activePaneId: preferredPaneId,
+      paneMru: initializePaneMru(
+        leaves.map((leaf) => leaf.paneId),
+        preferredPaneId
+      ),
+      broadcastMode: false,
+      broadcastActivity: 0,
+      cwd: info.cwd,
+      connectionId: info.connection_id,
+      workspaceId: info.workspace_id,
+    }
+  }
+
+  /**
+   * Load this window's tab over REST and start syncing.
+   *
+   * Runs after authentication is ready. A missing tab is a terminal state for
+   * the window (`detached.tabNotFound`); network errors are thrown so the shell
+   * can distinguish them from a genuinely missing tab.
+   */
+  async function load(): Promise<LoadResult> {
+    const data = await apiListTabs()
+    const info = data.tabs.find((candidate) => candidate.tab_id === tabId)
+    if (!info) return 'not-found'
+
+    const created = buildTab(info)
+    session.setTabs([created])
+    session.activePaneId = tabId
+    // Input gate: only the tab's focused pane may emit keystrokes.
+    setActivePaneId(created.activePaneId)
+
+    void syncWs.connectSyncWS()
+    return 'ok'
+  }
+
+  // Keep the input gate on whatever pane the layout says is focused. This
+  // covers local focus changes (useSplitPane updates `activePaneId`) and
+  // `layout_updated` from another client.
+  watch(
+    () => tab.value?.activePaneId,
+    (paneId) => {
+      const current = tab.value
+      if (paneId && current && findLeaf(current.layout, paneId)) {
+        setActivePaneId(paneId)
+      }
+    }
+  )
+
+  // Titlebar + native window title follow the tab title, never the raw id.
+  // `immediate` still runs before load; the empty title guard keeps the
+  // bootstrap document title until the tab is known.
+  watch(
+    [tabTitle, broadcastActive],
+    ([name, broadcast]) => {
+      if (!name) return
+      const label = broadcast ? `${name} · ${t('detached.broadcastOn')}` : name
+      document.title = label
+      if (isTauri()) {
+        void setTauriWindowTitle(label, tauriInvoke, () =>
+          (window as any).__TAURI__?.window?.getCurrentWindow?.()
+        )
+      }
+    },
+    { immediate: true }
+  )
+
+  async function closeTerminal(): Promise<void> {
+    try {
+      await apiCloseTab(tabId)
+      // `tab_closed` normally closes the window through `onTabClosed`. If sync
+      // is down there will be no broadcast, so close directly — the tab is
+      // gone either way.
+      if (!syncWs.isConnected()) void closeWindow()
+    } catch (error) {
+      console.error('[detached] failed to close terminal:', error)
+    }
+  }
+
+  function reattachToMain(): void {
+    void closeWindow()
+  }
+
+  function registerTermRef(paneId: string, el: unknown): void {
+    if (!el) return
+    if (typeof (el as any).setOutputListener === 'function') {
+      termRefs[paneId] = el as InstanceType<typeof TerminalPane>
+    }
+  }
+
+  function onTitleChange(paneId: string, title: string): void {
+    const leaf = tab.value ? findLeaf(tab.value.layout, paneId) : null
+    if (leaf) leaf.title = title || 'Terminal'
+  }
+
+  function onShellInfo(paneId: string, shellType: string): void {
+    const leaf = tab.value ? findLeaf(tab.value.layout, paneId) : null
+    if (leaf) leaf.shell_type = shellType
+  }
+
+  function onFocus(paneId: string): void {
+    splitPane.focusPane(paneId)
+  }
+
+  function onClosePane(paneId: string): void {
+    const current = tab.value
+    if (!current) return
+    // Closing the last pane means closing the tab; the pane header only offers
+    // close while a split exists, so this is a defensive no-op.
+    if (getAllLeaves(current.layout).length <= 1) return
+    void splitPane.closePane(paneId)
+  }
+
+  function onDividerDragEnd(): void {
+    const current = tab.value
+    if (!current) return
+    // Resize is global layout state; unlike the main window there is nothing to
+    // persist locally.
+    syncWs.sendLayoutSync(current.paneId, current.layout, current.activePaneId)
+  }
+
+  function onReorder(sourcePaneId: string, targetPaneId: string, position: DropPosition): void {
+    splitPane.reorderPane(sourcePaneId, targetPaneId, position)
+  }
+
+  return {
+    tab,
+    tabTitle,
+    broadcastActive,
+    allowClose,
+    termRefs,
+    load,
+    focusActive,
+    closeTerminal,
+    reattachToMain,
+    registerTermRef,
+    onTitleChange,
+    onShellInfo,
+    onFocus,
+    onClosePane,
+    onDividerDragEnd,
+    onReorder,
+    onInput: splitPane.onTerminalInput,
+    onSplitHorizontal: () => void splitPane.splitPane('horizontal'),
+    onSplitVertical: () => void splitPane.splitPane('vertical'),
+    onNewLocalTerminal: () => void splitPane.splitPane('horizontal', true),
+    onToggleBroadcast: () => splitPane.toggleBroadcast(),
+    sshAuthVisible: sshAuth.sshAuthVisible,
+    sshAuthHost: sshAuth.sshAuthHost,
+    sshAuthPrompts: sshAuth.sshAuthPrompts,
+    onSshAuthSubmit: (responses: string[]) => sshAuth.submit(responses),
+    onSshAuthCancel: () => sshAuth.cancel(),
+  }
+}

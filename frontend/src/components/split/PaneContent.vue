@@ -4,6 +4,7 @@
     :ref="(el: any) => emit('register', leaf.paneId, el)"
     :pane-id="leaf.paneId"
     :ssh-host="leaf.shell_type === 'ssh' ? leaf.title : undefined"
+    :force-web-socket="forceWebSocket"
     @title-change="(title: string) => emit('titleChange', leaf.paneId, title)"
     @shell-info="(shell: string) => emit('shellInfo', leaf.paneId, shell)"
     @input="(data: string) => emit('input', leaf.paneId, data)"
@@ -71,6 +72,8 @@ const props = defineProps<{
   /** Workspace of the owning terminal tab; overrides pane-id derivation for
    *  split panes whose uuid pane ids do not encode a workspace. */
   workspaceId?: string
+  /** Detached windows force WebSocket for every terminal (see TerminalPane). */
+  forceWebSocket?: boolean
 }>()
 
 const emit = defineEmits<{

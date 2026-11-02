@@ -72,6 +72,7 @@
       :is-visible="isVisible"
       :is-focused="leaf.paneId === activePaneId"
       :workspace-id="workspaceId"
+      :force-web-socket="forceWebSocket"
       @register="(id: string, el: any) => emit('register', id, el)"
       @title-change="(id: string, title: string) => emit('titleChange', id, title)"
       @shell-info="(id: string, shell: string) => emit('shellInfo', id, shell)"
@@ -107,6 +108,7 @@
         :parent-direction="split!.direction"
         :tab-id="tabId"
         :workspace-id="workspaceId"
+        :force-web-socket="forceWebSocket"
         :is-visible="isChildVisible(child)"
         :style="getChildStyle(idx)"
         @register="(id: string, el: any) => emit('register', id, el)"
@@ -171,6 +173,8 @@ const props = withDefaults(
     /** Workspace owning this tab, threaded down so split plugin panes can
      *  resolve their workspace without an encoded workspace id. */
     workspaceId?: string
+    /** Detached windows force WebSocket for every terminal (see TerminalPane). */
+    forceWebSocket?: boolean
     isVisible?: boolean
   }>(),
   {

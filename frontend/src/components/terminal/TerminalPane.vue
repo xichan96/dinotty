@@ -119,6 +119,10 @@ import { openUrlInSystemBrowser } from '../../utils/openExternalUrl'
 const props = defineProps<{
   paneId: string
   sshHost?: string // "user@host:port" for SSH tabs
+  /** Detached windows must use WebSocket even when Tauri IPC is available:
+   *  `TauriIpcTransport` is single-owner per pane and would kick the main
+   *  window off a pane both windows render. See `createTransport`. */
+  forceWebSocket?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -1021,7 +1025,7 @@ function onHandleDragEnd(canceled = false) {
 }
 
 onMounted(() => {
-  terminal = new TerminalInstance(props.paneId)
+  terminal = new TerminalInstance(props.paneId, { forceWebSocket: props.forceWebSocket })
   paneAlive = true
   const self = terminal
   if (props.sshHost) self.sshHost = props.sshHost

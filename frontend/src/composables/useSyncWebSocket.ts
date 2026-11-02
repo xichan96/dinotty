@@ -4,6 +4,7 @@ import type { SyncServerMsg, SyncClientMsg, SyncEvent, SyncMarkRead } from '../t
 import type { Tab, TerminalTab } from '../types/pane'
 import {
   getAllLeaves,
+  findFirstLeaf,
   findLeaf,
   migrateTab,
   migratePreviewToLeaf,
@@ -108,13 +109,27 @@ export function sendMarkRead(payload: SyncMarkRead): void {
   sendMarkReadFn?.(payload)
 }
 
+/**
+ * Single-tab detached-window mode.
+ *
+ * A detached window is a second view of exactly one tab. It must not drive
+ * global activation, and it must not adopt the server's whole tab list: the
+ * main window owns that selection. Setting this option makes `useSyncWebSocket`
+ * track only `tabId` and report its disappearance through `onTabClosed`.
+ */
+export interface DetachedSyncOptions {
+  tabId: string
+  onTabClosed?: (tabId: string) => void
+}
+
 export function useSyncWebSocket(opts: {
   termRefs: Record<string, InstanceType<typeof TerminalPane>>
   persist: () => void
   focusActive: () => void
   newTab: () => Promise<void>
+  detached?: DetachedSyncOptions
 }) {
-  const { termRefs, persist, focusActive, newTab } = opts
+  const { termRefs, persist, focusActive, newTab, detached } = opts
   const session = useSessionStore()
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
@@ -269,6 +284,55 @@ export function useSyncWebSocket(opts: {
       }
 
       if (msg.type === 'tab_list') {
+        // Detached window: only this tab exists here. `tab_list` is
+        // authoritative for liveness — its absence means the tab was closed
+        // while we were reconnecting.
+        if (detached) {
+          const info = msg.tabs.find((candidate) => candidate.tab_id === detached.tabId)
+          if (!info) {
+            detached.onTabClosed?.(detached.tabId)
+            return
+          }
+          let current = tabs.value.find(
+            (candidate): candidate is TerminalTab =>
+              candidate.type === 'terminal' && candidate.paneId === detached.tabId
+          )
+          if (!current) {
+            const layout = ensureSplitRoot(
+              info.layout ?? {
+                type: 'leaf',
+                paneId: info.pane_id,
+                title: 'Terminal',
+                ratio: 1,
+                zoomed: false,
+              }
+            )
+            const preferredPaneId =
+              info.active_pane_id && findLeaf(layout, info.active_pane_id)
+                ? info.active_pane_id
+                : findFirstLeaf(layout).paneId
+            current = {
+              type: 'terminal',
+              paneId: info.tab_id,
+              layout,
+              activePaneId: preferredPaneId,
+              paneMru: initializePaneMru(
+                getAllLeaves(layout).map((leaf) => leaf.paneId),
+                preferredPaneId
+              ),
+              broadcastMode: false,
+              broadcastActivity: 0,
+              cwd: info.cwd,
+              connectionId: info.connection_id,
+              workspaceId: info.workspace_id,
+            }
+            tabs.value.push(current)
+          } else if (info.workspace_id && current.workspaceId !== info.workspace_id) {
+            current.workspaceId = info.workspace_id
+          }
+          return
+        }
+
         const localLeafIds = new Set<string>()
         const localTabIds = new Set<string>()
         for (const t of tabs.value) {
@@ -415,6 +479,8 @@ export function useSyncWebSocket(opts: {
         persist()
         nextTick(() => focusActive())
       } else if (msg.type === 'tab_created') {
+        // A detached window only ever renders its own tab.
+        if (detached) return
         const existing = tabs.value.find((t) => {
           if (t.type !== 'terminal') return false
           return t.paneId === msg.tab_id || !!findLeaf(t.layout, msg.pane_id)
@@ -472,6 +538,12 @@ export function useSyncWebSocket(opts: {
           nextTick(() => focusActive())
         }
       } else if (msg.type === 'tab_closed') {
+        // The window exists to show one tab; the tab is gone, so ask the shell
+        // to close the window rather than rotating to a sibling tab.
+        if (detached) {
+          if (msg.pane_id === detached.tabId) detached.onTabClosed?.(detached.tabId)
+          return
+        }
         // Match by tab paneId only. The backend always broadcasts
         // `tab_closed` with the tab's paneId (a.k.a. tab_id), never a leaf
         // paneId. A previous fallback that searched layouts by leaf paneId
@@ -537,6 +609,10 @@ export function useSyncWebSocket(opts: {
           }
         }
       } else if (msg.type === 'tab_activated') {
+        // Global activation is a main-window concern. Mirroring it here would
+        // steal focus between the window's panes (and, on tab_list, point the
+        // local store at a tab this window does not render).
+        if (detached) return
         const cur = tabs.value.find((t) => t.paneId === activePaneId.value)
         if (!cur || cur.type !== 'plugin') {
           const targetTab = tabs.value.find((t) => {
@@ -565,6 +641,7 @@ export function useSyncWebSocket(opts: {
           persist()
         }
       } else if (msg.type === 'tab_reordered') {
+        if (detached) return
         // Apply the server's canonical order to the tabs we have. Tabs not in
         // the list (e.g. local-only plugin tabs) keep their slots; only the
         // listed tabs are rearranged into the given sequence. withSuppressed
@@ -712,6 +789,7 @@ export function useSyncWebSocket(opts: {
           }
         }
       } else if (msg.type === 'workspace_activated') {
+        if (detached) return
         activeWorkspaceId.value = toActiveWorkspaceId(msg.id)
       } else if (msg.type === 'workspace_reordered') {
         for (let i = 0; i < msg.ids.length; i++) {

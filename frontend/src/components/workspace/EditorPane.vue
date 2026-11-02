@@ -39,47 +39,69 @@
       @reload-disk="onDiskChangedClick"
     />
 
-    <FilePreviewContent
-      ref="previewContentRef"
-      :pane-id="paneId"
-      :file-path="activeFilePath ?? undefined"
-      :leaf-id="leaf.id"
-      :preview-loading="previewLoading"
-      :preview-err="previewErr"
-      :selected-rel="activeFilePath"
-      :selected-is-dir="activeIsDir"
-      :meta="meta"
-      :raw-url="rawUrl"
-      :show-save="true"
-      :audio-title="audioTitle"
-      :audio-sub="audioSub"
-      :audio-time-now="audio.audioTimeNow.value"
-      :audio-time-total="audio.audioTimeTotal.value"
-      :audio-seek-value="audio.audioSeekValue.value"
-      :audio-vol-value="audio.audioVolValue.value"
-      :audio-playing="audio.audioPlaying.value"
-      :editor-dirty="editor.editorDirty.value"
-      :editor-text="editor.editorText.value"
-      :can-save-editor="editor.canSaveEditor.value"
-      :md-show-preview="editor.mdShowPreview.value"
-      :html-show-preview="editor.htmlShowPreview.value"
-      :markdown-editor-html="editor.markdownEditorHtml.value"
-      :office-loading="office.officeLoading.value"
-      :office-err="office.officeErr.value"
-      :office-html="office.officeHtml.value"
-      @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
-      @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
-      @audio-ended="audio.onAudioEnded()"
-      @audio-seek-input="(ev: Event) => audio.onAudioSeekInput(audioRef, ev)"
-      @seek-audio="(d: number) => audio.seekAudio(audioRef, d)"
-      @toggle-audio="audio.toggleAudio(audioRef)"
-      @audio-volume-input="(ev: Event) => audio.onAudioVolumeInput(audioRef, ev)"
-      @update:md-show-preview="editor.mdShowPreview.value = $event"
-      @update:html-show-preview="editor.htmlShowPreview.value = $event"
-      @update:editor-text="editor.editorText.value = $event"
-      @save-editor="onSaveEditor"
-      @selection-change="editor.onEditorSelectionChange"
-    />
+    <div class="preview-wrap">
+      <FilePreviewContent
+        ref="previewContentRef"
+        :pane-id="paneId"
+        :file-path="activeFilePath ?? undefined"
+        :leaf-id="leaf.id"
+        :preview-loading="previewLoading"
+        :preview-err="previewErr"
+        :selected-rel="activeFilePath"
+        :selected-is-dir="activeIsDir"
+        :meta="meta"
+        :raw-url="rawUrl"
+        :show-save="true"
+        :audio-title="audioTitle"
+        :audio-sub="audioSub"
+        :audio-time-now="audio.audioTimeNow.value"
+        :audio-time-total="audio.audioTimeTotal.value"
+        :audio-seek-value="audio.audioSeekValue.value"
+        :audio-vol-value="audio.audioVolValue.value"
+        :audio-playing="audio.audioPlaying.value"
+        :editor-dirty="editor.editorDirty.value"
+        :editor-text="editor.editorText.value"
+        :can-save-editor="editor.canSaveEditor.value"
+        :md-show-preview="editor.mdShowPreview.value"
+        :html-show-preview="editor.htmlShowPreview.value"
+        :markdown-editor-html="editor.markdownEditorHtml.value"
+        :office-loading="office.officeLoading.value"
+        :office-err="office.officeErr.value"
+        :office-html="office.officeHtml.value"
+        :outline-open="outlineOpen"
+        :outline-available="outlineAvailable"
+        :outline-panel-id="outlinePanelId"
+        @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
+        @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
+        @audio-ended="audio.onAudioEnded()"
+        @audio-seek-input="(ev: Event) => audio.onAudioSeekInput(audioRef, ev)"
+        @seek-audio="(d: number) => audio.seekAudio(audioRef, d)"
+        @toggle-audio="audio.toggleAudio(audioRef)"
+        @audio-volume-input="(ev: Event) => audio.onAudioVolumeInput(audioRef, ev)"
+        @update:md-show-preview="editor.mdShowPreview.value = $event"
+        @update:html-show-preview="editor.htmlShowPreview.value = $event"
+        @update:editor-text="editor.editorText.value = $event"
+        @save-editor="onSaveEditor"
+        @toggle-outline="toggleOutline"
+        @selection-change="editor.onEditorSelectionChange"
+      />
+      <OutlinePanel
+        v-if="outlineAvailable"
+        :open="outlineOpen"
+        :mobile="outlineMobile"
+        :source="outlineSource"
+        :mode="outlinePanelMode"
+        :active-id="outlineActiveId"
+        :file-path="activeFilePath ?? ''"
+        :language-label="outlineLanguageLabel"
+        :panel-id="outlinePanelId"
+        @open="outlineOpen = true"
+        @close="outlineOpen = false"
+        @reveal="onOutlineReveal"
+        @retry="rescanOutline"
+        @update:active-id="outlineActiveId = $event"
+      />
+    </div>
   </div>
 </template>
 
@@ -117,8 +139,13 @@ import {
 import type { EditorDropPosition } from '../../composables/useEditorSplit'
 import type { TabMenuCommand } from './EditorTabContextMenu.vue'
 import FilePreviewContent from './FilePreviewContent.vue'
+import OutlinePanel from './OutlinePanel.vue'
 import EditorTabBar from './EditorTabBar.vue'
 import EditorBreadcrumbs from './EditorBreadcrumbs.vue'
+import { useFileOutline } from '../../composables/useFileOutline'
+import { flattenOutline, outlineAtLine } from '../../utils/outlineTree'
+import type { OutlineItem, OutlineMode } from '../../types/outline'
+import type * as monaco from 'monaco-editor'
 
 export interface EditorRevealTarget {
   path: string
@@ -217,6 +244,227 @@ const rawUrl = computed(() => {
   return apiUrl(`/api/workspace/raw?${q}`)
 })
 
+// --- Outline panel ---
+// The toggle and active row are per pane; the width is global and owned by
+// OutlinePanel (localStorage). Scroll-spy drives `outlineActiveId` from the
+// rendered Markdown preview or from Monaco's visible range.
+const OUTLINE_READING_OFFSET = 88
+const OUTLINE_SUPPRESS_MS = 1200
+const OUTLINE_MOBILE_QUERY = '(max-width: 720px)'
+
+const outlineOpen = ref(false)
+const outlineActiveId = ref('')
+const outlineMobile = ref(false)
+const outlinePanelId = computed(() => `outline-panel-${props.leaf.id}`)
+
+const outlineLanguage = computed(() => meta.value?.language ?? '')
+const { source: outlineSource, rescan: rescanOutline } = useFileOutline({
+  kind: computed(() => meta.value?.kind ?? null),
+  language: outlineLanguage,
+  text: editor.editorText,
+  markdownTokens: editor.markdownOutline,
+  markdownTokensSource: editor.markdownOutlineSource,
+})
+
+const outlineAvailable = computed(
+  () => isEditableTextKind(meta.value?.kind) && outlineSource.value.mode !== 'none'
+)
+const outlinePanelMode = computed<Exclude<OutlineMode, 'none'>>(() =>
+  outlineSource.value.mode === 'none' ? 'code' : outlineSource.value.mode
+)
+
+const outlineLanguageLabel = computed(() => {
+  if (outlineSource.value.mode === 'markdown') return t('outline.typeMarkdown')
+  if (outlineSource.value.mode === 'json') return t('outline.typeJson')
+  const labels: Record<string, string> = {
+    typescript: 'TypeScript',
+    javascript: 'JavaScript',
+    rust: 'Rust',
+    python: 'Python',
+    go: 'Go',
+  }
+  const language = outlineSource.value.language
+  return language ? (labels[language] ?? language) : t('outline.typeCode')
+})
+
+const outlineFlat = computed(() => flattenOutline(outlineSource.value.items))
+const outlineAnchorIds = computed(() => {
+  const ids = new Map<string, string>()
+  for (const entry of outlineFlat.value) {
+    if (entry.item.anchor) ids.set(entry.item.anchor, entry.item.id)
+  }
+  return ids
+})
+
+let outlineMediaQuery: MediaQueryList | null = null
+let outlineSpyToken = 0
+let outlineSpyRaf = 0
+let disposeOutlineSpy: (() => void) | null = null
+let outlineSpySuppressedUntil = 0
+let outlineFlashTimer: ReturnType<typeof setTimeout> | null = null
+let outlineFlashEl: HTMLElement | null = null
+
+function syncOutlineMobile(): void {
+  outlineMobile.value = outlineMediaQuery?.matches ?? false
+}
+
+function toggleOutline(): void {
+  outlineOpen.value = !outlineOpen.value
+}
+
+function stopOutlineSpy(): void {
+  outlineSpyToken++
+  if (outlineSpyRaf) {
+    cancelAnimationFrame(outlineSpyRaf)
+    outlineSpyRaf = 0
+  }
+  if (disposeOutlineSpy) {
+    disposeOutlineSpy()
+    disposeOutlineSpy = null
+  }
+}
+
+function setOutlineActive(id: string): void {
+  if (id && outlineActiveId.value !== id) outlineActiveId.value = id
+}
+
+function computePreviewSpy(scroller: HTMLElement): void {
+  if (!outlineOpen.value || performance.now() < outlineSpySuppressedUntil) return
+  const threshold = scroller.getBoundingClientRect().top + OUTLINE_READING_OFFSET
+  const headings = scroller.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')
+  let active = ''
+  for (let i = 0; i < headings.length; i++) {
+    if (headings[i].getBoundingClientRect().top > threshold) break
+    const mapped = outlineAnchorIds.value.get(headings[i].id)
+    if (mapped) active = mapped
+  }
+  if (!active) {
+    for (let i = 0; i < headings.length; i++) {
+      const mapped = outlineAnchorIds.value.get(headings[i].id)
+      if (mapped) {
+        active = mapped
+        break
+      }
+    }
+  }
+  setOutlineActive(active)
+}
+
+function computeSourceSpy(monacoEditor: monaco.editor.IStandaloneCodeEditor): void {
+  if (!outlineOpen.value || performance.now() < outlineSpySuppressedUntil) return
+  const topLine = monacoEditor.getVisibleRanges()[0]?.startLineNumber ?? 1
+  const item = outlineAtLine(outlineFlat.value, topLine) ?? outlineFlat.value[0]?.item
+  if (item) setOutlineActive(item.id)
+}
+
+function schedulePreviewSpy(scroller: HTMLElement): void {
+  if (outlineSpyRaf) return
+  outlineSpyRaf = requestAnimationFrame(() => {
+    outlineSpyRaf = 0
+    computePreviewSpy(scroller)
+  })
+}
+
+function scheduleSourceSpy(monacoEditor: monaco.editor.IStandaloneCodeEditor): void {
+  if (outlineSpyRaf) return
+  outlineSpyRaf = requestAnimationFrame(() => {
+    outlineSpyRaf = 0
+    computeSourceSpy(monacoEditor)
+  })
+}
+
+function setupOutlineSpy(): void {
+  stopOutlineSpy()
+  if (!outlineOpen.value || !outlineAvailable.value) return
+
+  if (editor.mdShowPreview.value && meta.value?.kind === 'markdown') {
+    const scroller = previewContentRef.value?.mdPreviewEl ?? null
+    if (!scroller) return
+    const onScroll = () => schedulePreviewSpy(scroller)
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    disposeOutlineSpy = () => scroller.removeEventListener('scroll', onScroll)
+    computePreviewSpy(scroller)
+    return
+  }
+
+  const token = outlineSpyToken
+  void whenEditorReady(props.leaf.id).then((monacoEditor) => {
+    if (token !== outlineSpyToken || !outlineOpen.value) return
+    const onScroll = () => scheduleSourceSpy(monacoEditor)
+    const disposable = monacoEditor.onDidScrollChange(onScroll)
+    disposeOutlineSpy = () => disposable.dispose()
+    computeSourceSpy(monacoEditor)
+  })
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
+function flashOutlineTarget(element: HTMLElement): void {
+  if (outlineFlashEl) outlineFlashEl.classList.remove('outline-target-flash')
+  if (outlineFlashTimer) clearTimeout(outlineFlashTimer)
+  void element.offsetWidth
+  element.classList.add('outline-target-flash')
+  outlineFlashEl = element
+  outlineFlashTimer = setTimeout(() => {
+    element.classList.remove('outline-target-flash')
+    if (outlineFlashEl === element) outlineFlashEl = null
+    outlineFlashTimer = null
+  }, 1300)
+}
+
+function onOutlineReveal(item: OutlineItem): void {
+  outlineActiveId.value = item.id
+  outlineSpySuppressedUntil = performance.now() + OUTLINE_SUPPRESS_MS
+
+  if (meta.value?.kind === 'markdown' && editor.mdShowPreview.value) {
+    const scroller = previewContentRef.value?.mdPreviewEl ?? null
+    if (!scroller || !item.anchor) return
+    const target = Array.from(scroller.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')).find(
+      (heading) => heading.id === item.anchor
+    )
+    if (!target) return
+    const top =
+      scroller.scrollTop +
+      target.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top -
+      26
+    scroller.scrollTo({
+      top: Math.max(0, top),
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    })
+    flashOutlineTarget(target)
+    return
+  }
+
+  const path = activeFilePath.value
+  void whenEditorReady(props.leaf.id).then((monacoEditor) => {
+    if (activeFilePath.value !== path) return
+    const model = monacoEditor.getModel()
+    const line = Math.max(1, Math.min(item.line, model?.getLineCount() ?? item.line))
+    monacoEditor.revealLineInCenter(line)
+    monacoEditor.setPosition({ lineNumber: line, column: 1 })
+    monacoEditor.focus()
+  })
+}
+
+watch(
+  [
+    outlineOpen,
+    outlineAvailable,
+    () => editor.mdShowPreview.value,
+    () => meta.value?.kind,
+    () => activeFilePath.value,
+    () => outlineSource.value.items,
+  ],
+  () => void nextTick(setupOutlineSpy),
+  { flush: 'post' }
+)
+
 // --- Active tab buffer swap ---
 const currentTab = ref<{ id: string; path: string } | null>(null)
 
@@ -272,6 +520,10 @@ watch(
   () => [activeTab.value?.id, activeTab.value?.filePath] as const,
   ([tabId, filePath]) => {
     saveLiveToStore()
+    if (tabId !== currentTab.value?.id) {
+      editor.clearMarkdownOutline()
+      outlineActiveId.value = ''
+    }
     if (!tabId || !filePath) {
       currentTab.value = null
       resetLive()
@@ -679,6 +931,11 @@ watch(
 )
 
 onMounted(() => {
+  if (typeof window.matchMedia === 'function') {
+    outlineMediaQuery = window.matchMedia(OUTLINE_MOBILE_QUERY)
+    syncOutlineMobile()
+    outlineMediaQuery.addEventListener?.('change', syncOutlineMobile)
+  }
   whenEditorReady(props.leaf.id).then((monaco) => {
     editorEventDisposers.value.push(
       monaco.onDidChangeModelContent((e) => {
@@ -701,12 +958,47 @@ onMounted(() => {
 onBeforeUnmount(() => {
   saveLiveToStore()
   unregisterEditorPaneState(props.leaf.id)
+  stopOutlineSpy()
+  if (outlineFlashTimer) clearTimeout(outlineFlashTimer)
+  outlineMediaQuery?.removeEventListener?.('change', syncOutlineMobile)
   for (const disposer of editorEventDisposers.value) disposer.dispose()
   editorEventDisposers.value = []
 })
 </script>
 
 <style scoped>
+/* Positioning context for the outline overlay: opening the panel never
+   changes the preview's width. */
+.preview-wrap {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.preview-wrap :deep(.outline-target-flash) {
+  animation: outline-target-flash 1.25s ease-out;
+}
+
+@keyframes outline-target-flash {
+  0% {
+    background: rgba(138, 138, 138, 0.2);
+    box-shadow: 0 0 0 6px rgba(138, 138, 138, 0.08);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-wrap :deep(.outline-target-flash) {
+    animation: none;
+  }
+}
+
 .editor-pane {
   display: flex;
   flex-direction: column;

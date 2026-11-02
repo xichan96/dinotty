@@ -3,6 +3,8 @@ import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
 import { isTauri } from './useTransport'
 import { loadKatex } from './markdownEnhance'
 import { esc, renderMarkdownCode } from '../utils/markdownCode'
+import { outlineFromMarkedTokens } from '../utils/markdownOutline'
+import type { OutlineItem } from '../types/outline'
 
 export { esc }
 
@@ -90,6 +92,10 @@ export function useFileEditor(opts: {
   const mdShowPreview = ref(false)
   const htmlShowPreview = ref(false)
   const markdownEditorHtml = ref('')
+  /** Heading tree from the same lexer pass; `null` until the first scan lands. */
+  const markdownOutline = ref<OutlineItem[] | null>(null)
+  /** Buffer text the heading tree was produced from. */
+  const markdownOutlineSource = ref('')
   const editorSelection = ref<{ text: string; rect: DOMRect | null } | null>(null)
 
   const editorDirty = computed(() => editorText.value !== editorBaseline.value)
@@ -114,17 +120,32 @@ export function useFileEditor(opts: {
     }
     if (!src) {
       markdownEditorHtml.value = ''
+      markdownOutline.value = []
+      markdownOutlineSource.value = ''
       return
     }
     mdDebounceTimer = setTimeout(async () => {
       try {
         const [m, dp] = await Promise.all([getMarked(), getDOMPurify()])
-        let html = m.parse(src, { async: false }) as string
+        // Lex once: the parser consumes the same token list, and the heading
+        // outline keeps the source offsets without a second full parse.
+        const tokens = m.lexer(src)
+        const outline = outlineFromMarkedTokens(tokens)
+        let html = m.parser(tokens) as string
         const filePath = opts.selectedRel.value
         if (filePath) html = rewriteImageSrcs(html, filePath, opts.paneId())
         markdownEditorHtml.value = dp.default.sanitize(html)
+        // The buffer may have changed while the async imports were resolving.
+        if (editorText.value === src) {
+          markdownOutline.value = outline
+          markdownOutlineSource.value = src
+        }
       } catch {
         markdownEditorHtml.value = ''
+        if (editorText.value === src) {
+          markdownOutline.value = []
+          markdownOutlineSource.value = src
+        }
       }
     }, 300)
   })
@@ -150,12 +171,19 @@ export function useFileEditor(opts: {
     return { filePath, content }
   }
 
+  /** Drop the heading tree when switching tabs, before the new lexer pass lands. */
+  function clearMarkdownOutline() {
+    markdownOutline.value = null
+    markdownOutlineSource.value = ''
+  }
+
   function resetEditor() {
     editorText.value = ''
     editorBaseline.value = ''
     mdShowPreview.value = false
     htmlShowPreview.value = false
     editorSelection.value = null
+    clearMarkdownOutline()
   }
 
   function onEditorSelectionChange(payload: { text: string; rect: DOMRect | null }) {
@@ -176,12 +204,15 @@ export function useFileEditor(opts: {
     mdShowPreview,
     htmlShowPreview,
     markdownEditorHtml,
+    markdownOutline,
+    markdownOutlineSource,
     editorSelection,
     editorDirty,
     canSaveEditorContext,
     canSaveEditor,
     saveEditor,
     resetEditor,
+    clearMarkdownOutline,
     onEditorSelectionChange,
     onSelectionDismiss,
   }

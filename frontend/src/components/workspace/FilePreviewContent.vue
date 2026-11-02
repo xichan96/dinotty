@@ -1,5 +1,5 @@
 <template>
-  <div class="file-workspace-preview">
+  <div ref="rootEl" class="file-workspace-preview">
     <div v-if="previewLoading" class="file-workspace-placeholder">
       {{ t('filePreview.loading') }}
     </div>
@@ -98,6 +98,7 @@
             >
               {{ t('filePreview.preview') }}
             </button>
+            <span class="file-editor-spacer"></span>
             <button
               v-if="showSave"
               type="button"
@@ -164,6 +165,30 @@
                 {{ t('filePreview.preview') }}
               </button>
             </template>
+            <span class="file-editor-spacer"></span>
+            <button
+              v-if="outlineAvailable"
+              type="button"
+              class="file-editor-outline"
+              :class="{ active: outlineOpen }"
+              :aria-pressed="outlineOpen ? 'true' : 'false'"
+              :aria-controls="outlinePanelId"
+              :title="t('outline.toggle')"
+              :aria-label="t('outline.toggle')"
+              @click="$emit('toggle-outline')"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M8 6h13M8 12h13M8 18h13" />
+                <path d="M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
+            </button>
             <button
               v-if="showSave"
               type="button"
@@ -227,8 +252,8 @@ const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
 const { t } = useI18n()
 
 const audioRef = ref<HTMLAudioElement | null>(null)
+const rootEl = ref<HTMLElement | null>(null)
 const csvShowTable = ref(true)
-defineExpose({ audioRef })
 
 const props = defineProps<{
   previewLoading: boolean
@@ -263,6 +288,9 @@ const props = defineProps<{
   paneId?: string
   filePath?: string
   leafId?: string
+  outlineOpen?: boolean
+  outlineAvailable?: boolean
+  outlinePanelId?: string
 }>()
 
 const language = computed(() => props.meta?.language || 'plaintext')
@@ -308,6 +336,9 @@ function showCsvTable() {
 // them after v-html has committed (and again whenever the preview toggles on).
 const mdPreviewEl = ref<HTMLElement | null>(null)
 
+// The outline overlay lives in EditorPane, outside this scroll container.
+defineExpose({ audioRef, scrollEl: rootEl, mdPreviewEl })
+
 function renderPreviewEnhancements() {
   const container = mdPreviewEl.value
   if (!container || props.meta?.kind !== 'markdown' || !props.mdShowPreview) return
@@ -345,6 +376,7 @@ defineEmits<{
   'update:htmlShowPreview': [value: boolean]
   saveEditor: []
   'update:editorText': [value: string]
+  'toggle-outline': []
   'selection-change': [payload: { text: string; rect: DOMRect | null }]
 }>()
 </script>
@@ -600,8 +632,44 @@ video.file-media {
   color: var(--fg-bright, #eee);
 }
 
+.file-editor-spacer {
+  flex: 1 1 auto;
+}
+
+.file-editor-outline {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.file-editor-outline:hover {
+  background: var(--bg-hover, #333);
+  color: var(--fg-bright, #eee);
+}
+
+.file-editor-outline.active {
+  background: var(--bg-hover, #333);
+  color: var(--fg-bright, #eee);
+}
+
+.file-editor-outline:focus-visible {
+  outline: 1px solid var(--border-focus, #8a8a8a);
+  outline-offset: -1px;
+}
+
+.file-editor-outline svg {
+  width: 14px;
+  height: 14px;
+}
+
 .file-editor-save {
-  margin-left: auto;
   border: none;
   background: var(--accent, #0e639c);
   color: #fff;

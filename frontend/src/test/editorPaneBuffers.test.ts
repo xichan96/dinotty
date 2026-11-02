@@ -3,11 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, reactive } from 'vue'
 import EditorPane from '../components/workspace/EditorPane.vue'
 import { useEditorSplit } from '../composables/useEditorSplit'
-import {
-  beginTabDrag,
-  endTabDrag,
-  TAB_DRAG_MIME,
-} from '../composables/useEditorTabDrag'
+import { beginTabDrag, endTabDrag, TAB_DRAG_MIME } from '../composables/useEditorTabDrag'
 import {
   createTabBufferStore,
   TAB_BUFFER_STORE_KEY,
@@ -15,11 +11,7 @@ import {
   type TabBufferStore,
 } from '../composables/useTabBufferStore'
 import type { EditorLeafPane } from '../types/editorPane'
-import {
-  createEditorTab,
-  getActiveTab,
-  type EditorTab,
-} from '../types/editorTabs'
+import { createEditorTab, getActiveTab, type EditorTab } from '../types/editorTabs'
 
 class ResizeObserverStub {
   observe() {}
@@ -58,6 +50,7 @@ const PreviewStub = defineComponent({
   props: {
     editorText: { type: String, default: '' },
     previewLoading: { type: Boolean, default: false },
+    htmlShowPreview: { type: Boolean, default: false },
   },
   emits: ['update:editorText', 'saveEditor', 'selection-change'],
   setup(props) {
@@ -66,6 +59,7 @@ const PreviewStub = defineComponent({
         class: 'preview-stub',
         'data-text': props.editorText,
         'data-loading': String(props.previewLoading),
+        'data-html-preview': String(props.htmlShowPreview),
       })
   },
 })
@@ -213,10 +207,10 @@ describe('EditorPane tab buffers', () => {
 
     const fetchMock = vi.fn(
       async () =>
-        new Response(
-          JSON.stringify({ kind: 'text', content: 'fresh b', language: 'typescript' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
+        new Response(JSON.stringify({ kind: 'text', content: 'fresh b', language: 'typescript' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -233,6 +227,30 @@ describe('EditorPane tab buffers', () => {
     expect(store.get(tab.id, 'a.ts')).toBeUndefined()
     expect(store.get(tab.id, 'b.ts')?.loaded).toBe(true)
     expect(store.isDirty(tab)).toBe(false)
+  })
+
+  it('loads HTML content into the editor buffer and opens the rendered view', async () => {
+    const tab = createEditorTab('site/index.html')
+    const leaf = leafWithTabs([tab], tab)
+    const store = createTabBufferStore()
+    const html = '<!doctype html><h1>Hello</h1>'
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ kind: 'html', content: html, language: 'html' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    wrapper = mountPane(leaf, store)
+    await flushPromises()
+    await nextTick()
+
+    // The preview iframe renders editorText; before this was fixed, html kind
+    // fell into the "no text" branch and the preview document was empty.
+    expect(mountedText(wrapper)).toBe(html)
+    expect(wrapper.find('.preview-stub').attributes('data-html-preview')).toBe('true')
   })
 
   it('emits split-tab when a tab from another group is dropped on an editor edge', async () => {

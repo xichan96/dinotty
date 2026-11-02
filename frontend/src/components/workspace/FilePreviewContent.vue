@@ -108,7 +108,13 @@
               {{ t('filePreview.save') }}
             </button>
           </div>
-          <iframe v-if="htmlShowPreview" class="file-pdf" :srcdoc="editorText"></iframe>
+          <iframe
+            v-if="htmlShowPreview"
+            class="file-pdf"
+            :title="t('filePreview.preview')"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            :srcdoc="htmlPreviewSrcdoc"
+          ></iframe>
           <MonacoEditor
             v-else
             :model-value="editorText"
@@ -205,7 +211,10 @@
 <script setup lang="ts">
 import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
+import { apiUrl, getAuthToken } from '../../composables/apiBase'
+import { isTauri } from '../../composables/useTransport'
 import { isCsvPreviewFile } from '../../utils/csvPreview'
+import { rewriteHtmlPreview } from '../../utils/htmlPreview'
 import { renderMermaidBlocks } from '../../composables/mermaidPreview'
 import CsvPreview from './CsvPreview.vue'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
@@ -259,6 +268,20 @@ const csvFilePath = computed(function computeCsvFilePath() {
 const isCsvFile = computed(function computeIsCsvFile() {
   // 步骤1：按当前文件路径判断是否启用 CSV 预览。
   return isCsvPreviewFile(csvFilePath.value)
+})
+
+const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {
+  if (props.meta?.kind !== 'html') return ''
+  // Relative refs in the document resolve against the Dinotty page, not the
+  // HTML file's directory, so point them at the workspace raw endpoint.
+  return rewriteHtmlPreview(props.editorText, csvFilePath.value, function toRawUrl(rel) {
+    const q = new URLSearchParams({ pane_id: props.paneId ?? '', path: rel })
+    if (isTauri()) {
+      const token = getAuthToken()
+      if (token) q.set('token', token)
+    }
+    return apiUrl(`/api/workspace/raw?${q}`)
+  })
 })
 
 watch(csvFilePath, function resetCsvViewForFile() {

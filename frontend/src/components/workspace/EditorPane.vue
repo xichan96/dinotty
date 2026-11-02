@@ -23,8 +23,13 @@
       @pin="(tabId: string) => $emit('set-tab-preview', leaf.id, tabId, false)"
       @split="() => $emit('split', leaf.id)"
       @close-group="() => $emit('close-group', leaf.id)"
-      @reorder="(tabId: string, targetId: string, after: boolean) => $emit('reorder-tab', leaf.id, tabId, targetId, after)"
-      @drop-on-strip="(sourceLeafId: string, tabId: string) => $emit('move-tab', sourceLeafId, tabId, leaf.id)"
+      @reorder="
+        (tabId: string, targetId: string, after: boolean) =>
+          $emit('reorder-tab', leaf.id, tabId, targetId, after)
+      "
+      @drop-on-strip="
+        (sourceLeafId: string, tabId: string) => $emit('move-tab', sourceLeafId, tabId, leaf.id)
+      "
       @command="onTabCommand"
     />
 
@@ -75,7 +80,6 @@
       @save-editor="onSaveEditor"
       @selection-change="editor.onEditorSelectionChange"
     />
-
   </div>
 </template>
 
@@ -86,7 +90,7 @@ import { getApiBase, apiUrl, authFetch, getAuthToken } from '../../composables/a
 import type { DropPosition } from '../../types/pane'
 import { isTauri } from '../../composables/useTransport'
 import { uiConfirm } from '../../composables/useConfirm'
-import { createFileEditor } from '../../composables/useFileEditor'
+import { createFileEditor, isEditableTextKind } from '../../composables/useFileEditor'
 import { useOfficePreview } from '../../composables/useOfficePreview'
 import { useAudioPlayer } from '../../composables/useAudioPlayer'
 import {
@@ -96,7 +100,12 @@ import {
 } from '../../composables/useEditorRegistry'
 import { useCursorGroup, isCursorBroadcasting } from '../../composables/useCursorGroup'
 import { useTabBufferStore, type TabBuffer } from '../../composables/useTabBufferStore'
-import { endTabDrag, getTabDrag, isTabDragEvent, tabDropPosition } from '../../composables/useEditorTabDrag'
+import {
+  endTabDrag,
+  getTabDrag,
+  isTabDragEvent,
+  tabDropPosition,
+} from '../../composables/useEditorTabDrag'
 import type { EditorLeafPane } from '../../types/editorPane'
 import {
   getActiveTab,
@@ -157,13 +166,9 @@ const activeIsDir = computed(() => activeTab.value?.isDir ?? false)
 
 const dropHint = computed(() => {
   if (draggingTab.value) {
-    return dropZone.value === 'center'
-      ? t('editorTabs.dropMoveHere')
-      : t('editorTabs.dropSplit')
+    return dropZone.value === 'center' ? t('editorTabs.dropMoveHere') : t('editorTabs.dropSplit')
   }
-  return dropZone.value === 'center'
-    ? t('filePreview.dropReplace')
-    : t('filePreview.dropSplit')
+  return dropZone.value === 'center' ? t('filePreview.dropReplace') : t('filePreview.dropSplit')
 })
 
 // --- Per-pane file state (the active tab's live buffer) ---
@@ -257,6 +262,11 @@ function resetLive(): void {
   editor.htmlShowPreview.value = false
 }
 
+// Declared before the immediate watcher below: on mount with an unloaded tab
+// it calls loadFile synchronously, and a `let` declared further down would
+// still be in its temporal dead zone.
+let loadToken = 0
+
 watch(
   () => [activeTab.value?.id, activeTab.value?.filePath] as const,
   ([tabId, filePath]) => {
@@ -307,8 +317,6 @@ watch(
 )
 
 // --- Load file when the active tab path changes ---
-let loadToken = 0
-
 async function loadFile(
   filePath: string,
   opts: { reset: boolean; skipIfDirty?: boolean }
@@ -345,7 +353,12 @@ async function loadFile(
     const buffer = liveBuffer()
     if (buffer) buffer.loaded = true
     if (next?.kind === 'office') void office.loadOfficePreview(filePath)
-    if (opts.reset) editor.mdShowPreview.value = next?.kind === 'markdown'
+    if (opts.reset) {
+      // Markdown/HTML open rendered, mirroring how the file type is meant to be
+      // consumed; the source is one click away.
+      editor.mdShowPreview.value = next?.kind === 'markdown'
+      editor.htmlShowPreview.value = next?.kind === 'html'
+    }
     void nextTick(maybeReveal)
   } catch {
     if (isStillActive(token, tabId, filePath)) previewErr.value = 'network'
@@ -356,9 +369,7 @@ async function loadFile(
 
 function isStillActive(token: number, tabId: string | undefined, filePath: string): boolean {
   return (
-    token === loadToken &&
-    activeTab.value?.id === tabId &&
-    activeTab.value?.filePath === filePath
+    token === loadToken && activeTab.value?.id === tabId && activeTab.value?.filePath === filePath
   )
 }
 
@@ -366,10 +377,15 @@ function isStillActive(token: number, tabId: string | undefined, filePath: strin
 function maybeReveal(): void {
   const target = props.reveal
   if (!target || target.path !== activeFilePath.value) return
-  if (meta.value?.kind !== 'text' && meta.value?.kind !== 'markdown') return
+  if (!isEditableTextKind(meta.value?.kind)) return
   if (meta.value?.kind === 'markdown' && editor.mdShowPreview.value) {
     // Reveal needs the source editor; switch back from rendered preview first.
     editor.mdShowPreview.value = false
+    void nextTick(maybeReveal)
+    return
+  }
+  if (meta.value?.kind === 'html' && editor.htmlShowPreview.value) {
+    editor.htmlShowPreview.value = false
     void nextTick(maybeReveal)
     return
   }
@@ -394,7 +410,7 @@ async function reloadFromDisk(): Promise<void> {
   if (!filePath || activeIsDir.value) return
   diskChanged.value = false
   await loadFile(filePath, { reset: false, skipIfDirty: true })
-  if (meta.value?.kind && meta.value.kind !== 'text' && meta.value.kind !== 'markdown') {
+  if (meta.value?.kind && !isEditableTextKind(meta.value.kind)) {
     rawBust.value = Date.now()
   }
 }
@@ -418,7 +434,7 @@ async function onDiskChangedClick(): Promise<void> {
   if (activeTab.value?.id !== tabId || activeFilePath.value !== filePath) return
   diskChanged.value = false
   await loadFile(filePath, { reset: true })
-  if (meta.value?.kind && meta.value.kind !== 'text' && meta.value.kind !== 'markdown') {
+  if (meta.value?.kind && !isEditableTextKind(meta.value.kind)) {
     rawBust.value = Date.now()
   }
 }
@@ -428,16 +444,14 @@ async function onSaveEditor(): Promise<void> {
   const tabId = props.leaf.activeTabId
   const result = await editor.saveEditor()
   if (!result) return
-  const tab = props.leaf.tabs.find(
-    (item) => item.id === tabId && item.filePath === result.filePath
-  )
+  const tab = props.leaf.tabs.find((item) => item.id === tabId && item.filePath === result.filePath)
   if (!tab) return
   const buffer = buffers.get(tab.id, tab.filePath) ?? buffers.ensure(tab.id, tab.filePath)
   const isLive = tab.id === props.leaf.activeTabId && tab.filePath === activeFilePath.value
   const liveText = isLive ? editor.editorText.value : buffer.text
   buffer.text = liveText
   buffer.baseline = result.content
-  if (buffer.meta && (buffer.meta.kind === 'text' || buffer.meta.kind === 'markdown')) {
+  if (buffer.meta && isEditableTextKind(buffer.meta.kind)) {
     buffer.meta = { ...buffer.meta, content: result.content, truncated: false, message: undefined }
   }
   if (liveText === result.content) buffer.diskChanged = false
@@ -446,7 +460,7 @@ async function onSaveEditor(): Promise<void> {
   // Only the tab that is still active may write the live refs. If edits
   // continued during the request the buffer stays dirty against the snapshot.
   editor.editorBaseline.value = result.content
-  if (meta.value && (meta.value.kind === 'text' || meta.value.kind === 'markdown')) {
+  if (meta.value && isEditableTextKind(meta.value.kind)) {
     meta.value = { ...meta.value, content: result.content, truncated: false, message: undefined }
   }
   if (editor.editorText.value === result.content) diskChanged.value = false
@@ -472,19 +486,21 @@ function requestCloseTab(tabId: string): void {
 function closeMany(tabs: EditorTab[], title: string): void {
   if (!tabs.length) return
   const dirty = tabs.filter((tab) => buffers.isDirty(tab)).length
-  const run = () => emit('close-tabs', props.leaf.id, tabs.map((tab) => tab.id))
+  const run = () =>
+    emit(
+      'close-tabs',
+      props.leaf.id,
+      tabs.map((tab) => tab.id)
+    )
   if (!dirty) {
     run()
     return
   }
-  void uiConfirm(
-    t('editorTabs.confirmCloseMany', { count: tabs.length, dirty }),
-    {
-      title,
-      confirmText: t('editorTabs.discardClose'),
-      cancelText: t('filePreview.cancel'),
-    }
-  ).then((ok) => {
+  void uiConfirm(t('editorTabs.confirmCloseMany', { count: tabs.length, dirty }), {
+    title,
+    confirmText: t('editorTabs.discardClose'),
+    cancelText: t('filePreview.cancel'),
+  }).then((ok) => {
     if (ok) run()
   })
 }
@@ -507,7 +523,12 @@ function onTabCommand(tabId: string, command: TabMenuCommand): void {
       break
     case 'close-saved': {
       const saved = savedTabs(props.leaf, (item) => buffers.isDirty(item))
-      if (saved.length) emit('close-tabs', props.leaf.id, saved.map((item) => item.id))
+      if (saved.length)
+        emit(
+          'close-tabs',
+          props.leaf.id,
+          saved.map((item) => item.id)
+        )
       break
     }
     case 'copy-path':
@@ -621,7 +642,7 @@ watch(
   () => [meta.value?.kind, meta.value?.content],
   () => {
     const m = meta.value
-    if (m?.kind === 'text' || m?.kind === 'markdown') {
+    if (isEditableTextKind(m?.kind)) {
       // Restoring a dirty tab keeps its unsaved text; the disk content is
       // already mirrored in `baseline`.
       if (editor.editorText.value !== editor.editorBaseline.value) return
@@ -749,5 +770,4 @@ onBeforeUnmount(() => {
   right: 4px;
   height: 30%;
 }
-
 </style>

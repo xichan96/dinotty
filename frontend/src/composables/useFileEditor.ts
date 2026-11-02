@@ -5,6 +5,12 @@ import { esc, renderMarkdownCode } from '../utils/markdownCode'
 
 export { esc }
 
+/** File kinds that Monaco edits as text (HTML included: it has a source view
+ *  and can be saved back, unlike media/office/pdf). */
+export function isEditableTextKind(kind: string | null | undefined): boolean {
+  return kind === 'text' || kind === 'markdown' || kind === 'html'
+}
+
 interface Meta {
   kind: string
   content?: string
@@ -87,7 +93,7 @@ export function useFileEditor(opts: {
       !!opts.selectedRel.value &&
       !opts.selectedIsDir.value &&
       !opts.meta.value?.truncated &&
-      (opts.meta.value?.kind === 'text' || opts.meta.value?.kind === 'markdown')
+      isEditableTextKind(opts.meta.value?.kind)
   )
 
   const canSaveEditor = computed(() => canSaveEditorContext.value && editorDirty.value)

@@ -117,7 +117,18 @@
       </span>
       <span class="file-name" :title="filePath">{{ fileName }}</span>
       <span class="type-pill">{{ typeLabel }}</span>
-      <span v-if="source.provider === 'regex'" class="source-pill" :title="t('outline.regexHint')">
+      <span
+        v-if="source.provider === 'monaco'"
+        class="source-pill monaco"
+        :title="t('outline.monacoHint')"
+      >
+        {{ t('outline.monaco') }}
+      </span>
+      <span
+        v-else-if="source.provider === 'regex'"
+        class="source-pill"
+        :title="t('outline.regexHint')"
+      >
         {{ t('outline.regex') }}
       </span>
     </div>
@@ -1070,6 +1081,10 @@ onBeforeUnmount(() => {
   color: var(--color-yellow, #d7ba7d);
   border-color: transparent;
   padding-right: 0;
+}
+
+.source-pill.monaco {
+  color: var(--color-cyan, #4ec9b0);
 }
 
 .search-wrap {

@@ -143,6 +143,8 @@ import OutlinePanel from './OutlinePanel.vue'
 import EditorTabBar from './EditorTabBar.vue'
 import EditorBreadcrumbs from './EditorBreadcrumbs.vue'
 import { useFileOutline } from '../../composables/useFileOutline'
+import { useMonacoOutlineSymbols } from '../../composables/useMonacoOutlineSymbols'
+import { normalizeCodeLanguage } from '../../utils/codeSymbols'
 import { flattenOutline, outlineAtLine } from '../../utils/outlineTree'
 import type { OutlineItem, OutlineMode } from '../../types/outline'
 import type * as monaco from 'monaco-editor'
@@ -258,13 +260,37 @@ const outlineMobile = ref(false)
 const outlinePanelId = computed(() => `outline-panel-${props.leaf.id}`)
 
 const outlineLanguage = computed(() => meta.value?.language ?? '')
-const { source: outlineSource, rescan: rescanOutline } = useFileOutline({
+
+// Only TS/JS get Monaco's navigation tree; Rust/Python/Go and non-code files
+// keep the regex extractor. The composable handles debounce, worker timeouts
+// and discarding results whose model version or file changed mid-flight.
+const monacoSymbolLanguage = computed<'typescript' | 'javascript' | null>(() => {
+  if (!isEditableTextKind(meta.value?.kind)) return null
+  const language = normalizeCodeLanguage(meta.value?.language)
+  return language === 'typescript' || language === 'javascript' ? language : null
+})
+const { symbols: monacoSymbols, refresh: refreshMonacoSymbols } = useMonacoOutlineSymbols({
+  leafId: props.leaf.id,
+  enabled: outlineOpen,
+  language: monacoSymbolLanguage,
+  filePath: activeFilePath,
+  revision: editor.editorText,
+})
+
+const { source: outlineSource, rescan: rescanFileOutline } = useFileOutline({
   kind: computed(() => meta.value?.kind ?? null),
   language: outlineLanguage,
   text: editor.editorText,
   markdownTokens: editor.markdownOutline,
   markdownTokensSource: editor.markdownOutlineSource,
+  codeSymbols: monacoSymbols,
 })
+
+/** Retry from the panel: re-scan the regex source and refetch Monaco symbols. */
+function rescanOutline(): void {
+  rescanFileOutline()
+  refreshMonacoSymbols()
+}
 
 const outlineAvailable = computed(
   () => isEditableTextKind(meta.value?.kind) && outlineSource.value.mode !== 'none'

@@ -222,7 +222,8 @@ export default {
   'imagePreview.zoomLevel': 'Zoom level',
   'imagePreview.loadFailed': 'Could not load this image',
   'svgPreview.truncated': 'Only the first 512 KB is shown; the preview uses the file on disk',
-  'spreadsheetPreview.legacyXls': 'Legacy .xls files are not supported. Convert to .xlsx to preview it.',
+  'spreadsheetPreview.legacyXls':
+    'Legacy .xls files are not supported. Convert to .xlsx to preview it.',
   'spreadsheetPreview.parseFailed': 'Could not parse this spreadsheet',
   'spreadsheetPreview.tooLarge': 'This spreadsheet is too large to preview (limit: 16 MB)',
   'spreadsheetPreview.empty': 'This spreadsheet has no data',
@@ -1394,4 +1395,25 @@ export default {
     'The editor has unsaved changes; this diff shows the version on disk',
   'workspaceChanges.mixedStaged': 'Includes staged and unstaged changes',
   'workspaceChanges.diffFailed': 'Unable to load this diff',
+
+  // Detached terminal window (desktop). The namespace is complete up front so
+  // later waves only consume these keys and never invent new ones.
+  'detached.loading': 'Loading terminal…',
+  'detached.tabNotFound': 'This terminal tab no longer exists.',
+  'detached.connectionFailed': 'Could not connect to the server.',
+  'detached.reattachToMain': 'Return to main window',
+  'detached.closeTerminal': 'Close terminal',
+  'detached.closeTerminalConfirm': 'Close this terminal? The running process will be terminated.',
+  'detached.rename': 'Rename',
+  'detached.search': 'Search',
+  'detached.newTerminalWindow': 'New terminal window',
+  'detached.broadcastOn': 'Broadcast input',
+  'detached.previewPlaceholder': 'Detached terminal rendering is not available yet.',
+  'detached.unsupportedPane': 'This pane type cannot be detached.',
+  'detached.focusFailed': 'Could not focus the terminal window.',
+  'detached.reattachedToWorkspace': 'Terminal returned to its workspace.',
+  'detached.returnedToDefaultWorkspace': 'Terminal returned to the default workspace.',
+  'tab.detachToWindow': 'Detach to new window',
+  'tab.detachedBadge': 'Detached',
+  'tab.closeTerminal': 'Close terminal',
 } satisfies MessageTable

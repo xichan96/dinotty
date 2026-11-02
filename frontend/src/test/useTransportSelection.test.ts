@@ -107,4 +107,27 @@ describe('createTransport transport selection', () => {
     expect(transport).toBeInstanceOf(WebSocketTransport)
     transport.disconnect()
   })
+
+  it('forceWebSocket wins over Tauri IPC on the local server', async () => {
+    // Detached windows share a pane with the main window; IPC is single-owner,
+    // so forcing WebSocket must override the otherwise-correct local IPC path.
+    installTauriStub()
+    const { createTransport, WebSocketTransport, TauriIpcTransport } = await loadTransport()
+
+    const transport = createTransport('pane-1', undefined, { forceWebSocket: true })
+
+    expect(transport).not.toBeInstanceOf(TauriIpcTransport)
+    expect(transport).toBeInstanceOf(WebSocketTransport)
+    transport.disconnect()
+  })
+
+  it('forceWebSocket: false leaves the Tauri IPC selection unchanged', async () => {
+    installTauriStub()
+    const { createTransport, TauriIpcTransport } = await loadTransport()
+
+    const transport = createTransport('pane-1', undefined, { forceWebSocket: false })
+
+    expect(transport).toBeInstanceOf(TauriIpcTransport)
+    transport.disconnect()
+  })
 })

@@ -4,7 +4,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
-import { isTauri, createTransport, type Transport } from './useTransport'
+import { isTauri, createTransport, type Transport, type TransportOptions } from './useTransport'
 import { onThemeChange, settings, type MobileInputMode } from './useSettings'
 import {
   FONT_SIZE_MAX,
@@ -38,10 +38,7 @@ import {
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { attachImeHeuristic } from '../utils/imeAnchor'
 import { setupTerminalDrop } from './useTerminalDrop'
-import {
-  findTerminalFileLinks,
-  type TerminalFileTarget,
-} from '../utils/terminalFileLink'
+import { findTerminalFileLinks, type TerminalFileTarget } from '../utils/terminalFileLink'
 import { createTerminalOverlay } from './useTerminalOverlay'
 import { t } from './useI18n'
 import { hasOpenGuard } from '../utils/keyboardGuardMode'
@@ -352,6 +349,7 @@ export class TerminalInstance {
   private static readonly ZERO_SIZE_RETRY_MS = 250
   private static readonly ZERO_SIZE_MAX_RETRIES = 120
   private _transportConnected = false
+  private _forceWebSocket = false
   private _lastSentCols = 0
   private _lastSentRows = 0
   private _resizeCooldownUntil = 0
@@ -380,8 +378,9 @@ export class TerminalInstance {
   onSessionExit: (() => void) | null = null
   onReconnect: (() => void) | null = null
 
-  constructor(paneId: string) {
+  constructor(paneId: string, opts?: TransportOptions) {
     this.paneId = paneId
+    this._forceWebSocket = opts?.forceWebSocket ?? false
   }
 
   attach(wrapper: HTMLElement) {
@@ -1179,7 +1178,9 @@ export class TerminalInstance {
 
   private _connectViaTransport() {
     this._transportConnected = false
-    this._transport = createTransport(this.paneId)
+    this._transport = createTransport(this.paneId, undefined, {
+      forceWebSocket: this._forceWebSocket,
+    })
 
     this._transport.onConnect(() => {
       this._transportConnected = true

@@ -17,7 +17,10 @@ export interface KatexRenderer {
 
 export interface HighlightRenderer {
   getLanguage(name: string): unknown
-  highlight(code: string, options: { language: string; ignoreIllegals?: boolean }): { value: string }
+  highlight(
+    code: string,
+    options: { language: string; ignoreIllegals?: boolean }
+  ): { value: string }
 }
 
 export interface EnhanceMarkdownOptions {
@@ -54,7 +57,7 @@ export function loadKatex(): Promise<KatexRenderer> {
   return katexPromise
 }
 
-function loadHighlight(): Promise<HighlightRenderer> {
+export function loadHighlight(): Promise<HighlightRenderer> {
   if (!highlightPromise) {
     highlightPromise = import('highlight.js/lib/common').then(
       (mod) => (mod.default ?? mod) as unknown as HighlightRenderer
@@ -187,7 +190,8 @@ export async function enhanceMarkdownBlocks(
     if (!render) {
       try {
         const katex = await loadKatex()
-        render = (source) => katex.renderToString(source, { displayMode: true, throwOnError: false })
+        render = (source) =>
+          katex.renderToString(source, { displayMode: true, throwOnError: false })
       } catch {
         // Leave the source visible rather than showing an empty block.
         for (const block of mathBlocks) block.dataset.mdState = 'error'

@@ -30,19 +30,21 @@ export function getMarked() {
   if (!_markedPromise) {
     // KaTeX rides along with marked so inline `$…$` / `$$…$$` is parsed in
     // the same lazy chunk; ```math fences are rendered after sanitizing.
-    _markedPromise = Promise.all([import('marked'), loadKatex(), import('marked-katex-extension')]).then(
-      ([m, , katexExtension]) => {
-        m.use({
-          gfm: true,
-          breaks: true,
-          renderer: {
-            code: renderMarkdownCode,
-          },
-        })
-        m.use(katexExtension.default({ throwOnError: false }))
-        return m
-      }
-    )
+    _markedPromise = Promise.all([
+      import('marked'),
+      loadKatex(),
+      import('marked-katex-extension'),
+    ]).then(([m, , katexExtension]) => {
+      m.use({
+        gfm: true,
+        breaks: true,
+        renderer: {
+          code: renderMarkdownCode,
+        },
+      })
+      m.use(katexExtension.default({ throwOnError: false }))
+      return m
+    })
   }
   return _markedPromise
 }
@@ -62,7 +64,7 @@ function resolveImagePath(relPath: string, filePath: string): string {
 }
 
 /** Rewrite relative <img src> in rendered HTML to /api/workspace/raw URLs */
-function rewriteImageSrcs(html: string, filePath: string, paneId: string): string {
+export function rewriteImageSrcs(html: string, filePath: string, paneId: string): string {
   return html.replace(/<img\b([^>]*?)\ssrc=(["'])(.+?)\2/gi, (_match, prefix, quote, src) => {
     if (/^(https?:\/\/|\/api\/workspace\/raw)/.test(src))
       return `<img${prefix} src=${quote}${src}${quote}`

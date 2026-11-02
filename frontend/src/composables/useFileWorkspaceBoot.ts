@@ -100,7 +100,11 @@ export interface FileWorkspaceBoot {
   captureState: () => PersistedFileWorkspaceState
   applyState: (s: PersistedFileWorkspaceState) => void
   boot: () => Promise<void>
-  openFromTerminal: (path: string) => Promise<void>
+  /** Resolves the workspace-relative path of the selected file, or null for a
+   *  directory / unresolved path. `resolvePaneId` overrides the session used
+   *  for `/api/workspace/resolve` (terminal clicks resolve against the pane
+   *  that emitted the path). */
+  openFromTerminal: (path: string, resolvePaneId?: string) => Promise<string | null>
 }
 
 export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorkspaceBoot {
@@ -274,8 +278,8 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     }
   }
 
-  async function openFromTerminal(path: string): Promise<void> {
-    const apiPane = sourcePaneId.value || paneId.value
+  async function openFromTerminal(path: string, resolvePaneId?: string): Promise<string | null> {
+    const apiPane = resolvePaneId || sourcePaneId.value || paneId.value
     await getApiBase()
     const q = new URLSearchParams({ pane_id: apiPane, path })
     let res: Response
@@ -283,11 +287,11 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
       res = await authFetch(apiUrl(`/api/workspace/resolve?${q}`))
     } catch (e) {
       previewErr.value = asWorkspaceError(e)
-      return
+      return null
     }
     if (!res.ok) {
       previewErr.value = await workspaceErrorFromResponse(res)
-      return
+      return null
     }
     const { rel } = await res.json()
     previewErr.value = null
@@ -299,14 +303,14 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
       await ensureChildren('')
     } catch (e) {
       previewErr.value = withWorkspaceErrorRel(e, '')
-      return
+      return null
     }
     const parts = (rel as string).split('/').filter(Boolean)
     if (parts.length === 0) {
       selectedRel.value = null
       selectedIsDir.value = false
       meta.value = null
-      return
+      return null
     }
     let acc = ''
     const nextExpanded = new Set(expanded.value)
@@ -322,13 +326,17 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
       await ensureChildren(parentRel)
     } catch (e) {
       previewErr.value = withWorkspaceErrorRel(e, acc || parentRel)
-      return
+      return null
     }
     const full = rel as string
     const parentEntries = childCache.value[parentRel]
     const entry = parentEntries?.find((e) => e.name === base)
-    if (entry?.is_dir) onSelectDir(full)
-    else await onSelectFile(full)
+    if (entry?.is_dir) {
+      onSelectDir(full)
+      return null
+    }
+    await onSelectFile(full)
+    return full
   }
 
   return {

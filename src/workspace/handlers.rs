@@ -22,7 +22,7 @@ use super::types::{
     ResolveResponse, SearchResponse, WorkspaceListQuery, WorkspaceSearchBody,
 };
 use super::util::{
-    detect_language, get_root, json_err, media_kind, normalize_join, office_kind,
+    detect_language, get_root, is_user_path, json_err, media_kind, normalize_join, office_kind,
     parent_dir_must_be_in_workspace, parse_rg_json, path_must_be_under, rel_from_root,
     resolve_byte_range, resolve_user_path, skip_text_preview, sort_dir_entries, ssh_session,
     try_res, ByteRangeResult, MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
@@ -37,7 +37,7 @@ pub async fn workspace_resolve(
         return remote::remote_resolve(session, q.path).await;
     }
     let root = try_res!(get_root(&manager, &q.pane_id));
-    let joined = if Path::new(&q.path).is_absolute() {
+    let joined = if is_user_path(&q.path) {
         resolve_user_path(dirs::home_dir(), &q.path)
     } else {
         try_res!(normalize_join(&root, &q.path))
@@ -68,7 +68,7 @@ pub async fn workspace_resolve_abs(
         return json_err(StatusCode::BAD_REQUEST, "not supported for SSH sessions");
     }
     let root = try_res!(get_root(&manager, &q.pane_id));
-    let joined = if Path::new(&q.path).is_absolute() {
+    let joined = if is_user_path(&q.path) {
         resolve_user_path(dirs::home_dir(), &q.path)
     } else {
         try_res!(normalize_join(&root, &q.path))

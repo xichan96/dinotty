@@ -3,6 +3,7 @@ use axum::{
     body::{to_bytes, Body},
     extract::{FromRequest, State},
     http::{Request, StatusCode},
+    response::IntoResponse,
     routing::{get, post},
     Router,
 };
@@ -112,6 +113,57 @@ fn resolve_user_path_expands_temp_tokens() {
         );
         assert_eq!(resolve_user_path(None, "x$TMPDIR/dinotty"), PathBuf::from("x$TMPDIR/dinotty"));
     }
+}
+
+#[test]
+fn is_user_path_recognizes_tilde_and_absolute() {
+    assert!(is_user_path("/tmp/a.txt"));
+    assert!(is_user_path("~/notes.md"));
+    assert!(is_user_path("  ~  "));
+    assert!(!is_user_path("src/main.rs"));
+    assert!(!is_user_path("./src/main.rs"));
+    // `~user` is a shell user-path form, not a home expansion we support here;
+    // it must not be treated as an absolute path.
+    assert!(!is_user_path("~user/notes.md"));
+}
+
+async fn resolve_request(
+    manager: Arc<SessionManager>,
+    pane_id: &str,
+    path: &str,
+) -> axum::response::Response {
+    workspace_resolve(
+        State(manager),
+        axum::extract::Query(ResolveQuery { pane_id: pane_id.into(), path: path.into() }),
+    )
+    .await
+    .into_response()
+}
+
+#[tokio::test]
+async fn workspace_resolve_resolves_relative_against_session_root() {
+    let root = TempDir::new().unwrap();
+    fs::create_dir(root.path().join("sub")).unwrap();
+    fs::write(root.path().join("sub/a.txt"), b"x").unwrap();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.path().to_path_buf()));
+
+    for path in ["sub/a.txt", "./sub/a.txt"] {
+        let response = resolve_request(Arc::clone(&manager), "p1", path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let json = response_json(response).await;
+        assert_eq!(json["rel"].as_str(), Some("sub/a.txt"), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn workspace_resolve_rejects_parent_dir() {
+    let root = TempDir::new().unwrap();
+    let manager = Arc::new(SessionManager::new());
+    manager.insert_session("p1", workspace_session(root.path().to_path_buf()));
+
+    let response = resolve_request(manager, "p1", "../outside.txt").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[test]

@@ -45,6 +45,7 @@ import { useTabLifecycle } from './useTabLifecycle'
 import { setMcSender, sendMcOp, useMissionControlState } from './useMissionControlState'
 import { ensureCapabilities } from './serverCapabilities'
 import { useSplitPane } from './useSplitPane'
+import { setPendingFileReveal } from './pendingFileReveal'
 import { useSyncWebSocket, setPluginChangedHandler } from './useSyncWebSocket'
 import type { SyncClientMsg } from '../types/protocol'
 import { workspaceIdFromPaneId } from '../utils/pluginPaneId'
@@ -721,19 +722,33 @@ export function useAppCore(options: AppCoreOptions) {
     return splitPane.insertNonTerminalPane('plugin', { pluginId })
   }
 
-  function onFileClick(path: string) {
-    const tabId = activePaneId.value
-    if (!tabId) return
-    const tab = tabs.value.find((t) => t.paneId === tabId)
+  function onFileClick(path: string, line?: number, column?: number, originPaneId?: string) {
+    // Resolve relative paths against the pane that emitted the click: a
+    // non-active split pane may have a different cwd than the active one.
+    const tab =
+      (originPaneId ? splitPane.findTabByPaneId(originPaneId) : null) ??
+      tabs.value.find((t) => t.paneId === activePaneId.value)
     if (!tab || tab.type !== 'terminal') return
 
     const existing = getAllLeaves(tab.layout).find((l) => paneKind(l) === 'files')
     if (existing) {
       splitPane.focusPane(existing.paneId)
-      nextTick(() => filesRefs[existing.paneId]?.openFromTerminal(path))
+      nextTick(() =>
+        filesRefs[existing.paneId]?.openFromTerminal(path, { line, column }, originPaneId)
+      )
       return
     }
-    void splitPane.insertNonTerminalPane('files', { path })
+    void splitPane
+      .insertNonTerminalPane('files', { path }, 'horizontal', originPaneId)
+      .then((ok) => {
+        if (!ok || (!line && !column)) return
+        // insertNonTerminalPane splits the active tab and makes the new pane
+        // active; the boot flow only has `path`, so stash the position here.
+        const inserted = tabs.value.find((t) => t.paneId === activePaneId.value)
+        if (inserted?.type === 'terminal') {
+          setPendingFileReveal(inserted.activePaneId, { path, line, column })
+        }
+      })
   }
 
   function getSendFn(): SendDataFn | null {

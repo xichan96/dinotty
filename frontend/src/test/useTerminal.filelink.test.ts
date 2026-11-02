@@ -25,10 +25,15 @@ beforeEach(() => {
 })
 
 describe('createFilePathLinkProvider', () => {
-  it('detects absolute, ./ and ~/ paths but not bare words', () => {
-    const { links } = makeProvider('cat /etc/hosts ./a.txt ~/notes.md readme.md')
+  it('detects absolute, relative and ~/ paths but not bare words', () => {
+    const { links } = makeProvider('cat /etc/hosts ./a.txt ~/notes.md src/main.rs word')
 
-    expect(links.map((l: any) => l.text)).toEqual(['/etc/hosts', './a.txt', '~/notes.md'])
+    expect(links.map((l: any) => l.text)).toEqual([
+      '/etc/hosts',
+      './a.txt',
+      '~/notes.md',
+      'src/main.rs',
+    ])
   })
 
   it('does not treat http URLs as file paths', () => {
@@ -37,12 +42,27 @@ describe('createFilePathLinkProvider', () => {
     expect(links).toHaveLength(0)
   })
 
-  it('activates with the path and click coordinates', () => {
+  it('activates with the target, parsed position, and click coordinates', () => {
     const { links, onOpen } = makeProvider('error at /var/log/system.log:5')
 
     links[0].activate(click)
 
-    expect(onOpen).toHaveBeenCalledWith('/var/log/system.log', 11, 22)
+    expect(onOpen).toHaveBeenCalledWith(
+      { path: '/var/log/system.log', line: 5, column: undefined },
+      11,
+      22
+    )
+  })
+
+  it('underlines the :line:col suffix but opens the bare path', () => {
+    const { links, onOpen } = makeProvider('  src/foo.ts:42:7')
+
+    expect(links[0].range).toEqual({
+      start: { x: 3, y: 1 },
+      end: { x: 18, y: 1 },
+    })
+    links[0].activate(click)
+    expect(onOpen).toHaveBeenCalledWith({ path: 'src/foo.ts', line: 42, column: 7 }, 11, 22)
   })
 
   it('reports hover and clears on leave', () => {

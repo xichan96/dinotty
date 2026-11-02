@@ -20,8 +20,10 @@ export interface UseFileWorkspaceSearchOptions {
 export function useFileWorkspaceSearch(opts: UseFileWorkspaceSearchOptions) {
   const searchOpen = ref(false)
   const searchPanelRef = ref<InstanceType<typeof FileSearchPanel> | null>(null)
-  /** Search result target; a fresh object (and seq) re-triggers the reveal. */
-  const searchReveal = ref<{ path: string; line: number; seq: number } | null>(null)
+  /** Reveal target; a fresh object (and seq) re-triggers the editor reveal. */
+  const searchReveal = ref<{ path: string; line: number; column?: number; seq: number } | null>(
+    null
+  )
   let revealSeq = 0
 
   function openSearch(focus: boolean) {
@@ -40,10 +42,16 @@ export function useFileWorkspaceSearch(opts: UseFileWorkspaceSearchOptions) {
     searchOpen.value = false
   }
 
+  /** Point the active editor at `rel:line:column`; shared by search and
+   *  terminal path links. The editor waits for the file/meta to load. */
+  function revealFileAt(rel: string, line: number, column = 1) {
+    searchReveal.value = { path: rel, line, column, seq: ++revealSeq }
+  }
+
   async function onSearchOpenFile(rel: string, line: number) {
     await opts.ensureParentsExpanded(rel)
     await opts.selectFile(rel)
-    searchReveal.value = { path: rel, line, seq: ++revealSeq }
+    revealFileAt(rel, line)
     void nextTick(() => opts.scrollSelectedIntoView())
   }
 
@@ -71,6 +79,7 @@ export function useFileWorkspaceSearch(opts: UseFileWorkspaceSearchOptions) {
     searchOpen,
     searchPanelRef,
     searchReveal,
+    revealFileAt,
     openSearch,
     closeSearch,
     onSearchOpenFile,

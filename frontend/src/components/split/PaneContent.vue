@@ -7,7 +7,10 @@
     @title-change="(title: string) => emit('titleChange', leaf.paneId, title)"
     @shell-info="(shell: string) => emit('shellInfo', leaf.paneId, shell)"
     @input="(data: string) => emit('input', leaf.paneId, data)"
-    @file-click="(path: string) => emit('fileClick', path)"
+    @file-click="
+      (path: string, line?: number, column?: number) =>
+        emit('fileClick', path, line, column, leaf.paneId)
+    "
     @preview-link="(url: string) => emit('previewLink', leaf.paneId, url)"
     @link-activate="emit('linkActivate')"
     @reconnect="emit('reconnect', leaf.paneId)"
@@ -75,7 +78,7 @@ const emit = defineEmits<{
   titleChange: [paneId: string, title: string]
   shellInfo: [paneId: string, shell: string]
   input: [paneId: string, data: string]
-  fileClick: [path: string]
+  fileClick: [path: string, line?: number, column?: number, paneId?: string]
   previewLink: [paneId: string, url: string]
   linkActivate: []
   close: [paneId: string]

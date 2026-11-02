@@ -95,6 +95,8 @@ export default {
   'outline.closeHintMobile': 'Tap outside or Esc to close',
   'outline.typeMarkdown': 'Markdown',
   'outline.typeJson': 'JSON',
+  'outline.typeYaml': 'YAML',
+  'outline.typeToml': 'TOML',
   'outline.typeCode': 'Code',
   'editorTabs.close': 'Close',
   'editorTabs.pin': 'Pin Tab',

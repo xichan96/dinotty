@@ -171,7 +171,7 @@ pub struct SearchMatch {
 #[derive(Serialize)]
 pub struct SearchResponse {
     pub matches: Vec<SearchMatch>,
-    /// True when the result list was cut at max_results.
+    /// True when the result list was cut at `max_results`.
     pub truncated: bool,
 }
 

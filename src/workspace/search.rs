@@ -51,6 +51,34 @@ pub(crate) struct NativeSearchResult {
     pub truncated: bool,
 }
 
+/// Owned search request. Unlike [`NativeSearchOptions`], this borrows nothing,
+/// so it can be moved onto the blocking pool by the HTTP handler.
+pub(crate) struct NativeSearchRequest {
+    pub root: PathBuf,
+    pub target: PathBuf,
+    pub query: String,
+    pub regex: bool,
+    pub word: bool,
+    pub case_sensitive: bool,
+    pub file_pattern: Option<String>,
+    pub max: usize,
+}
+
+impl NativeSearchRequest {
+    pub(crate) fn run(&self) -> Result<NativeSearchResult, String> {
+        native_search(&NativeSearchOptions {
+            root: &self.root,
+            target: &self.target,
+            query: &self.query,
+            regex: self.regex,
+            word: self.word,
+            case_sensitive: self.case_sensitive,
+            file_pattern: self.file_pattern.as_deref(),
+            max: self.max,
+        })
+    }
+}
+
 fn build_regex(opts: &NativeSearchOptions<'_>) -> Result<Regex, String> {
     let base = if opts.regex { opts.query.to_string() } else { regex::escape(opts.query) };
     let pattern = if opts.word { format!(r"\b(?:{base})\b") } else { base };
@@ -78,7 +106,8 @@ fn relative_path(root: &Path, path: &Path) -> String {
 
 fn column_at(line: &str, byte_offset: usize) -> u32 {
     // Monaco counts UTF-16 code units, not bytes.
-    line[..byte_offset.min(line.len())].encode_utf16().count().saturating_add(1) as u32
+    u32::try_from(line[..byte_offset.min(line.len())].encode_utf16().count().saturating_add(1))
+        .unwrap_or(u32::MAX)
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
@@ -113,7 +142,7 @@ fn search_file(
         for m in regex.find_iter(line) {
             out.push(SearchMatch {
                 file_path: rel.clone(),
-                line: (idx + 1) as u32,
+                line: u32::try_from(idx + 1).unwrap_or(u32::MAX),
                 column: column_at(line, m.start()),
                 line_text: line.to_string(),
             });

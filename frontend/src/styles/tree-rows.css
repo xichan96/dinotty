@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'seti';
+  src: url('../assets/fonts/seti.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
 .tree-host {
   --tree-base-hpad: 8px;
   --tree-indent-step: 12px;
@@ -162,9 +170,7 @@
 .tree-host .tree-row:has(.tree-label.sel) .tree-kind-icon-folder {
   color: var(--tree-folder-icon-selected, #e8dcc4);
 }
-.tree-host .tree-row:has(.tree-label.sel) .tree-kind-icon-file {
-  color: var(--tree-file-icon-selected, #b4e1ff);
-}
+/* File icons keep their type colour on selection (the colour is inline). */
 
 .tree-host .tree-kind-icon {
   flex-shrink: 0;
@@ -183,6 +189,33 @@
 .tree-host .tree-kind-icon-file {
   color: var(--tree-file-icon, #90caf9);
 }
+
+/* Seti file-type glyphs: the codepoint comes from fileTypeIcons.ts and the
+   colour is applied inline per extension, so selection keeps the type colour. */
+.file-glyph {
+  font-family: 'seti', monospace;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 400;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tree-host .tree-file-glyph {
+  font-family: 'seti', monospace;
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 400;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
 .tree-host .tree-svg {
   width: 100%;
   height: 100%;

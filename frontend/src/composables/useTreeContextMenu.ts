@@ -1,6 +1,5 @@
 import { ref, computed, nextTick, type Ref } from 'vue'
 import { copyToClipboard } from '../utils/clipboard'
-import { uiConfirm } from './useConfirm'
 import type { DirEntry } from '../components/workspace/TreeRows'
 import { isRunnableCodeFile } from '../utils/runCodeCommand'
 import { tauriInvoke } from './useTransport'
@@ -41,6 +40,12 @@ export function useTreeContextMenu(opts: {
   triggerUpload: () => void
   downloadFile: (rel: string) => Promise<void>
   paneId: () => string
+  /** True when any open tab for (or under, for a directory) the path is dirty. */
+  isPathDirty?: (rel: string, isDir: boolean) => boolean
+  /** Called after a delete succeeds, once the user has confirmed any loss. */
+  onDeleted?: (rel: string, isDir: boolean) => void
+  /** Rewrite open tabs (and their buffers) after a successful move. */
+  onPathMoved?: (oldRel: string, newRel: string) => void
   t: (key: string) => string
   /** Return focus to the menu's target row after Escape (keyboard a11y). */
   onMenuClosed?: (rel: string) => void
@@ -164,19 +169,6 @@ export function useTreeContextMenu(opts: {
     if (rel) opts.onMenuClosed?.(rel)
   }
 
-  async function shouldBlockNavigate(): Promise<boolean> {
-    if (
-      !opts.editorDirty.value ||
-      !opts.meta.value ||
-      (opts.meta.value.kind !== 'text' && opts.meta.value.kind !== 'markdown')
-    )
-      return false
-    return !(await uiConfirm(opts.t('filePreview.discardChanges'), {
-      confirmText: opts.t('filePreview.discardChanges'),
-      cancelText: opts.t('filePreview.cancel'),
-    }))
-  }
-
   /** Open the menu for an explicit target and position. Pointer and keyboard
    *  entry points share it so both get the same clamping/focus behaviour. */
   function openMenuAt(rel: string, isDir: boolean, x: number, y: number) {
@@ -201,7 +193,6 @@ export function useTreeContextMenu(opts: {
     if (!contextMenu.value) return
     const { rel, isDir } = contextMenu.value
     closeContextMenu()
-    if (await shouldBlockNavigate()) return
     const parentRel = isDir ? rel : opts.parentRelPath(rel)
     opts.inlineCreate.value = { parentRel, kind: 'file', value: '', error: '' }
     opts.expanded.value = new Set([...opts.expanded.value, parentRel])
@@ -212,7 +203,6 @@ export function useTreeContextMenu(opts: {
     if (!contextMenu.value) return
     const { rel, isDir } = contextMenu.value
     closeContextMenu()
-    if (await shouldBlockNavigate()) return
     const parentRel = isDir ? rel : opts.parentRelPath(rel)
     opts.inlineCreate.value = { parentRel, kind: 'dir', value: '', error: '' }
     opts.expanded.value = new Set([...opts.expanded.value, parentRel])
@@ -255,11 +245,15 @@ export function useTreeContextMenu(opts: {
   function requestDelete(rel: string, isDir: boolean) {
     if (!rel) return
     closeContextMenu()
-    const discardNeeded = !!(
-      opts.editorDirty.value &&
-      opts.meta.value &&
-      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
-    )
+    // Any tab showing the target (or something under it) counts: the active
+    // tab alone is no longer the whole story once editor groups hold tabs.
+    const discardNeeded = opts.isPathDirty
+      ? opts.isPathDirty(rel, isDir)
+      : !!(
+          opts.editorDirty.value &&
+          opts.meta.value &&
+          (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
+        )
     deleteConfirm.value = { rel, isDir, discardNeeded }
   }
 
@@ -277,11 +271,10 @@ export function useTreeContextMenu(opts: {
     const info = deleteConfirm.value
     if (!info) return
     deleteConfirm.value = null
-    const { rel, isDir, discardNeeded } = info
+    const { rel, isDir } = info
     const prevRel = opts.selectedRel.value
     const prevIsDir = opts.selectedIsDir.value
     const prevMeta = opts.meta.value
-    if (discardNeeded) opts.editorText.value = opts.editorBaseline.value
     opts.selectedRel.value = rel
     opts.selectedIsDir.value = isDir
     opts.meta.value = null
@@ -295,7 +288,11 @@ export function useTreeContextMenu(opts: {
       opts.selectedRel.value = prevRel
       opts.selectedIsDir.value = prevIsDir
       opts.meta.value = prevMeta
+      return
     }
+    // Tabs for the target are dropped only after the user confirmed the
+    // delete (the watcher deliberately keeps dirty tabs alive).
+    opts.onDeleted?.(rel, isDir)
   }
 
   function cancelDelete() {
@@ -431,6 +428,9 @@ export function useTreeContextMenu(opts: {
     try {
       await Promise.all([opts.ensureChildren(srcParent), opts.ensureChildren(destDir)])
     } catch {}
+    const name = src.split('/').pop() || src
+    const newRel = destDir ? `${destDir}/${name}` : name
+    if (newRel !== src) opts.onPathMoved?.(src, newRel)
     return true
   }
 
@@ -468,7 +468,6 @@ export function useTreeContextMenu(opts: {
     setMenuEl,
     onMenuKeydown,
     closeContextMenu,
-    shouldBlockNavigate,
     openMenuAt,
     requestDelete,
     onTreeContextMenu,

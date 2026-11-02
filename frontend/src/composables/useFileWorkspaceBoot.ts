@@ -6,6 +6,11 @@ import {
   type PersistedFileWorkspaceState,
 } from './useFileWorkspaceState'
 import type { DirEntry } from '../components/workspace/TreeRows'
+import {
+  findEditorLeaf,
+  findFirstEditorLeaf,
+  normalizeEditorLayout,
+} from '../types/editorPane'
 
 /** An API failure that keeps the HTTP status (0 = network/transport) and the
  *  server's JSON `error` detail, so the UI can map it to a localized message
@@ -172,8 +177,15 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
   }
 
   function applyState(s: PersistedFileWorkspaceState): void {
-    editorLayout.value = s.editorLayout
-    activeEditorLeafId.value = s.activeEditorLeafId
+    editorLayout.value = normalizeEditorLayout(s.editorLayout)
+    // Older states could persist a collapsed split's half ratio on the root
+    // leaf; a lone pane with flex-grow < 1 only fills half the editor.
+    if (editorLayout.value.type === 'editor-leaf') editorLayout.value.ratio = 1
+    const remembered =
+      s.activeEditorLeafId && findEditorLeaf(editorLayout.value, s.activeEditorLeafId)
+        ? s.activeEditorLeafId
+        : findFirstEditorLeaf(editorLayout.value)?.id ?? null
+    activeEditorLeafId.value = remembered
     childCache.value = s.childCache
     expanded.value = s.expanded
     cwdLabel.value = s.cwdLabel ?? ''

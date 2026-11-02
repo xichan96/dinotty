@@ -2,6 +2,7 @@ import { defineComponent, ref, h, onMounted, nextTick, watch } from 'vue'
 import type { VNode } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { setInternalDrag, clearInternalDrag } from '../../composables/internalDragState'
+import { fileTypeGlyph } from './fileTypeIcons'
 
 function hasType(dt: DataTransfer | undefined | null, type: string): boolean {
   if (!dt) return false
@@ -60,74 +61,16 @@ export function treeFolderIcon(expanded: boolean): VNode {
   ])
 }
 
-const DEFAULT_FILE_ICON_COLOR = '#9aa0a6'
-
-// Same palette as the UX prototype (file-tree-ux.html). No extra icon assets:
-// only the fill of the existing document glyph changes.
-const FILE_EXT_COLORS: Record<string, string> = {
-  ts: '#6fa8dc',
-  tsx: '#6fa8dc',
-  js: '#d6c85a',
-  jsx: '#d6c85a',
-  mjs: '#d6c85a',
-  cjs: '#d6c85a',
-  vue: '#41b883',
-  rs: '#dea584',
-  json: '#cbcb41',
-  md: '#8cb4d9',
-  mdx: '#8cb4d9',
-  css: '#a074c4',
-  scss: '#a074c4',
-  sass: '#a074c4',
-  less: '#a074c4',
-  html: '#e37933',
-  htm: '#e37933',
-  toml: '#9c6b3f',
-  yml: '#c97b63',
-  yaml: '#c97b63',
-  svg: '#e9b35a',
-  png: '#b78fd6',
-  jpg: '#b78fd6',
-  jpeg: '#b78fd6',
-  gif: '#b78fd6',
-  webp: '#b78fd6',
-  ico: '#b78fd6',
-  py: '#3572a5',
-  go: '#00add8',
-  java: '#b07219',
-  sh: '#89e051',
-  bash: '#89e051',
-  zsh: '#89e051',
-  lock: '#8a8a8a',
-  gitignore: '#8a8a8a',
-}
-
-function fileIconColor(name: string): string {
-  const base = name.slice(name.lastIndexOf('/') + 1)
-  if (base === '.gitignore') return FILE_EXT_COLORS.gitignore
-  const dot = base.lastIndexOf('.')
-  if (dot <= 0) return DEFAULT_FILE_ICON_COLOR
-  return FILE_EXT_COLORS[base.slice(dot + 1).toLowerCase()] ?? DEFAULT_FILE_ICON_COLOR
-}
-
 export function treeFileIcon(name = ''): VNode {
+  const glyph = fileTypeGlyph(name)
   return h(
     'span',
     {
-      class: 'tree-kind-icon tree-kind-icon-file',
-      style: name ? { color: fileIconColor(name) } : undefined,
+      class: 'tree-kind-icon tree-kind-icon-file tree-file-glyph',
+      style: { color: glyph.color },
+      'aria-hidden': 'true',
     },
-    [
-      h(
-        'svg',
-        { viewBox: '0 0 16 16', class: 'tree-svg', fill: 'currentColor', 'aria-hidden': 'true' },
-        [
-          h('path', {
-            d: 'M4 2h5.2L13 5.8V14H4V2zm1 1v10h7V6.5H8.5L9 6 8 5H5zm5.2 0L12 5.8h-2V3h-.8z',
-          }),
-        ]
-      ),
-    ]
+    [glyph.char]
   )
 }
 
@@ -365,6 +308,7 @@ export const TreeRows = defineComponent({
   emits: [
     'toggle',
     'select-file',
+    'open-file-pinned',
     'select-dir',
     'inline-create-commit',
     'inline-create-cancel',
@@ -719,7 +663,8 @@ export const TreeRows = defineComponent({
                 inlineRename: p.inlineRename,
                 gitStatus: p.gitStatus,
                 onToggle: (x: string) => emit('toggle', x),
-                onSelectFile: (x: string) => emit('select-file', x),
+                onSelectFile: (x: string, ev?: MouseEvent) => emit('select-file', x, ev),
+                onOpenFilePinned: (x: string) => emit('open-file-pinned', x),
                 onSelectDir: (x: string) => emit('select-dir', x),
                 onInlineCreateCommit: (x: string) => emit('inline-create-commit', x),
                 onInlineCreateCancel: () => emit('inline-create-cancel'),
@@ -808,7 +753,10 @@ export const TreeRows = defineComponent({
                   'span',
                   {
                     class: 'tree-file-hit',
-                    onClick: isRenaming ? undefined : () => emit('select-file', rel),
+                    onClick: isRenaming
+                      ? undefined
+                      : (ev: MouseEvent) => emit('select-file', rel, ev),
+                    onDblclick: isRenaming ? undefined : () => emit('open-file-pinned', rel),
                   },
                   [
                     treeGuides(p.depth),

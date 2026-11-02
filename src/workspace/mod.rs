@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::result_large_err)]
 
 mod git;
+mod git_changes;
 mod handlers;
 mod remote;
 mod search;
@@ -13,6 +14,10 @@ pub use git::{
     workspace_git_diff, workspace_git_revert_lines, workspace_git_stage_lines,
     workspace_git_status, GitChange, GitDiffResponse, GitFileStatus, GitRevertBody, GitStageBody,
     GitStatusResponse,
+};
+pub use git_changes::{
+    workspace_git_changes, workspace_git_file_diff, GitFileDiffQuery, WorkspaceChangeFile,
+    WorkspaceChangesResponse, WorkspaceChangesSummary, WorkspaceGitFileDiffResponse,
 };
 pub use syntax::{workspace_syntax_check, SyntaxCheckBody, SyntaxCheckResponse, SyntaxDiagnostic};
 

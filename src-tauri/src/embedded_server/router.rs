@@ -123,6 +123,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/workspace/move", post(workspace::workspace_move))
         .route("/api/workspace/git-status", get(workspace::workspace_git_status))
         .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
+        .route("/api/workspace/git-changes", get(workspace::workspace_git_changes))
+        .route("/api/workspace/git-file-diff", get(workspace::workspace_git_file_diff))
         .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
         .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
         .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))

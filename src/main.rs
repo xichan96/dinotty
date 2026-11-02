@@ -516,6 +516,8 @@ async fn main() {
             .route("/api/workspace/move", post(workspace::workspace_move))
             .route("/api/workspace/git-status", get(workspace::workspace_git_status))
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
+            .route("/api/workspace/git-changes", get(workspace::workspace_git_changes))
+            .route("/api/workspace/git-file-diff", get(workspace::workspace_git_file_diff))
             .route("/api/workspace/reveal", get(workspace::workspace_reveal))
             .route("/api/workspace/cwd", get(workspace::workspace_cwd))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))

@@ -12,7 +12,7 @@ use crate::{platform::process::CommandNoWindowExt, session::SessionManager};
 use super::util::try_res;
 use super::{get_root, json_err, normalize_join, PanePathQuery, PaneQuery};
 
-fn git_command() -> std::process::Command {
+pub(super) fn git_command() -> std::process::Command {
     let mut command = std::process::Command::new("git");
     command.no_window();
     command

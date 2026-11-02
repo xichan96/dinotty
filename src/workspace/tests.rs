@@ -117,7 +117,10 @@ fn resolve_user_path_expands_temp_tokens() {
 
 #[test]
 fn is_user_path_recognizes_tilde_and_absolute() {
-    assert!(is_user_path("/tmp/a.txt"));
+    // `Path::is_absolute` is prefix-aware on Windows, so a Unix-style `/tmp`
+    // path is not absolute there; assert with a platform-native absolute path.
+    let absolute = if cfg!(windows) { r"C:\tmp\a.txt" } else { "/tmp/a.txt" };
+    assert!(is_user_path(absolute));
     assert!(is_user_path("~/notes.md"));
     assert!(is_user_path("  ~  "));
     assert!(!is_user_path("src/main.rs"));

@@ -78,8 +78,55 @@ vi.mock('../components/workspace/CsvPreview.vue', () => ({
   __esModule: true,
   default: {
     name: 'CsvPreview',
-    props: ['content', 'filePath', 'rawUrl', 'sourceAvailable', 'truncated'],
+    props: [
+      'content',
+      'filePath',
+      'rawUrl',
+      'sourceAvailable',
+      'truncated',
+      'rows',
+      'encodingAvailable',
+      'truncatedMessage',
+    ],
     template: '<div class="csv-preview-stub"></div>',
+  },
+}))
+
+vi.mock('../components/workspace/ImagePreview.vue', () => ({
+  __esModule: true,
+  default: {
+    name: 'ImagePreview',
+    props: ['src', 'alt', 'fileKey'],
+    template: '<div class="image-preview-stub" :data-src="src"></div>',
+  },
+}))
+
+vi.mock('../components/workspace/SvgPreview.vue', () => ({
+  __esModule: true,
+  default: {
+    name: 'SvgPreview',
+    props: [
+      'content',
+      'editorText',
+      'filePath',
+      'rawUrl',
+      'truncated',
+      'editorDirty',
+      'showSave',
+      'canSaveEditor',
+      'paneId',
+      'leafId',
+    ],
+    template: '<div class="svg-preview-stub"></div>',
+  },
+}))
+
+vi.mock('../components/workspace/SpreadsheetPreview.vue', () => ({
+  __esModule: true,
+  default: {
+    name: 'SpreadsheetPreview',
+    props: ['rawUrl', 'filePath', 'paneId'],
+    template: '<div class="spreadsheet-preview-stub"></div>',
   },
 }))
 
@@ -161,6 +208,29 @@ describe('FilePreviewContent structured routing', () => {
     await settle()
     expect(wrapper.find('.csv-preview-stub').exists()).toBe(true)
     expect(wrapper.find('.structured-stub').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('routes images to the image preview', async () => {
+    const wrapper = mountPreview('photo.png', 'image')
+    await settle()
+    expect(wrapper.find('.image-preview-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each(['icon.svg', 'ICON.SVG'])('routes %s text to the SVG preview', async (filePath) => {
+    const wrapper = mountPreview(filePath)
+    await settle()
+    expect(wrapper.find('.svg-preview-stub').exists()).toBe(true)
+    expect(wrapper.find('.monaco-stub').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('routes spreadsheets to the spreadsheet preview', async () => {
+    const wrapper = mountPreview('book.xlsx', 'spreadsheet')
+    await settle()
+    expect(wrapper.find('.spreadsheet-preview-stub').exists()).toBe(true)
+    expect(wrapper.find('.file-office').exists()).toBe(false)
     wrapper.unmount()
   })
 

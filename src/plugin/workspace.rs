@@ -17,7 +17,8 @@ use tokio::sync::broadcast;
 
 use crate::settings::SettingsState;
 use crate::workspace::{
-    detect_language, json_err, resolve_user_path, try_res, validate_entry_name,
+    detect_language, json_err, resolve_user_path, truncate_utf8_prefix, try_res,
+    validate_entry_name,
 };
 use crate::workspace_mgmt::is_sensitive;
 
@@ -156,7 +157,7 @@ pub async fn plugin_workspace_read_file(Query(q): Query<PluginPathQuery>) -> Res
     };
     let max_preview = crate::workspace::MAX_TEXT_PREVIEW;
     let truncated = bytes.len() > max_preview;
-    let slice = if truncated { &bytes[..max_preview] } else { &bytes[..] };
+    let slice = truncate_utf8_prefix(&bytes, max_preview);
     let text = match std::str::from_utf8(slice) {
         Ok(t) => t.to_string(),
         Err(_) => {

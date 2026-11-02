@@ -38,8 +38,8 @@ pub use upload::{
 // matching the original `pub(super)` semantics of the un-split module.
 pub(crate) use util::{
     detect_language, get_root, json_err, media_kind, normalize_join, office_kind,
-    resolve_user_path, skip_text_preview, try_res, validate_entry_name, MAX_DOWNLOAD,
-    MAX_TEXT_PREVIEW,
+    resolve_user_path, skip_text_preview, truncate_utf8_prefix, try_res, validate_entry_name,
+    MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
 };
 
 // Re-export helpers that `tests.rs` consumes via `use super::*`. Gated on

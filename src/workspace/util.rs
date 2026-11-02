@@ -242,7 +242,7 @@ pub(crate) fn detect_language(path: &Path) -> &'static str {
         "json" => "json",
         "yaml" | "yml" => "yaml",
         "toml" => "toml",
-        "xml" | "vue" => "xml",
+        "xml" | "vue" | "svg" => "xml",
         "html" | "htm" => "html",
         "css" | "scss" | "sass" => "css",
         "md" | "markdown" => "markdown",
@@ -250,6 +250,22 @@ pub(crate) fn detect_language(path: &Path) -> &'static str {
         "sql" => "sql",
         _ => "plaintext",
     }
+}
+
+/// Return at most `max` leading bytes of `bytes` without splitting a UTF-8
+/// code point. When truncation lands inside a multi-byte sequence, back off to
+/// the start of that code point so `from_utf8` does not reject the whole file.
+pub(crate) fn truncate_utf8_prefix(bytes: &[u8], max: usize) -> &[u8] {
+    if bytes.len() <= max {
+        return bytes;
+    }
+    let mut end = max;
+    // Every continuation byte is `0b10xxxxxx`; stop once `end` sits on a lead
+    // byte (or at the start of the buffer).
+    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 pub(crate) enum ByteRangeResult {
@@ -319,7 +335,7 @@ pub(crate) fn media_kind(path: &Path) -> Option<(&'static str, &'static str)> {
         "jpg" | "jpeg" => ("image", "image/jpeg"),
         "gif" => ("image", "image/gif"),
         "webp" => ("image", "image/webp"),
-        "svg" => ("image", "image/svg+xml"),
+        // SVG is editable text with a preview toggle, not a media kind.
         "mp4" | "m4v" => ("video", "video/mp4"),
         "webm" => ("video", "video/webm"),
         "mov" => ("video", "video/quicktime"),
@@ -349,8 +365,10 @@ pub(crate) fn office_kind(path: &Path) -> Option<(&'static str, &'static str)> {
         "docx" => {
             ("office", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         }
-        "xls" => ("office", "application/vnd.ms-excel"),
-        "xlsx" => ("office", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "xls" => ("spreadsheet", "application/vnd.ms-excel"),
+        "xlsx" => {
+            ("spreadsheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        }
         _ => return None,
     })
 }
@@ -457,5 +475,52 @@ mod tests {
         sort_dir_entries(&mut entries);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["Assets", "src", "file2.txt", "file10.txt"]);
+    }
+
+    #[test]
+    fn svg_is_editable_xml_not_media() {
+        // SVG must not be routed to the media (image) preview.
+        assert_eq!(media_kind(Path::new("icon.svg")), None);
+        assert_eq!(media_kind(Path::new("ICON.SVG")), None);
+        // SVG is editable text; Monaco renders it as XML.
+        assert_eq!(detect_language(Path::new("icon.svg")), "xml");
+        assert_eq!(detect_language(Path::new("ICON.SVG")), "xml");
+    }
+
+    #[test]
+    fn office_kind_splits_spreadsheets_from_documents() {
+        assert_eq!(office_kind(Path::new("letters.doc")).map(|(k, _)| k), Some("office"));
+        assert_eq!(office_kind(Path::new("letters.docx")).map(|(k, _)| k), Some("office"));
+        assert_eq!(office_kind(Path::new("book.xls")).map(|(k, _)| k), Some("spreadsheet"));
+        assert_eq!(office_kind(Path::new("book.xlsx")).map(|(k, _)| k), Some("spreadsheet"));
+        assert_eq!(office_kind(Path::new("BOOK.XLSX")).map(|(k, _)| k), Some("spreadsheet"));
+    }
+
+    #[test]
+    fn truncate_utf8_never_splits_a_code_point() {
+        // "a中b": 中 is three bytes (E4 B8 AD).
+        let bytes = "a中b".as_bytes();
+        assert_eq!(truncate_utf8_prefix(bytes, bytes.len()), bytes);
+        assert_eq!(truncate_utf8_prefix(bytes, bytes.len() + 10), bytes);
+
+        for max in 0..=bytes.len() {
+            let prefix = truncate_utf8_prefix(bytes, max);
+            assert!(prefix.len() <= max);
+            // The prefix must still be valid UTF-8 for every cut point.
+            std::str::from_utf8(prefix).expect("prefix stays a valid UTF-8 string");
+        }
+
+        // Cutting inside the multi-byte character backs off to the lead byte.
+        assert_eq!(truncate_utf8_prefix(bytes, 1), b"a");
+        assert_eq!(truncate_utf8_prefix(bytes, 2), b"a");
+        assert_eq!(truncate_utf8_prefix(bytes, 3), b"a");
+        assert_eq!(truncate_utf8_prefix(bytes, 4), "a中".as_bytes());
+
+        // Four-byte emoji are handled the same way.
+        let emoji = "x🦀y".as_bytes();
+        for max in 0..=emoji.len() {
+            std::str::from_utf8(truncate_utf8_prefix(emoji, max))
+                .expect("emoji prefix stays valid UTF-8");
+        }
     }
 }

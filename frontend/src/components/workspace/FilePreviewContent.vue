@@ -8,7 +8,12 @@
       {{ t('filePreview.pickFile') }}
     </div>
     <template v-else>
-      <img v-if="meta?.kind === 'image'" class="file-media" :src="rawUrl" alt="" />
+      <ImagePreview
+        v-if="meta?.kind === 'image'"
+        :src="rawUrl"
+        :alt="csvFilePath"
+        :file-key="csvFilePath"
+      />
       <video
         v-else-if="meta?.kind === 'video'"
         class="file-media"
@@ -182,6 +187,22 @@
         @selection-change="(payload) => $emit('selection-change', payload)"
         @toggle-outline="$emit('toggle-outline')"
       />
+      <SvgPreview
+        v-else-if="isSvgFile && meta?.kind === 'text'"
+        :content="meta?.content ?? editorText"
+        :editor-text="editorText"
+        :file-path="csvFilePath"
+        :raw-url="rawUrl"
+        :truncated="!!meta?.truncated"
+        :editor-dirty="editorDirty"
+        :show-save="showSave"
+        :can-save-editor="canSaveEditor"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(payload) => $emit('selection-change', payload)"
+      />
       <template v-else-if="meta?.kind === 'text' || meta?.kind === 'markdown'">
         <div class="file-editor-root">
           <div class="file-editor-chrome">
@@ -272,6 +293,12 @@
           />
         </div>
       </template>
+      <SpreadsheetPreview
+        v-else-if="meta?.kind === 'spreadsheet'"
+        :raw-url="rawUrl"
+        :file-path="csvFilePath"
+        :pane-id="paneId"
+      />
       <div v-else-if="meta?.kind === 'office'" class="file-office">
         <div v-if="officeLoading" class="file-workspace-placeholder">
           {{ t('filePreview.loading') }}
@@ -299,12 +326,15 @@ import {
   handleMarkdownPreviewClick,
 } from '../../composables/markdownEnhance'
 import CsvPreview from './CsvPreview.vue'
+import ImagePreview from './ImagePreview.vue'
 import { isIpynbFile as isIpynbPath } from '../../utils/ipynb'
 import { structuredFormatForPath } from '../../utils/structuredOutline'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
 const LogPreview = defineAsyncComponent(() => import('./LogPreview.vue'))
 const IpynbPreview = defineAsyncComponent(() => import('./IpynbPreview.vue'))
 const StructuredPreview = defineAsyncComponent(() => import('./StructuredPreview.vue'))
+const SvgPreview = defineAsyncComponent(() => import('./SvgPreview.vue'))
+const SpreadsheetPreview = defineAsyncComponent(() => import('./SpreadsheetPreview.vue'))
 
 const { t } = useI18n()
 
@@ -358,6 +388,10 @@ const csvFilePath = computed(function computeCsvFilePath() {
 const isCsvFile = computed(function computeIsCsvFile() {
   // 步骤1：按当前文件路径判断是否启用 CSV 预览。
   return isCsvPreviewFile(csvFilePath.value)
+})
+const isSvgFile = computed(function computeIsSvgFile() {
+  // SVG arrives as editable text; the extension alone picks the SVG viewer.
+  return csvFilePath.value.toLowerCase().endsWith('.svg')
 })
 const isLogFile = computed(function computeIsLogFile() {
   // Only the explicit `.log` extension gets the ANSI log viewer; every other

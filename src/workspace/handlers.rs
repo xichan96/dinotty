@@ -25,7 +25,7 @@ use super::util::{
     detect_language, get_root, is_user_path, json_err, media_kind, normalize_join, office_kind,
     parent_dir_must_be_in_workspace, parse_rg_json, path_must_be_under, rel_from_root,
     resolve_byte_range, resolve_user_path, skip_text_preview, sort_dir_entries, ssh_session,
-    try_res, ByteRangeResult, MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
+    truncate_utf8_prefix, try_res, ByteRangeResult, MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
 };
 
 #[allow(clippy::unused_async)]
@@ -356,7 +356,7 @@ pub async fn workspace_meta(
         Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
     let truncated = bytes.len() > MAX_TEXT_PREVIEW;
-    let slice = if truncated { &bytes[..MAX_TEXT_PREVIEW] } else { &bytes[..] };
+    let slice = truncate_utf8_prefix(&bytes, MAX_TEXT_PREVIEW);
     let text = match std::str::from_utf8(slice) {
         Ok(t) => t.to_string(),
         Err(_) => return Json(MetaResponse::unsupported()).into_response(),

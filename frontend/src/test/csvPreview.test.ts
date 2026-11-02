@@ -424,6 +424,64 @@ describe('CsvPreview', function csvPreviewComponentSuite() {
     expect(wrapper.find('tbody').text()).toContain('Alice')
   })
 
+  it('renders supplied rows without parsing content', function rendersSuppliedRows() {
+    // Step 1: Spreadsheet previews pass dense string[][] rows instead of text.
+    const wrapper = mount(CsvPreview, {
+      props: {
+        rows: [
+          ['name', 'city'],
+          ['Alice', 'Shanghai'],
+          ['Bob', 'Beijing'],
+        ],
+        filePath: 'book.xlsx',
+        truncated: false,
+      },
+    })
+
+    // Step 2: First row is still the header; both data rows render.
+    const headerCells = wrapper.findAll('thead th')
+    expect(headerCells[1].text()).toBe('name')
+    expect(headerCells[2].text()).toBe('city')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
+    expect(wrapper.find('tbody').text()).toContain('Bob')
+  })
+
+  it('hides the encoding selector and never fetches raw bytes when unavailable', async function hidesEncoding() {
+    // Step 1: A spreadsheet provides rows only; the raw URL points at a binary.
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mount(CsvPreview, {
+      props: {
+        rows: [['name'], ['Alice']],
+        filePath: 'book.xlsx',
+        rawUrl: '/api/workspace/raw?path=book.xlsx',
+        encodingAvailable: false,
+        truncated: false,
+      },
+    })
+    await flushPromises()
+
+    // Step 2: No encoding control, and no fetch of the binary source.
+    expect(wrapper.find('[data-testid="csv-encoding-select"]').exists()).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('uses a custom truncation message', function usesTruncatedMessage() {
+    // Step 1: Mount truncated rows with a caller-supplied notice.
+    const wrapper = mount(CsvPreview, {
+      props: {
+        rows: [['name'], ['Alice']],
+        filePath: 'book.xlsx',
+        truncated: true,
+        truncatedMessage: '当前工作表仅显示开头部分',
+        encodingAvailable: false,
+      },
+    })
+
+    // Step 2: The custom message replaces the generic CSV notice.
+    expect(wrapper.get('.csv-preview-notice').text()).toBe('当前工作表仅显示开头部分')
+  })
+
   it('can treat the first record as table data', async function togglesHeaderRow() {
     // 步骤1：确认默认模式把首行作为表头。
     const wrapper = mount(CsvPreview, {

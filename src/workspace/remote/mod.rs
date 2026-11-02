@@ -16,9 +16,9 @@ use super::util::sort_dir_entries;
 use crate::session::Session;
 use crate::workspace::upload::upload_cap_label_bytes;
 use crate::workspace::{
-    detect_language, json_err, media_kind, office_kind, skip_text_preview, DirEntry, ListResponse,
-    MetaResponse, PanePathQuery, ResolveResponse, WorkspaceListQuery, MAX_DOWNLOAD,
-    MAX_TEXT_PREVIEW,
+    detect_language, json_err, media_kind, office_kind, skip_text_preview, truncate_utf8_prefix,
+    DirEntry, ListResponse, MetaResponse, PanePathQuery, ResolveResponse, WorkspaceListQuery,
+    MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
 };
 use exec::{list_via_ssh_exec, read_via_ssh_exec};
 use path::{normalize_remote_join, resolve_remote_rel, resolve_remote_terminal_path};
@@ -168,7 +168,7 @@ pub async fn remote_meta(session: Arc<Session>, q: PanePathQuery) -> Response {
         }
     };
     let truncated = bytes.len() > MAX_TEXT_PREVIEW;
-    let slice = if truncated { &bytes[..MAX_TEXT_PREVIEW] } else { &bytes[..] };
+    let slice = truncate_utf8_prefix(&bytes, MAX_TEXT_PREVIEW);
     let text = match std::str::from_utf8(slice) {
         Ok(t) => t.to_string(),
         Err(_) => return Json(MetaResponse::unsupported()).into_response(),

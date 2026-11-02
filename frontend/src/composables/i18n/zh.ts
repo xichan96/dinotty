@@ -52,6 +52,8 @@ export default {
   'filePreview.preview': '预览',
   'filePreview.source': '源代码',
   'filePreview.mermaidError': '图表渲染失败',
+  'filePreview.copyCode': '复制',
+  'filePreview.copied': '已复制',
   'filePreview.discardChanges': '放弃未保存的更改？',
   'editorTabs.close': '关闭',
   'editorTabs.pin': '固定标签',

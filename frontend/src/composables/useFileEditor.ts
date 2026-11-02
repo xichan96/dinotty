@@ -1,6 +1,7 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
 import { isTauri } from './useTransport'
+import { loadKatex } from './markdownEnhance'
 import { esc, renderMarkdownCode } from '../utils/markdownCode'
 
 export { esc }
@@ -25,16 +26,21 @@ let _domPurifyPromise: Promise<typeof import('dompurify')> | null = null
 
 export function getMarked() {
   if (!_markedPromise) {
-    _markedPromise = import('marked').then((m) => {
-      m.use({
-        gfm: true,
-        breaks: true,
-        renderer: {
-          code: renderMarkdownCode,
-        },
-      })
-      return m
-    })
+    // KaTeX rides along with marked so inline `$…$` / `$$…$$` is parsed in
+    // the same lazy chunk; ```math fences are rendered after sanitizing.
+    _markedPromise = Promise.all([import('marked'), loadKatex(), import('marked-katex-extension')]).then(
+      ([m, , katexExtension]) => {
+        m.use({
+          gfm: true,
+          breaks: true,
+          renderer: {
+            code: renderMarkdownCode,
+          },
+        })
+        m.use(katexExtension.default({ throwOnError: false }))
+        return m
+      }
+    )
   }
   return _markedPromise
 }

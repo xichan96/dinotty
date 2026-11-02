@@ -178,6 +178,7 @@
             v-if="meta?.kind === 'markdown' && mdShowPreview"
             ref="mdPreviewEl"
             class="file-md file-md-body file-editor-preview"
+            @click="onMarkdownPreviewClick"
             v-html="markdownEditorHtml"
           ></div>
           <MonacoEditor
@@ -216,6 +217,10 @@ import { isTauri } from '../../composables/useTransport'
 import { isCsvPreviewFile } from '../../utils/csvPreview'
 import { rewriteHtmlPreview } from '../../utils/htmlPreview'
 import { renderMermaidBlocks } from '../../composables/mermaidPreview'
+import {
+  enhanceMarkdownBlocks,
+  handleMarkdownPreviewClick,
+} from '../../composables/markdownEnhance'
 import CsvPreview from './CsvPreview.vue'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
 
@@ -299,23 +304,34 @@ function showCsvTable() {
   csvShowTable.value = true
 }
 
-// Mermaid placeholders are inert until the DOM exists, so render them after
-// v-html has committed (and again whenever the preview is toggled back on).
+// Mermaid/code/math placeholders are inert until the DOM exists, so enhance
+// them after v-html has committed (and again whenever the preview toggles on).
 const mdPreviewEl = ref<HTMLElement | null>(null)
 
-function renderDiagrams() {
+function renderPreviewEnhancements() {
   const container = mdPreviewEl.value
   if (!container || props.meta?.kind !== 'markdown' || !props.mdShowPreview) return
   void renderMermaidBlocks(container, { errorLabel: t('filePreview.mermaidError') })
+  void enhanceMarkdownBlocks(container, {
+    copyLabel: t('filePreview.copyCode'),
+    copiedLabel: t('filePreview.copied'),
+  })
+}
+
+function onMarkdownPreviewClick(event: MouseEvent) {
+  handleMarkdownPreviewClick(event, {
+    copyLabel: t('filePreview.copyCode'),
+    copiedLabel: t('filePreview.copied'),
+  })
 }
 
 watch(
   () => [props.markdownEditorHtml, props.mdShowPreview, props.meta?.kind] as const,
-  renderDiagrams,
+  renderPreviewEnhancements,
   { flush: 'post' }
 )
 
-onMounted(renderDiagrams)
+onMounted(renderPreviewEnhancements)
 
 defineEmits<{
   audioTimeUpdate: [e: Event]
@@ -772,6 +788,152 @@ video.file-media {
   font-size: 0.92em;
   text-align: left;
 }
+/* Code blocks: header with language label + copy button, highlighted body. */
+.file-md-body :deep(.md-code-block) {
+  margin: 0.65em 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, #1a1a1a);
+  overflow: hidden;
+}
+
+.file-md-body :deep(.md-code-block pre) {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.file-md-body :deep(.md-code-head) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--tab-bg);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  line-height: 1.6;
+}
+
+.file-md-body :deep(.md-code-lang) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-md-body :deep(.md-code-copy) {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.file-md-body :deep(.md-code-copy:hover) {
+  border-color: var(--border);
+  color: var(--fg-bright);
+}
+
+/* highlight.js tokens mapped onto the app's theme colours. */
+.file-md-body :deep(.hljs-comment),
+.file-md-body :deep(.hljs-quote) {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.file-md-body :deep(.hljs-keyword),
+.file-md-body :deep(.hljs-selector-tag),
+.file-md-body :deep(.hljs-literal),
+.file-md-body :deep(.hljs-doctag),
+.file-md-body :deep(.hljs-name) {
+  color: var(--color-magenta);
+}
+
+.file-md-body :deep(.hljs-string),
+.file-md-body :deep(.hljs-regexp),
+.file-md-body :deep(.hljs-addition),
+.file-md-body :deep(.hljs-attribute) {
+  color: var(--color-green);
+}
+
+.file-md-body :deep(.hljs-number),
+.file-md-body :deep(.hljs-symbol),
+.file-md-body :deep(.hljs-bullet),
+.file-md-body :deep(.hljs-variable),
+.file-md-body :deep(.hljs-template-variable),
+.file-md-body :deep(.hljs-link),
+.file-md-body :deep(.hljs-selector-attr),
+.file-md-body :deep(.hljs-selector-pseudo) {
+  color: var(--color-yellow);
+}
+
+.file-md-body :deep(.hljs-title),
+.file-md-body :deep(.hljs-section),
+.file-md-body :deep(.hljs-selector-id),
+.file-md-body :deep(.hljs-built_in),
+.file-md-body :deep(.hljs-type) {
+  color: var(--color-blue);
+}
+
+.file-md-body :deep(.hljs-attr),
+.file-md-body :deep(.hljs-params),
+.file-md-body :deep(.hljs-property),
+.file-md-body :deep(.hljs-tag) {
+  color: var(--color-cyan);
+}
+
+.file-md-body :deep(.hljs-meta),
+.file-md-body :deep(.hljs-deletion) {
+  color: var(--color-red);
+}
+
+.file-md-body :deep(.hljs-emphasis) {
+  font-style: italic;
+}
+
+.file-md-body :deep(.hljs-strong) {
+  font-weight: 600;
+}
+
+/* ```math fences */
+.file-md-body :deep(.md-math) {
+  margin: 0.75em 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.file-md-body :deep(.md-math-src) {
+  margin: 0;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.file-md-body :deep(.md-math[data-md-state='done'] .md-math-src) {
+  display: none;
+}
+
+.file-md-body :deep(.md-math-canvas .katex-display) {
+  margin: 0;
+}
+
+/* Inline KaTeX inherits the prose size; display math may overflow horizontally. */
+.file-md-body :deep(.katex) {
+  font-size: 1.05em;
+}
+
+.file-md-body :deep(.katex-display) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2em 0;
+}
+
 .file-md-body :deep(input[type='checkbox']) {
   margin-right: 0.35em;
   vertical-align: middle;

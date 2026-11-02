@@ -18,6 +18,7 @@ import {
 } from '../types/paneMru'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 import { getApiBase, wsUrl } from './apiBase'
 import { isLocalActive } from './activeServer'
 import { scopedKey } from './serverScope'
@@ -131,6 +132,7 @@ export function useSyncWebSocket(opts: {
 }) {
   const { termRefs, persist, focusActive, newTab, detached } = opts
   const session = useSessionStore()
+  const detachedWindows = useDetachedWindowsStore()
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
   const { syncConnected } = storeToRefs(ui)
@@ -553,6 +555,9 @@ export function useSyncWebSocket(opts: {
           if (msg.pane_id === detached.tabId) detached.onTabClosed?.(detached.tabId)
           return
         }
+        // A tab closed from any client also ends its detached window (the
+        // window closes itself); stop hiding the id and let the tab be pruned.
+        detachedWindows.handleClosed(msg.pane_id)
         // Match by tab paneId only. The backend always broadcasts
         // `tab_closed` with the tab's paneId (a.k.a. tab_id), never a leaf
         // paneId. A previous fallback that searched layouts by leaf paneId

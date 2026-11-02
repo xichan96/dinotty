@@ -272,6 +272,7 @@ import {
   LayoutTemplate,
   ClipboardCopy,
   Copy,
+  ExternalLink,
 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
@@ -285,6 +286,7 @@ import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 import { useTabDrag } from '../../composables/useTabDrag'
 import { SIDEBAR_WIDTH_DEFAULT, useTabPlacement } from '../../composables/useTabPlacement'
 import { copyToClipboard } from '../../utils/clipboard'
+import { isTauri } from '../../composables/useTransport'
 import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 import { singleElRef } from '../../utils/singleElRef'
@@ -412,6 +414,7 @@ const emit = defineEmits<{
   ]
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
+  'detach-to-window': [paneId: string]
   'open-overview': []
   'close-tabs': [paneIds: string[]]
   'save-as-template': [tabId: string]
@@ -586,12 +589,25 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
     return sideTabs.filter((t) => t.type !== 'plugin')
   }
 
+  // Detached windows are a desktop-only concept and v1 only carries terminal
+  // (including SSH) tabs; plugin/preview tabs have no terminal to render.
+  const canDetach = tab.type === 'terminal' && isTauri() && !props.isMobile
+
   ctxItems.value = [
     {
       label: t('palette.rename'),
       icon: Pencil,
       action: () => startEdit(tab),
     },
+    ...(canDetach
+      ? [
+          {
+            label: t('tab.detachToWindow'),
+            icon: ExternalLink,
+            action: () => emit('detach-to-window', tab.paneId),
+          },
+        ]
+      : []),
     {
       label: closeWorkspaceLabel,
       icon: Layers,

@@ -39,6 +39,7 @@
         @merge-tab-into-pane="onMergeTabIntoPane"
         @open-plugin="openPlugin"
         @rename="onRenameTab"
+        @detach-to-window="detachTab"
         @open-overview="openOverview"
         @save-as-template="openSaveTemplateDialog"
         @apply-template="templatePickerVisible = true"
@@ -160,7 +161,7 @@
         @touchcancel.capture="onTabContentTouchCancelCapture"
       >
         <div
-          v-for="tab in tabs"
+          v-for="tab in contentTabs"
           :key="tabKey(tab)"
           class="tab-page"
           :class="{
@@ -513,6 +514,7 @@ const windowCloseConfirmVisible = ref(false)
 const trayVisibilityDialogVisible = ref(false)
 const previewMenuOpen = ref(false)
 const lastTabCloseShortcutAt = ref(0)
+let disposeDetachedListener: (() => void) | undefined
 
 // ── Tab bar placement (device-scoped; never written to the server settings) ──
 const tabPlacement = useTabPlacement()
@@ -606,6 +608,7 @@ const {
   systemToolbarRef,
   activeTabType,
   visibleTabList,
+  contentTabs,
   tabIndicators,
   notificationPaneLabels,
   currentTabIndex,
@@ -622,6 +625,9 @@ const {
   activateTab,
   closeTab,
   requestCloseTab,
+  detachTab,
+  setupDetachedWindowListener,
+  refreshDetachedWindows,
   onCloseTabsBulk,
   reorderTab,
   onRenameTab,
@@ -772,6 +778,7 @@ const { pluginNotifyBridge } = bridge
 
 onMounted(async () => {
   setupTauriWindowClose()
+  disposeDetachedListener = setupDetachedWindowListener()
   syncKbDebugFlag()
   window.addEventListener('hashchange', syncKbDebugFlag)
   await desktopLifecycle.setup()
@@ -787,6 +794,10 @@ onMounted(async () => {
   try {
     if (authenticated.value) {
       await getApiBase()
+      // The Rust process may still own detached windows from before a reload.
+      // Rebuild the filter before sync WS/REST deliver tabs, so those panes
+      // never mount in the main window first.
+      await refreshDetachedWindows()
       // Packs live on the server, so this can only run once we know where the
       // server is and that we may talk to it. Deliberately not awaited: a
       // missing or slow route must not hold up the first paint, and until it
@@ -899,6 +910,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposeDetachedListener?.()
   hostClipboardPaste.dispose()
   stopForegroundGainSubscription()
   pluginNotifyBridge.dispose()

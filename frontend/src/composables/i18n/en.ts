@@ -1414,6 +1414,7 @@ export default {
   'detached.reattachedToWorkspace': 'Terminal returned to its workspace.',
   'detached.returnedToDefaultWorkspace': 'Terminal returned to the default workspace.',
   'tab.detachToWindow': 'Detach to new window',
+  'tab.detachFailed': 'Could not detach this tab into a new window.',
   'tab.detachedBadge': 'Detached',
   'tab.closeTerminal': 'Close terminal',
 } satisfies MessageTable

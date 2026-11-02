@@ -1361,6 +1361,7 @@ export default {
   'detached.reattachedToWorkspace': '终端已收回到所属工作区。',
   'detached.returnedToDefaultWorkspace': '终端已收回到默认工作区。',
   'tab.detachToWindow': '游离到新窗口',
+  'tab.detachFailed': '无法将该标签页游离到新窗口。',
   'tab.detachedBadge': '已游离',
   'tab.closeTerminal': '关闭终端',
 } satisfies MessageTable

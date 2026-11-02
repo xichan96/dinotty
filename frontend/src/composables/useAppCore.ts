@@ -42,6 +42,7 @@ import type { FloatWindowContent, PreviewOpenMode } from '../types/floatWindow'
 import { floatWindowId, resolvePreviewOpenMode } from '../types/floatWindow'
 import { settings } from './useSettings'
 import { useTabLifecycle } from './useTabLifecycle'
+import { useDetachedWindows } from './useDetachedWindows'
 import { setMcSender, sendMcOp, useMissionControlState } from './useMissionControlState'
 import { ensureCapabilities } from './serverCapabilities'
 import { useSplitPane } from './useSplitPane'
@@ -81,6 +82,7 @@ import type { MobileInputMode } from './useSettings'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 import { useDesktopLifecycle } from './useDesktopLifecycle'
 import { useNotification } from './useNotification'
 import { useToast } from 'vue-toastification'
@@ -167,6 +169,7 @@ export function useAppCore(options: AppCoreOptions) {
   const { tabs, activePaneId, tabList, activeTabType, activeTab, isBroadcastActive, canBroadcast } =
     storeToRefs(session)
   const { kbVisible, settingsOpen, authenticated, authProbe, needsSetup } = storeToRefs(ui)
+  const detachedStore = useDetachedWindowsStore()
   const appSettings = settingsStore.settings
   const { t, locale } = useI18n()
   const presentationSettings = useNotificationPresentation().settings
@@ -312,6 +315,9 @@ export function useAppCore(options: AppCoreOptions) {
 
   const visibleTabList = computed(() => {
     const list = tabList.value.filter((info) => {
+      // Detached tabs stay in the store (Mission Control and workspace counts
+      // still see them) but never reach the main window's tab bar.
+      if (detachedStore.isDetached(info.paneId)) return false
       const rawTab = tabs.value.find((t) => t.paneId === info.paneId)
       if (!rawTab) return false
       if (rawTab.type === 'plugin') return true
@@ -335,6 +341,11 @@ export function useAppCore(options: AppCoreOptions) {
     // Reindex: workspace-relative 1-based indices
     return list.map((t, i) => ({ ...t, index: i + 1 }))
   })
+
+  /** Tabs the main window actually mounts. App.vue renders this instead of the
+   *  full store list so a detached tab's TerminalPane unmounts (no double
+   *  attach); the tab itself stays in the store for Mission Control. */
+  const contentTabs = computed(() => detachedStore.withoutDetached(tabs.value))
 
   /** Aggregated per-tab unread notification severity (rolls up all leaves of a split tab). */
   const tabIndicators = computed(() => {
@@ -415,6 +426,18 @@ export function useAppCore(options: AppCoreOptions) {
     onSshConnectRef,
     sendSync: (msg) => sendSyncFn(msg),
     showCreateTerminalError: (error) => showShellApiError(error, 'terminal.createFailed'),
+  })
+
+  // Detaching a tab is a local display move: it never calls `apiActivatePane`,
+  // so other clients keep their own focus (design "Active tab / active workspace").
+  const detachedWindows = useDetachedWindows({
+    tabs,
+    activePaneId,
+    visibleTabList,
+    commitLocalActivePane,
+    focusActive,
+    toast,
+    t,
   })
 
   // Overlay host is a sibling of #app-root and cannot reach this per-instance
@@ -817,6 +840,9 @@ export function useAppCore(options: AppCoreOptions) {
     markCookieAuthenticated()
     ui.setAuthenticated(true)
     await getApiBase()
+    // The Rust process still owns any windows from before a reload, and tabs
+    // are about to arrive: rebuild the filter before they mount their panes.
+    await detachedStore.refreshFromRust()
     await settingsStore.load()
     void loadAll()
     void syncWs.connectSyncWS()
@@ -1264,6 +1290,7 @@ export function useAppCore(options: AppCoreOptions) {
     activeWorkspaceColor,
     // tab metadata
     visibleTabList,
+    contentTabs,
     tabIndicators,
     notificationPaneLabels,
     currentTabIndex,
@@ -1284,6 +1311,10 @@ export function useAppCore(options: AppCoreOptions) {
     requestCloseTab,
     closeTab,
     focusActive,
+    // detached windows
+    detachTab: detachedWindows.detachTab,
+    setupDetachedWindowListener: detachedWindows.setupListener,
+    refreshDetachedWindows: detachedWindows.refresh,
     // overview
     overviewOpen,
     openOverview,

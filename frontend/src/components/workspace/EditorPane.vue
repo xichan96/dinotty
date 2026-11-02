@@ -34,79 +34,99 @@
     />
 
     <EditorBreadcrumbs
+      v-if="!showingDiff"
       :file-path="activeFilePath"
       :disk-changed="diskChanged"
       @reload-disk="onDiskChangedClick"
     />
 
     <div class="preview-wrap">
-      <FilePreviewContent
-        ref="previewContentRef"
+      <GitDiffView
+        v-if="showingDiff && diffTarget"
+        :key="diffTarget.path + '|' + (diffTarget.origPath ?? '')"
         :pane-id="paneId"
-        :file-path="activeFilePath ?? undefined"
         :leaf-id="leaf.id"
-        :preview-loading="previewLoading"
-        :preview-err="previewErr"
-        :selected-rel="activeFilePath"
-        :selected-is-dir="activeIsDir"
-        :meta="meta"
-        :raw-url="rawUrl"
-        :show-save="true"
-        :audio-title="audioTitle"
-        :audio-sub="audioSub"
-        :audio-time-now="audio.audioTimeNow.value"
-        :audio-time-total="audio.audioTimeTotal.value"
-        :audio-seek-value="audio.audioSeekValue.value"
-        :audio-vol-value="audio.audioVolValue.value"
-        :audio-playing="audio.audioPlaying.value"
+        :target="diffTarget"
         :editor-dirty="editor.editorDirty.value"
-        :editor-text="editor.editorText.value"
-        :can-save-editor="editor.canSaveEditor.value"
-        :md-show-preview="editor.mdShowPreview.value"
-        :html-show-preview="editor.htmlShowPreview.value"
-        :markdown-editor-html="editor.markdownEditorHtml.value"
-        :office-loading="office.officeLoading.value"
-        :office-err="office.officeErr.value"
-        :office-html="office.officeHtml.value"
-        :outline-open="outlineOpen"
-        :outline-available="outlineAvailable"
-        :outline-panel-id="outlinePanelId"
-        @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
-        @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
-        @audio-ended="audio.onAudioEnded()"
-        @audio-seek-input="(ev: Event) => audio.onAudioSeekInput(audioRef, ev)"
-        @seek-audio="(d: number) => audio.seekAudio(audioRef, d)"
-        @toggle-audio="audio.toggleAudio(audioRef)"
-        @audio-volume-input="(ev: Event) => audio.onAudioVolumeInput(audioRef, ev)"
-        @update:md-show-preview="editor.mdShowPreview.value = $event"
-        @update:html-show-preview="editor.htmlShowPreview.value = $event"
-        @update:editor-text="editor.editorText.value = $event"
-        @save-editor="onSaveEditor"
-        @toggle-outline="toggleOutline"
-        @selection-change="editor.onEditorSelectionChange"
+        :active="isActive"
       />
-      <OutlinePanel
-        v-if="outlineAvailable"
-        :open="outlineOpen"
-        :mobile="outlineMobile"
-        :source="outlineSource"
-        :mode="outlinePanelMode"
-        :active-id="outlineActiveId"
-        :file-path="activeFilePath ?? ''"
-        :language-label="outlineLanguageLabel"
-        :panel-id="outlinePanelId"
-        @open="outlineOpen = true"
-        @close="outlineOpen = false"
-        @reveal="onOutlineReveal"
-        @retry="rescanOutline"
-        @update:active-id="outlineActiveId = $event"
-      />
+      <template v-else>
+        <FilePreviewContent
+          ref="previewContentRef"
+          :pane-id="paneId"
+          :file-path="activeFilePath ?? undefined"
+          :leaf-id="leaf.id"
+          :preview-loading="previewLoading"
+          :preview-err="previewErr"
+          :selected-rel="activeFilePath"
+          :selected-is-dir="activeIsDir"
+          :meta="meta"
+          :raw-url="rawUrl"
+          :show-save="true"
+          :audio-title="audioTitle"
+          :audio-sub="audioSub"
+          :audio-time-now="audio.audioTimeNow.value"
+          :audio-time-total="audio.audioTimeTotal.value"
+          :audio-seek-value="audio.audioSeekValue.value"
+          :audio-vol-value="audio.audioVolValue.value"
+          :audio-playing="audio.audioPlaying.value"
+          :editor-dirty="editor.editorDirty.value"
+          :editor-text="editor.editorText.value"
+          :can-save-editor="editor.canSaveEditor.value"
+          :md-show-preview="editor.mdShowPreview.value"
+          :html-show-preview="editor.htmlShowPreview.value"
+          :markdown-editor-html="editor.markdownEditorHtml.value"
+          :office-loading="office.officeLoading.value"
+          :office-err="office.officeErr.value"
+          :office-html="office.officeHtml.value"
+          :outline-open="outlineOpen"
+          :outline-available="outlineAvailable"
+          :outline-panel-id="outlinePanelId"
+          @audio-time-update="audio.onAudioTimeUpdate(audioRef)"
+          @audio-loaded-metadata="audio.onAudioLoadedMetadata(audioRef)"
+          @audio-ended="audio.onAudioEnded()"
+          @audio-seek-input="(ev: Event) => audio.onAudioSeekInput(audioRef, ev)"
+          @seek-audio="(d: number) => audio.seekAudio(audioRef, d)"
+          @toggle-audio="audio.toggleAudio(audioRef)"
+          @audio-volume-input="(ev: Event) => audio.onAudioVolumeInput(audioRef, ev)"
+          @update:md-show-preview="editor.mdShowPreview.value = $event"
+          @update:html-show-preview="editor.htmlShowPreview.value = $event"
+          @update:editor-text="editor.editorText.value = $event"
+          @save-editor="onSaveEditor"
+          @toggle-outline="toggleOutline"
+          @selection-change="editor.onEditorSelectionChange"
+        />
+        <OutlinePanel
+          v-if="outlineAvailable"
+          :open="outlineOpen"
+          :mobile="outlineMobile"
+          :source="outlineSource"
+          :mode="outlinePanelMode"
+          :active-id="outlineActiveId"
+          :file-path="activeFilePath ?? ''"
+          :language-label="outlineLanguageLabel"
+          :panel-id="outlinePanelId"
+          @open="outlineOpen = true"
+          @close="outlineOpen = false"
+          @reveal="onOutlineReveal"
+          @retry="rescanOutline"
+          @update:active-id="outlineActiveId = $event"
+        />
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
 import type { DropPosition } from '../../types/pane'
@@ -121,6 +141,7 @@ import {
   unregisterEditorPaneState,
 } from '../../composables/useEditorRegistry'
 import { useCursorGroup, isCursorBroadcasting } from '../../composables/useCursorGroup'
+import { clearDiffTarget, useDiffTarget } from '../../composables/useDiffView'
 import { useTabBufferStore, type TabBuffer } from '../../composables/useTabBufferStore'
 import {
   endTabDrag,
@@ -148,6 +169,10 @@ import { normalizeCodeLanguage } from '../../utils/codeSymbols'
 import { flattenOutline, outlineAtLine } from '../../utils/outlineTree'
 import type { OutlineItem, OutlineMode } from '../../types/outline'
 import type * as monaco from 'monaco-editor'
+
+// Monaco is heavy; keep it out of the normal-preview path (and out of tests
+// that never mount a diff target), mirroring FilePreviewContent's lazy editor.
+const GitDiffView = defineAsyncComponent(() => import('./GitDiffView.vue'))
 
 export interface EditorRevealTarget {
   path: string
@@ -193,6 +218,31 @@ const draggingTab = ref(false)
 const activeTab = computed(() => getActiveTab(props.leaf))
 const activeFilePath = computed(() => activeTab.value?.filePath ?? null)
 const activeIsDir = computed(() => activeTab.value?.isDir ?? false)
+
+// A changes-list row can set a diff target before this pane activates the tab,
+// so the target is only cleared after the pane has actually shown it and then
+// navigated to a different path.
+const diffTarget = useDiffTarget(() => props.leaf.id)
+const showingDiff = computed(
+  () => diffTarget.value !== null && activeFilePath.value === diffTarget.value.path
+)
+// Start true when the pane mounts already showing a diff, so a later tab
+// switch still clears the target.
+let diffWasShown = showingDiff.value
+
+watch(
+  () => [activeFilePath.value, diffTarget.value] as const,
+  () => {
+    if (showingDiff.value) {
+      diffWasShown = true
+      return
+    }
+    if (diffWasShown) {
+      diffWasShown = false
+      clearDiffTarget(props.leaf.id)
+    }
+  }
+)
 
 const dropHint = computed(() => {
   if (draggingTab.value) {

@@ -11,11 +11,11 @@
     :id="panelId"
     ref="panelEl"
     class="outline-panel"
-    :class="{ open, mobile, resizing }"
+    :class="{ open, mobile, resizing, swiping }"
     :aria-hidden="open ? 'false' : 'true'"
     :inert="!open"
     :aria-label="t('outline.title')"
-    :style="{ '--panel-w': `${width}px` }"
+    :style="{ '--panel-w': `${width}px`, '--panel-drag': `${swipeOffset}px` }"
   >
     <div
       class="resize-handle"
@@ -23,9 +23,22 @@
       @pointerdown="onResizeStart"
       @dblclick="resetWidth"
     ></div>
-    <div class="panel-grip" aria-hidden="true"></div>
+    <div
+      class="panel-grip"
+      aria-hidden="true"
+      @pointerdown="onSwipeStart"
+      @pointermove="onSwipeMove"
+      @pointerup="onSwipeEnd"
+      @pointercancel="onSwipeEnd"
+    ></div>
 
-    <header class="panel-head">
+    <header
+      class="panel-head"
+      @pointerdown="onSwipeStart"
+      @pointermove="onSwipeMove"
+      @pointerup="onSwipeEnd"
+      @pointercancel="onSwipeEnd"
+    >
       <span class="panel-title">
         <svg
           viewBox="0 0 24 24"
@@ -151,7 +164,7 @@
       </button>
     </div>
 
-    <div ref="scrollEl" class="outline-scroll">
+    <div ref="scrollEl" class="outline-scroll" @scroll.passive="onScroll">
       <div v-if="source.status === 'error'" class="panel-empty">
         <span class="empty-icon warn">
           <svg
@@ -224,7 +237,13 @@
 
       <div v-else class="outline-tree" role="tree" :aria-label="t('outline.treeLabel')">
         <div
-          v-for="row in rows"
+          v-if="virtualized && topPad > 0"
+          class="outline-vpad"
+          :style="{ height: `${topPad}px` }"
+          aria-hidden="true"
+        ></div>
+        <div
+          v-for="row in visibleRows"
           :key="row.item.id"
           class="outline-row"
           :class="{ active: row.item.id === activeId }"
@@ -277,6 +296,12 @@
             metaFor(row.item)
           }}</span>
         </div>
+        <div
+          v-if="virtualized && bottomPad > 0"
+          class="outline-vpad"
+          :style="{ height: `${bottomPad}px` }"
+          aria-hidden="true"
+        ></div>
       </div>
     </div>
 
@@ -319,6 +344,13 @@ import {
   findOutlineEntry,
   outlineRows,
 } from '../../utils/outlineTree'
+import { shouldCloseOnSwipe } from '../../utils/outlineSwipe'
+import {
+  OUTLINE_ROW_HEIGHT,
+  OUTLINE_ROW_HEIGHT_MOBILE,
+  OUTLINE_VIRTUALIZE_THRESHOLD,
+  virtualWindow,
+} from '../../utils/outlineVirtual'
 
 const props = withDefaults(
   defineProps<{
@@ -364,9 +396,37 @@ const width = ref(loadWidth())
 const expanded = ref<Set<string>>(new Set())
 let expansionReady = false
 
+let scrollFrame: number | null = null
+let resizeObserver: ResizeObserver | null = null
+let swipeState: { pointerId: number; startY: number; startTime: number; dy: number } | null = null
+
 const needle = computed(() => query.value.trim())
 const stats = computed(() => outlineRows(props.source.items, expanded.value, query.value))
 const rows = computed(() => stats.value.rows)
+
+const scrollTop = ref(0)
+const viewportHeight = ref(0)
+const swipeOffset = ref(0)
+const swiping = ref(false)
+
+const virtualized = computed(() => rows.value.length > OUTLINE_VIRTUALIZE_THRESHOLD)
+const rowHeight = computed(() =>
+  props.mobile ? OUTLINE_ROW_HEIGHT_MOBILE : OUTLINE_ROW_HEIGHT
+)
+const windowState = computed(() =>
+  virtualWindow(
+    rows.value.length,
+    scrollTop.value,
+    viewportHeight.value,
+    rowHeight.value
+  )
+)
+const visibleRows = computed(() => {
+  if (!virtualized.value) return rows.value
+  return rows.value.slice(windowState.value.start, windowState.value.end)
+})
+const topPad = computed(() => (virtualized.value ? windowState.value.topPad : 0))
+const bottomPad = computed(() => (virtualized.value ? windowState.value.bottomPad : 0))
 
 const noMatches = computed(
   () => props.source.status === 'ok' && needle.value.length > 0 && stats.value.matches === 0
@@ -432,28 +492,47 @@ watch(
   { immediate: true }
 )
 
-// Do not leave focus inside an aria-hidden/inert subtree.
+// Do not leave focus inside an aria-hidden/inert subtree; reset swipe state.
 watch(
   () => props.open,
   (open) => {
-    if (open) return
+    if (open) {
+      void nextTick(syncScrollMetrics)
+      return
+    }
+    swipeOffset.value = 0
+    swiping.value = false
+    swipeState = null
     const active = document.activeElement
     if (active instanceof HTMLElement && panelEl.value?.contains(active)) active.blur()
   }
 )
 
-// A spy hit inside a manually collapsed branch must stay visible.
+// Rows, expansion and filtering all change the total height; re-measure after
+// the DOM settles so the window never straddles a stale scroll position.
+watch(
+  [rows, () => props.mobile],
+  () => {
+    void nextTick(syncScrollMetrics)
+  }
+)
+
+// A spy hit inside a manually collapsed branch must stay visible, and a
+// virtualized row outside the window must be scrolled into view.
 watch(
   () => props.activeId,
   (id) => {
     if (!id) return
     const entry = findOutlineEntry(props.source.items, id)
-    if (!entry || entry.parents.length === 0) return
-    const missing = entry.parents.filter((parent) => !expanded.value.has(parent))
-    if (missing.length === 0) return
-    const next = new Set(expanded.value)
-    for (const parent of missing) next.add(parent)
-    expanded.value = next
+    if (entry && entry.parents.length > 0) {
+      const missing = entry.parents.filter((parent) => !expanded.value.has(parent))
+      if (missing.length > 0) {
+        const next = new Set(expanded.value)
+        for (const parent of missing) next.add(parent)
+        expanded.value = next
+      }
+    }
+    void ensureActiveRowVisible(id)
   }
 )
 
@@ -548,14 +627,116 @@ function clearFilter(): void {
 function onRowClick(item: OutlineItem): void {
   emit('update:activeId', item.id)
   emit('reveal', item)
-  void nextTick(() => {
-    const target = Array.from(
-      scrollEl.value?.querySelectorAll<HTMLElement>('[data-outline-id]') ?? []
-    ).find((element) => element.dataset.outlineId === item.id)
-    if (target && typeof target.scrollIntoView === 'function') {
-      target.scrollIntoView({ block: 'nearest' })
-    }
+  void ensureRowVisible(item)
+}
+
+function syncScrollMetrics(): void {
+  const element = scrollEl.value
+  if (!element) return
+  scrollTop.value = element.scrollTop
+  viewportHeight.value = element.clientHeight
+}
+
+function measureViewport(): void {
+  viewportHeight.value = scrollEl.value?.clientHeight ?? 0
+}
+
+function onScroll(): void {
+  if (!virtualized.value || scrollFrame !== null) return
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = null
+    if (scrollEl.value) scrollTop.value = scrollEl.value.scrollTop
   })
+}
+
+/** Move the scroll position so a row index is inside the rendered window. */
+function scrollIndexIntoView(index: number): void {
+  if (!virtualized.value || index < 0) return
+  const element = scrollEl.value
+  const height = viewportHeight.value || element?.clientHeight || 0
+  const top = index * rowHeight.value
+  const bottom = top + rowHeight.value
+  const current = element?.scrollTop ?? scrollTop.value
+  if (top >= current && bottom <= current + height) return
+  if (element) element.scrollTop = top
+  scrollTop.value = top
+}
+
+async function ensureRowVisible(item: OutlineItem): Promise<void> {
+  const index = rows.value.findIndex((row) => row.item.id === item.id)
+  scrollIndexIntoView(index)
+  await nextTick()
+  const target = Array.from(
+    scrollEl.value?.querySelectorAll<HTMLElement>('[data-outline-id]') ?? []
+  ).find((element) => element.dataset.outlineId === item.id)
+  if (target && typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+async function ensureActiveRowVisible(id: string): Promise<void> {
+  await nextTick()
+  const row = rows.value.find((entry) => entry.item.id === id)
+  if (row) await ensureRowVisible(row.item)
+}
+
+/* ── Mobile swipe-to-close ─────────────────────────────────────────────── */
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return !!target.closest('button, input, a, [role="button"]')
+}
+
+function onSwipeStart(event: PointerEvent): void {
+  if (!props.mobile || !props.open) return
+  if (event.button !== 0 || isInteractiveTarget(event.target)) return
+  swipeState = {
+    pointerId: event.pointerId,
+    startY: event.clientY,
+    startTime: performance.now(),
+    dy: 0,
+  }
+  swiping.value = true
+  swipeOffset.value = 0
+  event.preventDefault()
+  try {
+    ;(event.currentTarget as HTMLElement | null)?.setPointerCapture(event.pointerId)
+  } catch {
+    // Pointer capture is an optimization; the handlers still work without it.
+  }
+}
+
+function onSwipeMove(event: PointerEvent): void {
+  if (!swipeState || event.pointerId !== swipeState.pointerId) return
+  const dy = Math.max(0, event.clientY - swipeState.startY)
+  swipeState.dy = dy
+  swipeOffset.value = dy
+  if (dy > 0) event.preventDefault()
+}
+
+function onSwipeEnd(event: PointerEvent): void {
+  if (!swipeState || event.pointerId !== swipeState.pointerId) return
+  const state = swipeState
+  swipeState = null
+  swiping.value = false
+
+  const surface = event.currentTarget as HTMLElement | null
+  try {
+    if (surface?.hasPointerCapture?.(event.pointerId)) {
+      surface.releasePointerCapture(event.pointerId)
+    }
+  } catch {
+    // Already released.
+  }
+
+  const elapsed = Math.max(1, performance.now() - state.startTime)
+  if (shouldCloseOnSwipe(state.dy, state.dy / elapsed)) {
+    // Keep the dragged offset until the `open` watcher resets it, so the
+    // sheet animates out from where the finger left it.
+    emit('close')
+    return
+  }
+  swipeOffset.value = 0
 }
 
 function iconText(item: OutlineItem): string {
@@ -645,6 +826,12 @@ onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', endResize)
   window.addEventListener('pointercancel', endResize)
+  window.addEventListener('resize', measureViewport)
+  measureViewport()
+  if (scrollEl.value && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(measureViewport)
+    resizeObserver.observe(scrollEl.value)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -652,6 +839,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', endResize)
   window.removeEventListener('pointercancel', endResize)
+  window.removeEventListener('resize', measureViewport)
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (scrollFrame !== null) {
+    cancelAnimationFrame(scrollFrame)
+    scrollFrame = null
+  }
   document.body.classList.remove('outline-resizing')
 })
 </script>
@@ -705,7 +899,8 @@ onBeforeUnmount(() => {
   background: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.22));
 }
 
-.outline-panel.resizing {
+.outline-panel.resizing,
+.outline-panel.swiping {
   transition: none;
   user-select: none;
 }
@@ -958,6 +1153,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+}
+
+/* Exact-height spacer that stands in for rows outside the virtual window. */
+.outline-vpad {
+  flex: 0 0 auto;
+  pointer-events: none;
 }
 
 .outline-row {
@@ -1321,9 +1522,19 @@ onBeforeUnmount(() => {
 }
 
 .outline-panel.mobile.open {
-  transform: translateY(0);
+  transform: translateY(var(--panel-drag, 0px));
   visibility: visible;
   transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.outline-panel.mobile .panel-grip,
+.outline-panel.mobile .panel-head {
+  touch-action: none;
+}
+
+/* Beat `.outline-panel.mobile.open`'s transition while a drag is live. */
+.outline-panel.mobile.swiping {
+  transition: none;
 }
 
 .outline-panel.mobile .resize-handle {

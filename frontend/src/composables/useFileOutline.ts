@@ -3,7 +3,9 @@
  * lexer pass), top-level code symbols (regex fallback) or a JSON key tree.
  *
  * Results are cached per content version and code/JSON scans are debounced so
- * typing a large file does not re-scan on every keystroke.
+ * typing a large file does not re-scan on every keystroke. Code/JSON parsing
+ * prefers a Web Worker and falls back to the synchronous builder when workers
+ * are unavailable, fail, or time out.
  */
 import {
   computed,
@@ -15,8 +17,13 @@ import {
   type MaybeRefOrGetter,
 } from 'vue'
 import type { OutlineItem, OutlineMode, OutlineSource } from '../types/outline'
-import { collectDocumentSymbols, normalizeCodeLanguage } from '../utils/codeSymbols'
-import { parseJsonOutline } from '../utils/jsonOutline'
+import { normalizeCodeLanguage } from '../utils/codeSymbols'
+import {
+  buildOutlineSync,
+  type OutlineWorkerMode,
+  type OutlineWorkerReply,
+  type OutlineWorkerRequest,
+} from '../utils/outlineBuild'
 
 export interface UseFileOutlineOptions {
   kind: MaybeRefOrGetter<string | null | undefined>
@@ -28,6 +35,8 @@ export interface UseFileOutlineOptions {
   markdownTokensSource?: MaybeRefOrGetter<string | undefined>
   /** Debounce for code/JSON scans. Markdown is already debounced upstream. */
   debounceMs?: number
+  /** Injection seam for tests; return `null` to force the synchronous path. */
+  createWorker?: () => Worker | null
 }
 
 export function outlineModeFor(
@@ -47,20 +56,49 @@ const EMPTY_SOURCE: OutlineSource = {
   loading: false,
 }
 
+/** Give up on the worker and scan synchronously after this long. */
+const WORKER_TIMEOUT_MS = 2000
+
+function createOutlineWorker(): Worker | null {
+  if (typeof Worker === 'undefined') return null
+  try {
+    return new Worker(new URL('../workers/outline.worker.ts', import.meta.url), {
+      type: 'module',
+    })
+  } catch {
+    return null
+  }
+}
+
+interface ActiveRequest {
+  id: number
+  key: string
+  mode: OutlineWorkerMode
+  language: string | null
+  text: string
+  timer: ReturnType<typeof setTimeout>
+}
+
 export function useFileOutline(options: UseFileOutlineOptions) {
   const mode = computed(() => outlineModeFor(toValue(options.kind), toValue(options.language)))
   const source = ref<OutlineSource>({ ...EMPTY_SOURCE })
   const debounceMs = options.debounceMs ?? 220
+  const createWorker = options.createWorker ?? createOutlineWorker
 
   let timer: ReturnType<typeof setTimeout> | null = null
   let cacheKey = ''
   let cached: OutlineSource | null = null
 
+  let worker: Worker | null = null
+  let workerUnavailable = false
+  let requestSeq = 0
+  let active: ActiveRequest | null = null
+
   function keyFor(): string {
     return `${mode.value}\u0000${toValue(options.language) ?? ''}\u0000${toValue(options.text)}`
   }
 
-  function build(): OutlineSource {
+  function buildLocal(): OutlineSource {
     const current = mode.value
     if (current === 'none') return { ...EMPTY_SOURCE }
 
@@ -81,38 +119,126 @@ export function useFileOutline(options: UseFileOutlineOptions) {
       }
     }
 
-    if (current === 'json') {
-      const result = parseJsonOutline(text)
-      if (result.errorLine !== undefined) {
-        return {
-          mode: current,
-          items: [],
-          status: 'error',
-          loading: false,
-          provider: 'json',
-          message: result.errorMessage,
-          errorLine: result.errorLine,
-        }
-      }
-      return {
-        mode: current,
-        items: result.items,
-        status: result.items.length > 0 ? 'ok' : 'empty',
-        loading: false,
-        provider: 'json',
-      }
-    }
+    return buildOutlineSync({ mode: current, language: toValue(options.language), text })
+  }
 
-    const language = normalizeCodeLanguage(toValue(options.language))
-    const items = language ? collectDocumentSymbols(text, language) : []
-    return {
-      mode: current,
-      items,
-      status: items.length > 0 ? 'ok' : 'empty',
-      loading: false,
-      provider: 'regex',
-      language: language ?? undefined,
+  function finish(key: string, next: OutlineSource): void {
+    if (!next.loading) {
+      cacheKey = key
+      cached = next
     }
+    if (key === keyFor()) source.value = next
+  }
+
+  function cancelActive(): void {
+    if (!active) return
+    clearTimeout(active.timer)
+    active = null
+  }
+
+  function disableWorker(): void {
+    workerUnavailable = true
+    const current = worker
+    worker = null
+    if (!current) return
+    try {
+      current.terminate()
+    } catch {
+      // A worker that cannot terminate is already unusable.
+    }
+  }
+
+  function fallback(request: ActiveRequest): void {
+    finish(
+      request.key,
+      buildOutlineSync({
+        mode: request.mode,
+        language: request.language,
+        text: request.text,
+      })
+    )
+  }
+
+  function onWorkerMessage(reply: OutlineWorkerReply): void {
+    if (!active || !reply || reply.id !== active.id) return
+    const request = active
+    cancelActive()
+    if (!reply.source || typeof reply.source !== 'object') {
+      disableWorker()
+      fallback(request)
+      return
+    }
+    finish(request.key, reply.source)
+  }
+
+  function onWorkerTimeout(id: number): void {
+    if (!active || active.id !== id) return
+    const request = active
+    cancelActive()
+    disableWorker()
+    fallback(request)
+  }
+
+  function onWorkerFailure(): void {
+    const request = active
+    cancelActive()
+    disableWorker()
+    if (request) fallback(request)
+  }
+
+  function ensureWorker(): Worker | null {
+    if (workerUnavailable) return null
+    if (worker) return worker
+    try {
+      const created = createWorker()
+      if (!created) {
+        workerUnavailable = true
+        return null
+      }
+      created.onmessage = (event: MessageEvent<OutlineWorkerReply>) =>
+        onWorkerMessage(event.data)
+      created.onerror = () => onWorkerFailure()
+      worker = created
+      return created
+    } catch {
+      workerUnavailable = true
+      return null
+    }
+  }
+
+  /** Returns true when the request was handed to a worker. */
+  function requestBuild(key: string): boolean {
+    const current = mode.value
+    if (current !== 'code' && current !== 'json') return false
+    const created = ensureWorker()
+    if (!created) return false
+
+    cancelActive()
+    const id = ++requestSeq
+    const request: ActiveRequest = {
+      id,
+      key,
+      mode: current,
+      language: toValue(options.language) ?? null,
+      text: toValue(options.text) ?? '',
+      timer: setTimeout(() => onWorkerTimeout(id), WORKER_TIMEOUT_MS),
+    }
+    active = request
+
+    const message: OutlineWorkerRequest = {
+      id: request.id,
+      mode: request.mode,
+      language: request.language,
+      text: request.text,
+    }
+    try {
+      created.postMessage(message)
+    } catch {
+      cancelActive()
+      disableWorker()
+      fallback(request)
+    }
+    return true
   }
 
   function commit(): void {
@@ -121,12 +247,8 @@ export function useFileOutline(options: UseFileOutlineOptions) {
       source.value = { ...cached }
       return
     }
-    const next = build()
-    if (!next.loading) {
-      cacheKey = key
-      cached = next
-    }
-    source.value = next
+    if (requestBuild(key)) return
+    finish(key, buildLocal())
   }
 
   function schedule(): void {
@@ -140,6 +262,9 @@ export function useFileOutline(options: UseFileOutlineOptions) {
       commit()
       return
     }
+
+    // A reply for the previous text must not land while the new scan debounces.
+    cancelActive()
 
     const key = keyFor()
     if (cached && cacheKey === key) {
@@ -166,6 +291,7 @@ export function useFileOutline(options: UseFileOutlineOptions) {
       clearTimeout(timer)
       timer = null
     }
+    cancelActive()
     cacheKey = ''
     cached = null
     commit()
@@ -189,6 +315,8 @@ export function useFileOutline(options: UseFileOutlineOptions) {
         clearTimeout(timer)
         timer = null
       }
+      cancelActive()
+      disableWorker()
     })
   }
 

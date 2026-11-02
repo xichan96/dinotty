@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import OutlinePanel from '../components/workspace/OutlinePanel.vue'
+import { OUTLINE_ROW_HEIGHT } from '../utils/outlineVirtual'
 import type { OutlineItem, OutlineSource } from '../types/outline'
 
 const items: OutlineItem[] = [
@@ -67,6 +69,23 @@ function mountPanel(overrides: Partial<PanelProps> = {}) {
 
 function rowIds(wrapper: ReturnType<typeof mount>): string[] {
   return wrapper.findAll('[data-outline-id]').map((row) => row.attributes('data-outline-id') ?? '')
+}
+
+function manyItems(count: number): OutlineItem[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `n${index}`,
+    label: `Node ${index}`,
+    kind: 'heading',
+    level: 1,
+    line: index + 1,
+    anchor: `n${index}`,
+  }))
+}
+
+function firePointer(element: Element, type: string, init: PointerEventInit): void {
+  element.dispatchEvent(
+    new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, ...init })
+  )
 }
 
 afterEach(() => {
@@ -186,6 +205,89 @@ describe('OutlinePanel', () => {
     expect(wrapper.find('.outline-panel').classes()).toContain('open')
     expect(wrapper.find('.outline-scrim').classes()).toContain('show')
     expect(wrapper.find('.outline-fab').exists()).toBe(false)
+  })
+
+  it('virtualizes large trees above the threshold with exact spacer heights', () => {
+    const items = manyItems(2500)
+    const wrapper = mountPanel({
+      source: { mode: 'markdown', items, status: 'ok', loading: false, provider: 'lexer' },
+    })
+
+    const rendered = rowIds(wrapper)
+    expect(rendered).toHaveLength(8)
+    expect(rendered[0]).toBe('n0')
+
+    const spacer = wrapper.find('.outline-vpad')
+    expect(spacer.exists()).toBe(true)
+    expect(spacer.attributes('style')).toContain(
+      `height: ${(2500 - rendered.length) * OUTLINE_ROW_HEIGHT}px`
+    )
+
+    // Rendered rows keep their tree semantics.
+    const first = wrapper.find('[data-outline-id="n0"]')
+    expect(first.attributes('role')).toBe('treeitem')
+    expect(first.attributes('aria-level')).toBe('1')
+  })
+
+  it('renders every row below the virtualization threshold', () => {
+    const items = manyItems(200)
+    const wrapper = mountPanel({
+      source: { mode: 'markdown', items, status: 'ok', loading: false, provider: 'lexer' },
+    })
+    expect(rowIds(wrapper)).toHaveLength(200)
+    expect(wrapper.find('.outline-vpad').exists()).toBe(false)
+  })
+
+  it('scrolls an active row from the scroll spy into the virtual window', async () => {
+    const items = manyItems(2500)
+    const wrapper = mountPanel({
+      activeId: '',
+      source: { mode: 'markdown', items, status: 'ok', loading: false, provider: 'lexer' },
+    })
+    expect(wrapper.find('[data-outline-id="n2000"]').exists()).toBe(false)
+
+    await wrapper.setProps({ activeId: 'n2000' })
+    for (let i = 0; i < 4; i++) await nextTick()
+
+    const scroller = wrapper.find('.outline-scroll').element as HTMLElement
+    expect(scroller.scrollTop).toBe(2000 * OUTLINE_ROW_HEIGHT)
+    expect(wrapper.find('[data-outline-id="n2000"]').exists()).toBe(true)
+  })
+
+  it('closes the mobile sheet after a downward swipe on the header', async () => {
+    const wrapper = mountPanel({ mobile: true, open: true })
+    const head = wrapper.find('.panel-head').element
+
+    firePointer(head, 'pointerdown', { clientY: 100 })
+    firePointer(head, 'pointermove', { clientY: 240 })
+    firePointer(head, 'pointerup', { clientY: 240 })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('ignores upward swipes and keeps the sheet open', async () => {
+    const wrapper = mountPanel({ mobile: true, open: true })
+    const head = wrapper.find('.panel-head').element
+
+    firePointer(head, 'pointerdown', { clientY: 240 })
+    firePointer(head, 'pointermove', { clientY: 120 })
+    firePointer(head, 'pointerup', { clientY: 120 })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  it('does not attach swipe-to-close on desktop', async () => {
+    const wrapper = mountPanel({ mobile: false, open: true })
+    const head = wrapper.find('.panel-head').element
+
+    firePointer(head, 'pointerdown', { clientY: 100 })
+    firePointer(head, 'pointermove', { clientY: 300 })
+    firePointer(head, 'pointerup', { clientY: 300 })
+    await nextTick()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
   })
 
   it('labels regex-derived code symbols', () => {

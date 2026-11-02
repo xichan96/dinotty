@@ -32,6 +32,18 @@ export type OutlineMode = 'markdown' | 'code' | 'json' | 'none'
 
 export type OutlineStatus = 'ok' | 'empty' | 'error'
 
+/** Window of a fixed-height row list plus spacer heights around it. */
+export interface OutlineVirtualWindow {
+  /** First rendered row index (inclusive). */
+  start: number
+  /** Last rendered row index (exclusive). */
+  end: number
+  /** Height of the spacer above the window. */
+  topPad: number
+  /** Height of the spacer below the window. */
+  bottomPad: number
+}
+
 export interface OutlineSource {
   mode: OutlineMode
   items: OutlineItem[]

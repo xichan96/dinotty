@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextTick, ref } from 'vue'
+import { nextTick, ref, type Ref } from 'vue'
 import { useFileOutline } from '../composables/useFileOutline'
 import type { OutlineItem } from '../types/outline'
 
@@ -15,6 +15,7 @@ function setup(options: {
   text?: string
   tokens?: OutlineItem[] | null
   tokensSource?: string
+  codeSymbols?: Ref<OutlineItem[] | null>
 }) {
   const kind = ref<string | null>(options.kind ?? 'text')
   const language = ref<string | null>(options.language ?? 'typescript')
@@ -27,6 +28,7 @@ function setup(options: {
     text,
     markdownTokens: tokens,
     markdownTokensSource: tokensSource,
+    codeSymbols: options.codeSymbols,
     debounceMs: 0,
   })
   return { kind, language, text, tokens, tokensSource, ...outline }
@@ -105,6 +107,57 @@ describe('useFileOutline', () => {
       provider: 'lexer',
     })
     expect(outline.source.value.items).toEqual(tokens)
+  })
+
+  it('prefers Monaco symbols and falls back to regex when they are cleared', async () => {
+    const symbols = ref<OutlineItem[] | null>([
+      { id: 'typescript:Foo:1', label: 'Foo', kind: 'class', line: 1 },
+    ])
+    const outline = setup({ text: 'export function run() {}\n', codeSymbols: symbols })
+    await flush()
+    expect(outline.source.value).toMatchObject({
+      mode: 'code',
+      provider: 'monaco',
+      status: 'ok',
+      language: 'typescript',
+    })
+    expect(outline.source.value.items.map((item) => item.label)).toEqual(['Foo'])
+
+    // Results can change without a text change; the cache must not win.
+    symbols.value = [{ id: 'typescript:Bar:2', label: 'Bar', kind: 'interface', line: 2 }]
+    await flush()
+    expect(outline.source.value.items.map((item) => item.label)).toEqual(['Bar'])
+
+    symbols.value = null
+    await flush()
+    expect(outline.source.value).toMatchObject({ provider: 'regex' })
+    expect(outline.source.value.items.map((item) => item.label)).toEqual(['run()'])
+  })
+
+  it('reports an empty Monaco result instead of falling back', async () => {
+    const symbols = ref<OutlineItem[] | null>([])
+    const outline = setup({ text: 'export function run() {}\n', codeSymbols: symbols })
+    await flush()
+    expect(outline.source.value).toMatchObject({ provider: 'monaco', status: 'empty' })
+    expect(outline.source.value.items).toEqual([])
+  })
+
+  it('leaves Markdown and JSON providers alone when Monaco symbols exist', async () => {
+    const symbols = ref<OutlineItem[] | null>([
+      { id: 'typescript:Foo:1', label: 'Foo', kind: 'class', line: 1 },
+    ])
+    const markdown = setup({
+      kind: 'markdown',
+      language: 'markdown',
+      text: '# Hello\n',
+      codeSymbols: symbols,
+    })
+    await nextTick()
+    expect(markdown.source.value).toMatchObject({ mode: 'markdown', provider: 'lexer' })
+
+    const json = setup({ kind: 'text', language: 'json', text: '{"a": 1}', codeSymbols: symbols })
+    await flush()
+    expect(json.source.value).toMatchObject({ mode: 'json', provider: 'json' })
   })
 
   it('marks the Markdown outline as loading while the token pass is pending or stale', async () => {

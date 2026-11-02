@@ -90,6 +90,9 @@ export default {
   'outline.noMatchesDesc': 'Nothing matches “{query}”. Try a shorter keyword.',
   'outline.regex': 'regex',
   'outline.regexHint': 'Symbols extracted by the regex fallback, not a language server.',
+  'outline.monaco': 'Monaco TS',
+  'outline.monacoHint':
+    'Symbols from the Monaco TypeScript service, not a full language server.',
   'outline.width': '{width} px',
   'outline.closeHint': 'Esc close · drag edge to resize · / to filter',
   'outline.closeHintMobile': 'Tap outside or Esc to close',

@@ -26,6 +26,11 @@ export interface UseFileOutlineOptions {
   markdownTokens?: MaybeRefOrGetter<OutlineItem[] | null | undefined>
   /** Source text that produced `markdownTokens`; a mismatch means stale. */
   markdownTokensSource?: MaybeRefOrGetter<string | undefined>
+  /**
+   * Monaco TypeScript symbols for TS/JS files. When non-null the code outline
+   * uses them instead of the regex scan; `null` falls back to regex.
+   */
+  codeSymbols?: MaybeRefOrGetter<OutlineItem[] | null | undefined>
   /** Debounce for code/JSON scans. Markdown is already debounced upstream. */
   debounceMs?: number
 }
@@ -104,6 +109,18 @@ export function useFileOutline(options: UseFileOutlineOptions) {
     }
 
     const language = normalizeCodeLanguage(toValue(options.language))
+    const monacoItems = toValue(options.codeSymbols)
+    if (monacoItems != null) {
+      return {
+        mode: current,
+        items: monacoItems,
+        status: monacoItems.length > 0 ? 'ok' : 'empty',
+        loading: false,
+        provider: 'monaco',
+        language: language ?? undefined,
+      }
+    }
+
     const items = language ? collectDocumentSymbols(text, language) : []
     return {
       mode: current,
@@ -116,6 +133,12 @@ export function useFileOutline(options: UseFileOutlineOptions) {
   }
 
   function commit(): void {
+    // Monaco results arrive pre-debounced and can change without a text change
+    // (a stale result discarded then refilled), so recompute rather than cache.
+    if (mode.value === 'code' && toValue(options.codeSymbols) != null) {
+      source.value = build()
+      return
+    }
     const key = keyFor()
     if (cached && cacheKey === key) {
       source.value = { ...cached }
@@ -137,6 +160,10 @@ export function useFileOutline(options: UseFileOutlineOptions) {
 
     const current = mode.value
     if (current === 'none' || current === 'markdown') {
+      commit()
+      return
+    }
+    if (current === 'code' && toValue(options.codeSymbols) != null) {
       commit()
       return
     }
@@ -178,6 +205,7 @@ export function useFileOutline(options: UseFileOutlineOptions) {
       () => toValue(options.text),
       () => toValue(options.markdownTokens),
       () => toValue(options.markdownTokensSource),
+      () => toValue(options.codeSymbols),
     ],
     schedule,
     { immediate: true, flush: 'post' }

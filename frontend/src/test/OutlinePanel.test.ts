@@ -204,4 +204,23 @@ describe('OutlinePanel', () => {
     expect(wrapper.find('.source-pill').text()).toBe('regex')
     expect(wrapper.find('.type-pill').text()).toBe('TypeScript')
   })
+
+  it('labels Monaco TypeScript symbols with a single source pill', () => {
+    const wrapper = mountPanel({
+      mode: 'code',
+      source: {
+        mode: 'code',
+        items: [{ id: 'typescript:Foo:1', label: 'Foo', kind: 'class', line: 1 }],
+        status: 'ok',
+        loading: false,
+        provider: 'monaco',
+        language: 'typescript',
+      },
+      languageLabel: 'TypeScript',
+    })
+    const pills = wrapper.findAll('.source-pill')
+    expect(pills).toHaveLength(1)
+    expect(pills[0].text()).toBe('Monaco TS')
+    expect(pills[0].classes()).toContain('monaco')
+  })
 })

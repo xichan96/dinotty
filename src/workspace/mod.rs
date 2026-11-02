@@ -3,6 +3,7 @@
 mod git;
 mod handlers;
 mod remote;
+mod search;
 mod syntax;
 mod types;
 mod upload;

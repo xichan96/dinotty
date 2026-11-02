@@ -149,6 +149,15 @@ pub struct WorkspaceSearchBody {
     pub file_pattern: Option<String>,
     #[serde(default)]
     pub max_results: Option<usize>,
+    /// Treat `query` as a regular expression instead of a literal string.
+    #[serde(default)]
+    pub regex: Option<bool>,
+    /// Match whole words. Defaults to true for the legacy exact-word caller.
+    #[serde(default)]
+    pub word: Option<bool>,
+    /// Case-sensitive search. Defaults to true (ripgrep's default).
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -162,6 +171,8 @@ pub struct SearchMatch {
 #[derive(Serialize)]
 pub struct SearchResponse {
     pub matches: Vec<SearchMatch>,
+    /// True when the result list was cut at max_results.
+    pub truncated: bool,
 }
 
 #[derive(Deserialize)]

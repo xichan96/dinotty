@@ -72,4 +72,8 @@ export interface DiffTarget {
   origPath: string | null
   status: WorkspaceChangeStatus
   conflicted: boolean
+  /** Copied from the list row so the diff header can show counts before the
+   *  file itself is fetched. */
+  additions?: number | null
+  deletions?: number | null
 }

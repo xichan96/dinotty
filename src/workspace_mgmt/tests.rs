@@ -382,3 +382,73 @@ fn tab_workspace_id_trailing_slash_on_workspace_path_is_tolerated() {
         Some("ws1".to_string())
     );
 }
+
+// ---------------------------------------------------------------------------
+// DELETE /api/workspaces/:id
+// ---------------------------------------------------------------------------
+
+mod delete_workspace_route {
+    use std::sync::Arc;
+
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::delete,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    use crate::session::SessionManager;
+    use crate::settings::{Settings, SettingsState};
+    use crate::test_support::EnvGuard;
+
+    fn workspace(id: &str) -> super::Workspace {
+        super::Workspace {
+            id: id.to_string(),
+            name: id.to_string(),
+            path: format!("/tmp/{id}"),
+            order: 0,
+            connection_id: None,
+            abbr: None,
+            color: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn clears_explicit_tab_assignments_for_the_deleted_workspace() {
+        // Keep the handler's saves out of the real config directory.
+        let _env = EnvGuard::new(&["DINOTTY_CONFIG_SUFFIX"]);
+        std::env::set_var("DINOTTY_CONFIG_SUFFIX", "-workspace-delete-unit-test");
+
+        let workspaces: super::WorkspacesState =
+            Arc::new(tokio::sync::RwLock::new(vec![workspace("ws-a"), workspace("ws-b")]));
+        let settings: SettingsState = Arc::new(tokio::sync::RwLock::new(Settings::default()));
+        let manager = Arc::new(SessionManager::new());
+        for tab in ["t1", "t2"] {
+            manager.insert_tab(
+                tab.into(),
+                serde_json::json!({"layout": {"type": "leaf", "paneId": tab}, "active_pane_id": tab}),
+            );
+        }
+        manager.set_tab_workspace("t1", Some("ws-a".into()));
+        manager.set_tab_workspace("t2", Some("ws-b".into()));
+
+        let app = Router::new()
+            .route("/api/workspaces/:id", delete(super::delete_workspace))
+            .with_state((workspaces, settings, Arc::clone(&manager)));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/workspaces/ws-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(manager.explicit_tab_workspace("t1"), None);
+        assert_eq!(manager.explicit_tab_workspace("t2").as_deref(), Some("ws-b"));
+    }
+}

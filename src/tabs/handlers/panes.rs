@@ -372,10 +372,20 @@ pub async fn extract_pane(
         .sessions
         .get(&req.pane_id)
         .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.profile_id.clone()));
-    let workspace_id = manager
-        .sessions
-        .get(&req.pane_id)
-        .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()));
+    // An explicit assignment on the source tab wins over SSH-derived
+    // attribution, then the pane's SSH params, then nothing.
+    let source_explicit_workspace = manager.explicit_tab_workspace(&req.source_tab_id);
+    let workspace_id = source_explicit_workspace.clone().or_else(|| {
+        manager
+            .sessions
+            .get(&req.pane_id)
+            .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()))
+    });
+    // Persist a transferred explicit assignment so subsequent `tab_list`
+    // round-trips keep the tab in the same workspace.
+    if let Some(explicit) = source_explicit_workspace {
+        manager.set_tab_workspace(&new_tab_id, Some(explicit));
+    }
 
     manager.broadcast_sync(&SyncMsg::TabCreated {
         tab_id: new_tab_id.clone(),

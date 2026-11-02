@@ -493,6 +493,10 @@ pub async fn delete_workspace(
     }
     drop(s);
 
+    // Tabs explicitly assigned to the deleted workspace would otherwise keep
+    // a dangling id and disappear from every workspace view.
+    manager.clear_tab_workspace_assignments(&id);
+
     manager.broadcast_sync(&SyncMsg::WorkspaceDeleted { id: id.clone() });
 
     Json(serde_json::json!({ "ok": true })).into_response()

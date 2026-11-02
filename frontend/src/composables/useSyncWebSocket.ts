@@ -349,8 +349,15 @@ export function useSyncWebSocket(opts: {
             if (candidate.type !== 'terminal') return false
             return candidate.paneId === tab.tab_id || !!findLeaf(candidate.layout, tab.pane_id)
           }) as TerminalTab | undefined
-          if (existingTab && tab.workspace_id) {
-            existingTab.workspaceId = tab.workspace_id
+          if (existingTab) {
+            if (tab.workspace_id) {
+              existingTab.workspaceId = tab.workspace_id
+            } else if (tab.workspace_id === null) {
+              // Explicit null means the server holds no assignment: drop a
+              // stale local id. An omitted field (older payloads) means
+              // "unchanged" and must not clear it.
+              existingTab.workspaceId = undefined
+            }
           }
           if (
             !localLeafIds.has(tab.pane_id) &&
@@ -400,7 +407,9 @@ export function useSyncWebSocket(opts: {
               cwd: tab.cwd,
               connectionId: tab.connection_id,
               workspaceId:
-                tab.workspace_id ?? migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
+                tab.workspace_id === null
+                  ? workspaceIdFromPaneId(tab.tab_id)
+                  : tab.workspace_id ?? migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
             })
           }
         }

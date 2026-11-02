@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -59,6 +60,10 @@ struct Registry {
 #[derive(Default)]
 pub struct DetachedTabWindows {
     inner: Mutex<Registry>,
+    /// Signalled whenever a creation reservation settles (window published or
+    /// creation aborted), so a concurrent `open_tab_window` can wait for the
+    /// in-flight window instead of returning silently.
+    settled: Condvar,
 }
 
 impl DetachedTabWindows {
@@ -78,44 +83,76 @@ impl DetachedTabWindows {
     }
 
     fn finish_create(&self, info: DetachedWindowInfo) {
-        let mut registry = self.lock();
-        registry.creating.remove(&info.tab_id);
-        registry.windows.insert(info.tab_id.clone(), info);
+        {
+            let mut registry = self.lock();
+            registry.creating.remove(&info.tab_id);
+            registry.windows.insert(info.tab_id.clone(), info);
+        }
+        self.settled.notify_all();
     }
 
     fn abort_create(&self, tab_id: &str) {
-        self.lock().creating.remove(tab_id);
+        {
+            self.lock().creating.remove(tab_id);
+        }
+        self.settled.notify_all();
+    }
+
+    /// Block until no creation is in flight for `tab_id`, or `timeout`
+    /// elapses. Returns true when creation settled before the deadline.
+    fn wait_for_creation(&self, tab_id: &str, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut registry = self.lock();
+        while registry.creating.contains(tab_id) {
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let (guard, _) = self
+                .settled
+                .wait_timeout(registry, deadline - now)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            registry = guard;
+        }
+        true
     }
 
     /// Record a window that already exists outside the registry (for example
     /// after the registry was lost) and refresh its title when one is given.
     fn remember_existing(&self, tab_id: &str, label: &str, title: Option<String>) {
-        let mut registry = self.lock();
-        registry.creating.remove(tab_id);
-        match registry.windows.get_mut(tab_id) {
-            Some(info) => {
-                if title.is_some() {
-                    info.title = title;
+        {
+            let mut registry = self.lock();
+            registry.creating.remove(tab_id);
+            match registry.windows.get_mut(tab_id) {
+                Some(info) => {
+                    if title.is_some() {
+                        info.title = title;
+                    }
+                }
+                None => {
+                    registry.windows.insert(
+                        tab_id.to_string(),
+                        DetachedWindowInfo {
+                            tab_id: tab_id.to_string(),
+                            label: label.to_string(),
+                            title,
+                        },
+                    );
                 }
             }
-            None => {
-                registry.windows.insert(
-                    tab_id.to_string(),
-                    DetachedWindowInfo {
-                        tab_id: tab_id.to_string(),
-                        label: label.to_string(),
-                        title,
-                    },
-                );
-            }
         }
+        self.settled.notify_all();
     }
 
     /// Remove a tab's entry. Idempotent: returns the removed entry, if any.
     fn remove(&self, tab_id: &str) -> Option<DetachedWindowInfo> {
-        let mut registry = self.lock();
-        registry.creating.remove(tab_id);
-        registry.windows.remove(tab_id)
+        let removed = {
+            let mut registry = self.lock();
+            registry.creating.remove(tab_id);
+            registry.windows.remove(tab_id)
+        };
+        self.settled.notify_all();
+        removed
     }
 
     fn list(&self) -> Vec<DetachedWindowInfo> {
@@ -178,6 +215,19 @@ pub fn open_tab_window(
     }
 
     if !state.begin_create(&tab_id) {
+        // Another call owns creation. Wait briefly for it to publish the
+        // window and focus it, so a second open request is not a silent no-op.
+        if state.wait_for_creation(&tab_id, Duration::from_secs(3)) {
+            if let Some(window) = app.get_webview_window(&label) {
+                state.remember_existing(&tab_id, &label, title.clone());
+                if let Some(title) = title.as_deref() {
+                    if let Err(error) = window.set_title(title) {
+                        tracing::warn!(%error, tab_id, "failed to update detached window title");
+                    }
+                }
+                return focus_window(&window);
+            }
+        }
         tracing::info!(tab_id, "detached window creation already in progress");
         return Ok(());
     }
@@ -260,28 +310,28 @@ fn notify_main_window_closed(app: &AppHandle, tab_id: &str) {
 
 /// Lifecycle hook for `tab-*` windows.
 ///
-/// Returns true when the event belonged to a detached window. Close requests
-/// are allowed to proceed; the registry entry is removed and the main window is
-/// notified. `Destroyed` runs the same idempotent cleanup so crashed or
-/// programmatically destroyed windows do not leak registry entries.
+/// Returns true when the event belonged to a detached window. Cleanup runs only
+/// on `Destroyed`: `CloseRequested` can be prevented or deferred, and removing
+/// the registry entry (plus telling the main window) there would drop a window
+/// that is still alive. This hook never prevents the close, so every window
+/// that closes reaches `Destroyed`. The cleanup is idempotent.
 pub fn handle_detached_window_event(window: &tauri::Window, event: &tauri::WindowEvent) -> bool {
     let Some(tab_id) = tab_id_from_label(window.label()) else {
         return false;
     };
-    match event {
-        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
-            let app = window.app_handle();
-            if app.state::<DetachedTabWindows>().remove(&tab_id).is_some() {
-                notify_main_window_closed(app, &tab_id);
-            }
+    if matches!(event, tauri::WindowEvent::Destroyed) {
+        let app = window.app_handle();
+        if app.state::<DetachedTabWindows>().remove(&tab_id).is_some() {
+            notify_main_window_closed(app, &tab_id);
         }
-        _ => {}
     }
     true
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     fn info(tab_id: &str, title: Option<&str>) -> DetachedWindowInfo {
@@ -331,6 +381,36 @@ mod tests {
         registry.remove("one");
         assert!(registry.begin_create("one"), "closed tab can be reopened");
         registry.abort_create("one");
+    }
+
+    #[test]
+    fn waiting_for_an_in_flight_creation_unblocks_when_it_settles() {
+        let registry = Arc::new(DetachedTabWindows::default());
+        assert!(registry.begin_create("one"));
+        let waiter = Arc::clone(&registry);
+        let handle =
+            std::thread::spawn(move || waiter.wait_for_creation("one", Duration::from_secs(5)));
+
+        // Give the waiter time to reach the condvar before publishing.
+        std::thread::sleep(Duration::from_millis(20));
+        registry.finish_create(info("one", None));
+
+        assert!(handle.join().unwrap());
+        assert_eq!(registry.list(), vec![info("one", None)]);
+    }
+
+    #[test]
+    fn waiting_for_a_settled_tab_returns_immediately() {
+        let registry = DetachedTabWindows::default();
+        assert!(registry.wait_for_creation("none", Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn waiting_for_creation_times_out_while_still_in_flight() {
+        let registry = DetachedTabWindows::default();
+        assert!(registry.begin_create("slow"));
+        assert!(!registry.wait_for_creation("slow", Duration::from_millis(10)));
+        registry.abort_create("slow");
     }
 
     #[test]

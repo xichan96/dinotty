@@ -230,7 +230,10 @@ pub struct TabInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<String>,
     /// Explicit workspace assignment for tabs that cannot be identified by CWD.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// Always serialized (including `null`) so a full `tab_list` resync can
+    /// clear a stale assignment on the client; an omitted field would be
+    /// indistinguishable from "unchanged" for older payloads.
     pub workspace_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,

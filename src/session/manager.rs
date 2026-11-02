@@ -389,6 +389,20 @@ impl SessionManager {
         true
     }
 
+    /// Drop every explicit workspace assignment pointing at `workspace_id`,
+    /// so tabs previously assigned to a deleted workspace fall back to derived
+    /// attribution. Returns the number of tabs cleared.
+    pub fn clear_tab_workspace_assignments(&self, workspace_id: &str) -> usize {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let before = self.tab_workspaces.len();
+        self.tab_workspaces.retain(|_, assigned| assigned.as_deref() != Some(workspace_id));
+        let cleared = before - self.tab_workspaces.len();
+        if cleared > 0 {
+            self.schedule_snapshot();
+        }
+        cleared
+    }
+
     fn update_layout_locked(
         &self,
         tab_id: String,

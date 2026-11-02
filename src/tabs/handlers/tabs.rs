@@ -71,29 +71,34 @@ pub async fn set_tab_workspace(
             .into_response();
     }
 
-    if let Some(workspace_id) = req.workspace_id.as_deref() {
-        if workspace_id.trim().is_empty() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "workspace_id must not be empty" })),
-            )
-                .into_response();
+    // The default workspace has no id; the frontend/mission control uses a
+    // `__default__` sentinel. Treat it as an explicit request to clear the
+    // assignment instead of rejecting it as unknown.
+    let workspace_id = match req.workspace_id.as_deref() {
+        Some("__default__") => None,
+        Some(workspace_id) => {
+            if workspace_id.trim().is_empty() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "workspace_id must not be empty" })),
+                )
+                    .into_response();
+            }
+            let known = workspaces.read().await.iter().any(|w| w.id == workspace_id);
+            if !known {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": "unknown workspace" })),
+                )
+                    .into_response();
+            }
+            Some(workspace_id.to_string())
         }
-        let known = workspaces.read().await.iter().any(|w| w.id == workspace_id);
-        if !known {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": "unknown workspace" })),
-            )
-                .into_response();
-        }
-    }
+        None => None,
+    };
 
-    if manager.set_tab_workspace(&tab_id, req.workspace_id.clone()) {
-        manager.broadcast_sync(&SyncMsg::TabWorkspaceUpdated {
-            tab_id,
-            workspace_id: req.workspace_id,
-        });
+    if manager.set_tab_workspace(&tab_id, workspace_id.clone()) {
+        manager.broadcast_sync(&SyncMsg::TabWorkspaceUpdated { tab_id, workspace_id });
         Json(serde_json::json!({ "ok": true })).into_response()
     } else {
         // The tab was removed between the existence check and the mutation.

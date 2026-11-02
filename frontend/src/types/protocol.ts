@@ -108,7 +108,7 @@ export interface SyncTabList {
     active_pane_id?: string
     cwd?: string
     connection_id?: string
-    workspace_id?: string
+    workspace_id?: string | null
     title?: string
   }[]
   active_pane_id: string | null

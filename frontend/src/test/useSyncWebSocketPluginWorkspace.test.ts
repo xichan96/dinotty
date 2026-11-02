@@ -226,6 +226,55 @@ describe('useSyncWebSocket plugin workspace attribution', () => {
     expect(existing.workspaceId).toBe('workspace-b')
   })
 
+  it('clears a stale workspace when a full resync sends workspace_id: null', async () => {
+    const existing = terminal('ssh-tab', { workspaceId: 'deleted-workspace' })
+    const { persist, emit } = await setup([existing])
+
+    emit({
+      type: 'tab_list',
+      tabs: [
+        {
+          tab_id: existing.paneId,
+          pane_id: existing.activePaneId,
+          workspace_id: null,
+        },
+      ],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBeUndefined()
+    await vi.waitFor(() => expect(persist).toHaveBeenCalled())
+  })
+
+  it('ignores a stale saved workspaceId when tab_list sends null for a new tab', async () => {
+    localStorage.setItem(
+      'dinotty_tabs',
+      JSON.stringify({ tabs: [terminal('saved-tab', { workspaceId: 'workspace-a' })] })
+    )
+    const { session, emit } = await setup()
+
+    emit({
+      type: 'tab_list',
+      tabs: [{ tab_id: 'saved-tab', pane_id: 'saved-tab-leaf', workspace_id: null }],
+      active_pane_id: null,
+    })
+
+    expect((session.tabs[0] as TerminalTab).workspaceId).toBeUndefined()
+  })
+
+  it('keeps the local workspace when tab_list omits workspace_id (older payloads)', async () => {
+    const existing = terminal('ssh-tab', { workspaceId: 'workspace-b' })
+    const { emit } = await setup([existing])
+
+    emit({
+      type: 'tab_list',
+      tabs: [{ tab_id: existing.paneId, pane_id: existing.activePaneId }],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBe('workspace-b')
+  })
+
   it('scenario 6: close-time read fallback attributes a missing field to a live workspace', async () => {
     const pluginTab = terminal('plugin:session-browser:workspace-b')
     const successor = terminal('workspace-b-successor', { workspaceId: 'workspace-b' })

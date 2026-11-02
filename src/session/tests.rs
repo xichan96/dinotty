@@ -431,6 +431,28 @@ fn remove_tab_drops_workspace_assignment() {
 }
 
 #[test]
+fn clear_tab_workspace_assignments_drops_only_matching_tabs() {
+    let manager = SessionManager::new();
+    for tab in ["t1", "t2", "t3"] {
+        manager.insert_tab(
+            tab.into(),
+            serde_json::json!({"layout": leaf("p"), "active_pane_id": "p"}),
+        );
+    }
+    manager.set_tab_workspace("t1", Some("workspace-a".into()));
+    manager.set_tab_workspace("t2", Some("workspace-a".into()));
+    manager.set_tab_workspace("t3", Some("workspace-b".into()));
+
+    assert_eq!(manager.clear_tab_workspace_assignments("workspace-a"), 2);
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+    assert_eq!(manager.explicit_tab_workspace("t2"), None);
+    assert_eq!(manager.explicit_tab_workspace("t3").as_deref(), Some("workspace-b"));
+
+    // Nothing matches: no-op.
+    assert_eq!(manager.clear_tab_workspace_assignments("workspace-a"), 0);
+}
+
+#[test]
 fn tab_list_prefers_explicit_workspace_over_ssh_params() {
     let manager = SessionManager::new();
     manager
@@ -447,6 +469,29 @@ fn tab_list_prefers_explicit_workspace_over_ssh_params() {
     assert!(manager.set_tab_workspace("t1", None));
     let (tabs, _) = manager.tab_list();
     assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-b"));
+}
+
+#[test]
+fn tab_list_serializes_absent_workspace_as_explicit_null() {
+    // A full resync must be able to clear a stale client id, so an absent
+    // explicit assignment is serialized as `null` rather than omitted.
+    let msg = SyncMsg::TabList {
+        tabs: vec![TabInfo {
+            tab_id: "t1".into(),
+            pane_id: "p1".into(),
+            layout: None,
+            active_pane_id: None,
+            cwd: None,
+            connection_id: None,
+            workspace_id: None,
+            title: None,
+        }],
+        active_pane_id: None,
+    };
+    let value = serde_json::to_value(msg).unwrap();
+    let tab = value["tabs"][0].as_object().expect("tab object");
+    assert!(tab.contains_key("workspace_id"), "workspace_id must be present");
+    assert!(tab["workspace_id"].is_null());
 }
 
 #[test]

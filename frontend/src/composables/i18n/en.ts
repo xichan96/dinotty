@@ -52,6 +52,8 @@ export default {
   'filePreview.preview': 'Preview',
   'filePreview.source': 'Source',
   'filePreview.mermaidError': 'Diagram failed to render',
+  'filePreview.copyCode': 'Copy',
+  'filePreview.copied': 'Copied',
   'filePreview.discardChanges': 'Discard unsaved changes?',
   'editorTabs.close': 'Close',
   'editorTabs.pin': 'Pin Tab',

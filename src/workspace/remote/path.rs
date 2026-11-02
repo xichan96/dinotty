@@ -35,10 +35,9 @@ pub(super) fn resolve_remote_rel(session: &Session, rel: &str, _cwd: Option<&str
 /// an SSH pane. Unlike [`resolve_remote_rel`], relative paths are anchored at
 /// the pane's live cwd, because that is what the terminal process sees.
 pub(super) fn resolve_remote_terminal_path(session: &Session, raw: &str) -> String {
-    let cwd = session.cwd_for_workspace().map_or_else(
-        || "/".to_string(),
-        |p| p.to_string_lossy().replace('\\', "/"),
-    );
+    let cwd = session
+        .cwd_for_workspace()
+        .map_or_else(|| "/".to_string(), |p| p.to_string_lossy().replace('\\', "/"));
     let home = session
         .remote_home
         .lock()

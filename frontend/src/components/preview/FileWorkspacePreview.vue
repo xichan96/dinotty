@@ -105,8 +105,19 @@
           :style="layout.treeWrapStyle.value"
         >
           <div class="file-workspace-tree-head">
-            <span class="file-workspace-tree-title">{{ t('filePreview.explorer') }}</span>
-            <div class="file-workspace-tree-actions">
+            <span class="file-workspace-tree-title">{{
+              searchOpen ? t('workspaceSearch.title') : t('filePreview.explorer')
+            }}</span>
+            <div v-if="!searchOpen" class="file-workspace-tree-actions">
+              <button
+                type="button"
+                data-testid="tree-head-search"
+                :title="t('workspaceSearch.open')"
+                :aria-label="t('workspaceSearch.open')"
+                @click="openSearch(true)"
+              >
+                <Search :size="14" />
+              </button>
               <button
                 type="button"
                 data-testid="tree-head-new-file"
@@ -146,6 +157,17 @@
               </button>
             </div>
             <button
+              v-if="searchOpen"
+              type="button"
+              class="file-workspace-tree-close"
+              data-testid="tree-head-search-close"
+              :title="t('workspaceSearch.close')"
+              :aria-label="t('workspaceSearch.close')"
+              @click="closeSearch"
+            >
+              <X :size="14" />
+            </button>
+            <button
               v-if="layout.narrow.value"
               type="button"
               class="file-workspace-tree-close"
@@ -156,17 +178,14 @@
               <X :size="14" />
             </button>
           </div>
-          <div v-if="previewErr" class="file-workspace-error" role="alert">
+          <div v-if="previewErr && !searchOpen" class="file-workspace-error" role="alert">
             <span class="file-workspace-error-text">{{ previewErrText }}</span>
-            <button
-              type="button"
-              class="file-workspace-error-retry"
-              @click="retryPreviewErr"
-            >
+            <button type="button" class="file-workspace-error-retry" @click="retryPreviewErr">
               {{ t('filePreview.retry') }}
             </button>
           </div>
           <div
+            v-show="!searchOpen"
             ref="treeHostRef"
             class="file-workspace-tree tree-host"
             tabindex="0"
@@ -190,12 +209,16 @@
               :ctx-target-rel="ctxMenu.contextMenu.value?.rel || undefined"
               :inline-create="inlineCreateForTree"
               :inline-placeholder="inlineInputPlaceholder"
+              :inline-rename="inlineRename ?? undefined"
               :git-status="gitStatusMap"
               @toggle="onToggle"
               @select-file="trySelectFile"
+              @open-file-pinned="tryOpenFilePinned"
               @select-dir="trySelectDir"
               @inline-create-commit="onInlineCreateCommit"
               @inline-create-cancel="onInlineCreateCancel"
+              @inline-rename-commit="onInlineRenameCommit"
+              @inline-rename-cancel="onInlineRenameCancel"
               @context-menu="ctxMenu.onTreeContextMenu"
               @long-press="ctxMenu.onTreeLongPress"
               @move-entry="ctxMenu.onMoveEntry"
@@ -203,6 +226,14 @@
               @upload-to-dir="onUploadToDir"
             />
           </div>
+          <FileSearchPanel
+            v-if="searchOpen"
+            ref="searchPanelRef"
+            :pane-id="apiPaneId"
+            :is-ssh="isSsh"
+            @open-file="onSearchOpenFile"
+            @close="closeSearch"
+          />
         </div>
         <div
           v-if="treeVisible && !layout.narrow.value"
@@ -225,178 +256,51 @@
             :active-leaf-id="editorSplit.activeEditorLeafId.value"
             :pane-id="apiPaneId"
             :show-header="editorSplit.isSplit.value"
+            :reveal="searchReveal"
             @focus="(id: string) => editorSplit.focusEditorPane(id)"
-            @close="onCloseEditorPane"
+            @activate-tab="onActivateTab"
+            @close-tab="onCloseTab"
+            @close-tabs="onCloseTabs"
+            @set-tab-preview="onSetTabPreview"
+            @split="onSplitGroup"
+            @close-group="onCloseGroup"
+            @copy-tab-path="onCopyTabPath"
+            @reorder-tab="
+              (leafId, tabId, targetId, after) =>
+                editorSplit.reorderTabInLeaf(leafId, tabId, targetId, after)
+            "
+            @move-tab="
+              (sourceLeafId, tabId, targetLeafId) =>
+                editorSplit.moveTabToPane(sourceLeafId, tabId, targetLeafId)
+            "
+            @split-tab="
+              (sourceLeafId, tabId, targetLeafId, position) =>
+                editorSplit.splitTabToEdge(sourceLeafId, tabId, targetLeafId, position)
+            "
             @file-drop="onEditorFileDrop"
           />
         </div>
       </div>
     </div>
   </div>
-  <Teleport to="body">
-    <div
-      v-if="ctxMenu.contextMenu.value && visible"
-      class="tree-ctx-backdrop"
-      @mousedown="ctxMenu.closeContextMenu"
-      @touchstart="ctxMenu.closeContextMenu"
-    ></div>
-    <div
-      v-if="ctxMenu.contextMenu.value && visible"
-      class="tree-ctx-menu"
-      :class="{ 'tree-ctx-menu--bottom': layout.narrow.value }"
-      :ref="ctxMenu.setMenuEl"
-      role="menu"
-      :style="ctxMenu.contextMenuStyle.value"
-      @keydown="ctxMenu.onMenuKeydown"
-      @mousedown.stop
-      @touchstart.stop
-    >
-      <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxNewFile">
-        <span class="tree-ctx-label">{{ t('filePreview.ctxNewFile') }}</span>
-      </button>
-      <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxNewFolder">
-        <span class="tree-ctx-label">{{ t('filePreview.ctxNewFolder') }}</span>
-      </button>
-      <!-- Blank-area menu: only the three creation actions, no selection fallback. -->
-      <button
-        v-if="!ctxMenu.contextMenu.value?.rel"
-        type="button"
-        class="tree-ctx-item"
-        role="menuitem"
-        @click="ctxMenu.ctxUpload"
-      >
-        <span class="tree-ctx-label">{{ t('filePreview.ctxUpload') }}</span>
-      </button>
-      <template v-if="ctxMenu.contextMenu.value?.rel">
-        <div class="tree-ctx-sep" />
-        <button
-          v-if="!ctxMenu.contextMenu.value?.isDir"
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          @click="ctxOpenToSide"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxOpenToSide') }}</span>
-        </button>
-        <div class="tree-ctx-sep" />
-        <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxRename">
-          <span class="tree-ctx-label">{{ t('filePreview.ctxRename') }}</span>
-          <span class="tree-ctx-kbd" aria-hidden="true">F2</span>
-        </button>
-        <button
-          type="button"
-          class="tree-ctx-item"
-          data-testid="tree-context-move"
-          role="menuitem"
-          @click="ctxMenu.ctxMove"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxMoveTo') }}</span>
-        </button>
-        <div class="tree-ctx-sep" />
-        <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxCopyPath">
-          <span class="tree-ctx-label">{{ t('filePreview.ctxCopyPath') }}</span>
-        </button>
-        <button
-          v-if="!ctxMenu.isRemote.value"
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          @click="ctxMenu.ctxReveal"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxReveal') }}</span>
-        </button>
-        <button
-          v-if="isTauri() && !ctxMenu.isRemote.value"
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          @click="ctxMenu.ctxOpenFolder"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxOpenFolder') }}</span>
-        </button>
-        <button
-          v-if="ctxMenu.canRunCode.value"
-          type="button"
-          class="tree-ctx-item"
-          data-testid="tree-context-run-code"
-          role="menuitem"
-          @click="ctxMenu.ctxRunCode"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxRunCode') }}</span>
-        </button>
-        <button
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          @click="ctxMenu.ctxInsertToTerminal"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxInsertToTerminal') }}</span>
-        </button>
-        <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxMenu.ctxUpload">
-          <span class="tree-ctx-label">{{ t('filePreview.ctxUpload') }}</span>
-        </button>
-        <button
-          v-if="!ctxMenu.contextMenu.value?.isDir"
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          @click="ctxMenu.ctxDownload"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxDownload') }}</span>
-        </button>
-        <button type="button" class="tree-ctx-item" role="menuitem" @click="ctxToggleBookmark">
-          <span class="tree-ctx-label">{{
-            ctxIsBookmarked ? t('fileBookmark.removeFrom') : t('fileBookmark.addTo')
-          }}</span>
-        </button>
-        <div class="tree-ctx-sep" />
-        <button
-          type="button"
-          class="tree-ctx-item tree-ctx-item-danger"
-          role="menuitem"
-          @click="ctxMenu.ctxDelete"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxDelete') }}</span>
-          <span class="tree-ctx-kbd" aria-hidden="true">{{ deleteKbdLabel }}</span>
-        </button>
-      </template>
-    </div>
-  </Teleport>
-  <ConfirmModal
-    :visible="!!ctxMenu.moveConfirm.value"
-    :title="t('filePreview.moveTitle')"
-    :message="t('filePreview.moveConfirmMsg')"
-    :confirm-text="t('filePreview.moveTitle')"
-    :cancel-text="t('filePreview.cancel')"
-    @confirm="ctxMenu.onMoveConfirm"
-    @cancel="ctxMenu.onMoveCancel"
-  />
-  <ConfirmModal
-    :visible="!!ctxMenu.deleteConfirm.value"
-    :title="t('filePreview.ctxDelete')"
-    :message="deleteConfirmMessage"
-    :confirm-text="t('filePreview.ctxDelete')"
-    :cancel-text="t('filePreview.cancel')"
-    @confirm="ctxMenu.executeDelete"
-    @cancel="ctxMenu.cancelDelete"
-  />
-  <MoveToDialog
-    :visible="!!ctxMenu.moveSource.value"
-    :source-rel="ctxMenu.moveSource.value?.rel ?? ''"
-    :is-dir="ctxMenu.moveSource.value?.isDir ?? false"
+  <FileWorkspaceOverlays
+    :visible="visible"
+    :narrow="layout.narrow.value"
     :pane-id="apiPaneId"
+    :menu="ctxMenu"
+    :is-bookmarked="ctxIsBookmarked"
+    :delete-message="deleteConfirmMessage"
+    :delete-kbd-label="deleteKbdLabel"
     :fetch-dirs="fetchList"
-    :move="async (src, dest) => { await ctxMenu.moveTo(src, dest) }"
-    @close="ctxMenu.closeMoveTo"
+    :toggle-bookmark="ctxToggleBookmark"
+    :open-to-side="ctxOpenToSide"
   />
-  <SelectionToolbar :selected-text="''" :anchor-rect="null" @dismiss="() => {}" />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, toRef } from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import { getApiBase, apiUrl, authFetch } from '../../composables/apiBase'
-import { isTauri } from '../../composables/useTransport'
+import { getApiBase } from '../../composables/apiBase'
 import { copyToClipboard } from '../../utils/clipboard'
 import { usePaneResize } from '../../composables/usePaneResize'
 import { useFileNavigation, useSelectedPath } from '../../composables/useFileNavigation'
@@ -404,15 +308,10 @@ import { useFileWorkspaceLayout } from '../../composables/useFileWorkspaceLayout
 import { useFileWatch } from '../../composables/useFileWatch'
 import { useEditorSplit } from '../../composables/useEditorSplit'
 import { setActiveLeaf, getEditorPaneState } from '../../composables/useEditorRegistry'
-import { getAllEditorLeaves } from '../../types/editorPane'
-import { uiConfirm } from '../../composables/useConfirm'
-import {
-  saveFileWorkspaceState,
-  type PersistedFileWorkspaceState,
-} from '../../composables/useFileWorkspaceState'
+import { provideTabBufferStore } from '../../composables/useTabBufferStore'
+import { saveFileWorkspaceState } from '../../composables/useFileWorkspaceState'
 import { setEditorSplitForCursorGroup } from '../../composables/useCursorGroup'
 import { useFileOperations } from '../../composables/useFileOperations'
-import type { DropPosition } from '../../types/pane'
 import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
 import {
   useTreeKeyboard,
@@ -422,18 +321,18 @@ import {
 import { useInlineCreateRename } from '../../composables/useInlineCreateRename'
 import {
   useFileWorkspaceBoot,
-  asWorkspaceError,
-  workspaceErrorFromResponse,
-  workspaceErrorKind,
   withWorkspaceErrorRel,
+  workspaceErrorKind,
   type WorkspaceError,
 } from '../../composables/useFileWorkspaceBoot'
+import { useFileWorkspaceTree } from '../../composables/useFileWorkspaceTree'
+import { useFileWorkspaceTabs } from '../../composables/useFileWorkspaceTabs'
+import { useFileWorkspaceSearch } from '../../composables/useFileWorkspaceSearch'
 import { TreeRows } from '../workspace/TreeRows'
 import type { DirEntry } from '../workspace/TreeRows'
 import EditorSplitContainer from '../workspace/EditorSplitContainer.vue'
-import SelectionToolbar from '../workspace/SelectionToolbar.vue'
-import ConfirmModal from '../ui/ConfirmModal.vue'
-import MoveToDialog from '../workspace/MoveToDialog.vue'
+import FileWorkspaceOverlays from '../workspace/FileWorkspaceOverlays.vue'
+import FileSearchPanel from '../workspace/FileSearchPanel.vue'
 import { useRecentFiles } from '../../composables/useRecentAccess'
 import { useWorkspaceBookmarks } from '../../composables/useWorkspaceBookmarks'
 import FileRecentDropdown from '../workspace/FileRecentDropdown.vue'
@@ -447,6 +346,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   RotateCw,
+  Search,
   X,
 } from 'lucide-vue-next'
 
@@ -489,22 +389,27 @@ const expanded = ref<Set<string>>(new Set())
 const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
 const recentDropdownOpen = ref(false)
-const refreshBusy = ref(false)
 const fileWorkspaceBodyRef = ref<HTMLElement | null>(null)
 const treeWrapRef = ref<HTMLElement | null>(null)
 const treeHostRef = ref<HTMLElement | null>(null)
+
+const selectedRel = ref<string | null>(null)
+const selectedIsDir = ref(false)
+const previewErr = ref<WorkspaceError | null>(null)
 
 // --- Composables ---
 const nav = useFileNavigation()
 const layout = useFileWorkspaceLayout()
 const recentFiles = useRecentFiles()
 const workspaceBookmarks = useWorkspaceBookmarks()
-const editorSplit = useEditorSplit({ paneId: () => apiPaneId.value })
-
-// Derived from active editor pane — keeps tree highlight and context menu working
-const selectedRel = ref<string | null>(null)
-const selectedIsDir = ref(false)
-const previewErr = ref<WorkspaceError | null>(null)
+const tabBuffers = provideTabBufferStore()
+const editorSplit = useEditorSplit({
+  paneId: () => apiPaneId.value,
+  isTabDirty: (tab) => tabBuffers.isDirty(tab),
+  onTabRemoved: (tab) => tabBuffers.drop(tab.id),
+  onTabReset: (tab) => tabBuffers.reset(tab.id),
+})
+const { selectedPath: globalSelectedPath } = useSelectedPath()
 
 // Live state of the active pane, exposed by EditorPane via the registry.
 const activeHandle = computed(() => {
@@ -558,11 +463,33 @@ watch(
   { immediate: true }
 )
 
-// Forward declaration: ops is declared below, but parentRelPath wraps it.
-// Function declarations are hoisted; ops will be defined by the time this is called.
+// Forward declarations keep the extraction order readable: these closures are
+// only invoked after setup has finished constructing every composable.
 function parentRelPath(rel: string): string {
   return ops.parentRelPath(rel)
 }
+function ensureChildren(rel: string): Promise<void> {
+  return tree.ensureChildren(rel)
+}
+async function fetchList(rel: string): Promise<DirEntry[]> {
+  return tree.fetchList(rel)
+}
+
+const tabs = useFileWorkspaceTabs({
+  split: editorSplit,
+  buffers: tabBuffers,
+  nav,
+  selectedRel,
+  selectedIsDir,
+  globalSelectedPath,
+  absolutePath: (rel) => ops.absolutePath(rel),
+  emitNavigate: (absPath) => emit('navigate', absPath),
+  recordRecent: (absPath, name) => recentFiles.recordFile(absPath, name),
+  closeDrawer: layout.closeDrawer,
+  isNarrow: () => layout.narrow.value,
+  t,
+  onGitChange: () => void tree.fetchGitStatus(),
+})
 
 const {
   inlineCreate,
@@ -582,8 +509,9 @@ const {
   expanded,
   parentRelPath,
   ensureChildren,
-  onSelectFile,
-  onSelectDir,
+  onSelectFile: tabs.selectFile,
+  onSelectDir: tabs.selectDir,
+  onPathRenamed: tabs.rewriteOpenTabs,
   t,
 })
 
@@ -618,11 +546,14 @@ const ctxMenu = useTreeContextMenu({
   parentRelPath: ops.parentRelPath,
   ensureChildren,
   deleteSelected: ops.deleteSelected,
-  onSelectFile,
-  onSelectDir,
+  onSelectFile: tabs.selectFile,
+  onSelectDir: tabs.selectDir,
   triggerUpload: ops.triggerUpload,
   downloadFile: ops.downloadFile,
   paneId: () => apiPaneId.value,
+  isPathDirty: tabs.isPathDirty,
+  onDeleted: tabs.closeTabsForPath,
+  onPathMoved: tabs.rewriteOpenTabs,
   t,
   // Escape from a keyboard-opened menu returns focus to its row.
   onMenuClosed: (rel: string) => treeKeyboard.focusRow(rel),
@@ -635,8 +566,8 @@ const treeKeyboard = useTreeKeyboard({
   container: treeHostRef,
   expanded,
   selectedRel,
-  onToggle,
-  onOpen: (rel) => void trySelectFile(rel),
+  onToggle: (rel) => tree.onToggle(rel),
+  onOpen: (rel) => void tabs.trySelectFile(rel),
   onRename: (rel, isDir) => {
     inlineRename.value = {
       rel,
@@ -649,48 +580,57 @@ const treeKeyboard = useTreeKeyboard({
   onMenu: (rel, isDir, x, y) => ctxMenu.openMenuAt(rel, isDir, x, y),
 })
 
+const tree = useFileWorkspaceTree({
+  paneId: () => apiPaneId.value,
+  isSsh: () => isSsh.value,
+  cwdLabel,
+  childCache,
+  expanded,
+  gitStatusMap,
+  previewErr,
+  selectedRel,
+  treeWrapRef,
+  reloadAll: () => reloadAll(),
+})
+
+// Template-facing names for the extracted modules.
+const { refreshBusy, refreshTree, collapseAll, onToggle } = tree
+const {
+  trySelectFile,
+  trySelectDir,
+  onActivateTab,
+  onCloseTab,
+  onCloseTabs,
+  onSetTabPreview,
+  onSplitGroup,
+  onCloseGroup,
+  onCopyTabPath,
+  onEditorFileDrop,
+} = tabs
+
+const {
+  searchOpen,
+  searchPanelRef,
+  searchReveal,
+  openSearch,
+  closeSearch,
+  onSearchOpenFile,
+  onWorkspaceSearchKeydown,
+} = useFileWorkspaceSearch({
+  visible: () => props.visible,
+  treeCollapsed,
+  layout,
+  treeWrapRef,
+  bodyRef: fileWorkspaceBodyRef,
+  ensureParentsExpanded: tree.ensureParentsExpanded,
+  selectFile: tabs.selectFile,
+  scrollSelectedIntoView: tree.scrollSelectedIntoView,
+})
+
 watch(nav.canGoBack, (v) => emit('update:canGoBack', v), { immediate: true })
 watch(nav.canGoForward, (v) => emit('update:canGoForward', v), { immediate: true })
 
 // --- File Watch ---
-// Every pane showing the changed path is refreshed — not just the active one.
-// Dirty buffers keep their content and show a "changed on disk" marker instead.
-function panesShowing(rel: string) {
-  return getAllEditorLeaves(editorSplit.editorLayout.value).filter((leaf) => leaf.filePath === rel)
-}
-
-// Bulk writes (checkout, branch switch, agent rewrites) produce one watcher
-// event per path. Coalesce the git-status refresh so a 100-file change runs
-// one `git status`, not 100.
-let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleGitRefresh() {
-  if (gitRefreshTimer) clearTimeout(gitRefreshTimer)
-  gitRefreshTimer = setTimeout(() => {
-    gitRefreshTimer = null
-    void fetchGitStatus()
-  }, 400)
-}
-
-function onWatchedFileChanged(rel: string) {
-  for (const leaf of panesShowing(rel)) {
-    const state = getEditorPaneState(leaf.id)
-    if (!state) continue
-    if (state.isDirty()) state.markDiskChanged()
-    else void state.reloadFromDisk()
-  }
-  scheduleGitRefresh()
-}
-
-function onWatchedFileDeleted(rel: string) {
-  for (const leaf of getAllEditorLeaves(editorSplit.editorLayout.value)) {
-    if (leaf.filePath === rel || leaf.filePath?.startsWith(`${rel}/`)) {
-      leaf.filePath = null
-      leaf.isDir = false
-    }
-  }
-  scheduleGitRefresh()
-}
-
 /** SSH panes have no local watcher behind them; don't open a socket at all. */
 const canWatch = computed(() => !isSsh.value)
 
@@ -705,7 +645,7 @@ async function refreshAfterWatchReconnect() {
       } catch {}
     })
   )
-  await fetchGitStatus()
+  await tree.fetchGitStatus()
 }
 
 const fileWatch = useFileWatch({
@@ -715,8 +655,8 @@ const fileWatch = useFileWatch({
   childCache,
   fetchList,
   canWatch: () => canWatch.value,
-  onFileChanged: onWatchedFileChanged,
-  onFileDeleted: onWatchedFileDeleted,
+  onFileChanged: tabs.onWatchedFileChanged,
+  onFileDeleted: tabs.onWatchedFileDeleted,
   onReconnected: () => void refreshAfterWatchReconnect(),
 })
 
@@ -729,7 +669,6 @@ function connectTreeWatchSocket() {
 const {
   reloadAll,
   captureState,
-  applyState,
   boot,
   openFromTerminal: openFromTerminalFromBoot,
 } = useFileWorkspaceBoot({
@@ -751,41 +690,21 @@ const {
   activeEditorLeafId: editorSplit.activeEditorLeafId,
   activeLeaf: editorSplit.activeLeaf,
   ensureChildren,
-  onSelectFile,
-  onSelectDir,
+  onSelectFile: tabs.selectFile,
+  onSelectDir: tabs.selectDir,
   connectTreeWatchSocket,
   disconnectTreeWatchSocket: fileWatch.disconnectTreeWatchSocket,
-  fetchGitStatus,
+  fetchGitStatus: tree.fetchGitStatus,
 })
 
 /**
  * User-initiated open (terminal path click / recent list). Boot restores,
- * rename reselects and delete reselects call `onSelectFile` directly, so they
+ * rename reselects and delete reselects call `selectFile` directly, so they
  * never arrive here and never prompt.
  */
 async function openFromTerminal(path: string): Promise<void> {
-  if (await shouldBlockNavigate()) return
   await openFromTerminalFromBoot(path)
-  await scrollSelectedIntoView()
-}
-
-/**
- * Bring the selected row into view after it was opened programmatically
- * (terminal link, recent list, history). Rows are identified by `data-rel`
- * rather than index because expansions shift the flat DOM order.
- */
-async function scrollSelectedIntoView(): Promise<void> {
-  await nextTick()
-  const rel = selectedRel.value
-  const wrap = treeWrapRef.value
-  if (!rel || !wrap) return
-  const rows = wrap.querySelectorAll<HTMLElement>('[data-rel]')
-  for (const row of rows) {
-    if (row.dataset.rel === rel) {
-      row.scrollIntoView({ block: 'nearest' })
-      return
-    }
-  }
+  await tree.scrollSelectedIntoView()
 }
 
 /**
@@ -805,7 +724,7 @@ async function retryPreviewErr() {
   delete next[rel]
   childCache.value = next
   try {
-    await ensureChildren(rel)
+    await tree.ensureChildren(rel)
   } catch (e) {
     previewErr.value = withWorkspaceErrorRel(e, rel)
   }
@@ -885,30 +804,17 @@ function ctxToggleBookmark() {
 function ctxOpenToSide() {
   const rel = ctxMenu.contextMenu.value?.rel || selectedRel.value
   if (!rel) return
+  const isDir = ctxMenu.contextMenu.value?.isDir ?? false
   ctxMenu.closeContextMenu()
-  editorSplit.openFileInNewPane(rel, ctxMenu.contextMenu.value?.isDir ?? false, 'horizontal')
-  recentFiles.recordFile(ops.absolutePath(rel), rel.split('/').pop() || rel)
-}
-
-async function onEditorFileDrop(leafId: string, rel: string, position: DropPosition) {
-  if (position === 'center') {
-    // Replacing this pane's file would drop its unsaved buffer.
-    if (!(await confirmDiscardForLeaf(leafId))) return
-    editorSplit.focusEditorPane(leafId)
-    await onSelectFile(rel)
-  } else {
-    const direction = position === 'left' || position === 'right' ? 'horizontal' : 'vertical'
-    editorSplit.openFileInNewPane(rel, false, direction)
-    await onSelectFile(rel)
-  }
+  tabs.openInNewPane(rel, isDir)
 }
 
 function isInternalTreeMove(ev: DragEvent): boolean {
-  const t = ev.dataTransfer?.types
-  if (!t) return false
-  return t.includes
-    ? t.includes('application/x-tree-move')
-    : (t as any).contains('application/x-tree-move')
+  const types = ev.dataTransfer?.types
+  if (!types) return false
+  return types.includes
+    ? types.includes('application/x-tree-move')
+    : (types as any).contains('application/x-tree-move')
 }
 
 function onWorkspaceDragEnter(ev: DragEvent) {
@@ -922,48 +828,24 @@ function onWorkspaceDrop(ev: DragEvent) {
 }
 
 // --- Navigation ---
-/** Expand every ancestor that is not open yet and wait for its listing, so
- *  the target row exists in the DOM before we try to scroll to it. */
-async function ensureParentsExpanded(rel: string): Promise<void> {
-  const parts = rel.split('/')
-  const next = new Set(expanded.value)
-  next.add('')
-  const loads: Promise<unknown>[] = []
-  for (let i = 1; i < parts.length; i++) {
-    const ancestor = parts.slice(0, i).join('/')
-    if (!next.has(ancestor)) {
-      next.add(ancestor)
-      loads.push(ensureChildren(ancestor).catch(() => {}))
-    }
-  }
-  expanded.value = next
-  await Promise.all(loads)
-}
-
 async function doGoBack() {
   if (!nav.canGoBack.value) return
-  // A directory entry only moves the tree selection; a file entry replaces
-  // the active pane's file.
-  const target = nav.navHistory.value[nav.navIndex.value - 1]
-  if (target && !target.isDir && (await shouldBlockNavigate())) return
   const entry = nav.goBack()
   if (!entry) return
-  await ensureParentsExpanded(entry.rel)
-  if (entry.isDir) onSelectDir(entry.rel)
-  else await onSelectFile(entry.rel)
-  await scrollSelectedIntoView()
+  await tree.ensureParentsExpanded(entry.rel)
+  if (entry.isDir) tabs.selectDir(entry.rel)
+  else await tabs.selectFile(entry.rel)
+  await tree.scrollSelectedIntoView()
 }
 
 async function doGoForward() {
   if (!nav.canGoForward.value) return
-  const target = nav.navHistory.value[nav.navIndex.value + 1]
-  if (target && !target.isDir && (await shouldBlockNavigate())) return
   const entry = nav.goForward()
   if (!entry) return
-  await ensureParentsExpanded(entry.rel)
-  if (entry.isDir) onSelectDir(entry.rel)
-  else await onSelectFile(entry.rel)
-  await scrollSelectedIntoView()
+  await tree.ensureParentsExpanded(entry.rel)
+  if (entry.isDir) tabs.selectDir(entry.rel)
+  else await tabs.selectFile(entry.rel)
+  await tree.scrollSelectedIntoView()
 }
 
 // --- Tree interactions ---
@@ -971,178 +853,9 @@ function bumpTreePointerTs() {
   lastTreePointerTs.value = Date.now()
 }
 
-/** Ask before dropping a dirty buffer. Returns true when it is safe to proceed. */
-async function confirmDiscardForLeaf(leafId: string | null | undefined): Promise<boolean> {
-  if (!leafId) return true
-  if (!getEditorPaneState(leafId)?.isDirty()) return true
-  return uiConfirm(t('filePreview.discardChanges'), {
-    confirmText: t('filePreview.discardChanges'),
-    cancelText: t('filePreview.cancel'),
-  })
+function tryOpenFilePinned(rel: string) {
+  void tabs.selectFile(rel, { pin: true })
 }
-
-async function shouldBlockNavigate(): Promise<boolean> {
-  return !(await confirmDiscardForLeaf(editorSplit.activeLeaf.value?.id))
-}
-
-async function trySelectFile(rel: string, ev?: MouseEvent) {
-  // Cmd (macOS) / Ctrl (Windows/Linux) + Click → open in new split pane
-  if (ev?.metaKey || ev?.ctrlKey) {
-    editorSplit.openFileInNewPane(rel, false, 'horizontal')
-    await loadMetaForActivePane(rel)
-    return
-  }
-  if (await shouldBlockNavigate()) return
-  await onSelectFile(rel)
-}
-
-function trySelectDir(rel: string) {
-  // Directory selection does not replace the editor buffer.
-  onSelectDir(rel)
-}
-
-/** Close one pane after checking only the buffer it is about to drop. */
-async function onCloseEditorPane(leafId: string) {
-  const state = getEditorPaneState(leafId)
-  if (state?.isDirty()) {
-    const ok = await uiConfirm(t('filePreview.discardChanges'), {
-      confirmText: t('filePreview.discardChanges'),
-      cancelText: t('filePreview.cancel'),
-    })
-    if (!ok) return
-  }
-  editorSplit.closeEditorPane(leafId)
-}
-
-const { selectedPath: globalSelectedPath } = useSelectedPath()
-
-function onSelectDir(rel: string) {
-  // Only update tree selection — keep the editor leaf showing the last opened
-  // file so the right pane doesn't go blank when a directory is clicked.
-  selectedRel.value = rel
-  selectedIsDir.value = true
-  nav.pushNav(rel, true)
-  globalSelectedPath.value = ops.absolutePath(rel)
-  emit('navigate', ops.absolutePath(rel))
-}
-
-async function loadMetaForActivePane(rel: string) {
-  recentFiles.recordFile(ops.absolutePath(rel), rel.split('/').pop() || rel)
-}
-
-async function onSelectFile(rel: string) {
-  // On narrow panes the drawer covers the preview; picking a file should
-  // reveal it. Directory selection keeps the drawer open for continued browsing.
-  if (layout.narrow.value) layout.closeDrawer()
-  selectedRel.value = rel
-  selectedIsDir.value = false
-  editorSplit.openFileInActivePane(rel, false)
-  meta.value = null
-  nav.pushNav(rel, false)
-  globalSelectedPath.value = ops.absolutePath(rel)
-  emit('navigate', ops.absolutePath(rel))
-  recentFiles.recordFile(ops.absolutePath(rel), rel.split('/').pop() || rel)
-}
-
-// --- Tree data ---
-async function fetchList(rel: string): Promise<DirEntry[]> {
-  await getApiBase()
-  const q = new URLSearchParams({ pane_id: apiPaneId.value, path: rel })
-  if (cwdLabel.value) q.set('root', cwdLabel.value)
-  let res: Response
-  try {
-    res = await authFetch(apiUrl(`/api/workspace/list?${q}`))
-  } catch (e) {
-    // Transport failure: status 0 so the UI reports a network error.
-    throw asWorkspaceError(e)
-  }
-  // Keep the server's status and `{ error }` body — the error bar maps them to
-  // localized text and decides whether Retry is useful.
-  if (!res.ok) throw await workspaceErrorFromResponse(res)
-  const data = await res.json()
-  if (isSsh.value) {
-    // The remote backend reports the directory it just listed; tree rel paths
-    // are always relative to the initial root '/', so following it would make
-    // cwdLabel drift on every navigation.
-    cwdLabel.value = '/'
-  } else {
-    cwdLabel.value = data.cwd || ''
-  }
-  return data.entries || []
-}
-
-async function fetchGitStatus() {
-  try {
-    await getApiBase()
-    const q = new URLSearchParams({ pane_id: apiPaneId.value })
-    const res = await authFetch(apiUrl(`/api/workspace/git-status?${q}`))
-    if (!res.ok) return
-    const data = await res.json()
-    if (!data.is_git_repo) {
-      gitStatusMap.value = {}
-      return
-    }
-    const map: Record<string, string> = {}
-    for (const f of data.files || []) {
-      map[f.path] = f.status
-    }
-    gitStatusMap.value = map
-  } catch {
-    gitStatusMap.value = {}
-  }
-}
-
-// One listing request per directory: concurrent expanders (hover-expand,
-// ensureParentsExpanded, rapid toggles) share the in-flight promise.
-const pendingChildren = new Map<string, Promise<void>>()
-
-function ensureChildren(rel: string): Promise<void> {
-  if (childCache.value[rel]) return Promise.resolve()
-  const inFlight = pendingChildren.get(rel)
-  if (inFlight) return inFlight
-  const request = (async () => {
-    try {
-      const entries = await fetchList(rel)
-      childCache.value = { ...childCache.value, [rel]: entries }
-    } finally {
-      pendingChildren.delete(rel)
-    }
-  })()
-  // Fire-and-forget callers (toggle, context menu, drag hover) must not
-  // produce an unhandled rejection; show the first failure in the error bar.
-  request.catch((e) => {
-    if (!previewErr.value) previewErr.value = withWorkspaceErrorRel(e, rel)
-  })
-  pendingChildren.set(rel, request)
-  return request
-}
-
-function onToggle(rel: string) {
-  const next = new Set(expanded.value)
-  if (next.has(rel)) next.delete(rel)
-  else next.add(rel)
-  expanded.value = next
-  if (next.has(rel)) void ensureChildren(rel)
-}
-
-/** Explorer "collapse all": close every directory but keep the selection so
- *  the highlighted row stays revealed under its collapsed ancestors. */
-function collapseAll() {
-  expanded.value = new Set()
-}
-
-async function refreshTree() {
-  if (refreshBusy.value) return
-  refreshBusy.value = true
-  try {
-    await reloadAll()
-  } finally {
-    refreshBusy.value = false
-  }
-}
-
-// --- Inline create/rename ---
-// (Extracted to useInlineCreateRename composable)
 
 async function onUploadToDir(dir: string, ev: DragEvent) {
   const items = ev.dataTransfer?.items
@@ -1178,9 +891,6 @@ function onSwipeAction(payload: { rel: string; action: string }) {
     )
   }
 }
-
-// --- Reload/Boot ---
-// (Extracted to useFileWorkspaceBoot composable)
 
 function close() {
   emit('close')
@@ -1231,6 +941,7 @@ function onWindowResize() {
 
 onMounted(() => {
   window.addEventListener('resize', onWindowResize)
+  window.addEventListener('keydown', onWorkspaceSearchKeydown)
   void nextTick(() => layout.clampTreePaneWidth(fileWorkspaceBodyRef.value))
   if (!props.isWindow) {
     window.addEventListener('keydown', onEditorSaveKeydown, true)
@@ -1242,12 +953,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (gitRefreshTimer) {
-    clearTimeout(gitRefreshTimer)
-    gitRefreshTimer = null
-  }
   if (props.paneId) saveFileWorkspaceState(props.paneId, captureState())
   window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('keydown', onWorkspaceSearchKeydown)
   if (!props.isWindow) {
     window.removeEventListener('keydown', onEditorSaveKeydown, true)
     window.removeEventListener('scroll', onCloseContextScroll, true)
@@ -1275,496 +983,6 @@ defineExpose({
 })
 </script>
 
-<style scoped>
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  border: 0;
-}
+<style scoped src="../../styles/file-workspace-preview.css"></style>
 
-.file-workspace.in-leaf {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-.file-workspace {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.file-workspace.horizontal {
-  flex-direction: row;
-  height: 100%;
-}
-
-.file-workspace.vertical {
-  flex-direction: column;
-  width: 100%;
-}
-
-.file-workspace-divider {
-  flex-shrink: 0;
-  background: var(--border, #333);
-  z-index: 2;
-}
-
-.file-workspace.horizontal .file-workspace-divider {
-  width: 6px;
-  cursor: col-resize;
-}
-
-.file-workspace.vertical .file-workspace-divider {
-  height: 6px;
-  cursor: row-resize;
-}
-
-.file-workspace-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.file-workspace-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--tab-bg, #252525);
-  border-bottom: 1px solid var(--border, #333);
-  flex-shrink: 0;
-}
-
-.file-workspace-toolbar button {
-  background: none;
-  border: none;
-  color: var(--fg-muted, #888);
-  font-size: 14px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.file-workspace-toolbar button:hover:not(:disabled) {
-  color: var(--fg, #ccc);
-  background: var(--tab-hover-bg, #333);
-}
-
-.file-workspace-toolbar button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.file-workspace-cwd {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-muted, #888);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.file-workspace-cwd:hover {
-  color: var(--fg, #ccc);
-}
-
-.file-workspace-cwd-wrap {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-}
-
-.file-workspace-cwd-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 499;
-}
-
-.file-workspace-body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.file-workspace-drop-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 300;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(59, 130, 246, 0.12);
-  border: 2px dashed rgba(59, 130, 246, 0.5);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--fg, #c7c7c7);
-  pointer-events: none;
-}
-
-.file-workspace-tree-wrap {
-  --tree-head-h: 30px;
-  min-width: 120px;
-  overflow: auto;
-  flex-shrink: 0;
-  background: var(--bg, #1a1a1a);
-}
-
-.file-workspace-tree-head {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
-  height: var(--tree-head-h);
-  padding: 0 4px 0 12px;
-  background: var(--bg, #1a1a1a);
-  border-bottom: 1px solid var(--border, #333);
-  color: var(--fg-muted, #888);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-}
-
-.file-workspace-tree-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-workspace-tree-actions {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  opacity: 0.78;
-}
-
-.file-workspace-tree-head:hover .file-workspace-tree-actions {
-  opacity: 1;
-}
-
-.file-workspace-tree-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted, #888);
-  cursor: pointer;
-}
-
-.file-workspace-tree-actions button:hover {
-  background: var(--tab-hover-bg, #333);
-  color: var(--fg, #ccc);
-}
-
-.file-workspace-tree-actions button.spinning svg {
-  animation: tree-head-spin 0.7s linear infinite;
-}
-
-@keyframes tree-head-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.file-workspace-error {
-  position: sticky;
-  top: var(--tree-head-h, 0);
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  background: rgba(244, 135, 113, 0.12);
-  border-bottom: 1px solid rgba(244, 135, 113, 0.35);
-  color: #f48771;
-  font-size: 12px;
-}
-
-.file-workspace-error-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-workspace-error-retry {
-  flex-shrink: 0;
-  border: 1px solid #4a4a50;
-  background: #26262b;
-  color: #cfcfd4;
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 1px 8px;
-  cursor: pointer;
-}
-
-.file-workspace-error-retry:hover {
-  border-color: var(--accent, #89b4fa);
-  color: #fff;
-}
-
-.file-workspace-preview-wrap {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  position: relative;
-  display: flex;
-}
-
-.tree-collapse-btn {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  z-index: 10;
-  background: var(--bg, #1a1a1a);
-  border: 1px solid var(--border, #333);
-  color: var(--fg-muted, #888);
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  display: inline-flex;
-  align-items: center;
-}
-.tree-collapse-btn:hover {
-  color: var(--fg, #ccc);
-  background: var(--tab-hover-bg, #333);
-}
-
-.file-workspace-tree-splitter {
-  flex-shrink: 0;
-  width: 5px;
-  cursor: col-resize;
-  background: var(--border, #333);
-  align-self: stretch;
-  transition: background 0.12s;
-}
-
-.file-workspace-tree-splitter:hover {
-  background: var(--accent, #89b4fa);
-}
-
-/* Narrow panes: the tree is an overlay drawer over the full-width preview. */
-.file-workspace-tree-wrap.narrow {
-  --tree-head-h: 40px;
-  position: absolute;
-  z-index: 30;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: min(84%, 320px);
-  min-width: 0;
-  max-width: 100%;
-  transform: translateX(-100%);
-  transition: transform 0.18s ease;
-  box-shadow: 18px 0 40px rgba(0, 0, 0, 0.45);
-  border-right: 1px solid var(--border, #333);
-}
-
-.file-workspace-tree-wrap.narrow.drawer-open {
-  transform: none;
-}
-
-.file-workspace-tree-wrap.narrow .file-workspace-tree-head {
-  font-size: 12px;
-}
-
-.file-workspace-tree-wrap.narrow .file-workspace-tree-actions {
-  opacity: 1;
-}
-
-.file-workspace-tree-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--fg-muted, #888);
-  cursor: pointer;
-}
-
-.file-workspace-tree-close:hover {
-  background: var(--tab-hover-bg, #333);
-  color: var(--fg, #ccc);
-}
-
-.file-workspace-drawer-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  background: rgba(0, 0, 0, 0.48);
-}
-
-.file-workspace-drawer-fab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  position: absolute;
-  left: 10px;
-  bottom: 12px;
-  z-index: 18;
-  padding: 8px 12px;
-  border: 1px solid var(--border, #3b3b42);
-  border-radius: 999px;
-  background: var(--tab-bg, #232328);
-  color: var(--fg, #ddd);
-  font-size: 12px;
-  cursor: pointer;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
-}
-
-.file-workspace-drawer-fab:hover {
-  background: var(--tab-hover-bg, #333);
-  color: #fff;
-}
-</style>
-
-<style>
-@import '../../styles/tree-rows.css';
-
-/* Inline create/rename: the input and its error share one flex row. */
-.tree-inline-field {
-  display: flex;
-  flex: 1 1 0;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.tree-inline-field .tree-inline-input {
-  flex: 1 1 auto;
-}
-
-.tree-inline-error {
-  flex-shrink: 0;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: #f48771;
-}
-
-.tree-ctx-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100000;
-  background: transparent;
-}
-
-.tree-ctx-menu {
-  position: fixed;
-  z-index: 100001;
-  min-width: 216px;
-  max-width: 320px;
-  max-height: calc(100vh - 16px);
-  overflow-y: auto;
-  padding: 4px 0;
-  margin: 0;
-  border-radius: 6px;
-  background: #252526;
-  border: 1px solid #3c3c3c;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-}
-
-.tree-ctx-menu--bottom {
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  top: auto !important;
-  min-width: 0;
-  max-width: none;
-  border-radius: 12px 12px 0 0;
-  padding: 8px 0;
-  padding-bottom: calc(8px + env(safe-area-inset-bottom));
-}
-
-.tree-ctx-menu--bottom .tree-ctx-item {
-  padding: 12px 16px;
-  font-size: 15px;
-}
-
-.tree-ctx-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  width: 100%;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 5px 14px;
-  border: none;
-  background: transparent;
-  color: #cccccc;
-  font-size: 13px;
-  line-height: 1.35;
-  text-align: left;
-  cursor: pointer;
-}
-
-.tree-ctx-item:hover,
-.tree-ctx-item:focus-visible {
-  background: #094771;
-  color: #ffffff;
-  outline: none;
-}
-.tree-ctx-item-danger:hover,
-.tree-ctx-item-danger:focus-visible {
-  background: #5a1d1d;
-  color: #ffcccc;
-}
-.tree-ctx-label {
-  flex: 1;
-  min-width: 0;
-}
-.tree-ctx-sep {
-  height: 1px;
-  margin: 4px 0;
-  background: #3c3c3c;
-  border: none;
-  padding: 0;
-}
-</style>
+<style src="../../styles/file-workspace-preview-global.css"></style>

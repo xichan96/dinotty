@@ -117,28 +117,25 @@ export function useFileEditor(opts: {
     }, 300)
   })
 
-  async function saveEditor() {
-    if (!canSaveEditor.value || !opts.selectedRel.value) return
+  /**
+   * PUT the active buffer. Returns the snapshot that was saved so the caller
+   * can commit the baseline to the right tab — the active tab may change while
+   * the request is in flight, and writing the response into whatever tab is
+   * active by then would clear another tab's dirty flag.
+   */
+  async function saveEditor(): Promise<{ filePath: string; content: string } | null> {
+    if (!canSaveEditor.value || !opts.selectedRel.value) return null
+    const filePath = opts.selectedRel.value
+    const content = editorText.value
     await getApiBase()
-    const q = new URLSearchParams({ pane_id: opts.paneId(), path: opts.selectedRel.value })
+    const q = new URLSearchParams({ pane_id: opts.paneId(), path: filePath })
     const res = await authFetch(apiUrl(`/api/workspace/file?${q}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: editorText.value }),
+      body: JSON.stringify({ content }),
     })
-    if (!res.ok) return
-    editorBaseline.value = editorText.value
-    if (
-      opts.meta.value &&
-      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
-    ) {
-      opts.meta.value = {
-        ...opts.meta.value,
-        content: editorText.value,
-        truncated: false,
-        message: undefined,
-      }
-    }
+    if (!res.ok) return null
+    return { filePath, content }
   }
 
   function resetEditor() {

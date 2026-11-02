@@ -721,3 +721,34 @@ async fn workspace_resolve_abs_rejects_missing_path() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[test]
+fn workspace_search_body_keeps_legacy_defaults() {
+    let body: WorkspaceSearchBody = serde_json::from_value(serde_json::json!({
+        "pane_id": "p1",
+        "path": ".",
+        "query": "needle"
+    }))
+    .unwrap();
+    // Cursor-picker callers predate these flags and must keep the old
+    // whole-word, case-sensitive literal behaviour.
+    assert_eq!(body.regex, None);
+    assert_eq!(body.word, None);
+    assert_eq!(body.case_sensitive, None);
+}
+
+#[test]
+fn workspace_search_body_reads_explicit_options() {
+    let body: WorkspaceSearchBody = serde_json::from_value(serde_json::json!({
+        "pane_id": "p1",
+        "path": ".",
+        "query": "needle.*",
+        "regex": true,
+        "word": false,
+        "case_sensitive": false
+    }))
+    .unwrap();
+    assert_eq!(body.regex, Some(true));
+    assert_eq!(body.word, Some(false));
+    assert_eq!(body.case_sensitive, Some(false));
+}

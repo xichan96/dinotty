@@ -29,6 +29,8 @@ export interface InlineCreateRenameOptions {
   ensureChildren: (rel: string) => Promise<void>
   onSelectFile: (rel: string) => Promise<void> | void
   onSelectDir: (rel: string) => void
+  /** Rewrite open tabs (and their buffers) after a successful rename. */
+  onPathRenamed?: (oldRel: string, newRel: string) => void
   t: (key: string) => string
 }
 
@@ -214,6 +216,9 @@ export function useInlineCreateRename(opts: InlineCreateRenameOptions): InlineCr
       try {
         await ensureChildren(parentRel)
       } catch {}
+      // Tabs keep their id/buffer, only their path changes; do this before
+      // selecting so the existing tab is activated instead of a duplicate.
+      opts.onPathRenamed?.(rel, newRel)
       if (selectedRel.value === rel) {
         if (isDir) onSelectDir(newRel)
         else await onSelectFile(newRel)

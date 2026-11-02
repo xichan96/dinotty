@@ -15,6 +15,7 @@ use crate::session::SessionManager;
 use crate::workspace_mgmt::is_sensitive;
 
 use super::remote;
+use super::search::{native_search, NativeSearchOptions};
 use super::types::{
     CreateEntryBody, CreateEntryQuery, DirEntry, ListResponse, MetaResponse, MoveBody,
     PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveAbsResponse, ResolveQuery,
@@ -233,14 +234,32 @@ pub async fn workspace_search(
     }
     let query = body.query.trim();
     if query.is_empty() {
-        return Json(SearchResponse { matches: vec![] }).into_response();
+        return Json(SearchResponse { matches: vec![], truncated: false }).into_response();
     }
     let max = body.max_results.unwrap_or(100).clamp(1, 500);
 
+    let regex = body.regex.unwrap_or(false);
+    let word = body.word.unwrap_or(true);
+    let case_sensitive = body.case_sensitive.unwrap_or(true);
+
     let mut cmd = tokio::process::Command::new("rg");
     cmd.no_window();
+    // The timeout below drops the child future; without this a large repo
+    // search would keep running after the HTTP request has already failed.
+    cmd.kill_on_drop(true);
     cmd.current_dir(&root);
-    cmd.args(["--json", "--word-regexp", "-F", query, body.path.trim().trim_start_matches('/')]);
+    cmd.arg("--json");
+    if !regex {
+        cmd.arg("-F");
+    }
+    if word {
+        cmd.arg("-w");
+    }
+    if !case_sensitive {
+        cmd.arg("-i");
+    }
+    cmd.arg(query);
+    cmd.arg(body.path.trim().trim_start_matches('/'));
     if let Some(ref pat) = body.file_pattern {
         cmd.args(["--glob", pat]);
     }
@@ -255,17 +274,73 @@ pub async fn workspace_search(
         Ok(Ok(o)) => o,
         Ok(Err(e)) => {
             if e.kind() == ErrorKind::NotFound {
-                return json_err(StatusCode::BAD_GATEWAY, "ripgrep not installed");
+                return native_search_response(
+                    root,
+                    target,
+                    query.to_string(),
+                    body.file_pattern.clone(),
+                    regex,
+                    word,
+                    case_sensitive,
+                    max,
+                )
+                .await;
             }
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
         }
         Err(_) => return json_err(StatusCode::GATEWAY_TIMEOUT, "search timeout"),
     };
 
-    // rg exits non-zero when no matches; ignore exit code and parse stdout.
+    // rg exits 1 when there are no matches and 2 on an error. Exit 2 can still
+    // carry matches (e.g. one unreadable file alongside readable hits), so
+    // only fail when stdout is empty too.
+    if output.status.code() == Some(2) && output.stdout.is_empty() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        return json_err(StatusCode::BAD_REQUEST, detail.trim());
+    }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let matches = parse_rg_json(&stdout, max);
-    Json(SearchResponse { matches }).into_response()
+    // Ask for one extra row so "exactly max" and "truncated" are distinguishable.
+    let mut matches = parse_rg_json(&stdout, max.saturating_add(1));
+    let truncated = matches.len() > max;
+    matches.truncate(max);
+    Json(SearchResponse { matches, truncated }).into_response()
+}
+
+/// Search without ripgrep. The scan is blocking filesystem I/O, so it runs on
+/// the blocking pool; the walker itself is bounded by file count, file size and
+/// wall-clock time to keep a huge workspace from pinning a worker forever.
+async fn native_search_response(
+    root: PathBuf,
+    target: PathBuf,
+    query: String,
+    file_pattern: Option<String>,
+    regex: bool,
+    word: bool,
+    case_sensitive: bool,
+    max: usize,
+) -> Response {
+    let result = tokio::task::spawn_blocking(move || {
+        let opts = NativeSearchOptions {
+            root: &root,
+            target: &target,
+            query: &query,
+            regex,
+            word,
+            case_sensitive,
+            file_pattern: file_pattern.as_deref(),
+            max,
+        };
+        native_search(&opts)
+    })
+    .await;
+    match result {
+        Ok(Ok(result)) => {
+            Json(SearchResponse { matches: result.matches, truncated: result.truncated })
+                .into_response()
+        }
+        Ok(Err(detail)) => json_err(StatusCode::BAD_REQUEST, &detail),
+        Err(e) => json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
 }
 
 #[allow(clippy::unused_async)]

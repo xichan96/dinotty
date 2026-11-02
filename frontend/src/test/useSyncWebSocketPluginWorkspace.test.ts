@@ -343,3 +343,51 @@ describe('useSyncWebSocket plugin workspace attribution', () => {
     expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
   })
 })
+
+describe('useSyncWebSocket tab workspace updates', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    mocks.apiActivateWorkspace.mockResolvedValue(undefined)
+    mocks.apiDeactivateWorkspace.mockResolvedValue(undefined)
+  })
+
+  it('applies and clears an explicit workspace assignment', async () => {
+    const tab = terminal('tab-1', { workspaceId: 'workspace-a' })
+    const { session, persist, emit } = await setup([tab])
+
+    emit({ type: 'tab_workspace_updated', tab_id: 'tab-1', workspace_id: 'workspace-b' })
+    expect((session.tabs[0] as TerminalTab).workspaceId).toBe('workspace-b')
+
+    emit({ type: 'tab_workspace_updated', tab_id: 'tab-1', workspace_id: null })
+    expect((session.tabs[0] as TerminalTab).workspaceId).toBeUndefined()
+    expect(persist).toHaveBeenCalledTimes(2)
+  })
+
+  it('carries workspace_id from tab_list onto an existing tab', async () => {
+    const existing = terminal('tab-1', { workspaceId: 'workspace-a' })
+    const { emit } = await setup([existing])
+
+    emit({
+      type: 'tab_list',
+      tabs: [
+        {
+          tab_id: existing.paneId,
+          pane_id: existing.activePaneId,
+          workspace_id: 'workspace-b',
+        },
+      ],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBe('workspace-b')
+  })
+
+  it('ignores updates for unknown tabs', async () => {
+    const { persist, emit } = await setup([terminal('tab-1')])
+
+    emit({ type: 'tab_workspace_updated', tab_id: 'missing', workspace_id: 'workspace-b' })
+
+    expect(persist).not.toHaveBeenCalled()
+  })
+})

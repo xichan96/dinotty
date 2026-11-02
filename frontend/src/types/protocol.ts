@@ -140,6 +140,14 @@ export interface SyncTabRenamed {
   title: string
 }
 
+/// Explicit tab→workspace assignment changed. `workspace_id` is `null` when
+/// the assignment was cleared (the tab falls back to derived attribution).
+export interface SyncTabWorkspaceUpdated {
+  type: 'tab_workspace_updated'
+  tab_id: string
+  workspace_id: string | null
+}
+
 export interface SyncTabReordered {
   type: 'tab_reordered'
   tab_ids: string[]
@@ -410,6 +418,7 @@ export type SyncServerMsg =
   | SyncTabClosed
   | SyncTabActivated
   | SyncTabRenamed
+  | SyncTabWorkspaceUpdated
   | SyncTabReordered
   | SyncPluginChanged
   | SyncLayoutUpdated

@@ -65,6 +65,22 @@ export async function apiGetPaneCwd(paneId: string): Promise<string | undefined>
   return body.cwd
 }
 
+/**
+ * Set (`workspaceId`) or clear (`null`) a tab's explicit workspace assignment.
+ * The server broadcasts `tab_workspace_updated` to every sync client.
+ */
+export async function apiSetTabWorkspace(
+  tabId: string,
+  workspaceId: string | null
+): Promise<void> {
+  const res = await authFetch(apiUrl(`/api/tabs/${tabId}/workspace`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspace_id: workspaceId }),
+  })
+  if (!res.ok) throw await apiErrorFromResponse(res, 'set tab workspace failed')
+}
+
 export async function apiCloseTab(tabId: string): Promise<void> {
   const res = await authFetch(apiUrl(`/api/tabs/${tabId}`), { method: 'DELETE' })
   if (!res.ok) throw new Error(`close tab failed: ${res.status}`)

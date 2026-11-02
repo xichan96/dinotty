@@ -144,6 +144,28 @@ describe('useWorkspaces', () => {
       expect(result?.id).toBe('ws2')
     })
 
+    it('explicit assignment beats cwd attribution', () => {
+      const result = matchWorkspace('/Users/talentc/rust/dinotty', undefined, 'ws2')
+      expect(result?.id).toBe('ws2')
+    })
+
+    it('explicit assignment beats connection_id attribution', () => {
+      workspaces.value.push({
+        id: 'ws-ssh',
+        name: 'server',
+        path: '/srv',
+        order: 3,
+        connection_id: 'profile-abc',
+      })
+      const result = matchWorkspace('/Users/talentc/projects/my-app', 'profile-abc', 'ws2')
+      expect(result?.id).toBe('ws2')
+    })
+
+    it('unknown explicit assignment falls through to cwd attribution', () => {
+      const result = matchWorkspace('/Users/talentc/rust/dinotty', undefined, 'deleted-ws')
+      expect(result?.id).toBe('ws1')
+    })
+
     it('uses Windows path semantics while preserving longest-prefix matching', () => {
       workspaces.value = [
         { id: 'parent', name: 'repo', path: String.raw`C:\Repo`, order: 0 },

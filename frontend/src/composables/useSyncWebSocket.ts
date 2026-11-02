@@ -556,6 +556,14 @@ export function useSyncWebSocket(opts: {
         if (targetTab) {
           ;(targetTab as TerminalTab).customTitle = msg.title
         }
+      } else if (msg.type === 'tab_workspace_updated') {
+        // Authoritative mirror: the broadcast includes the sender. `null`
+        // clears the explicit assignment so derived attribution takes over.
+        const targetTab = tabs.value.find((t) => t.paneId === msg.tab_id)
+        if (targetTab) {
+          targetTab.workspaceId = msg.workspace_id ?? undefined
+          persist()
+        }
       } else if (msg.type === 'tab_reordered') {
         // Apply the server's canonical order to the tabs we have. Tabs not in
         // the list (e.g. local-only plugin tabs) keep their slots; only the

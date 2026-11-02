@@ -524,7 +524,13 @@ fn navigate_tab_in_workspace(
     let filtered_ids: Vec<&str> = tabs
         .iter()
         .filter(|t| {
-            tab_workspace_id(workspaces, t.cwd.as_deref(), t.connection_id.as_deref()).as_deref()
+            tab_workspace_id(
+                workspaces,
+                t.workspace_id.as_deref(),
+                t.cwd.as_deref(),
+                t.connection_id.as_deref(),
+            )
+            .as_deref()
                 == selected_workspace_id
         })
         .map(|t| t.tab_id.as_str())
@@ -605,7 +611,12 @@ async fn seed_mission_control_selection(
         let (tabs, _) = manager.tab_list();
         let ws_snapshot = workspaces.read().await.clone();
         snap.selected_workspace_id = tabs.iter().find(|t| &t.tab_id == tab_id).and_then(|t| {
-            tab_workspace_id(&ws_snapshot, t.cwd.as_deref(), t.connection_id.as_deref())
+            tab_workspace_id(
+                &ws_snapshot,
+                t.workspace_id.as_deref(),
+                t.cwd.as_deref(),
+                t.connection_id.as_deref(),
+            )
         });
     }
 }

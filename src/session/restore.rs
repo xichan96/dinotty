@@ -60,6 +60,7 @@ fn restore_single_tab(manager: &Arc<SessionManager>, tab: &TabSnapshot) -> Resul
                 "active_pane_id": tab.active_pane_id,
             }),
         );
+        manager.set_tab_workspace(&tab.tab_id, tab.workspace_id.clone());
         return Ok(());
     }
 
@@ -85,6 +86,7 @@ fn restore_single_tab(manager: &Arc<SessionManager>, tab: &TabSnapshot) -> Resul
             "active_pane_id": tab.active_pane_id,
         }),
     );
+    manager.set_tab_workspace(&tab.tab_id, tab.workspace_id.clone());
     Ok(())
 }
 
@@ -254,6 +256,41 @@ mod tests {
 
         // Cleanup: kill the spawned PTY so the test doesn't leak processes.
         manager.kill_and_remove("restore-pane-1");
+    }
+
+    /// Explicit workspace assignments survive the snapshot round-trip.
+    #[tokio::test]
+    async fn restore_session_applies_workspace_assignment() {
+        use crate::session::SessionManager;
+        let manager = Arc::new(SessionManager::new());
+
+        let snapshot = SessionSnapshot {
+            version: 1,
+            saved_at: 0,
+            active_pane_id: None,
+            tab_order: vec!["plugin-tab".into()],
+            tabs: vec![TabSnapshot {
+                tab_id: "plugin-tab".into(),
+                pane_id: "plugin-pane".into(),
+                // Plugin-only tab: no PTY spawn, so this test stays fast.
+                layout: json!({
+                    "type": "leaf",
+                    "kind": "plugin",
+                    "paneId": "plugin-pane",
+                    "pluginId": "test-plugin"
+                }),
+                active_pane_id: Some("plugin-pane".into()),
+                connection_id: None,
+                workspace_id: Some("workspace-b".into()),
+                custom_title: None,
+                broadcast_mode: None,
+            }],
+        };
+
+        restore_session(&manager, &snapshot).await;
+
+        assert!(manager.tab_layouts.contains_key("plugin-tab"));
+        assert_eq!(manager.explicit_tab_workspace("plugin-tab").as_deref(), Some("workspace-b"));
     }
 
     /// SSH tabs (`connection_id` set) are skipped in Phase 1.

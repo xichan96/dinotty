@@ -88,12 +88,17 @@ pub struct SessionManager {
     pub sync_clients: Arc<Mutex<Vec<SyncClient>>>,
     pub active_pane_id: Arc<Mutex<Option<String>>>,
     pub tab_layouts: DashMap<String, serde_json::Value>,
+    /// Explicit tab→workspace assignments. A tab absent from this map has no
+    /// explicit assignment and falls back to SSH params / cwd attribution.
+    /// Kept out of `tab_layouts` because layout JSON is rewritten wholesale by
+    /// `update_layout` and its siblings, which would erase the assignment.
+    pub tab_workspaces: DashMap<String, Option<String>>,
     pub pending_ssh_auth: DashMap<String, crate::session::backend::PendingSshAuth>,
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
     /// Guards membership and all composite mutations of `sessions`,
-    /// `tab_layouts`, `tab_order`, `active_pane_id`, spawn reservations, and
-    /// `unowned_since`.
+    /// `tab_layouts`, `tab_workspaces`, `tab_order`, `active_pane_id`, spawn
+    /// reservations, and `unowned_since`.
     ///
     /// Lock order rule: this lock and per-session locks (`exited`, `status`,
     /// and `backend`) are never held together in either order. Signals,
@@ -179,6 +184,7 @@ impl SessionManager {
             sync_clients: Arc::new(Mutex::new(Vec::new())),
             active_pane_id: Arc::new(Mutex::new(None)),
             tab_layouts: DashMap::new(),
+            tab_workspaces: DashMap::new(),
             tab_order: Mutex::new(Vec::new()),
             pending_ssh_auth: DashMap::new(),
             event_bus: EventBus::new(),
@@ -340,6 +346,7 @@ impl SessionManager {
 
     fn remove_tab_locked(&self, tab_id: &str) -> bool {
         let removed = self.tab_layouts.remove(tab_id).is_some();
+        self.tab_workspaces.remove(tab_id);
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         order.retain(|id| id != tab_id);
         if removed {
@@ -352,6 +359,34 @@ impl SessionManager {
     pub fn remove_tab(&self, tab_id: &str) -> bool {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.remove_tab_locked(tab_id)
+    }
+
+    /// The explicit workspace assignment for a tab, if any. Callers that fall
+    /// back to SSH params or cwd must treat `None` as "derive it".
+    #[must_use]
+    pub fn explicit_tab_workspace(&self, tab_id: &str) -> Option<String> {
+        self.tab_workspaces.get(tab_id).and_then(|entry| entry.value().clone())
+    }
+
+    /// Set (`Some`) or clear (`None`) a tab's explicit workspace assignment.
+    ///
+    /// Returns `false` when the tab does not exist. Clearing removes the map
+    /// entry so the tab falls back to derived attribution again.
+    pub fn set_tab_workspace(&self, tab_id: &str, workspace_id: Option<String>) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.tab_layouts.contains_key(tab_id) {
+            return false;
+        }
+        match workspace_id {
+            Some(id) => {
+                self.tab_workspaces.insert(tab_id.to_string(), Some(id));
+            }
+            None => {
+                self.tab_workspaces.remove(tab_id);
+            }
+        }
+        self.schedule_snapshot();
+        true
     }
 
     fn update_layout_locked(
@@ -746,10 +781,13 @@ impl SessionManager {
                     .sessions
                     .get(&pane_id)
                     .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.profile_id.clone()));
-                let workspace_id = self
-                    .sessions
-                    .get(&pane_id)
-                    .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()));
+                // Explicit assignment wins over SSH params so a tab moved out
+                // of its connection's workspace stays there.
+                let workspace_id = self.explicit_tab_workspace(&tab_id).or_else(|| {
+                    self.sessions
+                        .get(&pane_id)
+                        .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()))
+                });
                 let title = v.get("title").and_then(|v| v.as_str()).map(String::from);
                 TabInfo {
                     tab_id,

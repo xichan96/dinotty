@@ -440,6 +440,7 @@ async fn main() {
             .route("/api/tabs/ssh", post(tabs::create_ssh_tab))
             .route("/api/tabs/:tab_id", delete(tabs::close_tab))
             .route("/api/tabs/:tab_id/rename", post(tabs::rename_tab))
+            .route("/api/tabs/:tab_id/workspace", put(tabs::set_tab_workspace))
             .route("/api/tabs/:tab_id/pane", post(tabs::split_pane))
             .route("/api/tabs/:tab_id/pane/plugin", post(tabs::create_plugin_pane))
             .route("/api/tabs/:tab_id/pane/files", post(tabs::create_files_pane))

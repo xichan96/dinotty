@@ -300,11 +300,11 @@ fn ws_remote(id: &str, path: &str, connection_id: &str) -> Workspace {
 fn tab_workspace_id_local_tab_longest_prefix_wins() {
     let workspaces = vec![ws_local("outer", "/Users/me"), ws_local("inner", "/Users/me/work")];
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me/work/project"), None),
+        tab_workspace_id(&workspaces, None, Some("/Users/me/work/project"), None),
         Some("inner".to_string())
     );
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me/other"), None),
+        tab_workspace_id(&workspaces, None, Some("/Users/me/other"), None),
         Some("outer".to_string())
     );
 }
@@ -312,16 +312,16 @@ fn tab_workspace_id_local_tab_longest_prefix_wins() {
 #[test]
 fn tab_workspace_id_no_match_returns_none() {
     let workspaces = vec![ws_local("ws1", "/Users/me/work")];
-    assert_eq!(tab_workspace_id(&workspaces, Some("/tmp"), None), None);
-    assert_eq!(tab_workspace_id(&workspaces, None, None), None);
-    assert_eq!(tab_workspace_id(&workspaces, Some(""), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some("/tmp"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, None, None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some(""), None), None);
 }
 
 #[test]
 fn tab_workspace_id_sibling_prefix_not_match() {
     // `/etcfoo` should NOT match workspace at `/etc` (no path separator)
     let workspaces = vec![ws_local("etc", "/etc")];
-    assert_eq!(tab_workspace_id(&workspaces, Some("/etcfoo"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some("/etcfoo"), None), None);
 }
 
 #[test]
@@ -331,11 +331,14 @@ fn tab_workspace_id_ssh_tab_matches_by_connection_id() {
         ws_remote("remote", "/home/deploy/app", "ssh-profile-1"),
     ];
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me"), Some("ssh-profile-1")),
+        tab_workspace_id(&workspaces, None, Some("/Users/me"), Some("ssh-profile-1")),
         Some("remote".to_string())
     );
     // SSH tab with connection_id that matches no workspace -> default (None)
-    assert_eq!(tab_workspace_id(&workspaces, Some("/Users/me"), Some("unknown-profile")), None);
+    assert_eq!(
+        tab_workspace_id(&workspaces, None, Some("/Users/me"), Some("unknown-profile")),
+        None
+    );
 }
 
 #[test]
@@ -343,14 +346,39 @@ fn tab_workspace_id_local_tab_skips_remote_workspaces() {
     // Local tab (no connection_id) should not match a remote workspace even
     // if its path happens to prefix-match.
     let workspaces = vec![ws_remote("remote", "/Users/me", "ssh-profile-1")];
-    assert_eq!(tab_workspace_id(&workspaces, Some("/Users/me/project"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some("/Users/me/project"), None), None);
+}
+
+#[test]
+fn tab_workspace_id_explicit_assignment_wins() {
+    let workspaces = vec![ws_local("a", "/Users/me/a"), ws_local("b", "/Users/me/b")];
+    // Explicit wins over cwd attribution.
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("b"), Some("/Users/me/a"), None),
+        Some("b".to_string())
+    );
+    // A stale explicit id (workspace deleted) falls through to cwd.
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("deleted"), Some("/Users/me/a"), None),
+        Some("a".to_string())
+    );
+}
+
+#[test]
+fn tab_workspace_id_explicit_assignment_beats_connection_id() {
+    let workspaces =
+        vec![ws_local("a", "/Users/me/a"), ws_remote("remote", "/srv", "ssh-profile-1")];
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("a"), None, Some("ssh-profile-1")),
+        Some("a".to_string())
+    );
 }
 
 #[test]
 fn tab_workspace_id_trailing_slash_on_workspace_path_is_tolerated() {
     let workspaces = vec![ws_local("ws1", "/Users/me/work/")];
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me/work/project"), None),
+        tab_workspace_id(&workspaces, None, Some("/Users/me/work/project"), None),
         Some("ws1".to_string())
     );
 }

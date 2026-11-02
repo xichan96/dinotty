@@ -4,7 +4,7 @@ mod tabs;
 
 pub use non_terminal::{create_files_pane, create_plugin_pane, create_plugin_tab, create_web_pane};
 pub use panes::{activate_pane, close_pane, extract_pane, move_pane, split_pane, update_layout};
-pub use tabs::{close_tab, create_tab, list_tabs, rename_tab};
+pub use tabs::{close_tab, create_tab, list_tabs, rename_tab, set_tab_workspace};
 
 use axum::{http::StatusCode, response::IntoResponse, Json};
 

@@ -385,6 +385,84 @@ fn tab_list_restores_ssh_workspace_assignment_from_session() {
     assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-b"));
 }
 
+fn ssh_session_with_workspace(profile: &str, workspace: &str) -> Arc<Session> {
+    let mut session = local_session_for_write_input();
+    Arc::get_mut(&mut session).unwrap().ssh_params = Some(SshSessionParams {
+        host: "example.test".into(),
+        port: 22,
+        username: "user".into(),
+        auth_method: crate::settings::SshAuthMethod::default(),
+        default_command: None,
+        profile_id: Some(profile.into()),
+        workspace_id: Some(workspace.into()),
+        initial_cwd: Some("/srv/b".into()),
+    });
+    session
+}
+
+#[test]
+fn set_and_clear_tab_workspace() {
+    let manager = SessionManager::new();
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+
+    assert!(manager.set_tab_workspace("t1", Some("workspace-a".into())));
+    assert_eq!(manager.explicit_tab_workspace("t1").as_deref(), Some("workspace-a"));
+
+    // Clearing removes the entry so derived attribution takes over again.
+    assert!(manager.set_tab_workspace("t1", None));
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+
+    // Unknown tabs are rejected and store nothing.
+    assert!(!manager.set_tab_workspace("missing", Some("workspace-a".into())));
+    assert_eq!(manager.explicit_tab_workspace("missing"), None);
+}
+
+#[test]
+fn remove_tab_drops_workspace_assignment() {
+    let manager = SessionManager::new();
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+    assert!(manager.set_tab_workspace("t1", Some("workspace-a".into())));
+
+    assert!(manager.remove_tab("t1"));
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+}
+
+#[test]
+fn tab_list_prefers_explicit_workspace_over_ssh_params() {
+    let manager = SessionManager::new();
+    manager
+        .sessions
+        .insert("p1".into(), ssh_session_with_workspace("shared-profile", "workspace-b"));
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+
+    assert!(manager.set_tab_workspace("t1", Some("workspace-a".into())));
+    let (tabs, _) = manager.tab_list();
+    assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-a"));
+
+    // Clearing falls back to the SSH params' workspace.
+    assert!(manager.set_tab_workspace("t1", None));
+    let (tabs, _) = manager.tab_list();
+    assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-b"));
+}
+
+#[test]
+fn tab_workspace_updated_serializes_clear_as_null() {
+    let msg = SyncMsg::TabWorkspaceUpdated { tab_id: "t1".into(), workspace_id: None };
+    let value = serde_json::to_value(msg).unwrap();
+    assert_eq!(value["type"], "tab_workspace_updated");
+    assert_eq!(value["tab_id"], "t1");
+    assert!(value["workspace_id"].is_null());
+
+    let msg =
+        SyncMsg::TabWorkspaceUpdated { tab_id: "t1".into(), workspace_id: Some("ws-a".into()) };
+    let value = serde_json::to_value(msg).unwrap();
+    assert_eq!(value["workspace_id"], "ws-a");
+}
+
 // ── CWD state tracking ─────────────────────────────────────────────
 
 #[test]

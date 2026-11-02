@@ -10,6 +10,7 @@ use axum::{
 use crate::platform::shell_probe::ShellProbeService;
 use crate::session::{self, SessionManager, SyncMsg};
 use crate::settings::SettingsState;
+use crate::workspace_mgmt::WorkspacesState;
 
 use super::super::service;
 use super::super::types::CreateTabRequest;
@@ -47,6 +48,55 @@ pub async fn rename_tab(
         manager.broadcast_sync(&SyncMsg::TabRenamed { tab_id, title: title.to_string() });
         Json(serde_json::json!({ "ok": true })).into_response()
     } else {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
+            .into_response()
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct SetTabWorkspaceRequest {
+    /// `null` (or an omitted field) clears the explicit assignment so the tab
+    /// falls back to derived attribution (SSH connection, then cwd).
+    #[serde(default)]
+    workspace_id: Option<String>,
+}
+
+pub async fn set_tab_workspace(
+    State((workspaces, manager)): State<(WorkspacesState, Arc<SessionManager>)>,
+    Path(tab_id): Path<String>,
+    Json(req): Json<SetTabWorkspaceRequest>,
+) -> impl IntoResponse {
+    if !manager.tab_layouts.contains_key(&tab_id) {
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
+            .into_response();
+    }
+
+    if let Some(workspace_id) = req.workspace_id.as_deref() {
+        if workspace_id.trim().is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "workspace_id must not be empty" })),
+            )
+                .into_response();
+        }
+        let known = workspaces.read().await.iter().any(|w| w.id == workspace_id);
+        if !known {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "unknown workspace" })),
+            )
+                .into_response();
+        }
+    }
+
+    if manager.set_tab_workspace(&tab_id, req.workspace_id.clone()) {
+        manager.broadcast_sync(&SyncMsg::TabWorkspaceUpdated {
+            tab_id,
+            workspace_id: req.workspace_id,
+        });
+        Json(serde_json::json!({ "ok": true })).into_response()
+    } else {
+        // The tab was removed between the existence check and the mutation.
         (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
             .into_response()
     }

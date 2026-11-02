@@ -174,6 +174,12 @@ pub enum SyncMsg {
         tab_id: String,
         title: String,
     },
+    /// Explicit workspace assignment changed. `workspace_id` is always sent
+    /// (`null` when cleared) so clients can tell "cleared" from "unchanged".
+    TabWorkspaceUpdated {
+        tab_id: String,
+        workspace_id: Option<String>,
+    },
     TabReordered {
         tab_ids: Vec<String>,
     },

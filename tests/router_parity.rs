@@ -45,6 +45,9 @@ const SHARED: &[&str] = &[
     "/api/info",
     "/api/shells",
     "/api/clipboard",
+    // Explicit tab→workspace assignment. A desktop-only or server-only copy
+    // would silently strand the assignment on the client that cannot reach it.
+    "/api/tabs/:tab_id/workspace",
 ];
 
 fn repo_root() -> PathBuf {

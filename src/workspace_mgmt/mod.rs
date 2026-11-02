@@ -198,20 +198,27 @@ pub fn derive_name(path: &str) -> String {
 
 /// Resolve the workspace id a tab belongs to, mirroring frontend
 /// `useWorkspaces.ts:matchWorkspace`:
-///   - SSH tabs (`connection_id` set) match by `Workspace.connection_id`.
-///   - Local tabs match by longest path-prefix of `cwd` against `Workspace.path`.
+///   1. An explicit assignment (`TabInfo.workspace_id`) wins when it names a
+///      known workspace.
+///   2. SSH tabs (`connection_id` set) match by `Workspace.connection_id`.
+///   3. Local tabs match by longest path-prefix of `cwd` against `Workspace.path`.
 ///
 /// Returns `None` when no workspace matches, meaning the tab belongs to the
-/// default workspace (`selected_workspace_id == None` in MC state). The
-/// frontend-only `tab.workspaceId` field (explicit assignment via Command
-/// Palette) is not visible to the backend; we accept this edge-case
-/// divergence to keep the backend stateless on that dimension.
+/// default workspace (`selected_workspace_id == None` in MC state).
 #[must_use]
 pub fn tab_workspace_id(
     workspaces: &[Workspace],
+    explicit: Option<&str>,
     cwd: Option<&str>,
     connection_id: Option<&str>,
 ) -> Option<String> {
+    if let Some(id) = explicit {
+        // Mirror the frontend: a stale id (workspace deleted) does not win,
+        // it falls through to derived attribution.
+        if let Some(ws) = workspaces.iter().find(|w| w.id == id) {
+            return Some(ws.id.clone());
+        }
+    }
     if let Some(cid) = connection_id {
         return workspaces
             .iter()

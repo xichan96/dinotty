@@ -185,7 +185,7 @@ fn build_snapshot(manager: &crate::session::SessionManager) -> SessionSnapshot {
             layout: enriched_layout,
             active_pane_id,
             connection_id: None,
-            workspace_id: None,
+            workspace_id: manager.explicit_tab_workspace(tab_id),
             custom_title: None,
             broadcast_mode: None,
         };
@@ -292,6 +292,46 @@ mod tests {
         assert_eq!(loaded.tabs.len(), 1);
         assert_eq!(loaded.tabs[0].tab_id, "tab-1");
         assert_eq!(loaded.tabs[0].workspace_id.as_deref(), Some("ws-1"));
+    }
+
+    #[test]
+    fn build_snapshot_includes_explicit_workspace() {
+        let manager = crate::session::SessionManager::new();
+        manager.insert_tab(
+            "t1".into(),
+            serde_json::json!({
+                "layout": {"type": "leaf", "kind": "terminal", "paneId": "p1"},
+                "active_pane_id": "p1",
+            }),
+        );
+        assert!(manager.set_tab_workspace("t1", Some("ws-1".into())));
+
+        let snap = build_snapshot(&manager);
+
+        assert_eq!(snap.tabs.len(), 1);
+        assert_eq!(snap.tabs[0].workspace_id.as_deref(), Some("ws-1"));
+    }
+
+    #[test]
+    fn snapshot_without_workspace_id_still_loads() {
+        // Old snapshots predate `workspace_id`; serde(default) must keep them loadable.
+        let legacy = serde_json::json!({
+            "version": SNAPSHOT_VERSION,
+            "saved_at": 1,
+            "active_pane_id": null,
+            "tab_order": ["t1"],
+            "tabs": [{
+                "tab_id": "t1",
+                "pane_id": "p1",
+                "layout": {"type": "leaf", "kind": "terminal", "paneId": "p1"},
+                "active_pane_id": "p1"
+            }]
+        });
+
+        let snap: SessionSnapshot = serde_json::from_value(legacy).expect("legacy snapshot loads");
+
+        assert_eq!(snap.tabs.len(), 1);
+        assert_eq!(snap.tabs[0].workspace_id, None);
     }
 
     #[test]

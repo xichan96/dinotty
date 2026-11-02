@@ -15,7 +15,7 @@ use crate::session::SessionManager;
 use crate::workspace_mgmt::is_sensitive;
 
 use super::remote;
-use super::search::{native_search, NativeSearchOptions};
+use super::search::NativeSearchRequest;
 use super::types::{
     CreateEntryBody, CreateEntryQuery, DirEntry, ListResponse, MetaResponse, MoveBody,
     PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveAbsResponse, ResolveQuery,
@@ -274,16 +274,16 @@ pub async fn workspace_search(
         Ok(Ok(o)) => o,
         Ok(Err(e)) => {
             if e.kind() == ErrorKind::NotFound {
-                return native_search_response(
+                return native_search_response(NativeSearchRequest {
                     root,
                     target,
-                    query.to_string(),
-                    body.file_pattern.clone(),
+                    query: query.to_string(),
+                    file_pattern: body.file_pattern.clone(),
                     regex,
                     word,
                     case_sensitive,
                     max,
-                )
+                })
                 .await;
             }
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
@@ -309,30 +309,8 @@ pub async fn workspace_search(
 /// Search without ripgrep. The scan is blocking filesystem I/O, so it runs on
 /// the blocking pool; the walker itself is bounded by file count, file size and
 /// wall-clock time to keep a huge workspace from pinning a worker forever.
-async fn native_search_response(
-    root: PathBuf,
-    target: PathBuf,
-    query: String,
-    file_pattern: Option<String>,
-    regex: bool,
-    word: bool,
-    case_sensitive: bool,
-    max: usize,
-) -> Response {
-    let result = tokio::task::spawn_blocking(move || {
-        let opts = NativeSearchOptions {
-            root: &root,
-            target: &target,
-            query: &query,
-            regex,
-            word,
-            case_sensitive,
-            file_pattern: file_pattern.as_deref(),
-            max,
-        };
-        native_search(&opts)
-    })
-    .await;
+async fn native_search_response(request: NativeSearchRequest) -> Response {
+    let result = tokio::task::spawn_blocking(move || request.run()).await;
     match result {
         Ok(Ok(result)) => {
             Json(SearchResponse { matches: result.matches, truncated: result.truncated })

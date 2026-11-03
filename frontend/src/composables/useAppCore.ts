@@ -956,16 +956,49 @@ export function useAppCore(options: AppCoreOptions) {
     return settings.preview_open_modes?.[kind] ?? 'split'
   }
 
+  /** Built-in previews only; plugins keep their own launcher/window path. */
+  type PreviewWindowContent = Extract<FloatWindowContent, { kind: 'files' | 'web' }>
+
+  /** Open a built-in preview in its own native window. Reopening the same kind
+   *  focuses the existing window and sends it the new path/url (the Rust side
+   *  emits `preview-window-navigate`), matching the one-window-per-kind floats.
+   *  Resolves false when the native window could not be opened. */
+  async function openPreviewWindow(content: PreviewWindowContent): Promise<boolean> {
+    const args: Record<string, unknown> = {
+      kind: content.kind,
+      title: t(content.kind === 'files' ? 'previewPanel.switchFiles' : 'previewPanel.switchWeb'),
+    }
+    if (content.kind === 'files') {
+      args.sourcePaneId = content.sourcePaneId
+      if (content.initialPath) args.path = content.initialPath
+    } else if (content.initialUrl) {
+      args.url = content.initialUrl
+    }
+    try {
+      await tauriInvoke('open_preview_window', args)
+      return true
+    } catch (error) {
+      console.warn('[preview] failed to open native window', error)
+      return false
+    }
+  }
+
   /** Open the built-in file/web preview, honoring the per-kind preference (and
    *  falling back to a split pane on touch). 'floating' opens a draggable
-   *  window; files floats bind to the active terminal session. */
+   *  window; 'window' opens a native desktop window; files previews bind to the
+   *  active terminal session. */
   function openPreview(
     kind: 'files' | 'web',
     payload: PreviewOpenPayload = {},
     explicit?: PreviewOpenMode
   ) {
-    const mode = resolvePreviewOpenMode(explicit, previewOpenModePref(kind), isTouchDevice())
-    if (mode !== 'floating') {
+    const mode = resolvePreviewOpenMode(
+      explicit,
+      previewOpenModePref(kind),
+      isTouchDevice(),
+      isTauri()
+    )
+    if (mode === 'split') {
       openOrFocusPreview(kind, payload)
       return
     }
@@ -977,14 +1010,28 @@ export function useAppCore(options: AppCoreOptions) {
       }
       const tab = activeTab.value
       const cwd = tab && tab.type === 'terminal' ? (tab.cwd ?? '') : ''
-      openPreviewFloat({
+      const content: PreviewWindowContent = {
         kind: 'files',
         sourcePaneId,
         initialPath: payload.path ?? (cwd || undefined),
+      }
+      if (mode === 'window') {
+        void openPreviewWindow(content).then((opened) => {
+          if (!opened) openPreviewFloat(content)
+        })
+        return
+      }
+      openPreviewFloat(content)
+      return
+    }
+    const content: PreviewWindowContent = { kind: 'web', initialUrl: payload.url }
+    if (mode === 'window') {
+      void openPreviewWindow(content).then((opened) => {
+        if (!opened) openPreviewFloat(content)
       })
       return
     }
-    openPreviewFloat({ kind: 'web', initialUrl: payload.url })
+    openPreviewFloat(content)
   }
 
   // ─── Server switching (Phase B4) ───────────────────────────────────

@@ -242,11 +242,15 @@
           <select
             class="shortcut-input"
             style="flex: 1"
+            data-setting="preview-open-mode-files"
             :value="previewOpenModeValue('files')"
             @change="onPreviewOpenModeChange('files', ($event.target as HTMLSelectElement).value)"
           >
             <option value="split">{{ t('settings.previewOpenMode.split') }}</option>
             <option value="floating">{{ t('settings.previewOpenMode.floating') }}</option>
+            <option v-if="desktopShell" value="window">
+              {{ t('settings.previewOpenMode.window') }}
+            </option>
           </select>
         </div>
         <div class="settings-row">
@@ -254,11 +258,15 @@
           <select
             class="shortcut-input"
             style="flex: 1"
+            data-setting="preview-open-mode-web"
             :value="previewOpenModeValue('web')"
             @change="onPreviewOpenModeChange('web', ($event.target as HTMLSelectElement).value)"
           >
             <option value="split">{{ t('settings.previewOpenMode.split') }}</option>
             <option value="floating">{{ t('settings.previewOpenMode.floating') }}</option>
+            <option v-if="desktopShell" value="window">
+              {{ t('settings.previewOpenMode.window') }}
+            </option>
           </select>
         </div>
         <p class="settings-hint">{{ t('settings.previewOpenMode.hint') }}</p>
@@ -810,6 +818,7 @@ import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { Eye, EyeOff, Copy, Check, Pencil, RefreshCw, Save, X, FolderOpen } from 'lucide-vue-next'
 import { useSettings } from '../../composables/useSettings'
 import type { WorkspaceBadgeMode } from '../../composables/useSettings'
+import type { PreviewOpenMode } from '../../types/floatWindow'
 import { useI18n } from '../../composables/useI18n'
 import { useIsMobile } from '../../composables/useIsMobile'
 import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
@@ -998,13 +1007,17 @@ function onWsBadgeModeChange(value: string) {
 }
 
 type PreviewPaneKind = 'files' | 'web'
+/** 'window' is a desktop-only mode; the server may hold it from another
+ *  client, so web/touch displays the float it would fall back to. */
+const desktopShell = isTauri()
 function previewOpenModeValue(kind: PreviewPaneKind): string {
-  return settings.preview_open_modes?.[kind] ?? 'split'
+  const mode = settings.preview_open_modes?.[kind] ?? 'split'
+  return mode === 'window' && !desktopShell ? 'floating' : mode
 }
 function onPreviewOpenModeChange(kind: PreviewPaneKind, mode: string) {
   settings.preview_open_modes = {
     ...settings.preview_open_modes,
-    [kind]: mode as 'split' | 'floating',
+    [kind]: mode as PreviewOpenMode,
   }
   saveSettings()
 }

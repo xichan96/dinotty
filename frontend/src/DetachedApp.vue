@@ -2,15 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToast } from 'vue-toastification'
 import { AppWindow } from 'lucide-vue-next'
-import {
-  apiUrl,
-  authFetch,
-  checkTokenConfigured,
-  fetchAutoToken,
-  getApiBase,
-  markCookieAuthenticated,
-  validateToken,
-} from './composables/apiBase'
+import { probeWindowSession } from './composables/windowSessionProbe'
 import { loadThemePacks } from './composables/useThemePacks'
 import { effectiveTheme } from './composables/useDeviceThemeSelection'
 import { useSettingsStore } from './stores/settingsStore'
@@ -112,36 +104,6 @@ function onDockHintChange(active: boolean): void {
   }
 }
 
-/**
- * True when this window may talk to the active server.
- *
- * Probe with the same authenticated endpoint the main window uses, then fall
- * back to the desktop loopback auto-token (the cookie-less Tauri path). A
- * detached window is only opened by the desktop app, so there is no setup or
- * login UI here — failure is terminal.
- */
-async function probeSession(): Promise<boolean> {
-  await getApiBase()
-  try {
-    const res = await authFetch(apiUrl('/api/settings'))
-    if (res.ok) {
-      markCookieAuthenticated()
-      return true
-    }
-  } catch {
-    // Unreachable server; try the desktop loopback auto-token before giving up.
-  }
-
-  const { configured, serverMode } = await checkTokenConfigured()
-  if (!configured || serverMode) return false
-  const autoToken = await fetchAutoToken()
-  if (!autoToken) return false
-  const result = await validateToken(autoToken)
-  if (!result.ok) return false
-  markCookieAuthenticated()
-  return true
-}
-
 function fail(key: 'detached.tabNotFound' | 'detached.connectionFailed') {
   errorKey.value = key
   state.value = 'error'
@@ -151,7 +113,7 @@ onMounted(async () => {
   if (!tabId) return
 
   try {
-    if (!(await probeSession())) {
+    if (!(await probeWindowSession())) {
       fail('detached.connectionFailed')
       return
     }

@@ -198,8 +198,10 @@
         <div
           v-if="treeVisible && !layout.narrow.value"
           class="file-workspace-tree-splitter"
+          :title="t('filePreview.treeWidthHint')"
           @mousedown.prevent="(e) => layout.startTreeWidthDrag(e, fileWorkspaceBodyRef)"
           @touchstart.prevent="(e) => layout.startTreeWidthDragTouch(e, fileWorkspaceBodyRef)"
+          @dblclick.prevent="layout.resetTreeWidthToAuto"
         ></div>
         <div class="file-workspace-preview-wrap">
           <button

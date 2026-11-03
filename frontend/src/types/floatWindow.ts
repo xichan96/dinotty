@@ -16,13 +16,20 @@ export function filesStatePaneId(sourcePaneId: string): string {
   return `float:files:${sourcePaneId}`
 }
 
-export type PreviewOpenMode = 'split' | 'floating'
+/** Where a built-in preview opens. 'window' is a native desktop window and is
+ *  unavailable outside the Tauri shell (and on touch), where it falls back. */
+export type PreviewOpenMode = 'split' | 'floating' | 'window'
 
 export function resolvePreviewOpenMode(
   explicit: PreviewOpenMode | undefined,
   pref: PreviewOpenMode,
-  touch: boolean
+  touch: boolean,
+  desktop: boolean
 ): PreviewOpenMode {
   if (touch) return 'split'
-  return explicit ?? pref
+  const mode = explicit ?? pref
+  // The native-window mode is a desktop-only capability; web/touch clients
+  // that received the preference from the server still get an in-app float.
+  if (mode === 'window' && !desktop) return 'floating'
+  return mode
 }

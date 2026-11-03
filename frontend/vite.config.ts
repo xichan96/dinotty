@@ -39,11 +39,13 @@ export default defineConfig({
     emptyOutDir: true,
     chunkSizeWarningLimit: 4000,
     rollupOptions: {
-      // Two HTML entries: the main window and the detached terminal window.
-      // The dev server serves both from the project root (/detached.html).
+      // Three HTML entries: the main window, the detached terminal window and
+      // the native preview window. The dev server serves all from the project
+      // root (/detached.html, /preview.html).
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         detached: fileURLToPath(new URL('./detached.html', import.meta.url)),
+        preview: fileURLToPath(new URL('./preview.html', import.meta.url)),
       },
       output: {
         manualChunks: {

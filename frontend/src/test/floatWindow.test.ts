@@ -8,23 +8,33 @@ import {
 
 describe('resolvePreviewOpenMode', () => {
   it('falls back to the per-kind preference when no explicit mode is given', () => {
-    const cases: Array<[PreviewOpenMode | undefined, PreviewOpenMode, boolean, PreviewOpenMode]> = [
-      [undefined, 'split', false, 'split'],
-      [undefined, 'floating', false, 'floating'],
+    const cases: Array<
+      [PreviewOpenMode | undefined, PreviewOpenMode, boolean, boolean, PreviewOpenMode]
+    > = [
+      [undefined, 'split', false, true, 'split'],
+      [undefined, 'floating', false, true, 'floating'],
+      [undefined, 'window', false, true, 'window'],
     ]
-    for (const [explicit, pref, touch, want] of cases) {
-      expect(resolvePreviewOpenMode(explicit, pref, touch)).toBe(want)
+    for (const [explicit, pref, touch, desktop, want] of cases) {
+      expect(resolvePreviewOpenMode(explicit, pref, touch, desktop)).toBe(want)
     }
   })
 
   it('lets an explicit mode override the preference', () => {
-    expect(resolvePreviewOpenMode('floating', 'split', false)).toBe('floating')
-    expect(resolvePreviewOpenMode('split', 'floating', false)).toBe('split')
+    expect(resolvePreviewOpenMode('floating', 'split', false, true)).toBe('floating')
+    expect(resolvePreviewOpenMode('split', 'floating', false, true)).toBe('split')
+    expect(resolvePreviewOpenMode('window', 'split', false, true)).toBe('window')
   })
 
   it('always opens as a split pane on touch devices', () => {
-    expect(resolvePreviewOpenMode(undefined, 'floating', true)).toBe('split')
-    expect(resolvePreviewOpenMode('floating', 'floating', true)).toBe('split')
+    expect(resolvePreviewOpenMode(undefined, 'floating', true, true)).toBe('split')
+    expect(resolvePreviewOpenMode('floating', 'floating', true, true)).toBe('split')
+    expect(resolvePreviewOpenMode(undefined, 'window', true, true)).toBe('split')
+  })
+
+  it('downgrades the native-window mode to a float outside the desktop shell', () => {
+    expect(resolvePreviewOpenMode(undefined, 'window', false, false)).toBe('floating')
+    expect(resolvePreviewOpenMode('window', 'split', false, false)).toBe('floating')
   })
 })
 

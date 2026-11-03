@@ -16,10 +16,12 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
 mod autostart;
 mod detached_windows;
 mod embedded_server;
+mod preview_windows;
 mod shutdown;
 mod tray;
 mod update_download;
 mod window_actions;
+mod window_host;
 
 static EMBEDDED_HTTP_PORT: OnceLock<u16> = OnceLock::new();
 const BUILT_IN_DEFAULT_PORT: u16 = 8999;
@@ -748,6 +750,7 @@ fn main() {
         .manage(tray::state::TrayMenuState::default())
         .manage(window_actions::MainWindowState::default())
         .manage(detached_windows::DetachedTabWindows::default())
+        .manage(preview_windows::PreviewWindows::default())
         .manage(update_download::UpdateDownloadState::default())
         .manage(StartupExitState::default())
         .manage(shutdown::ShutdownCoordinator::new(manager.clone()))
@@ -830,6 +833,11 @@ fn main() {
             if detached_windows::handle_detached_window_event(window, event) {
                 return;
             }
+            // Preview windows close like detached ones: no server state to
+            // prompt about, so keep the main window's quit dialog out of it.
+            if preview_windows::handle_preview_window_event(window, event) {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.app_handle().state::<shutdown::ShutdownCoordinator>().is_finalizing() {
                     return;
@@ -866,6 +874,8 @@ fn main() {
             detached_windows::focus_tab_window,
             detached_windows::list_detached_tab_windows,
             detached_windows::close_tab_window,
+            preview_windows::open_preview_window,
+            preview_windows::close_preview_window,
             window_actions::open_system_tray_settings,
             autostart::autostart_status,
             autostart::set_autostart,

@@ -316,7 +316,14 @@ function openFromWebUrl(url: string) {
   recentUrlsComposable.recordUrl(url)
 }
 
-defineExpose({ openFromWebUrl })
+/** Live URL, including address-bar and in-page navigation. Used by the native
+ *  window shell to carry its location when it is docked back into the main
+ *  window. */
+function getCurrentUrl(): string {
+  return currentUrl.value
+}
+
+defineExpose({ openFromWebUrl, getCurrentUrl })
 
 function stripCacheBuster(url: string): string {
   try {

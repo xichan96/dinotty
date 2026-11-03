@@ -979,8 +979,17 @@ onBeforeUnmount(() => {
   fileWatch.disconnectTreeWatchSocket()
 })
 
+/** Absolute path of the current selection, or the browser root when nothing is
+ *  selected. Used by the native window shell to carry its location when it is
+ *  docked back into the main window. Empty before boot. */
+function getCurrentPath(): string {
+  if (!cwdLabel.value) return ''
+  return ops.absolutePath(selectedRel.value ?? '')
+}
+
 defineExpose({
   openFromTerminal,
+  getCurrentPath,
   reloadAll,
   deleteSelected: ops.deleteSelected,
   startNewFile,

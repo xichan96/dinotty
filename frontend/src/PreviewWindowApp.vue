@@ -8,6 +8,7 @@ import {
   PREVIEW_WINDOW_NAVIGATE_EVENT,
   type PreviewWindowPayload,
 } from './composables/previewWindowBridge'
+import { usePreviewWindowDock } from './composables/usePreviewWindowDock'
 import { tauriInvoke } from './composables/useTransport'
 import { t } from './composables/useI18n'
 import FileWorkspacePreview from './components/preview/FileWorkspacePreview.vue'
@@ -21,15 +22,37 @@ import WebPreview from './components/preview/WebPreview.vue'
  * window owns no tab state — it talks to the same server as the main window
  * and keeps its own workspace state, scoped by `window:files:<sourcePaneId>`.
  *
- * Reopening the same kind from the main window focuses this window and emits
- * `preview-window-navigate` with the new target, so one window per kind is
- * enough (mirrors the floats' single-instance-per-kind rule).
+ * Windows are multi-instance: a file browser window is bound to the terminal
+ * session it browses (one window per `sourcePaneId`, so different workspaces
+ * get their own), and every web preview open creates a fresh window. Reopening
+ * the same file-browser session focuses its window and emits
+ * `preview-window-navigate` with the new target.
+ *
+ * Dragging the native title bar over the main window merges this preview into
+ * the current workspace (`usePreviewWindowDock`).
  */
 
 type ShellState = 'loading' | 'ready' | 'error'
 
 const params = new URLSearchParams(window.location.search)
 const kind: 'files' | 'web' = params.get('kind') === 'web' ? 'web' : 'files'
+
+function tauriWindowLabel(): string {
+  try {
+    const tauri = (
+      window as unknown as {
+        __TAURI__?: { window?: { getCurrentWindow?: () => { label?: string } } }
+      }
+    ).__TAURI__
+    return tauri?.window?.getCurrentWindow?.()?.label ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** Identity of this native window; carried in the entry URL so the in-window
+ *  close affordance can target this instance instead of its kind. */
+const windowLabel = params.get('windowLabel')?.trim() || tauriWindowLabel()
 
 const settingsStore = useSettingsStore()
 
@@ -48,6 +71,20 @@ const paneId = computed(() => `window:files:${sourcePaneId.value || 'none'}`)
 let stopThemeWatch: (() => void) | null = null
 let navigateListenerDisposed = false
 let unlistenNavigate: (() => void) | null = null
+let disposeDock: (() => void) | null = null
+
+/** True while this window's title bar is over the main window. */
+const dockHint = ref(false)
+
+/** Live target carried when the window is docked into the main window. */
+function currentLocation(): { path?: string; url?: string } {
+  if (kind === 'files') {
+    const path = filesRef.value?.getCurrentPath?.() || filePath.value
+    return { path }
+  }
+  const url = webRef.value?.getCurrentUrl?.() || webUrl.value
+  return { url }
+}
 
 type NavigateListener = (
   event: string,
@@ -55,8 +92,12 @@ type NavigateListener = (
 ) => Promise<() => void>
 
 async function closeWindow() {
+  if (!windowLabel) {
+    console.warn('[preview-window] close skipped: window label unavailable')
+    return
+  }
   try {
-    await tauriInvoke('close_preview_window', { kind })
+    await tauriInvoke('close_preview_window', { windowLabel })
   } catch (error) {
     console.warn('[preview-window] close failed', error)
   }
@@ -120,6 +161,20 @@ onMounted(async () => {
     state.value = 'ready'
     await nextTick()
     listenNavigate()
+    // Dragging this window's title bar onto the main window merges it into the
+    // current workspace.
+    disposeDock = usePreviewWindowDock({
+      windowLabel,
+      kind,
+      sourcePaneId: () => sourcePaneId.value,
+      getLocation: currentLocation,
+      onHintChange: (active) => {
+        dockHint.value = active
+      },
+      onRejected: () => {
+        dockHint.value = false
+      },
+    })
   } catch (error) {
     console.error('[preview-window] bootstrap failed:', error)
     state.value = 'error'
@@ -130,6 +185,9 @@ onBeforeUnmount(() => {
   navigateListenerDisposed = true
   unlistenNavigate?.()
   unlistenNavigate = null
+  disposeDock?.()
+  disposeDock = null
+  dockHint.value = false
   stopThemeWatch?.()
   stopThemeWatch = null
 })
@@ -170,11 +228,20 @@ onBeforeUnmount(() => {
     <p v-else class="preview-window-shell__status preview-window-shell__status--error" role="alert">
       {{ t('previewWindow.error') }}
     </p>
+
+    <div
+      v-if="state === 'ready' && dockHint"
+      class="preview-window-shell__dock-hint"
+      aria-hidden="true"
+    >
+      {{ t('previewWindow.dockHint') }}
+    </div>
   </div>
 </template>
 
 <style scoped>
 .preview-window-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -204,5 +271,23 @@ onBeforeUnmount(() => {
 .preview-window-shell__status--error {
   color: var(--danger, #e5484d);
   opacity: 1;
+}
+
+/* Absolutely positioned so it does not take a flex slot from the preview. */
+.preview-window-shell__dock-hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 10;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 </style>

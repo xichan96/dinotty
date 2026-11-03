@@ -2,13 +2,15 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
+import type { PreviewWindowDockOptions } from '../composables/usePreviewWindowDock'
 
 /**
- * The native preview window is a second, standalone view of one built-in
- * preview. These tests pin the contract with the main window: the kind comes
- * from the entry URL, and reopening the same kind focuses the window and
- * carries the new target over `preview-window-navigate` instead of creating a
- * duplicate.
+ * The native preview window is a standalone view of one built-in preview.
+ * These tests pin the contract with the main window: the kind and the window
+ * label come from the entry URL, reopening the same file-browser session
+ * focuses the window and carries the new target over
+ * `preview-window-navigate`, and the in-window close targets this instance
+ * rather than its kind.
  */
 
 type NavigateHandler = (event: { payload?: Record<string, unknown> }) => void
@@ -17,9 +19,12 @@ const mocks = vi.hoisted(() => ({
   probe: vi.fn(async () => true),
   tauriInvoke: vi.fn(async () => undefined),
   openFromTerminal: vi.fn(async () => undefined),
+  currentPath: vi.fn(() => '/tmp/current.md'),
+  currentUrl: vi.fn(() => 'https://example.com/current'),
+  usePreviewWindowDock: vi.fn((_options: PreviewWindowDockOptions) => () => {}),
 }))
 
-let navigateHandler: NavigateHandler | null = null
+let handlers: Map<string, NavigateHandler>
 
 vi.mock('../composables/windowSessionProbe', () => ({
   probeWindowSession: mocks.probe,
@@ -28,6 +33,10 @@ vi.mock('../composables/windowSessionProbe', () => ({
 vi.mock('../composables/useTransport', () => ({
   tauriInvoke: mocks.tauriInvoke,
   isTauri: () => true,
+}))
+
+vi.mock('../composables/usePreviewWindowDock', () => ({
+  usePreviewWindowDock: mocks.usePreviewWindowDock,
 }))
 
 vi.mock('../stores/settingsStore', () => ({
@@ -55,7 +64,10 @@ vi.mock('../components/preview/FileWorkspacePreview.vue', async () => {
         isWindow: Boolean,
       },
       setup(_props, { expose }) {
-        expose({ openFromTerminal: mocks.openFromTerminal })
+        expose({
+          openFromTerminal: mocks.openFromTerminal,
+          getCurrentPath: mocks.currentPath,
+        })
         return () => h('div', { class: 'files-stub' })
       },
     }),
@@ -69,7 +81,8 @@ vi.mock('../components/preview/WebPreview.vue', async () => {
       name: 'WebPreview',
       props: { visible: Boolean, url: { type: String, default: '' } },
       emits: ['close'],
-      setup() {
+      setup(_props, { expose }) {
+        expose({ getCurrentUrl: mocks.currentUrl })
         return () => h('div', { class: 'web-stub' })
       },
     }),
@@ -78,30 +91,42 @@ vi.mock('../components/preview/WebPreview.vue', async () => {
 
 import PreviewWindowApp from '../PreviewWindowApp.vue'
 
-function installTauriEventBridge() {
-  navigateHandler = null
+function installTauriEventBridge(label = 'preview-files-test') {
+  handlers = new Map()
   ;(window as unknown as Record<string, unknown>).__TAURI__ = {
+    window: {
+      getCurrentWindow: () => ({ label }),
+      getAllWindows: async () => [],
+    },
     event: {
-      listen: vi.fn(async (_event: string, handler: NavigateHandler) => {
-        navigateHandler = handler
-        return () => {}
+      listen: vi.fn(async (event: string, handler: NavigateHandler) => {
+        handlers.set(event, handler)
+        return () => handlers.delete(event)
       }),
+      emitTo: vi.fn(async () => undefined),
     },
   }
 }
 
-async function mountPreview(query: string) {
+function fireNavigate(payload: Record<string, unknown>) {
+  handlers.get('preview-window-navigate')?.({ payload })
+}
+
+async function mountPreview(query: string, label = 'preview-files-test') {
   window.history.replaceState({}, '', `/preview.html?${query}`)
-  installTauriEventBridge()
+  installTauriEventBridge(label)
   const wrapper = mount(PreviewWindowApp)
   await vi.waitFor(() => expect(wrapper.attributes('data-state')).toBe('ready'))
-  await vi.waitFor(() => expect(navigateHandler).not.toBeNull())
+  await vi.waitFor(() => expect(handlers.has('preview-window-navigate')).toBe(true))
   return wrapper
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.probe.mockResolvedValue(true)
+  mocks.currentPath.mockReturnValue('/tmp/current.md')
+  mocks.currentUrl.mockReturnValue('https://example.com/current')
+  mocks.usePreviewWindowDock.mockImplementation(() => () => {})
   window.history.replaceState({}, '', '/preview.html')
 })
 
@@ -124,7 +149,7 @@ describe('PreviewWindowApp', () => {
   it('navigates the open file browser when the main window reopens the preview', async () => {
     const wrapper = await mountPreview('kind=files&sourcePaneId=pane-1&path=%2Ftmp%2Fa.md')
 
-    navigateHandler?.({ payload: { kind: 'files', sourcePaneId: 'pane-1', path: '/tmp/b.md' } })
+    fireNavigate({ kind: 'files', sourcePaneId: 'pane-1', path: '/tmp/b.md' })
     expect(mocks.openFromTerminal).toHaveBeenCalledWith('/tmp/b.md')
 
     wrapper.unmount()
@@ -133,7 +158,7 @@ describe('PreviewWindowApp', () => {
   it('remounts the file browser when the target terminal changes', async () => {
     const wrapper = await mountPreview('kind=files&sourcePaneId=pane-1&path=%2Ftmp%2Fa.md')
 
-    navigateHandler?.({ payload: { kind: 'files', sourcePaneId: 'pane-2', path: '/tmp/c.md' } })
+    fireNavigate({ kind: 'files', sourcePaneId: 'pane-2', path: '/tmp/c.md' })
     await flushPromises()
     await nextTick()
 
@@ -151,12 +176,51 @@ describe('PreviewWindowApp', () => {
     const web = wrapper.findComponent({ name: 'WebPreview' })
     expect(web.props('url')).toBe('https://example.com')
 
-    navigateHandler?.({ payload: { kind: 'web', url: 'https://example.org/docs' } })
+    fireNavigate({ kind: 'web', url: 'https://example.org/docs' })
     await nextTick()
 
     expect(wrapper.findComponent({ name: 'WebPreview' }).props('url')).toBe(
       'https://example.org/docs'
     )
+
+    wrapper.unmount()
+  })
+
+  it('closes this window instance by label, not by kind', async () => {
+    const wrapper = await mountPreview('kind=web&windowLabel=preview-web-7')
+    wrapper.findComponent({ name: 'WebPreview' }).vm.$emit('close')
+    await flushPromises()
+
+    expect(mocks.tauriInvoke).toHaveBeenCalledWith('close_preview_window', {
+      windowLabel: 'preview-web-7',
+    })
+
+    wrapper.unmount()
+  })
+
+  it('passes the live path, url, label and source to the dock gesture', async () => {
+    const wrapper = await mountPreview(
+      'kind=files&windowLabel=preview-files-pane-1&sourcePaneId=pane-1'
+    )
+
+    const options = mocks.usePreviewWindowDock.mock.calls[0][0]
+    expect(options.windowLabel).toBe('preview-files-pane-1')
+    expect(options.kind).toBe('files')
+    expect(options.sourcePaneId?.()).toBe('pane-1')
+    expect(options.getLocation()).toEqual({ path: '/tmp/current.md' })
+    expect(mocks.currentPath).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('falls back to the entry URL when the web preview has no live URL yet', async () => {
+    mocks.currentUrl.mockReturnValue('')
+    const wrapper = await mountPreview(
+      'kind=web&windowLabel=preview-web-8&url=https%3A%2F%2Fexample.com'
+    )
+
+    const options = mocks.usePreviewWindowDock.mock.calls[0][0]
+    expect(options.getLocation()).toEqual({ url: 'https://example.com' })
 
     wrapper.unmount()
   })

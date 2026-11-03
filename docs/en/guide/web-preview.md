@@ -66,6 +66,24 @@ Split 4 web preview panes pointing at `:3000` / `:3001` / `:8080` / `:8888`, com
 
 Run the dev server on desktop, connect from mobile to the same Dinotty server, open a web preview pane on mobile -- equivalent to mobile real-device testing.
 
+## Native Preview Windows
+
+In **Settings → General → Previews**, the file browser and web preview can open
+in a native desktop window instead of a split pane or in-app float.
+
+- **File browser: one window per terminal session.** Switching to another
+  workspace and opening the file browser creates a second window; reopening the
+  same terminal's file browser focuses the existing window and navigates it.
+- **Web browser: a new window per open.** Each window is an independent browser
+  with its own address bar and history.
+- **Drag to merge.** Drag a preview window by its native title bar over the main
+  window and hold briefly. The preview becomes a split pane in the current
+  workspace's active terminal tab, and the native window closes. A file browser
+  from another workspace rebinds to the current workspace root; a web preview
+  keeps its current URL.
+- If the active tab is not a terminal tab, the merge is refused with a toast and
+  the preview window stays open.
+
 ## Closing the Preview
 
 - Close pane: `Cmd + W` (when focused on the pane) or click X in the pane header

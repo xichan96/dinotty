@@ -520,6 +520,7 @@ const trayVisibilityDialogVisible = ref(false)
 const previewMenuOpen = ref(false)
 const lastTabCloseShortcutAt = ref(0)
 let disposeDetachedListener: (() => void) | undefined
+let disposePreviewDockListener: (() => void) | undefined
 let disposeDockTargetReporter: (() => void) | undefined
 
 // ── Tab bar placement (device-scoped; never written to the server settings) ──
@@ -633,6 +634,7 @@ const {
   requestCloseTab,
   detachTab,
   setupDetachedWindowListener,
+  setupPreviewWindowDockListener,
   refreshDetachedWindows,
   onCloseTabsBulk,
   reorderTab,
@@ -786,6 +788,9 @@ const { pluginNotifyBridge } = bridge
 onMounted(async () => {
   setupTauriWindowClose()
   disposeDetachedListener = setupDetachedWindowListener()
+  // Preview windows merged onto the main window insert into the current
+  // workspace and then close themselves.
+  disposePreviewDockListener = setupPreviewWindowDockListener()
   // Detached windows ask for the tab-bar rectangle while their title bar is
   // being dragged; it is the only valid recall target.
   disposeDockTargetReporter = useDockTargetReporter()
@@ -921,6 +926,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposeDetachedListener?.()
+  disposePreviewDockListener?.()
+  disposePreviewDockListener = undefined
   disposeDockTargetReporter?.()
   disposeDockTargetReporter = undefined
   hostClipboardPaste.dispose()

@@ -43,6 +43,8 @@ import { floatWindowId, resolvePreviewOpenMode } from '../types/floatWindow'
 import { settings } from './useSettings'
 import { useTabLifecycle } from './useTabLifecycle'
 import { useDetachedWindows } from './useDetachedWindows'
+import { usePreviewDockReceiver, type PreviewDockOutcome } from './usePreviewDockReceiver'
+import type { PreviewDockRequest } from './previewWindowBridge'
 import { setMcSender, sendMcOp, useMissionControlState } from './useMissionControlState'
 import { ensureCapabilities } from './serverCapabilities'
 import { useSplitPane } from './useSplitPane'
@@ -924,8 +926,10 @@ export function useAppCore(options: AppCoreOptions) {
   })
 
   // ── Built-in preview floats (files/web) ─────────────────────────────
-  // Open ids are 'float:files' / 'float:web' (single window per kind). The
-  // rendered content lives here so the host layer can resolve — and drop — it.
+  // In-app floats still use one id per kind ('float:files' / 'float:web');
+  // native preview windows are multi-instance (see `openPreviewWindow`). The
+  // rendered float content lives here so the host layer can resolve — and
+  // drop — it.
   const previewFloatContents = shallowReactive<Record<string, FloatWindowContent>>({})
 
   function isLiveTerminalLeaf(paneId: string): boolean {
@@ -959,10 +963,12 @@ export function useAppCore(options: AppCoreOptions) {
   /** Built-in previews only; plugins keep their own launcher/window path. */
   type PreviewWindowContent = Extract<FloatWindowContent, { kind: 'files' | 'web' }>
 
-  /** Open a built-in preview in its own native window. Reopening the same kind
-   *  focuses the existing window and sends it the new path/url (the Rust side
-   *  emits `preview-window-navigate`), matching the one-window-per-kind floats.
-   *  Resolves false when the native window could not be opened. */
+  /** Open a built-in preview in its own native window. File-browser windows are
+   *  keyed by `sourcePaneId`: reopening the same terminal session focuses its
+   *  window and sends the new path (`preview-window-navigate`), while a
+   *  different workspace/session gets its own window. Every web preview open
+   *  creates a fresh window. Resolves false when the native window could not be
+   *  opened. */
   async function openPreviewWindow(content: PreviewWindowContent): Promise<boolean> {
     const args: Record<string, unknown> = {
       kind: content.kind,
@@ -1032,6 +1038,59 @@ export function useAppCore(options: AppCoreOptions) {
       return
     }
     openPreviewFloat(content)
+  }
+
+  /** Merge a preview window into the current workspace: split the active
+   *  terminal tab so the new pane is bound to its live session. Returns a
+   *  failure reason instead of throwing so the preview window can stay open. */
+  async function dockPreviewWindow(request: PreviewDockRequest): Promise<PreviewDockOutcome> {
+    const tab = activeTab.value
+    if (!tab || tab.type !== 'terminal') return 'no-active-terminal'
+    // Never split a files/web/plugin leaf: the backend binds the new pane's
+    // `sourcePaneId` to the split target, which must be a live terminal.
+    const targetPaneId =
+      activeTerminalLeaf.value?.paneId ??
+      getAllLeaves(tab.layout).find((leaf) => paneKind(leaf) === 'terminal')?.paneId
+    if (!targetPaneId) return 'no-active-terminal'
+
+    const url = request.url?.trim()
+    if (request.kind === 'web' && !url) return 'invalid-target'
+    // A file browser bound to another workspace/session cannot reuse its
+    // absolute path: the new pane is scoped to the target session's root and
+    // would reject paths outside it. Only carry the path when the merge stays
+    // on the same session; otherwise boot at the current workspace root.
+    const sameSession = !!request.sourcePaneId && request.sourcePaneId === targetPaneId
+    const payload =
+      request.kind === 'files'
+        ? { path: sameSession ? (request.path ?? '') : '' }
+        : { url: url ?? '' }
+    const inserted = await splitPane.insertNonTerminalPane(
+      request.kind,
+      payload,
+      'horizontal',
+      targetPaneId
+    )
+    return inserted ? 'ok' : 'insert-failed'
+  }
+
+  /** Listen for preview windows dropped onto the main window. The Rust side
+   *  closes the source window only after the pane exists. */
+  function setupPreviewWindowDockListener(): () => void {
+    return usePreviewDockReceiver({
+      dock: dockPreviewWindow,
+      closeWindow: async (windowLabel) => {
+        await tauriInvoke('close_preview_window', { windowLabel })
+      },
+      notify: (outcome) => {
+        if (outcome === 'no-active-terminal') {
+          toast?.warning(t('previewPanel.needActiveTerminal'))
+        } else if (outcome === 'invalid-target') {
+          toast?.warning(t('previewWindow.dockEmptyTarget'))
+        } else {
+          toast?.warning(t('previewWindow.dockFailed'))
+        }
+      },
+    })
   }
 
   // ─── Server switching (Phase B4) ───────────────────────────────────
@@ -1367,6 +1426,7 @@ export function useAppCore(options: AppCoreOptions) {
     detachTab: detachedWindows.detachTab,
     setupDetachedWindowListener: detachedWindows.setupListener,
     refreshDetachedWindows: detachedWindows.refresh,
+    setupPreviewWindowDockListener,
     // overview
     overviewOpen,
     openOverview,

@@ -51,6 +51,10 @@ struct Registry {
     windows: BTreeMap<String, DetachedWindowInfo>,
     /// Reservations for windows whose creation is still in flight.
     creating: BTreeSet<String>,
+    /// Tab ids whose next window close means "return to the main window"
+    /// rather than "close the terminal". Set by `close_tab_window` callers
+    /// (Mission Control's recall action), consumed by the `Destroyed` hook.
+    reattaching: BTreeSet<String>,
 }
 
 /// Tauri-managed registry of detached tab windows.
@@ -149,10 +153,36 @@ impl DetachedTabWindows {
         let removed = {
             let mut registry = self.lock();
             registry.creating.remove(tab_id);
+            registry.reattaching.remove(tab_id);
             registry.windows.remove(tab_id)
         };
         self.settled.notify_all();
         removed
+    }
+
+    /// Remember that closing `tab_id`'s window means "return to the main
+    /// window". Any other close kills the terminal, so the default is false.
+    fn mark_reattach(&self, tab_id: &str) {
+        self.lock().reattaching.insert(tab_id.to_string());
+    }
+
+    fn clear_reattach(&self, tab_id: &str) {
+        self.lock().reattaching.remove(tab_id);
+    }
+
+    /// Drop the window entry and take its reattach intent. Both are reported
+    /// to the main window so a user close and a programmatic recall stay
+    /// distinct.
+    fn take_closed(&self, tab_id: &str) -> Option<(DetachedWindowInfo, bool)> {
+        let taken = {
+            let mut registry = self.lock();
+            registry.creating.remove(tab_id);
+            let info = registry.windows.remove(tab_id);
+            let reattach = registry.reattaching.remove(tab_id);
+            info.map(|info| (info, reattach))
+        };
+        self.settled.notify_all();
+        taken
     }
 
     fn list(&self) -> Vec<DetachedWindowInfo> {
@@ -319,27 +349,45 @@ pub fn list_detached_tab_windows(
     Ok(state.list())
 }
 
-/// Programmatically recall a detached window. Closing is idempotent: when the
+/// Close a detached window. `reattach` selects what the close means: `true`
+/// returns the tab to the main window (Mission Control's recall action);
+/// `false`, the default, closes the terminal. Closing is idempotent: when the
 /// window is already gone the registry entry is dropped and the main window is
-/// notified, matching the normal close path.
+/// notified with the same intent.
 #[tauri::command]
 pub fn close_tab_window(
     app: AppHandle,
     state: State<'_, DetachedTabWindows>,
     tab_id: String,
+    reattach: Option<bool>,
 ) -> Result<(), String> {
+    let reattach = reattach.unwrap_or(false);
     let label = label_for_tab(&tab_id)?;
-    if let Some(window) = app.get_webview_window(&label) {
-        return window.close().map_err(|error| format!("failed to close detached window: {error}"));
+    if reattach {
+        state.mark_reattach(&tab_id);
     }
-    if state.remove(&tab_id).is_some() {
-        notify_main_window_closed(&app, &tab_id);
+    if let Some(window) = app.get_webview_window(&label) {
+        return window.close().map_err(|error| {
+            if reattach {
+                state.clear_reattach(&tab_id);
+            }
+            format!("failed to close detached window: {error}")
+        });
+    }
+    match state.take_closed(&tab_id) {
+        Some((_info, intent)) => notify_main_window_closed(&app, &tab_id, intent),
+        // No registry entry: the intent (if any) has nothing to attach to.
+        None => state.clear_reattach(&tab_id),
     }
     Ok(())
 }
 
-fn notify_main_window_closed(app: &AppHandle, tab_id: &str) {
-    if let Err(error) = app.emit_to("main", CLOSED_EVENT, serde_json::json!({ "tab_id": tab_id })) {
+fn notify_main_window_closed(app: &AppHandle, tab_id: &str, reattach: bool) {
+    if let Err(error) = app.emit_to(
+        "main",
+        CLOSED_EVENT,
+        serde_json::json!({ "tab_id": tab_id, "reattach": reattach }),
+    ) {
         tracing::warn!(%error, tab_id, "failed to notify main window of detached close");
     }
 }
@@ -357,8 +405,8 @@ pub fn handle_detached_window_event(window: &tauri::Window, event: &tauri::Windo
     };
     if matches!(event, tauri::WindowEvent::Destroyed) {
         let app = window.app_handle();
-        if app.state::<DetachedTabWindows>().remove(&tab_id).is_some() {
-            notify_main_window_closed(app, &tab_id);
+        if let Some((_info, reattach)) = app.state::<DetachedTabWindows>().take_closed(&tab_id) {
+            notify_main_window_closed(app, &tab_id, reattach);
         }
     }
     true
@@ -488,6 +536,34 @@ mod tests {
         assert_eq!(registry.remove("a"), Some(info("a", Some("Alpha"))));
         assert_eq!(registry.remove("a"), None, "close cleanup must be idempotent");
         assert_eq!(registry.list(), vec![info("b", None)]);
+    }
+
+    #[test]
+    fn reattach_intent_rides_along_with_the_closed_entry_once() {
+        let registry = DetachedTabWindows::default();
+        registry.finish_create(info("a", None));
+        registry.mark_reattach("a");
+
+        let (_, reattach) = registry.take_closed("a").expect("closed entry");
+        assert!(reattach, "recall intent must be reported");
+        assert!(registry.take_closed("a").is_none(), "close cleanup must be idempotent");
+
+        // A plain close carries no intent.
+        registry.finish_create(info("b", None));
+        let (_, reattach) = registry.take_closed("b").expect("closed entry");
+        assert!(!reattach, "a user close closes the terminal");
+    }
+
+    #[test]
+    fn removing_a_window_drops_any_stale_reattach_intent() {
+        let registry = DetachedTabWindows::default();
+        registry.finish_create(info("a", None));
+        registry.mark_reattach("a");
+        registry.remove("a");
+
+        registry.finish_create(info("a", None));
+        let (_, reattach) = registry.take_closed("a").expect("reopened entry");
+        assert!(!reattach, "a fresh window must not inherit the old intent");
     }
 
     #[test]

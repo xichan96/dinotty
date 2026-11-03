@@ -79,6 +79,14 @@ describe('detachedWindowsStore', () => {
     expect(store.withoutDetached([{ paneId: 'a' }, { paneId: 'c' }])).toEqual([{ paneId: 'a' }])
   })
 
+  it('closes a window with a recall intent so the tab returns to main', async () => {
+    const store = useDetachedWindowsStore()
+    mocks.invoke.mockResolvedValue(undefined)
+
+    expect(await store.closeDetached('a')).toBe(true)
+    expect(mocks.invoke).toHaveBeenCalledWith('close_tab_window', { tabId: 'a', reattach: true })
+  })
+
   it('focuses an already-detached tab instead of opening it twice', async () => {
     const store = useDetachedWindowsStore()
     mocks.invoke.mockResolvedValue(undefined)

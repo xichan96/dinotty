@@ -6,9 +6,10 @@ import Toast from 'vue-toastification'
 
 /**
  * The detached window is a second view of one tab. These tests pin the
- * contract that makes that safe: it renders only its own tab, ignores global
- * activation, closes its native window when the tab disappears, follows
- * renames in the titlebar, and never writes the main window's tab snapshot.
+ * contract that makes that safe: it renders only its own tab without in-page
+ * window chrome, ignores global activation, closes its native window when the
+ * tab disappears, follows renames in the native title, and never writes the
+ * main window's tab snapshot.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     load: vi.fn(async () => {}),
     applyTheme: vi.fn(),
   },
+  loadAllPlugins: vi.fn(async () => {}),
 }))
 
 const splitMocks = vi.hoisted(() => ({
@@ -67,6 +69,10 @@ vi.mock('../composables/useSplitPane', () => ({
 
 vi.mock('../composables/useThemePacks', () => ({
   loadThemePacks: vi.fn(),
+}))
+
+vi.mock('../composables/usePluginLoader', () => ({
+  usePluginLoader: () => ({ loadAll: mocks.loadAllPlugins }),
 }))
 
 vi.mock('../composables/useDeviceThemeSelection', async () => {
@@ -158,7 +164,7 @@ async function mountDetached() {
   const wrapper = mount(DetachedApp, {
     global: {
       plugins: [pinia, Toast],
-      stubs: { SshAuthPromptDialog: true, ConfirmModal: true },
+      stubs: { SshAuthPromptDialog: true },
     },
   })
   await vi.waitFor(() => expect(wrapper.find('.split-stub').exists()).toBe(true))
@@ -199,9 +205,39 @@ describe('DetachedApp', () => {
     expect(split.props('tabId')).toBe(TAB_ID)
     expect(split.props('forceWebSocket')).toBe(true)
 
-    expect(wrapper.find('.detached-shell__title').text()).toBe('Alpha')
+    // No in-page titlebar: the native window title is the only chrome.
+    expect(wrapper.find('.detached-shell__titlebar').exists()).toBe(false)
     expect(document.title).toBe('Alpha')
     expect(wrapper.text()).not.toContain(TAB_ID)
+
+    wrapper.unmount()
+  })
+
+  it('loads plugins so plugin and files leaves can render', async () => {
+    mocks.apiListTabs.mockResolvedValue({
+      tabs: [
+        {
+          tab_id: TAB_ID,
+          pane_id: 'pane-a',
+          layout: {
+            type: 'leaf',
+            kind: 'plugin',
+            pluginId: 'api-tester',
+            paneId: 'pane-a',
+            title: 'API Tester',
+            ratio: 1,
+            zoomed: false,
+          },
+          active_pane_id: 'pane-a',
+        },
+      ],
+      active_pane_id: 'pane-a',
+    })
+
+    const { wrapper } = await mountDetached()
+
+    expect(mocks.loadAllPlugins).toHaveBeenCalled()
+    expect(wrapper.find('.split-stub').exists()).toBe(true)
 
     wrapper.unmount()
   })
@@ -232,16 +268,15 @@ describe('DetachedApp', () => {
     wrapper.unmount()
   })
 
-  it('follows tab_renamed in the titlebar and native window title', async () => {
+  it('follows tab_renamed in the native window title', async () => {
     const { wrapper } = await mountDetached()
     mocks.tauriInvoke.mockClear()
 
     emit({ type: 'tab_renamed', tab_id: TAB_ID, title: 'Renamed' })
 
     await vi.waitFor(() => {
-      expect(wrapper.find('.detached-shell__title').text()).toBe('Renamed')
+      expect(document.title).toBe('Renamed')
     })
-    expect(document.title).toBe('Renamed')
     expect(mocks.tauriInvoke).toHaveBeenCalledWith('set_window_title', { title: 'Renamed' })
 
     wrapper.unmount()
@@ -296,18 +331,16 @@ describe('DetachedApp', () => {
     single.wrapper.unmount()
   })
 
-  it('shows the broadcast indicator and marks the native title', async () => {
+  it('marks broadcast state in the native title only', async () => {
     const { wrapper, session } = await mountDetached()
-    expect(wrapper.find('.detached-shell__broadcast').exists()).toBe(false)
 
     const tab = session.tabs.find((candidate) => candidate.paneId === TAB_ID) as TerminalTab
     tab.broadcastMode = true
     await nextTick()
     await nextTick()
 
-    const badge = wrapper.find('.detached-shell__broadcast')
-    expect(badge.exists()).toBe(true)
-    expect(badge.attributes('aria-label')).toBe(t('split.broadcastActive'))
+    // The in-page header is gone; the native title carries the state.
+    expect(wrapper.find('.detached-shell__broadcast').exists()).toBe(false)
     expect(document.title).toBe(`Alpha · ${t('split.broadcastActive')}`)
 
     wrapper.unmount()

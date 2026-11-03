@@ -118,7 +118,7 @@ describe('TabOverview - detached cards', () => {
 
     const placeholder = wrapper.find('.mc-detached-preview')
     expect(placeholder.exists()).toBe(true)
-    expect(placeholder.text()).toContain(t('detached.previewPlaceholder'))
+    expect(placeholder.text()).toContain(t('detached.openedInNewWindow'))
     expect(wrapper.html()).not.toContain('should-not-render')
   })
 
@@ -151,7 +151,7 @@ describe('TabOverview - detached cards', () => {
     expect(wrapper.emitted('activate')).toEqual([['tab-1']])
   })
 
-  it('reattaches by closing the native window', async () => {
+  it('reattaches by closing the native window with a recall intent', async () => {
     hoisted.invoke.mockResolvedValue(undefined)
     const wrapper = mountOverview({ cards: [makeCard({ detached: true })] })
     const buttons = await openCardMenu(wrapper)
@@ -159,7 +159,10 @@ describe('TabOverview - detached cards', () => {
     buttons[1].click()
     await nextTick()
 
-    expect(hoisted.invoke).toHaveBeenCalledWith('close_tab_window', { tabId: 'tab-1' })
+    expect(hoisted.invoke).toHaveBeenCalledWith('close_tab_window', {
+      tabId: 'tab-1',
+      reattach: true,
+    })
   })
 
   it('confirms before closing the terminal for real', async () => {

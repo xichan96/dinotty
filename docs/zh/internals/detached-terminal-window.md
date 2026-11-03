@@ -19,9 +19,9 @@ Dinotty 的终端 tab 目前只能存在于主窗口中。随着多 tab、分屏
 ### 目标
 
 1. 桌面端可以把任意终端 tab 打开为独立原生窗口。
-2. 独立窗口是**纯终端窗口**：没有顶部 tab 栏、工具栏、状态栏、Mission Control。
+2. 独立窗口是**纯终端窗口**：没有顶部 tab 栏、自绘标题栏/工具栏、状态栏、Mission Control；当前 tab 标题与路径由原生标题栏显示。
 3. 一个窗口同一时间只显示一个 tab；该 tab 的完整 layout（含分屏）可用。
-4. 关闭窗口 = tab 收回主窗口，不杀会话；显式“关闭终端”才结束 PTY。
+4. 关闭窗口 = 直接关闭终端；要保留会话则把窗口标题栏拖到主窗口 tab 栏上，或在 Mission Control 中选择“收回主窗口”。
 5. 主窗口的 Mission Control 能看到游离中的 tab，并能点击聚焦对应窗口。
 6. Web、手机、另一台桌面看到的行为保持一致：仍按普通 tab 显示。
 
@@ -31,7 +31,6 @@ Dinotty 的终端 tab 目前只能存在于主窗口中。随着多 tab、分屏
 - 跨原生窗口拖拽（Tauri 自定义 payload DnD 成本高，暂缓）。
 - 窗口布局在多端之间同步。
 - 游离开启状态跨应用重启恢复。
-- files / web / plugin pane 的游离。
 - 同一 tab 同时镜像到多个窗口。
 - per-client active tab / active workspace 的完整重构。
 
@@ -43,7 +42,7 @@ Dinotty 的终端 tab 目前只能存在于主窗口中。随着多 tab、分屏
 | --- | --- |
 | 中文产品名 | 游离终端窗口 |
 | 英文名 | Detached Terminal Window |
-| 动作 | 游离到新窗口 |
+| 动作 | 在新窗口打开 |
 | 反向动作 | 收回主窗口 |
 | 结束会话 | 关闭终端 |
 | 代码标识 | `detached`，带 `Window` 限定 |
@@ -82,7 +81,7 @@ Dinotty 的数据必须分成两层理解：
 
 - Web / 手机没有“游离窗口”概念，只看到普通 tab；
 - 另一台桌面照常在自己的主窗口显示该 tab；
-- 只有发起游离的那台桌面，主窗口 tab 栏会隐藏它、Mission Control 会显示“游离中”标识。
+- 只有发起游离的那台桌面，主窗口 tab 栏会隐藏它、Mission Control 会显示“已在新窗口打开”标识。
 
 ---
 
@@ -113,13 +112,13 @@ Dinotty 没有真正的“无工作区”UI 状态，只有默认工作区 `__de
 
 “移动到工作区”是**全局变更**，不是窗口本机状态。
 
-当前本地 tab 的工作区归属主要靠 cwd 前缀匹配；服务端 `TabInfo.workspace_id` 基本只在 SSH tab 上有值（`src/session/manager.rs:749-761`）。因此这个能力有一个前置条件：
+服务端已提供显式归属端点 `PUT /api/tabs/:id/workspace`（`src/tabs/handlers/tabs.rs`），并把结果通过 `tab_workspace_updated` 广播给所有 sync 客户端：
 
-- 为 tab 增加显式 workspace 归属（tab layout 字段或独立端点，例如 `PUT /api/tabs/:id/workspace`）；
 - 前端优先使用显式归属，其次才是 connection/cwd 匹配；
+- 显式写入 `__default__` 表示**固定到默认工作区**；传 `null` 才是清除归属、回退派生匹配；
 - 所有端都能一致看到移动结果，刷新/重启后不丢。
 
-在补上显式归属之前，“移动到其他工作区”只能是前端本地覆盖，跨端和刷新后不一致，不建议发布。
+收回游离窗口时自动走这条路径，把 tab 归到主窗口当前工作区（见 7.3）。
 
 ---
 
@@ -148,7 +147,7 @@ struct DetachedTabWindows {
 | `open_tab_window(tab_id, title)` | 创建或聚焦该 tab 的游离窗口 |
 | `focus_tab_window(tab_id)` | show / unminimize / set_focus |
 | `list_detached_tab_windows()` | 主窗口重载后恢复“哪些 tab 已游离” |
-| `close_tab_window(tab_id)` | 可选：程序化收回 |
+| `close_tab_window(tab_id, reattach)` | `reattach: true` 表示收回主窗口；默认关闭终端 |
 
 创建时：
 
@@ -190,10 +189,10 @@ struct DetachedTabWindows {
 - **主窗口**保持现有“隐藏到托盘 / 退出 / 取消”流程；
 - **游离窗口**的 `CloseRequested` 不再走主窗口退出对话框，而是：
   1. 从 registry 移除；
-  2. 向 `main` 发 `tab-window-closed { tab_id }`；
+  2. 向 `main` 发 `tab-window-closed { tab_id, reattach }`；
   3. 允许窗口关闭；
-- 关闭窗口 = tab 收回主窗口，**不杀 PTY**；
-- 显式“关闭终端”才调用关闭 tab 的 API，结束会话；
+- 关闭窗口默认 = **关闭终端**（`reattach: false`），主窗口调用自己的 tab 关闭流程结束会话；
+- 收回主窗口（`reattach: true`）只来自 Mission Control 的“收回主窗口”或把窗口标题栏拖到主窗口 tab 栏上，不杀 PTY；
 - `focus_tab_window` 要处理最小化、隐藏、另一个 Space、macOS app 未激活等情况；
 - 如果 registry 里没有该窗口（崩溃/已关闭），返回明确错误，让前端做兜底。
 
@@ -280,27 +279,16 @@ WebSocket 路径本来就是多客户端设计：
 - 不渲染对应 `TerminalPane`，避免双 attach；
 - 主窗口重载后调用 `list_detached_tab_windows()` 恢复状态。
 
-### 6.5 快捷键与右键菜单
+### 6.5 快捷键与菜单
 
-游离窗口只加载终端需要的子集：
+游离窗口不绘制自己的标题栏或工具栏：tab 标题/路径和广播状态写在原生窗口标题里，没有右侧操作按钮。窗口内只保留终端需要的子集：
 
 - 复制 / 粘贴；
 - 终端内搜索；
 - 字号；
-- 分屏；
-- 关闭窗口（收回主窗口）；
-- 关闭终端（kill PTY，二次确认）。
+- 分屏。
 
-不要复用主窗口整套 keymap（命令面板、workspace 切换、Mission Control、新建 tab 等）。
-
-右键菜单建议：
-
-- 收回主窗口；
-- 重命名；
-- 搜索；
-- 新建终端窗口；
-- 关闭终端；
-- 复制 / 粘贴（终端自身菜单）。
+不要复用主窗口整套 keymap（命令面板、workspace 切换、Mission Control、新建 tab 等）。收回主窗口只通过把窗口标题栏拖到主窗口 tab 栏上，或 Mission Control 的“收回主窗口”完成；关闭原生窗口等于关闭终端。
 
 ---
 
@@ -308,7 +296,7 @@ WebSocket 路径本来就是多客户端设计：
 
 ### 7.1 游离
 
-1. 用户在 tab 右键菜单或 MC 中选择“游离到新窗口”。
+1. 用户在 tab 右键菜单或 MC 中选择“在新窗口打开”，或把 tab 拖出主窗口后松开。
 2. 主窗口调用 `open_tab_window(tab_id, title)`。
 3. Rust 创建或聚焦 `tab-<id>` 窗口。
 4. 主窗口把 tab 加入 `detachedTabIds`，并从渲染树卸载对应 `TerminalPane`。
@@ -321,18 +309,39 @@ WebSocket 路径本来就是多客户端设计：
 
 ### 7.2 收回
 
-1. 用户关闭游离窗口，或右键选择“收回主窗口”。
-2. 游离窗口卸载终端，WebSocket 断开。
-3. Rust 从 registry 移除，向主窗口发 `tab-window-closed`。
+1. 用户把游离窗口的标题栏拖到主窗口 tab 栏上，或在 Mission Control 选择“收回主窗口”。
+2. Rust 以 `reattach: true` 关闭窗口；游离窗口卸载终端，WebSocket 断开。
+3. Rust 从 registry 移除，向主窗口发 `tab-window-closed { tab_id, reattach: true }`。
 4. 主窗口从 `detachedTabIds` 移除，重新挂载该 tab。
-5. 主窗口本地激活或聚焦该 tab；是否切换 workspace 按下面规则处理。
+5. 如果 tab 的工作区与主窗口当前工作区不一致，把 tab 改归到主窗口当前工作区，再激活/聚焦（见 7.3）。
+
+> 直接点原生关闭按钮不走进这里：那是 `reattach: false`，主窗口会调用 tab 关闭流程结束会话。
 
 ### 7.3 收回后的工作区
 
-- tab 仍属于它自己的有效工作区；
-- 没有工作区归属的 tab 回到默认工作区；
-- 如果主窗口当前停在别的具体工作区，建议给出“已收回默认/工作区 X”的提示，允许一键切换，不要静默消失；
+收回以“用户正看着的主窗口”为准：
+
+- 主窗口停在具体工作区 X → 收回的 tab 改归 X（`PUT /api/tabs/:id/workspace`，服务端广播 `tab_workspace_updated`）；
+- 主窗口在默认工作区 → 显式写入 `__default__`。不能只清空归属，否则 cwd / SSH 派生匹配会把 tab 拉回原工作区；
+- 本地先乐观更新归属再发请求，使 tab 在下一帧就能渲染；请求失败则回滚并提示 `tab.recallWorkspaceFailed`；
 - 收回不重启 PTY，内容通过 snapshot 恢复。
+
+### 7.4 拖拽反馈
+
+两类跨窗口手势都要有和 pane/tab 拖放一致的“落点提示”：
+
+| 手势 | 主窗口 | 游离窗口 |
+| --- | --- | --- |
+| tab 拖出主窗口 | 指针离开窗口后显示整窗虚线框 + “松开即在新窗口打开” | — |
+| 游离窗口标题栏拖到主窗口 tab 栏 | tab 栏本身高亮 + “松开即在此收回标签页” | 顶部标题栏区高亮 + “松开即收回主窗口” |
+| 收回完成 | tab 回到 tab 栏时高亮闪烁一次 | 窗口关闭 |
+
+- 收回的落点是主窗口的 **tab 栏**，不是整个主窗口：只有拖动游离窗口的**原生标题栏**、并让标题栏覆盖 tab 栏（按标题栏面积 ≥50%）才算命中；把窗口主体压在主窗口任意位置不会触发，避免目标过大、过于敏感；
+- tab 栏矩形由主窗口按需测量：游离窗口发 `detached-dock-target-request { tab_id, request_id }`，主窗口回 `detached-dock-target { tab_id, request_id, rect }`；矩形用物理屏幕像素返回，兼容 tab 栏在上/下/左/右以及移动端布局；
+- 命中后停稳 400ms 才执行收回，避免拖拽路径经过 tab 栏时误触；
+- 游离窗口通过 Tauri 事件 `detached-dock-hint { tab_id, active }` 把命中状态告诉主窗口（`core:event:default` 已包含 `emit-to`）；
+- 手势只在桌面壳启用：拖出要求 `isTauri() && !isMobile` 且为 terminal tab（`useTabDrag.canDetachTab`），收回只存在于原生游离窗口；移动端浏览器 / Web 不会显示提示，也不会误开窗口；
+- 尊重 `prefers-reduced-motion`，关闭脉冲/弹出动画。
 
 ---
 
@@ -355,18 +364,18 @@ WebSocket 路径本来就是多客户端设计：
 | 关闭 pane | 支持 |
 | 在游离窗口里继续分屏 | 支持（复用 `useSplitPane`） |
 | pane 拖到 tab 栏 / extract 成新 tab / merge 到其他 tab | 不支持（主窗口手势） |
-| files / web / plugin pane | 不支持（v1 只支持 terminal / SSH leaf） |
+| files / web / plugin pane | 支持（渲染同一 layout；plugin 由游离窗口加载插件运行时） |
 
-单 pane 的 tab 仍然完全没有任何 header，是纯终端；只有分屏时才出现 per-pane header。`PaneHeader` 是 pane 的一部分，不是全局工具栏。
+单 pane 的 tab 仍然不显示任何 header；terminal leaf 就是纯终端，只有分屏时才出现 per-pane header。`PaneHeader` 是 pane 的一部分，不是全局工具栏。
 
 ### 8.3 边界
 
-- **broadcast 必须可见**：tab 开启输入广播时，游离窗口要在标题或右键菜单里显示“广播中”，否则用户会在不知情的情况下向多个 pane 发送输入。
+- **broadcast 必须可见**：tab 开启输入广播时，原生窗口标题会追加“广播中”，否则用户会在不知情的情况下向多个 pane 发送输入。
 - 关闭最后一个 pane → tab 被关闭 → 游离窗口同步关闭。
 - 在游离窗口里新建 tab → 开一个新的游离窗口，不回到主窗口。
 - pane 聚焦只更新该 tab 的 layout / active pane，不调用 `apiActivatePane`。
 - `syncTabLayout` 继续走全局同步，Web/其他端能看到分屏和 layout 变化。
-- 含 files / web / plugin leaf 的混合 tab v1 不允许游离；需要先 extract 出终端 pane。
+- 含 files / web / plugin leaf 的 tab 可以直接在新窗口打开；没有 terminal leaf 时不建立终端 WebSocket。
 
 ---
 
@@ -496,7 +505,7 @@ v1 约定：
 - 现有 tab/pane 拖拽是 DOM pointer 逻辑，无法跨原生窗口；
 - 原生拖拽需要 macOS NSPasteboard / Windows OLE / Linux XDND，每平台单独实现；
 - 开关 `dragDropEnabled` 会影响现有 HTML5 拖拽（当前保持 false）；
-- v1 用“收回主窗口 / 移动到工作区”菜单 + MC 完成，拖拽作为后续 macOS-only 实验。
+- v1 已支持**窗口级**命中：把游离窗口的标题栏拖到主窗口 tab 栏上停住即收回（比较标题栏矩形与按需测量的 tab 栏矩形，不传输内容）；反向的“把 tab 拖出主窗口即开新窗口”也已支持（鼠标离开窗口/在窗口外松开判定）。内容级跨 webview payload DnD 仍暂缓。
 
 ### 13.2 桌面宠物
 
@@ -511,7 +520,6 @@ v1 约定：
 - 同一 tab 镜像到多个窗口；
 - 窗口布局跨端同步；
 - 游离开启状态跨重启恢复；
-- 在游离窗口里渲染 files / web / plugin；
 - per-client active tab / active workspace；
 - 让 Web 远程控制桌面聚焦某个游离窗口。
 
@@ -536,8 +544,8 @@ v1 约定：
 
 ### Phase 2：收回与 MC
 
-- 关闭窗口收回、右键/快捷键收回；
-- MC 卡片“游离中”标识、点击聚焦、上下文菜单；
+- 把窗口标题栏拖到 tab 栏收回、MC 收回；
+- MC 卡片“已在新窗口打开”标识、点击聚焦、上下文菜单；
 - 默认工作区兜底与收回提示；
 - 显式 workspace 归属（移动到其他工作区的前置）。
 
@@ -578,10 +586,10 @@ v1 约定：
 
 ### 手工端到端
 
-1. 游离一个终端 tab，输入/resize/搜索正常。
-2. 关闭游离窗口 → tab 回主窗口，PTY 未中断。
-3. 显式“关闭终端” → 会话结束。
-4. MC 显示“游离中”，点击聚焦窗口，不重复激活。
+1. 游离一个终端 tab（右键或拖出主窗口），输入/resize/搜索正常；窗口内没有自绘标题栏/工具栏。
+2. 关闭原生窗口 → 会话结束，主窗口对应 tab 消失。
+3. 把游离窗口的标题栏拖到主窗口 tab 栏上 → tab 收回主窗口，PTY 未中断。
+4. MC 显示“已在新窗口打开”，点击聚焦窗口，不重复激活；选择“收回主窗口”同样收回。
 5. Web/手机看到普通 tab，可输入、可关闭。
 6. 任意端关闭 tab → 游离窗口关闭。
 7. 分屏 tab 游离后，分屏、resize、关闭 pane 正常；广播提示可见。
@@ -598,7 +606,7 @@ v1 约定：
 | 问题 | 建议 |
 | --- | --- |
 | detach 当前 active tab 时是否全局激活邻居 | v1 不建议，只做本地选择 |
-| 关闭游离窗口是收回还是杀会话 | 收回；kill 走显式“关闭终端” |
+| 关闭游离窗口是收回还是杀会话 | 杀会话；收回走把标题栏拖到 tab 栏或 MC |
 | 显式 workspace 归属的 API 形态 | tab layout 字段或 `PUT /api/tabs/:id/workspace` |
 | SSH 认证提示在游离窗口还是主窗口 | 实现前定；建议游离窗口内复用认证对话框 |
 | 通知/铃铛在哪个窗口展示 | 游离窗口标题/badge，避免与主窗口重复 |
@@ -644,14 +652,18 @@ v1 约定：
 ### 已实现（Waves 1–3）
 
 - **多窗口底座**：`tab-<tab_id>` 窗口 registry、去重/聚焦/关闭、`detached.html` 独立入口、`detached-window` capability。
-- **游离/收回**：主窗口游离入口与过滤、关闭窗口收回、Mission Control 聚焦游离窗口（Waves 1–2）。
-- **纯终端视图**：单 tab、强制 WebSocket、忽略 `tab_activated` / `workspace_activated`、不写 `dinotty_tabs`。
+- **游离/收回**：主窗口游离入口（右键菜单、把 tab 拖出主窗口）与过滤、Mission Control 聚焦游离窗口（Waves 1–2）；收回走 MC 或把窗口标题栏拖到主窗口 tab 栏上。
+- **单 tab 视图**：单 tab、终端强制 WebSocket、忽略 `tab_activated` / `workspace_activated`、不写 `dinotty_tabs`。
+- **非终端 tab**：插件 / 文件浏览 / 网页 leaf 也能在新窗口打开；游离窗口会加载插件运行时与宿主 bridge，纯非终端 tab 不建立终端 WebSocket。
 - **分屏**：新建水平/垂直终端分屏、点击聚焦、分隔条 resize、关闭 pane；单 pane 不显示 `PaneHeader`；跨 tab 拖拽/extract/merge 不提供（游离窗口没有 TabBar 落点，相关事件有意不绑定），同 tab 内 pane reorder 保留。
-- **广播指示**：`broadcastMode` 且存在多个 pane 时，标题栏显示“广播中”（`split.broadcastActive`），原生窗口标题追加同一状态。
+- **广播指示**：`broadcastMode` 且存在多个 pane 时，原生窗口标题追加“广播中”（`split.broadcastActive`）；窗口内不再绘制自绘标题栏。
+- **窗口 chrome**：不显示自绘 header/工具栏/右侧按钮；tab 标题与路径由原生标题栏显示；`document.title` 与原生标题同步。
 - **链接**：外部 http(s) 链接（含 localhost 预览链接）经 shell 插件用系统浏览器打开；文件链接不加载主窗口的 files pane，仅提示（v1 缺口）。
 - **SSH 认证**：复用 sync WS 的 `ssh_auth_prompt` / `ssh_auth_response`，`SshAuthPromptDialog` 在游离窗口内提交/取消。
 - **同步与重连**：任意端 `tab_closed` 关闭游离窗口；`tab_renamed`、`layout_updated`、`tab_workspace_updated` 生效；重连时 `tab_list` 会恢复 pane 集合变化，终端内容由终端 WS snapshot 回放。
-- **关闭语义**：关闭窗口 = 收回主窗口，不杀 PTY；显式“关闭终端”二次确认后结束会话；PTY 退出只影响该终端，不销毁窗口。
+- **关闭语义**：关闭原生窗口 = 直接关闭终端，不弹确认；收回主窗口走拖拽到主窗口或 MC（`reattach: true`），不杀 PTY；PTY 退出只影响该终端，不销毁窗口。
+- **拖拽反馈**：tab 拖出主窗口时整窗虚线框 + “松开即在新窗口打开”；游离窗口的标题栏覆盖主窗口 tab 栏时，主窗口高亮 tab 栏、游离窗口高亮标题栏，停稳 400ms 收回；收回后 tab 回到 tab 栏时高亮闪烁一次（见 7.4）。
+- **收回工作区**：收回的 tab 改归主窗口当前工作区；主窗口在默认工作区时显式写入 `__default__`，避免派生匹配把 tab 拉回原工作区（见 7.3）。
 
 ### 已知缺口（v1）
 
@@ -661,15 +673,16 @@ v1 约定：
 
 ### 手工 E2E 清单（桌面端）
 
-1. **游离**：从主窗口把终端 tab 游离到新窗口，新窗口打开且主窗口 tab 栏隐藏该项。
+1. **游离**：右键“在新窗口打开”，或把 tab 拖出主窗口后松开；新窗口打开且主窗口 tab 栏隐藏该项。
 2. **输入/resize/搜索**：游离窗口输入正常、拖动边框改变尺寸后终端重新 fit、Ctrl/Cmd+F 搜索可用，内容通过 snapshot 恢复。
-3. **关闭窗口 = 收回**：关闭原生窗口后 tab 回主窗口，PTY 未中断。
-4. **显式关闭终端**：标题栏菜单“关闭终端”→二次确认→会话结束，主窗口对应 tab 消失。
-5. **MC 聚焦**：Mission Control 点击“游离中”卡片聚焦已有窗口，不重复激活/创建。
-6. **Web/手机不受影响**：Web 与手机仍按普通 tab 显示，可输入、可关闭；任意端关闭 tab 后游离窗口关闭。
-7. **分屏**：在游离窗口新建水平/垂直分屏、点击聚焦、拖分隔条 resize、关闭其中一个 pane；单 pane 时无 pane header；跨 tab 拖拽无落点。
-8. **广播指示**：开启广播后标题栏显示“广播中”，原生窗口标题含同状态。
-9. **server 切换**：主窗口切换服务器后，游离窗口仍固定原 `(server_id, tab_id)`。
-10. **托盘**：主窗口隐藏到托盘后，游离窗口继续工作。
-11. **SSH 认证**：SSH tab 游离后触发键盘交互认证，对话框在游离窗口弹出，可提交与取消。
-12. **重复游离**：再次点击“游离到新窗口”只聚焦已有窗口，不创建第二个。
+3. **关闭窗口 = 关闭终端**：点击原生关闭按钮后会话结束，主窗口对应 tab 消失，无确认弹窗。
+4. **拖到 tab 栏收回**：把游离窗口的标题栏拖到主窗口 tab 栏上，主窗口 tab 栏与游离窗口标题栏出现落点提示；停住后窗口关闭、tab 回主窗口并高亮一次，PTY 未中断。只把窗口主体压在主窗口上不应触发收回。
+5. **MC 聚焦/收回**：Mission Control 点击“已在新窗口打开”卡片聚焦已有窗口，不重复激活/创建；“收回主窗口”把 tab 放回主窗口。
+7. **Web/手机不受影响**：Web 与手机仍按普通 tab 显示，可输入、可关闭；拖 tab 出窗口不会出现“新窗口打开”提示或开窗；任意端关闭 tab 后游离窗口关闭。
+8. **分屏**：在游离窗口新建水平/垂直分屏、点击聚焦、拖分隔条 resize、关闭其中一个 pane；单 pane 时无 pane header；跨 tab 拖拽无落点。
+9. **广播指示**：开启广播后原生窗口标题含“广播中”；窗口内无自绘标题栏。
+10. **server 切换**：主窗口切换服务器后，游离窗口仍固定原 `(server_id, tab_id)`。
+11. **托盘**：主窗口隐藏到托盘后，游离窗口继续工作。
+12. **SSH 认证**：SSH tab 游离后触发键盘交互认证，对话框在游离窗口弹出，可提交与取消。
+13. **重复打开**：再次点击“在新窗口打开”只聚焦已有窗口，不创建第二个。
+14. **非终端 tab**：设备插件 tab、文件浏览器 tab 在新窗口打开后正常渲染与操作。

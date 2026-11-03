@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePaneDrag } from '../paneDragContext'
 import { useTabDrag } from '../useTabDrag'
 
@@ -85,5 +85,143 @@ describe('useTabDrag click fallback', () => {
     window.dispatchEvent(mouse('mouseup', close, { button: 0 }))
 
     expect(activate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useTabDrag detach outside the window', () => {
+  const disposers: Array<() => void> = []
+
+  beforeEach(() => {
+    // jsdom has no hit-testing; the drag only needs an empty element list.
+    Object.defineProperty(document, 'elementsFromPoint', {
+      value: () => [],
+      configurable: true,
+    })
+  })
+
+  afterEach(() => {
+    // A test that stops mid-gesture leaves global listeners behind; tear them
+    // down so they cannot mutate the shared drag state in the next test.
+    for (const dispose of disposers.splice(0)) dispose()
+    document.body.replaceChildren()
+    vi.useRealTimers()
+  })
+
+  function setup(overrides: { canDetachTab?: (tabId: string) => boolean } = {}) {
+    const onDetach = vi.fn()
+    const onReorder = vi.fn()
+    const onMergeTabIntoPane = vi.fn()
+    const state = useTabDrag({
+      drag: usePaneDrag(),
+      activePaneId: ref('pane-2'),
+      findTabElement: () => undefined,
+      onActivate: vi.fn(),
+      onReorder,
+      onMergeTabIntoPane,
+      onDetach,
+      ...overrides,
+    })
+    disposers.push(state.cleanup)
+    return { state, onDetach, onReorder, onMergeTabIntoPane }
+  }
+
+  function startDrag(state: ReturnType<typeof useTabDrag>, tab: HTMLElement): void {
+    state.onTabMouseDown(mouse('mousedown', tab, { button: 0 }), 'pane-1')
+    window.dispatchEvent(
+      mouse('mousemove', document, { clientX: 50, clientY: 50, buttons: 1 })
+    )
+  }
+
+  it('opens the tab in a new window when released outside the viewport', () => {
+    const tab = createTab('pane-1')
+    const { state, onDetach, onReorder, onMergeTabIntoPane } = setup()
+    startDrag(state, tab)
+
+    window.dispatchEvent(mouse('mouseup', document, { clientX: 5000, clientY: 50 }))
+
+    expect(onDetach).toHaveBeenCalledWith('pane-1')
+    expect(onReorder).not.toHaveBeenCalled()
+    expect(onMergeTabIntoPane).not.toHaveBeenCalled()
+  })
+
+  it('does not detach when released inside the window', () => {
+    const tab = createTab('pane-1')
+    const { state, onDetach } = setup()
+    startDrag(state, tab)
+
+    window.dispatchEvent(mouse('mouseup', document, { clientX: 500, clientY: 300 }))
+
+    expect(onDetach).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a timer when the webview drops the outside mouseup', () => {
+    vi.useFakeTimers()
+    const tab = createTab('pane-1')
+    const { state, onDetach } = setup()
+    startDrag(state, tab)
+
+    document.dispatchEvent(mouse('mouseleave', document))
+    vi.advanceTimersByTime(600)
+
+    expect(onDetach).toHaveBeenCalledWith('pane-1')
+  })
+
+  it('exposes the outside-window state for the detach hint', () => {
+    vi.useFakeTimers()
+    const tab = createTab('pane-1')
+    const { state, onDetach } = setup()
+    const drag = usePaneDrag()
+    startDrag(state, tab)
+
+    document.dispatchEvent(mouse('mouseleave', document))
+    expect(drag.state.outsideWindow).toBe(true)
+
+    window.dispatchEvent(
+      mouse('mousemove', document, { clientX: 100, clientY: 100, buttons: 1 })
+    )
+    expect(drag.state.outsideWindow).toBe(false)
+    expect(onDetach).not.toHaveBeenCalled()
+
+    state.cleanup()
+    expect(drag.state.outsideWindow).toBe(false)
+  })
+
+  it('cancels the outside timer when the pointer comes back', () => {
+    vi.useFakeTimers()
+    const tab = createTab('pane-1')
+    const { state, onDetach } = setup()
+    startDrag(state, tab)
+
+    document.dispatchEvent(mouse('mouseleave', document))
+    window.dispatchEvent(
+      mouse('mousemove', document, { clientX: 100, clientY: 100, buttons: 1 })
+    )
+    vi.advanceTimersByTime(600)
+
+    expect(onDetach).not.toHaveBeenCalled()
+  })
+
+  it('never arms the detach gesture when the tab cannot be detached', () => {
+    // Mobile layouts and non-terminal tabs must not show the detach hint or
+    // fire a window-open on release: they have no native window to open.
+    vi.useFakeTimers()
+    const tab = createTab('pane-1')
+    const { state, onDetach } = setup({ canDetachTab: () => false })
+    const drag = usePaneDrag()
+    startDrag(state, tab)
+
+    document.dispatchEvent(mouse('mouseleave', document))
+    expect(drag.state.outsideWindow).toBe(false)
+
+    window.dispatchEvent(
+      mouse('mousemove', document, { clientX: 5000, clientY: 50, buttons: 1 })
+    )
+    expect(drag.state.outsideWindow).toBe(false)
+
+    vi.advanceTimersByTime(600)
+    expect(onDetach).not.toHaveBeenCalled()
+
+    window.dispatchEvent(mouse('mouseup', document, { clientX: 5000, clientY: 50 }))
+    expect(onDetach).not.toHaveBeenCalled()
   })
 })

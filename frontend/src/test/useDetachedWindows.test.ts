@@ -6,10 +6,14 @@ import type { Tab, TerminalTab } from '../types/pane'
 const mocks = vi.hoisted(() => ({
   tauri: true,
   invoke: vi.fn(),
+  setWorkspace: vi.fn(async (_tabId: string, _workspaceId: string | null) => {}),
 }))
 vi.mock('../composables/useTransport', () => ({
   isTauri: () => mocks.tauri,
   tauriInvoke: mocks.invoke,
+}))
+vi.mock('../composables/useTabApi', () => ({
+  apiSetTabWorkspace: mocks.setWorkspace,
 }))
 
 import { useDetachedWindows } from '../composables/useDetachedWindows'
@@ -33,27 +37,47 @@ function terminalTab(paneId: string): TerminalTab {
   }
 }
 
-function setup(initial: string[] = ['a', 'b'], visibleIds?: string[]) {
+function setup(
+  initial: string[] = ['a', 'b'],
+  options: { activeWorkspaceId?: string | null } = {}
+) {
   const store = useDetachedWindowsStore()
   const tabs = ref<Tab[]>(initial.map(terminalTab))
   const activePaneId = ref<string | null>(initial[0] ?? null)
-  // Mirrors useAppCore's visibleTabList: workspace filter + detached filter.
+  const activeWorkspaceId = ref<string | null>(options.activeWorkspaceId ?? null)
+  const workspaceIdOfTab = (tab: Tab): string | null =>
+    tab.workspaceId === '__default__' ? null : (tab.workspaceId ?? null)
+  // Mirrors useAppCore's visibleTabList: workspace filter + detached filter,
+  // both derived from the live tab list.
   const visibleTabList = computed(() =>
-    (visibleIds ?? initial).filter((id) => !store.isDetached(id)).map((id) => ({ paneId: id }))
+    tabs.value
+      .filter(
+        (tab) =>
+          !store.isDetached(tab.paneId) &&
+          workspaceIdOfTab(tab) === activeWorkspaceId.value
+      )
+      .map((tab) => ({ paneId: tab.paneId }))
   )
   const commitLocalActivePane = vi.fn((id: string) => {
     activePaneId.value = id
   })
   const focusActive = vi.fn()
+  const closeTab = vi.fn(async (id: string) => {
+    const idx = tabs.value.findIndex((tab) => tab.paneId === id)
+    if (idx !== -1) tabs.value.splice(idx, 1)
+  })
   const toast = { error: vi.fn() }
   const t = (key: string) => key
 
   const dw = useDetachedWindows({
     tabs,
     activePaneId,
+    activeWorkspaceId,
+    workspaceIdOfTab,
     visibleTabList,
     commitLocalActivePane,
     focusActive,
+    closeTab,
     toast,
     t,
   })
@@ -62,9 +86,11 @@ function setup(initial: string[] = ['a', 'b'], visibleIds?: string[]) {
     store,
     tabs,
     activePaneId,
+    activeWorkspaceId,
     visibleTabList,
     commitLocalActivePane,
     focusActive,
+    closeTab,
     toast,
     dw,
   }
@@ -75,6 +101,7 @@ describe('useDetachedWindows', () => {
     setActivePinia(createPinia())
     mocks.tauri = true
     mocks.invoke.mockReset()
+    mocks.setWorkspace.mockClear()
   })
 
   afterEach(() => {
@@ -127,8 +154,22 @@ describe('useDetachedWindows', () => {
     expect(toast.error).toHaveBeenCalledWith('tab.detachFailed')
   })
 
-  it('remounts and activates the tab locally when its window closes', async () => {
-    const { store, activePaneId, commitLocalActivePane, focusActive, visibleTabList, dw } = setup()
+  it('closes the terminal when its window closes without a reattach intent', async () => {
+    const { store, tabs, visibleTabList, closeTab, dw } = setup()
+    mocks.invoke.mockResolvedValue(undefined)
+    await dw.detachTab('a')
+
+    await dw.onTabWindowClosed('a')
+
+    expect(closeTab).toHaveBeenCalledWith('a')
+    expect(store.isDetached('a')).toBe(false)
+    expect(tabs.value.some((tab) => tab.paneId === 'a')).toBe(false)
+    expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(false)
+  })
+
+  it('remounts and activates the tab locally on a recall', async () => {
+    const { store, activePaneId, commitLocalActivePane, focusActive, visibleTabList, closeTab, dw } =
+      setup()
     mocks.invoke.mockResolvedValue(undefined)
     await dw.detachTab('a')
     expect(activePaneId.value).toBe('b')
@@ -136,38 +177,88 @@ describe('useDetachedWindows', () => {
 
     commitLocalActivePane.mockClear()
     mocks.invoke.mockClear()
-    await dw.onTabWindowClosed('a')
+    await dw.onTabWindowClosed('a', true)
 
+    expect(closeTab).not.toHaveBeenCalled()
     expect(store.isDetached('a')).toBe(false)
     expect(commitLocalActivePane).toHaveBeenCalledWith('a')
     expect(activePaneId.value).toBe('a')
     expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(true)
     expect(focusActive).toHaveBeenCalled()
-    // Undetaching is purely local: the server's active pane is not touched.
+    // Recalling is purely local: the server's active pane is not touched.
     expect(mocks.invoke).not.toHaveBeenCalled()
   })
 
-  it('does not steal focus when the returned tab is outside the current workspace', async () => {
-    const { store, activePaneId, commitLocalActivePane, dw } = setup(['a', 'b'], ['b'])
+  it('rehomes a recalled tab into the workspace the main window is showing', async () => {
+    const { store, tabs, activePaneId, commitLocalActivePane, visibleTabList, dw } = setup(
+      ['a', 'b'],
+      { activeWorkspaceId: 'ws-b' }
+    )
+    const tabA = tabs.value.find((tab) => tab.paneId === 'a')!
+    const tabB = tabs.value.find((tab) => tab.paneId === 'b')!
+    tabA.workspaceId = 'ws-a'
+    tabB.workspaceId = 'ws-b'
     activePaneId.value = 'b'
+
+    mocks.invoke.mockResolvedValue([{ tab_id: 'a', label: 'tab-a', title: null }])
+    await store.refreshFromRust()
+    await nextTick()
+    expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(false)
+
+    commitLocalActivePane.mockClear()
+    await dw.onTabWindowClosed('a', true)
+
+    expect(mocks.setWorkspace).toHaveBeenCalledWith('a', 'ws-b')
+    expect(tabA.workspaceId).toBe('ws-b')
+    expect(store.isDetached('a')).toBe(false)
+    expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(true)
+    expect(commitLocalActivePane).toHaveBeenCalledWith('a')
+    expect(activePaneId.value).toBe('a')
+  })
+
+  it('pins a recalled tab to the default workspace explicitly', async () => {
+    const { store, tabs, commitLocalActivePane, activeWorkspaceId, dw } = setup()
+    const tabA = tabs.value.find((tab) => tab.paneId === 'a')!
+    tabA.workspaceId = 'ws-a'
+    expect(activeWorkspaceId.value).toBeNull()
+
     mocks.invoke.mockResolvedValue([{ tab_id: 'a', label: 'tab-a', title: null }])
     await store.refreshFromRust()
     await nextTick()
 
     commitLocalActivePane.mockClear()
-    await dw.onTabWindowClosed('a')
+    await dw.onTabWindowClosed('a', true)
 
-    expect(store.isDetached('a')).toBe(false)
-    expect(commitLocalActivePane).not.toHaveBeenCalled()
-    expect(activePaneId.value).toBe('b')
+    // Clearing the assignment would let cwd attribution pick ws-a again.
+    expect(mocks.setWorkspace).toHaveBeenCalledWith('a', '__default__')
+    expect(tabA.workspaceId).toBe('__default__')
+    expect(commitLocalActivePane).toHaveBeenCalledWith('a')
+  })
+
+  it('rolls the workspace move back when the server rejects it', async () => {
+    const { store, tabs, toast, dw } = setup(['a', 'b'], { activeWorkspaceId: 'ws-b' })
+    const tabA = tabs.value.find((tab) => tab.paneId === 'a')!
+    const tabB = tabs.value.find((tab) => tab.paneId === 'b')!
+    tabA.workspaceId = 'ws-a'
+    tabB.workspaceId = 'ws-b'
+    mocks.invoke.mockResolvedValue([{ tab_id: 'a', label: 'tab-a', title: null }])
+    await store.refreshFromRust()
+    await nextTick()
+    mocks.setWorkspace.mockRejectedValueOnce(new Error('boom'))
+
+    await dw.onTabWindowClosed('a', true)
+    await nextTick()
+
+    expect(tabA.workspaceId).toBe('ws-a')
+    expect(toast.error).toHaveBeenCalledWith('tab.recallWorkspaceFailed')
   })
 
   it('bridges the tab-window-closed event into the store and unlistens', async () => {
     const { store, commitLocalActivePane, dw } = setup()
-    let handler: ((event: { payload?: { tab_id?: string } }) => void) | undefined
+    const handlers = new Map<string, (event: any) => void>()
     const unlisten = vi.fn()
-    const listen = vi.fn(async (_name: string, cb: typeof handler) => {
-      handler = cb
+    const listen = vi.fn(async (name: string, cb: (event: any) => void) => {
+      handlers.set(name, cb)
       return unlisten
     })
     ;(window as any).__TAURI__ = { event: { listen } }
@@ -181,7 +272,8 @@ describe('useDetachedWindows', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(listen).toHaveBeenCalledWith('tab-window-closed', expect.any(Function))
-    handler?.({ payload: { tab_id: 'a' } })
+    expect(listen).toHaveBeenCalledWith('detached-dock-hint', expect.any(Function))
+    handlers.get('tab-window-closed')?.({ payload: { tab_id: 'a', reattach: true } })
     await nextTick()
     await nextTick()
 
@@ -189,6 +281,6 @@ describe('useDetachedWindows', () => {
     expect(commitLocalActivePane).toHaveBeenCalledWith('a')
 
     dispose()
-    expect(unlisten).toHaveBeenCalled()
+    expect(unlisten).toHaveBeenCalledTimes(2)
   })
 })

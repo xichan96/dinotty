@@ -50,7 +50,7 @@
           <div class="mc-card-preview">
             <div v-if="card.detached" class="mc-detached-preview">
               <AppWindow :size="24" />
-              <span>{{ t('detached.previewPlaceholder') }}</span>
+              <span>{{ t('detached.openedInNewWindow') }}</span>
             </div>
             <img v-else-if="card.previewImage" :src="card.previewImage" />
             <SplitPreviewNode
@@ -144,7 +144,7 @@
           <div class="mc-card-preview">
             <div v-if="card.detached" class="mc-detached-preview">
               <AppWindow :size="24" />
-              <span>{{ t('detached.previewPlaceholder') }}</span>
+              <span>{{ t('detached.openedInNewWindow') }}</span>
             </div>
             <img v-else-if="card.previewImage" :src="card.previewImage" />
             <SplitPreviewNode

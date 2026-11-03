@@ -9,7 +9,7 @@
         </button>
         <button v-if="canRevealFile" class="tcm-item" role="menuitem" @click="onRevealFile">
           <FolderSearch :size="12" class="tcm-icon" />
-          <span class="tcm-label">{{ t('terminal.ctxRevealInFileManager') }}</span>
+          <span class="tcm-label">{{ t(revealLabelKey) }}</span>
         </button>
         <button
           v-if="linkType === 'link' && isTauri()"
@@ -151,6 +151,7 @@ import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 import { isTauri } from '../../composables/useTransport'
 import { isLocalActive } from '../../composables/activeServer'
+import { revealInFileManagerKey } from '../../utils/clientPlatform'
 
 const props = defineProps<{
   visible: boolean
@@ -181,6 +182,7 @@ const emit = defineEmits<{
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
 
 const { t } = useI18n()
+const revealLabelKey = revealInFileManagerKey()
 const { settings, saveSettings } = useSettings()
 const { getBinding, formatBinding } = useKeybindings()
 const toast = useToast()

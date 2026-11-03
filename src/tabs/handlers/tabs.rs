@@ -71,11 +71,13 @@ pub async fn set_tab_workspace(
             .into_response();
     }
 
-    // The default workspace has no id; the frontend/mission control uses a
-    // `__default__` sentinel. Treat it as an explicit request to clear the
-    // assignment instead of rejecting it as unknown.
+    // The default workspace is client-owned and not part of the server's
+    // workspace list, but the frontend/mission control can pin a tab to it
+    // with the `__default__` sentinel. Store the sentinel as an explicit
+    // assignment; treating it as "clear" would let cwd/SSH attribution pull
+    // the tab back to the workspace it was moved out of.
     let workspace_id = match req.workspace_id.as_deref() {
-        Some("__default__") => None,
+        Some("__default__") => Some("__default__".to_string()),
         Some(workspace_id) => {
             if workspace_id.trim().is_empty() {
                 return (

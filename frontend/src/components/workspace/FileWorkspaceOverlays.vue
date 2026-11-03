@@ -69,16 +69,7 @@
           role="menuitem"
           @click="menu.ctxReveal"
         >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxReveal') }}</span>
-        </button>
-        <button
-          v-if="isTauri() && !menu.isRemote.value"
-          type="button"
-          class="tree-ctx-item"
-          role="menuitem"
-          @click="menu.ctxOpenFolder"
-        >
-          <span class="tree-ctx-label">{{ t('filePreview.ctxOpenFolder') }}</span>
+          <span class="tree-ctx-label">{{ t(revealLabelKey) }}</span>
         </button>
         <button
           v-if="menu.canRunCode.value"
@@ -165,7 +156,7 @@
 <script setup lang="ts">
 import { useI18n } from '../../composables/useI18n'
 import type { useTreeContextMenu } from '../../composables/useTreeContextMenu'
-import { isTauri } from '../../composables/useTransport'
+import { revealInFileManagerKey } from '../../utils/clientPlatform'
 import type { DirEntry } from './TreeRows'
 import ConfirmModal from '../ui/ConfirmModal.vue'
 import MoveToDialog from './MoveToDialog.vue'
@@ -185,4 +176,5 @@ defineProps<{
 }>()
 
 const { t } = useI18n()
+const revealLabelKey = revealInFileManagerKey()
 </script>

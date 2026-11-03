@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToast } from 'vue-toastification'
-import { Ellipsis, Radar } from 'lucide-vue-next'
+import { AppWindow } from 'lucide-vue-next'
 import {
   apiUrl,
   authFetch,
@@ -15,19 +15,26 @@ import { loadThemePacks } from './composables/useThemePacks'
 import { effectiveTheme } from './composables/useDeviceThemeSelection'
 import { useSettingsStore } from './stores/settingsStore'
 import { useDetachedTab } from './composables/useDetachedTab'
+import { useDetachedWindowDock } from './composables/useDetachedWindowDock'
+import { DETACHED_DOCK_HINT_EVENT } from './composables/detachedWindowBridge'
+import { usePluginLoader } from './composables/usePluginLoader'
 import { t } from './composables/useI18n'
 import SplitContainer from './components/split/SplitContainer.vue'
 import SshAuthPromptDialog from './components/ssh/SshAuthPromptDialog.vue'
-import ConfirmModal from './components/ui/ConfirmModal.vue'
-import type { DropPosition } from './types/pane'
+import { getAllLeaves, paneKind, type DropPosition } from './types/pane'
 
 /**
  * Detached terminal window (`detached.html?tabId=<tab_id>`).
  *
- * A pure single-tab terminal: no TabBar, StatusBar, notification panel, command
- * palette, Mission Control, plugin hosts or mobile keyboard. The tab is loaded
- * over REST, then kept live by the sync WebSocket in `detached` mode (no global
- * activation, no `dinotty_tabs` persistence).
+ * A pure single-tab view: no TabBar, StatusBar, notification panel, command
+ * palette, Mission Control, plugin hosts, mobile keyboard or in-page titlebar.
+ * The native window title carries the tab title/path and broadcast state. The
+ * tab is loaded over REST, then kept live by the sync WebSocket in `detached`
+ * mode (no global activation, no `dinotty_tabs` persistence).
+ *
+ * Closing the native window closes the terminal: `useDetachedWindows` maps a
+ * window close without a reattach intent to a tab close, so there is no
+ * confirm dialog or prompt here.
  *
  * Every terminal is forced onto `WebSocketTransport`: Tauri IPC is single-owner
  * per pane, so sharing a pane with the main window over IPC would kick the main
@@ -48,13 +55,9 @@ const errorKey = ref<'detached.tabNotFound' | 'detached.connectionFailed'>(
 
 const {
   tab,
-  tabTitle,
-  broadcastActive,
   allowClose,
   load,
   focusActive,
-  closeTerminal,
-  reattachToMain,
   registerTermRef,
   onTitleChange,
   onShellInfo,
@@ -77,56 +80,37 @@ const {
   onSshAuthCancel,
 } = useDetachedTab(tabId, { toast })
 
-const title = computed(() => {
-  if (tabTitle.value) return tabTitle.value
-  return state.value === 'error' ? t(errorKey.value) : t('detached.loading')
-})
-
-// ── Titlebar context menu ───────────────────────────────────────
-const menuOpen = ref(false)
-const menuPos = ref({ x: 0, y: 0 })
-const closeConfirmVisible = ref(false)
-
-function openMenuAt(event: MouseEvent) {
-  event.preventDefault()
-  menuPos.value = { x: event.clientX, y: event.clientY }
-  menuOpen.value = true
-}
-
-function toggleMenu(event: MouseEvent) {
-  if (menuOpen.value) {
-    menuOpen.value = false
-    return
-  }
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  menuPos.value = { x: rect.right - 8, y: rect.bottom + 4 }
-  menuOpen.value = true
-}
-
-function closeMenu() {
-  menuOpen.value = false
-}
-
-function onReattach() {
-  closeMenu()
-  reattachToMain()
-}
-
-function requestCloseTerminal() {
-  closeMenu()
-  closeConfirmVisible.value = true
-}
-
-function confirmCloseTerminal() {
-  closeConfirmVisible.value = false
-  void closeTerminal()
-}
-
 function onMenuReorder(sourcePaneId: string, targetPaneId: string, position: DropPosition) {
   onReorder(sourcePaneId, targetPaneId, position)
 }
 
 let stopThemeWatch: (() => void) | null = null
+let stopDock: (() => void) | null = null
+
+/** True while this window's title bar is over the main window's tab bar. */
+const dockHint = ref(false)
+
+/**
+ * The detached window cannot draw over the main window, so the hover state is
+ * forwarded there through Tauri events. The main window then highlights its
+ * actual tab bar; this window highlights the header being dragged. Older
+ * shells without the event API simply skip this.
+ */
+function onDockHintChange(active: boolean): void {
+  if (dockHint.value === active) return
+  dockHint.value = active
+  try {
+    const emitTo = (window as any).__TAURI__?.event?.emitTo
+    if (typeof emitTo !== 'function') return
+    void Promise.resolve(
+      emitTo('main', DETACHED_DOCK_HINT_EVENT, { tab_id: tabId, active })
+    ).catch((error: unknown) => {
+      console.warn('[detached] dock hint emit failed', error)
+    })
+  } catch (error) {
+    console.warn('[detached] dock hint emit failed', error)
+  }
+}
 
 /**
  * True when this window may talk to the active server.
@@ -185,9 +169,20 @@ onMounted(async () => {
       return
     }
 
+    // A detached tab may be a plugin leaf (or contain one in a split). Plugin
+    // panes read the shared `loadedPlugins` map, so load them here too — only
+    // when this tab actually needs one; the map is reactive and PluginView
+    // renders as soon as the plugin is ready.
+    if (tab.value && getAllLeaves(tab.value.layout).some((leaf) => paneKind(leaf) === 'plugin')) {
+      void usePluginLoader().loadAll()
+    }
+
     state.value = 'ready'
     await nextTick()
     focusActive()
+
+    // Dragging this window's title bar onto the main tab bar recalls the tab.
+    stopDock = useDetachedWindowDock(tabId, { onHintChange: onDockHintChange })
   } catch (err) {
     console.error('[detached] bootstrap failed:', err)
     fail('detached.connectionFailed')
@@ -195,6 +190,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopDock?.()
+  stopDock = null
   stopThemeWatch?.()
   stopThemeWatch = null
 })
@@ -202,32 +199,16 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="detached-shell" :data-state="state">
-    <header class="detached-shell__titlebar" @contextmenu="openMenuAt">
-      <span class="detached-shell__title" :title="title">{{ title }}</span>
-      <span
-        v-if="broadcastActive"
-        class="detached-shell__broadcast"
-        :title="t('split.broadcastTooltip')"
-        :aria-label="t('split.broadcastActive')"
-      >
-        <Radar :size="13" />
-        <span class="detached-shell__broadcast-label">{{ t('split.broadcastActive') }}</span>
-      </span>
-      <button
-        type="button"
-        class="detached-shell__menu-btn"
-        :aria-label="t('detached.reattachToMain')"
-        @click.stop="toggleMenu"
-      >
-        <Ellipsis :size="16" />
-      </button>
-    </header>
-
     <main
       v-if="state === 'ready' && tab"
       class="detached-shell__body detached-shell__body--terminal"
     >
-      <div id="tab-content" class="detached-shell__content">
+      <!--
+        No `id="tab-content"`: that global rule (styles/layout.css) is a flex
+        child of the main window's column and would win over this element's
+        absolutely-positioned wrapper, collapsing it to zero height.
+      -->
+      <div class="detached-shell__content">
         <div class="tab-page active">
           <!--
             Cross-tab pane gestures are intentionally unbound: `dropOnTab` /
@@ -274,26 +255,15 @@ onBeforeUnmount(() => {
       </p>
     </main>
 
-    <template v-if="menuOpen">
-      <div class="detached-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu"></div>
-      <div
-        class="detached-menu"
-        role="menu"
-        :style="{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }"
-      >
-        <button type="button" role="menuitem" @click="onReattach">
-          {{ t('detached.reattachToMain') }}
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          class="detached-menu__danger"
-          @click="requestCloseTerminal"
-        >
-          {{ t('detached.closeTerminal') }}
-        </button>
+    <Transition name="dock-hint">
+      <div v-if="state === 'ready' && dockHint" class="dock-hint" aria-hidden="true">
+        <div class="dock-hint__header"></div>
+        <div class="dock-hint__pill">
+          <AppWindow :size="14" />
+          <span>{{ t('tab.dockDropHint') }}</span>
+        </div>
       </div>
-    </template>
+    </Transition>
 
     <SshAuthPromptDialog
       v-if="sshAuthVisible"
@@ -301,17 +271,6 @@ onBeforeUnmount(() => {
       :prompts="sshAuthPrompts"
       @submit="onSshAuthSubmit"
       @cancel="onSshAuthCancel"
-    />
-
-    <ConfirmModal
-      :visible="closeConfirmVisible"
-      :title="t('detached.closeTerminal')"
-      :message="t('detached.closeTerminalConfirm')"
-      :confirm-text="t('detached.closeTerminal')"
-      :cancel-text="t('ssh.cancel')"
-      danger
-      @confirm="confirmCloseTerminal"
-      @cancel="closeConfirmVisible = false"
     />
   </div>
 </template>
@@ -323,70 +282,6 @@ onBeforeUnmount(() => {
   height: 100%;
   background: var(--bg, #1e1e1e);
   color: var(--fg, #c7c7c7);
-}
-
-.detached-shell__titlebar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 6px 0 12px;
-  border-bottom: 1px solid var(--border, #333);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.detached-shell__title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.detached-shell__broadcast {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  font-size: 11px;
-  font-weight: 600;
-  animation: detached-broadcast-pulse 2s ease-in-out infinite;
-}
-
-.detached-shell__broadcast-label {
-  white-space: nowrap;
-}
-
-@keyframes detached-broadcast-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.detached-shell__menu-btn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 26px;
-  border-radius: 4px;
-  color: var(--fg-muted, #888);
-}
-
-.detached-shell__menu-btn:hover {
-  color: var(--fg-bright, #fff);
-  background: var(--tab-hover-bg, rgba(255, 255, 255, 0.06));
 }
 
 .detached-shell__body {
@@ -420,44 +315,84 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.detached-menu-backdrop {
+/* Header highlight while the native title bar is over the main tab bar.
+   Mirrors the main window's tab-bar highlight so both windows agree on the
+   target: the header is the thing being dragged, the tab bar is the thing it
+   must land on. */
+.dock-hint {
   position: fixed;
   inset: 0;
-  z-index: 999;
-  background: transparent;
-}
-
-.detached-menu {
-  position: fixed;
-  z-index: 1000;
-  min-width: 160px;
-  max-width: calc(100vw - 16px);
-  padding: 4px 0;
-  background: var(--bg-surface, #1a1a1a);
-  border: 1px solid var(--border, #333);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 30;
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 46px;
+  pointer-events: none;
 }
 
-.detached-menu button {
-  padding: 8px 14px;
-  background: transparent;
-  border: none;
-  color: var(--fg, #c7c7c7);
-  font-size: 13px;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
+.dock-hint__header {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 6px;
+  height: 34px;
+  border: 2px solid var(--accent, #8a8a8a);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #8a8a8a) 12%, transparent);
+  animation: dock-hint-pulse 1.2s ease-in-out infinite;
 }
 
-.detached-menu button:hover {
+.dock-hint__pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent, #8a8a8a);
+  border-radius: 999px;
+  background: var(--bg-surface, #262626);
   color: var(--fg-bright, #fff);
-  background: var(--tab-hover-bg, rgba(255, 255, 255, 0.06));
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  animation: dock-hint-pop 0.16s ease-out;
 }
 
-.detached-menu__danger {
-  color: var(--danger, #f44747);
+.dock-hint-enter-active,
+.dock-hint-leave-active {
+  transition: opacity 0.14s ease;
+}
+
+.dock-hint-enter-from,
+.dock-hint-leave-to {
+  opacity: 0;
+}
+
+@keyframes dock-hint-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dock-hint-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-hint__header,
+  .dock-hint__pill {
+    animation: none;
+  }
 }
 </style>

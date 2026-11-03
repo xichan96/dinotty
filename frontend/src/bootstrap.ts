@@ -1,3 +1,4 @@
+import * as vue from 'vue'
 import { createApp, type App, type Component } from 'vue'
 import { createPinia } from 'pinia'
 import Toast, { POSITION, type PluginOptions } from 'vue-toastification'
@@ -42,6 +43,11 @@ const toastOptions: PluginOptions = {
  * bundles that load after startup.
  */
 export async function prepareRuntime(): Promise<void> {
+  // Shared Vue runtime for externally-built plugin bundles
+  // (keyboard-plugin-design.md §5 Phase 1b). Set here, not in an entry file, so
+  // the detached window can load plugin panes with the same bridge the main
+  // window uses. Must be assigned before any bridged plugin is imported.
+  ;(window as unknown as Record<string, unknown>).__DINOTTY_VUE__ = vue
   await loadLocale(normalizeLocale(settings.locale))
   installHostBridge()
 }

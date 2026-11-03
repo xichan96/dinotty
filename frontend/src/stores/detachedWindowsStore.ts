@@ -92,12 +92,13 @@ export const useDetachedWindowsStore = defineStore('detachedWindows', () => {
     }
   }
 
-  /** Programmatically recall a window. The window's close event is what
-   *  actually remounts the tab in the main window (`handleClosed`). */
+  /** Programmatically recall a window. `reattach: true` tells Rust this close
+   *  returns the tab to the main window (`handleClosed` + reselect) instead of
+   *  closing the terminal, which is what a plain window close does. */
   async function closeDetached(tabId: string): Promise<boolean> {
     if (!isTauri()) return false
     try {
-      await tauriInvoke('close_tab_window', { tabId })
+      await tauriInvoke('close_tab_window', { tabId, reattach: true })
       return true
     } catch (error) {
       console.warn('[detached] failed to close window', tabId, error)

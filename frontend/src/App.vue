@@ -217,6 +217,8 @@
 
     <DropPreview />
 
+    <DetachedWindowDropHint />
+
     <StatusBar />
 
     <CommandPalette ref="paletteRef" :commands="paletteCommands" />
@@ -410,6 +412,7 @@ import SshHostsPanel from './components/ssh/SshHostsPanel.vue'
 import SshAuthPromptDialog from './components/ssh/SshAuthPromptDialog.vue'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
 import DropPreview from './components/split/DropPreview.vue'
+import DetachedWindowDropHint from './components/terminal/DetachedWindowDropHint.vue'
 import SplitContainer from './components/split/SplitContainer.vue'
 import StatusBar from './components/terminal/StatusBar.vue'
 const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
@@ -469,6 +472,7 @@ import { useUiStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useDesktopLifecycle } from './composables/useDesktopLifecycle'
+import { useDockTargetReporter } from './composables/useDockTargetReporter'
 import { useAppCore } from './composables/useAppCore'
 import { useSettingsSync } from './composables/useSettingsSync'
 import { useAppActions } from './composables/useAppActions'
@@ -516,6 +520,7 @@ const trayVisibilityDialogVisible = ref(false)
 const previewMenuOpen = ref(false)
 const lastTabCloseShortcutAt = ref(0)
 let disposeDetachedListener: (() => void) | undefined
+let disposeDockTargetReporter: (() => void) | undefined
 
 // ── Tab bar placement (device-scoped; never written to the server settings) ──
 const tabPlacement = useTabPlacement()
@@ -781,6 +786,9 @@ const { pluginNotifyBridge } = bridge
 onMounted(async () => {
   setupTauriWindowClose()
   disposeDetachedListener = setupDetachedWindowListener()
+  // Detached windows ask for the tab-bar rectangle while their title bar is
+  // being dragged; it is the only valid recall target.
+  disposeDockTargetReporter = useDockTargetReporter()
   syncKbDebugFlag()
   window.addEventListener('hashchange', syncKbDebugFlag)
   await desktopLifecycle.setup()
@@ -913,6 +921,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposeDetachedListener?.()
+  disposeDockTargetReporter?.()
+  disposeDockTargetReporter = undefined
   hostClipboardPaste.dispose()
   stopForegroundGainSubscription()
   pluginNotifyBridge.dispose()

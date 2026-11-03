@@ -4,7 +4,7 @@ import type { DropPosition, TerminalTab } from '../types/pane'
 import { ensureSplitRoot, findFirstLeaf, findLeaf, getAllLeaves } from '../types/pane'
 import { initializePaneMru } from '../types/paneMru'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
-import { apiCloseTab, apiListTabs, type ListTabsResult } from './useTabApi'
+import { apiListTabs, type ListTabsResult } from './useTabApi'
 import { useSyncWebSocket } from './useSyncWebSocket'
 import { useSshAuth } from './useSshAuth'
 import { useSplitPane } from './useSplitPane'
@@ -219,22 +219,6 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
     { immediate: true }
   )
 
-  async function closeTerminal(): Promise<void> {
-    try {
-      await apiCloseTab(tabId)
-      // `tab_closed` normally closes the window through `onTabClosed`. If sync
-      // is down there will be no broadcast, so close directly — the tab is
-      // gone either way.
-      if (!syncWs.isConnected()) void closeWindow()
-    } catch (error) {
-      console.error('[detached] failed to close terminal:', error)
-    }
-  }
-
-  function reattachToMain(): void {
-    void closeWindow()
-  }
-
   function registerTermRef(paneId: string, el: unknown): void {
     if (!el) return
     if (typeof (el as any).setOutputListener === 'function') {
@@ -326,8 +310,6 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
     termRefs,
     load,
     focusActive,
-    closeTerminal,
-    reattachToMain,
     registerTermRef,
     onTitleChange,
     onShellInfo,

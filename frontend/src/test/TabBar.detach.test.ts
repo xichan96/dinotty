@@ -3,8 +3,12 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
+const mocks = vi.hoisted(() => ({
+  tauri: true,
+}))
+
 vi.mock('../composables/useTransport', () => ({
-  isTauri: () => true,
+  isTauri: () => mocks.tauri,
 }))
 
 vi.mock('vue-toastification', () => ({
@@ -61,7 +65,13 @@ describe('TabBar detach entry gating', () => {
   let wrapper: ReturnType<typeof mountWith> | undefined
 
   beforeEach(() => {
+    mocks.tauri = true
     setActivePinia(createPinia())
+    // jsdom/happy-dom have no hit-testing; the drag only needs an empty list.
+    Object.defineProperty(document, 'elementsFromPoint', {
+      value: () => [],
+      configurable: true,
+    })
   })
 
   afterEach(() => {
@@ -87,7 +97,7 @@ describe('TabBar detach entry gating', () => {
     expect(menuLabels()).toContain(t('tab.detachToWindow'))
   })
 
-  it('hides detach when a terminal-typed tab has only non-terminal leaves', async () => {
+  it('offers detach when a terminal-typed tab has only non-terminal leaves', async () => {
     const store = useSessionStore()
     store.tabs.push(terminalTabWithLeaves(['files', 'web', 'plugin']))
     const info = store.tabList[0]
@@ -95,6 +105,43 @@ describe('TabBar detach entry gating', () => {
 
     await openContextMenu(info)
 
-    expect(menuLabels()).not.toContain(t('tab.detachToWindow'))
+    expect(menuLabels()).toContain(t('tab.detachToWindow'))
+  })
+
+  async function dragTabOutside(): Promise<void> {
+    const tab = wrapper!.find('.tab')
+    await tab.trigger('mousedown', { button: 0 })
+    // First move clears the drag threshold, second leaves the viewport.
+    window.dispatchEvent(
+      new MouseEvent('mousemove', { bubbles: true, clientX: 50, clientY: 50, buttons: 1 })
+    )
+    window.dispatchEvent(
+      new MouseEvent('mousemove', { bubbles: true, clientX: 5000, clientY: 50, buttons: 1 })
+    )
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 5000, clientY: 50 }))
+    await nextTick()
+  }
+
+  it('tears a terminal tab off when dragged outside the desktop window', async () => {
+    const store = useSessionStore()
+    store.tabs.push(terminalTabWithLeaves(['terminal']))
+    wrapper = mountWith(store.tabList[0])
+
+    await dragTabOutside()
+
+    expect(wrapper.emitted('detach-to-window')).toEqual([['tab-1']])
+  })
+
+  it('does not tear tabs off in a web or mobile browser', async () => {
+    // Mobile/web have no native window to open, so the gesture must stay inert
+    // and must not light up the detach hint.
+    mocks.tauri = false
+    const store = useSessionStore()
+    store.tabs.push(terminalTabWithLeaves(['terminal']))
+    wrapper = mountWith(store.tabList[0])
+
+    await dragTabOutside()
+
+    expect(wrapper.emitted('detach-to-window')).toBeUndefined()
   })
 })

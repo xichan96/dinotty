@@ -50,7 +50,11 @@
           v-for="tab in tabs"
           :key="tab.paneId"
           class="tab"
-          :class="{ active: tab.paneId === activePaneId, 'drag-over': dragOverId === tab.paneId }"
+          :class="{
+            active: tab.paneId === activePaneId,
+            'drag-over': dragOverId === tab.paneId,
+            recalled: feedback.state.recalledTabId === tab.paneId,
+          }"
           :data-pane-id="tab.paneId"
           :data-tab-id="tab.paneId"
           @mousedown.prevent="onTabMouseDown($event, tab.paneId)"
@@ -280,6 +284,7 @@ import { useSettingsStore } from '../../stores'
 import { resolveWorkspaceBadgeMode } from '../../composables/useWorkspaceBadgeMode'
 import { uiConfirm } from '../../composables/useConfirm'
 import { usePaneDrag } from '../../composables/paneDragContext'
+import { useDetachedWindowFeedback } from '../../composables/detachedWindowFeedback'
 import WorkspaceBadge from '../WorkspaceBadge.vue'
 import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
@@ -591,11 +596,10 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
     return sideTabs.filter((t) => t.type !== 'plugin')
   }
 
-  // Detached windows are a desktop-only concept, and a detached window can
-  // only render a PTY-backed pane. A terminal-typed tab may be composed
-  // entirely of plugin/files/web leaves, which have no terminal to carry over.
-  const canDetach =
-    tab.type === 'terminal' && tab.hasTerminalLeaf === true && isTauri() && !props.isMobile
+  // Detached windows are a desktop-only concept. Any layout-based tab can move
+  // into its own window: the detached entry renders the same SplitContainer, so
+  // plugin/files/web leaves work without a PTY (they just have no terminal WS).
+  const canDetach = tab.type === 'terminal' && isTauri() && !props.isMobile
 
   ctxItems.value = [
     {
@@ -859,6 +863,7 @@ function resetSidebarWidth() {
 }
 
 const drag = usePaneDrag()
+const feedback = useDetachedWindowFeedback()
 
 const {
   dragOverId,
@@ -876,6 +881,15 @@ const {
   onReorder: (fromId: string, toId: string) => emit('reorder', fromId, toId),
   onMergeTabIntoPane: (tabId: string, paneId: string, zone) =>
     emit('merge-tab-into-pane', tabId, paneId, zone),
+  // Dropping a tab outside the main window tears it off into its own window,
+  // matching the native tab-strip gesture. Same eligibility as the menu item:
+  // desktop app only, and never on the mobile layout (which has no native
+  // window to open and must not show detach hints).
+  canDetachTab: (tabId: string) => {
+    const tab = props.tabs.find((candidate) => candidate.paneId === tabId)
+    return tab?.type === 'terminal' && isTauri() && !props.isMobile
+  },
+  onDetach: (tabId: string) => emit('detach-to-window', tabId),
 })
 
 defineExpose({ hasTab, scrollTabIntoView })
@@ -972,6 +986,25 @@ onBeforeUnmount(() => {
 .is-vertical .tab.drag-over {
   border-left: none;
   border-top: 2px solid var(--accent, #8a8a8a);
+}
+/* A recalled tab remounts in the strip; flash it so the arrival is noticed. */
+.tab.recalled {
+  animation: tab-recall-flash 0.9s ease-out;
+}
+@keyframes tab-recall-flash {
+  0% {
+    background: color-mix(in srgb, var(--accent, #8a8a8a) 38%, transparent);
+    box-shadow: inset 0 0 0 1px var(--accent, #8a8a8a);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab.recalled {
+    animation: none;
+  }
 }
 .is-vertical .tab-title-input {
   max-width: none;

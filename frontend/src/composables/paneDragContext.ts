@@ -22,6 +22,8 @@ export interface PaneDragSnapshot {
   hoverTabId: string | null
   /** For Mode A: when set, the whole source tab is dragged as a subtree. */
   wholeTab: boolean
+  /** Whole-tab drag has left the main window; releasing there detaches it. */
+  outsideWindow: boolean
 }
 
 const state = reactive<PaneDragSnapshot>({
@@ -33,6 +35,7 @@ const state = reactive<PaneDragSnapshot>({
   targetKind: null,
   hoverTabId: null,
   wholeTab: false,
+  outsideWindow: false,
 })
 
 /** Shared drag-and-drop coordinator. Singleton state across the app. */
@@ -49,6 +52,11 @@ export function usePaneDrag() {
       state.zone = null
       state.targetKind = null
       state.hoverTabId = null
+      state.outsideWindow = false
+    },
+
+    setOutsideWindow(outside: boolean) {
+      state.outsideWindow = outside
     },
 
     setTarget(targetId: string, zone: DropZone, kind: DropTargetKind) {
@@ -76,6 +84,7 @@ export function usePaneDrag() {
       state.targetKind = null
       state.hoverTabId = null
       state.wholeTab = false
+      state.outsideWindow = false
     },
   }
 }

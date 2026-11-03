@@ -55,7 +55,7 @@
         <div class="mc-card-preview">
           <div v-if="card.detached" class="mc-detached-preview">
             <AppWindow :size="24" />
-            <span>{{ t('detached.previewPlaceholder') }}</span>
+            <span>{{ t('detached.openedInNewWindow') }}</span>
           </div>
           <img v-else-if="card.previewImage" :src="card.previewImage" />
           <pre v-else-if="card.htmlContent" class="mc-card-text" v-html="card.htmlContent"></pre>

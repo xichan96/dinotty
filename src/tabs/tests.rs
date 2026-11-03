@@ -208,7 +208,7 @@ mod tab_workspace_route {
     }
 
     #[tokio::test]
-    async fn default_workspace_sentinel_clears_the_assignment() {
+    async fn default_workspace_sentinel_pins_the_default_workspace() {
         let manager = manager_with_tab("tab-1");
         let (status, _) =
             put_workspace(manager.clone(), "tab-1", r#"{"workspace_id":"ws-a"}"#).await;
@@ -219,7 +219,7 @@ mod tab_workspace_route {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, serde_json::json!({ "ok": true }));
-        assert_eq!(manager.explicit_tab_workspace("tab-1"), None);
+        assert_eq!(manager.explicit_tab_workspace("tab-1").as_deref(), Some("__default__"));
     }
 
     #[tokio::test]

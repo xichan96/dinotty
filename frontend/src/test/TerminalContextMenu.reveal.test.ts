@@ -13,7 +13,11 @@ vi.mock('../composables/useI18n', () => ({
     t: (key: string) =>
       ({
         'terminal.ctxOpenFile': 'Open in File Browser',
-        'terminal.ctxRevealInFileManager': 'Reveal in File Manager',
+        // All three platform labels resolve to the same text so the finder
+        // below works regardless of the platform jsdom reports.
+        'fileManager.revealInFinder': 'Reveal in File Manager',
+        'fileManager.revealInExplorer': 'Reveal in File Manager',
+        'fileManager.revealInFileManager': 'Reveal in File Manager',
       })[key] ?? key,
   }),
 }))

@@ -1,12 +1,6 @@
-import * as vue from 'vue'
 import App from './App.vue'
 import { prepareRuntime, mountApp } from './bootstrap'
 import { loadAllBuiltins } from './composables/i18n/tables'
-
-// Shared Vue runtime for externally-built plugin bundles (keyboard-plugin-design.md §5 Phase 1b).
-// Must be assigned before any bridged plugin loads; the bridge keeps plugin
-// components on the exact same runtime instance as the host app.
-;(window as unknown as Record<string, unknown>).__DINOTTY_VUE__ = vue
 
 // Register service worker for PWA installability
 if ('serviceWorker' in navigator) {

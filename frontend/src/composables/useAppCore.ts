@@ -433,9 +433,12 @@ export function useAppCore(options: AppCoreOptions) {
   const detachedWindows = useDetachedWindows({
     tabs,
     activePaneId,
+    activeWorkspaceId,
+    workspaceIdOfTab,
     visibleTabList,
     commitLocalActivePane,
     focusActive,
+    closeTab,
     toast,
     t,
   })

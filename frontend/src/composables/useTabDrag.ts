@@ -10,6 +10,12 @@ export interface TabDragOptions {
   onActivate: (paneId: string) => void
   onReorder: (fromId: string, toId: string) => void
   onMergeTabIntoPane: (tabId: string, paneId: string, zone: PaneZone) => void
+  /** Release outside the window: open the tab in its own native window. */
+  onDetach?: (tabId: string) => void
+  /** Whether `tabId` may be torn off at all. Mobile/web surfaces pass a
+   *  predicate that returns false so the gesture and its hint never activate
+   *  where there is no native window to open. */
+  canDetachTab?: (tabId: string) => boolean
 }
 
 export interface TabDragState {
@@ -23,9 +29,22 @@ export interface TabDragState {
 }
 
 const DRAG_THRESHOLD = 5
+/** How long the pointer may stay outside the window before the release is
+ *  assumed to have happened out there. Some webviews drop the mouseup when it
+ *  lands outside the window; this timer is the fallback for those. */
+const OUTSIDE_RELEASE_MS = 600
 
 export function useTabDrag(opts: TabDragOptions): TabDragState {
-  const { drag, activePaneId, findTabElement, onActivate, onReorder, onMergeTabIntoPane } = opts
+  const {
+    drag,
+    activePaneId,
+    findTabElement,
+    onActivate,
+    onReorder,
+    onMergeTabIntoPane,
+    onDetach,
+    canDetachTab,
+  } = opts
 
   const dragOverId = ref<string | null>(null)
 
@@ -37,6 +56,9 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
   let suppressClick = false
   let paneTargetId: string | null = null
   let paneTargetZone: PaneZone | null = null
+  let outsideTimer: ReturnType<typeof setTimeout> | null = null
+  /** Resolved once per drag; false on mobile/web or for non-terminal tabs. */
+  let detachEligible = false
 
   function scrollTabIntoView(paneId: string): boolean {
     const el = findTabElement(paneId)
@@ -94,6 +116,8 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
     dragFromId = paneId
     paneTargetId = null
     paneTargetZone = null
+    detachEligible =
+      !isTouch && Boolean(onDetach) && (canDetachTab ? canDetachTab(paneId) : true)
 
     const moveEvent = isTouch ? 'touchmove' : 'mousemove'
     const endEvent = isTouch ? 'touchend' : 'mouseup'
@@ -120,10 +144,36 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
     }
   }
 
-  function onMouseLeave(_e: MouseEvent) {
-    if (dragStarted) {
-      cancelDrag()
+  function onMouseLeave() {
+    if (!dragStarted || !dragFromId || isTouchDrag || !detachEligible || !onDetach) return
+    drag.setOutsideWindow(true)
+    // Direct mouseup outside the window is the primary signal (see
+    // `onPointerEnd`); this timer covers webviews that drop it.
+    clearOutsideTimer()
+    outsideTimer = setTimeout(() => {
+      outsideTimer = null
+      if (!dragStarted || !dragFromId) return
+      const id = dragFromId
+      suppressClick = true
+      onDetach(id)
+      cleanup()
+    }, OUTSIDE_RELEASE_MS)
+  }
+
+  function clearOutsideTimer() {
+    if (outsideTimer !== null) {
+      clearTimeout(outsideTimer)
+      outsideTimer = null
     }
+  }
+
+  function isOutsideViewport(pos: { clientX: number; clientY: number }): boolean {
+    return (
+      pos.clientX < 0 ||
+      pos.clientY < 0 ||
+      pos.clientX > window.innerWidth ||
+      pos.clientY > window.innerHeight
+    )
   }
 
   function onBlur() {
@@ -171,6 +221,14 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
       return
     }
     const pos = getPointerPos(e)
+    // Back inside after leaving: the pending outside-release timer is stale,
+    // and the detach hint should disappear.
+    if (isOutsideViewport(pos)) {
+      if (!isTouchDrag && detachEligible) drag.setOutsideWindow(true)
+    } else {
+      clearOutsideTimer()
+      if (!isTouchDrag) drag.setOutsideWindow(false)
+    }
     if (!dragStarted) {
       if (
         Math.abs(pos.clientX - startX) < DRAG_THRESHOLD &&
@@ -229,6 +287,22 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
   }
 
   function onPointerEnd(e: MouseEvent | TouchEvent) {
+    clearOutsideTimer()
+    // Released outside the window: detach instead of reordering/merging.
+    if (
+      dragStarted &&
+      dragFromId &&
+      !isTouchDrag &&
+      detachEligible &&
+      onDetach &&
+      isOutsideViewport(getPointerPos(e))
+    ) {
+      suppressClick = true
+      onDetach(dragFromId)
+      cleanup()
+      return
+    }
+
     if (!dragStarted && dragFromId && !isTouchDrag && releasedOnSourceTab(e, dragFromId)) {
       // WebKit may skip the synthesized click when an OSC title update replaces
       // the title node between mousedown and mouseup. Activate from the drag
@@ -259,8 +333,11 @@ export function useTabDrag(opts: TabDragOptions): TabDragState {
   }
 
   function cleanup() {
+    clearOutsideTimer()
+    drag.setOutsideWindow(false)
     dragStarted = false
     dragFromId = null
+    detachEligible = false
     dragOverId.value = null
     paneTargetId = null
     paneTargetZone = null

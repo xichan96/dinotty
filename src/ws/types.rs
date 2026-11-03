@@ -53,6 +53,12 @@ pub enum SyncClientMsg {
         pane_id: String,
         layout: serde_json::Value,
         active_pane_id: String,
+        /// `false` updates and broadcasts the layout without touching the
+        /// server-global active pane (detached-window focus/resize must not
+        /// steal focus from the main window). Omitted by old clients, which
+        /// keeps the historical activating behaviour.
+        #[serde(default)]
+        activate: Option<bool>,
     },
     /// 前端返回 keyboard-interactive 认证响应
     SshAuthResponse {

@@ -30,7 +30,7 @@ export interface ListTabsResult {
     active_pane_id?: string
     cwd?: string
     connection_id?: string
-    workspace_id?: string
+    workspace_id?: string | null
   }>
   active_pane_id: string | null
 }

@@ -500,14 +500,15 @@ pub async fn update_layout(
             .into_response();
     }
 
-    // Store updated layout
+    // Store updated layout. Detached windows pass `activate: false` so their
+    // focus changes do not move the server-global active pane.
     manager.update_layout(
         tab_id.clone(),
         serde_json::json!({
             "layout": req.layout.clone(),
             "active_pane_id": req.active_pane_id.clone(),
         }),
-        Some(req.active_pane_id.clone()),
+        req.activate.unwrap_or(true).then(|| req.active_pane_id.clone()),
     );
 
     // Broadcast to all sync clients

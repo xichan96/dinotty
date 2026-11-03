@@ -39,7 +39,12 @@ export function useSplitPane(opts: {
   termRefs: Record<string, InstanceType<typeof TerminalPane>>
   genPaneId: () => string
   sendSync: (msg: SyncClientMsg) => void
-  sendLayoutSync: (tabPaneId: string, layout: any, activePaneId: string) => void
+  sendLayoutSync: (
+    tabPaneId: string,
+    layout: any,
+    activePaneId: string,
+    opts?: { activate?: boolean }
+  ) => void
   persist: () => void
   showSplitTerminalError: (error: unknown) => void
 }) {

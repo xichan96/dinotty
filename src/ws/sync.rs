@@ -378,18 +378,19 @@ async fn handle_sync_socket(
                         SyncClientMsg::ClosePane { pane_id } => {
                             manager.close_pane(&pane_id);
                         }
-                        SyncClientMsg::UpdateLayout { pane_id, layout, active_pane_id } => {
-                            manager.update_layout(
-                                pane_id.clone(),
-                                serde_json::json!({
-                                    "layout": layout,
-                                    "active_pane_id": active_pane_id.clone(),
-                                }),
-                                Some(active_pane_id.clone()),
-                            );
-                            manager.broadcast_sync_others(
-                                &SyncMsg::LayoutUpdated { pane_id, layout, active_pane_id },
+                        SyncClientMsg::UpdateLayout {
+                            pane_id,
+                            layout,
+                            active_pane_id,
+                            activate,
+                        } => {
+                            apply_layout_update(
+                                &manager,
                                 &client_id,
+                                pane_id,
+                                layout,
+                                active_pane_id,
+                                activate.unwrap_or(true),
                             );
                         }
                         SyncClientMsg::SshAuthResponse { pane_id, responses } => {
@@ -498,6 +499,34 @@ fn tab_leaf_for(manager: &SessionManager, tab_id: &str) -> Option<String> {
 fn resolve_activate_leaf(manager: &SessionManager, pane_id: &str) -> Option<String> {
     let leaf_id = tab_leaf_for(manager, pane_id).unwrap_or_else(|| pane_id.to_string());
     manager.is_pane_in_any_tab(&leaf_id).then_some(leaf_id)
+}
+
+/// Persist and broadcast a layout update, optionally activating its pane.
+///
+/// `activate == false` is the detached-window path: a second window may focus,
+/// resize, or split panes, but that must not move the server-global active pane
+/// out from under the main window. The tab layout and the `layout_updated`
+/// broadcast are identical either way.
+fn apply_layout_update(
+    manager: &SessionManager,
+    client_id: &str,
+    pane_id: String,
+    layout: serde_json::Value,
+    active_pane_id: String,
+    activate: bool,
+) {
+    manager.update_layout(
+        pane_id.clone(),
+        serde_json::json!({
+            "layout": layout,
+            "active_pane_id": active_pane_id.clone(),
+        }),
+        activate.then(|| active_pane_id.clone()),
+    );
+    manager.broadcast_sync_others(
+        &SyncMsg::LayoutUpdated { pane_id, layout, active_pane_id },
+        client_id,
+    );
 }
 
 /// Pure tab navigation within a workspace. Filters `tabs` to those belonging
@@ -1037,6 +1066,94 @@ mod tests {
             None,
         );
         assert_eq!(resolve_activate_leaf(&manager, "tab-1").as_deref(), Some("pane-a"));
+    }
+
+    /// A detached window's layout update must persist and broadcast the new
+    /// layout without moving the server-global active pane away from the pane
+    /// the main window is using.
+    #[test]
+    fn suppressed_layout_update_keeps_global_active_pane() {
+        let manager = SessionManager::new();
+        manager.update_layout(
+            "tab-1".to_string(),
+            serde_json::json!({
+                "layout": { "type": "leaf", "paneId": "pane-a" },
+                "active_pane_id": "pane-a",
+            }),
+            Some("pane-a".to_string()),
+        );
+        let (_, mut observer) = manager.add_sync_client();
+        let (origin_id, mut origin) = manager.add_sync_client();
+
+        apply_layout_update(
+            &manager,
+            &origin_id,
+            "tab-1".to_string(),
+            serde_json::json!({ "type": "leaf", "paneId": "pane-b" }),
+            "pane-b".to_string(),
+            false,
+        );
+
+        let global = manager
+            .active_pane_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(global.as_deref(), Some("pane-a"));
+        let stored = manager.tab_layouts.get("tab-1").expect("tab layout");
+        assert_eq!(stored["layout"]["paneId"], "pane-b");
+
+        let received = observer.try_recv().expect("observer receives layout_updated");
+        let msg: serde_json::Value = serde_json::from_str(&received).expect("valid json");
+        assert_eq!(msg["type"], "layout_updated");
+        assert_eq!(msg["pane_id"], "tab-1");
+        assert_eq!(msg["active_pane_id"], "pane-b");
+        assert!(origin.try_recv().is_err(), "sender must not be echoed");
+    }
+
+    /// The default (activating) path keeps its historical behaviour.
+    #[test]
+    fn activating_layout_update_moves_global_active_pane() {
+        let manager = SessionManager::new();
+        let (origin_id, _origin) = manager.add_sync_client();
+
+        apply_layout_update(
+            &manager,
+            &origin_id,
+            "tab-1".to_string(),
+            serde_json::json!({ "type": "leaf", "paneId": "pane-b" }),
+            "pane-b".to_string(),
+            true,
+        );
+
+        let global = manager
+            .active_pane_id
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(global.as_deref(), Some("pane-b"));
+    }
+
+    /// Wire compatibility: an old `update_layout` without `activate` still
+    /// activates, while `activate: false` is carried through.
+    #[test]
+    fn update_layout_activate_flag_is_optional() {
+        let legacy: SyncClientMsg = serde_json::from_str(
+            r#"{"type":"update_layout","pane_id":"t","layout":{},"active_pane_id":"p"}"#,
+        )
+        .expect("legacy message");
+        match legacy {
+            SyncClientMsg::UpdateLayout { activate, .. } => assert_eq!(activate, None),
+            other => panic!("unexpected message: {other:?}"),
+        }
+        let suppressed: SyncClientMsg = serde_json::from_str(
+            r#"{"type":"update_layout","pane_id":"t","layout":{},"active_pane_id":"p","activate":false}"#,
+        )
+        .expect("suppressed message");
+        match suppressed {
+            SyncClientMsg::UpdateLayout { activate, .. } => assert_eq!(activate, Some(false)),
+            other => panic!("unexpected message: {other:?}"),
+        }
     }
 
     /// `McOp::Set` exists precisely because `Toggle` is not idempotent: a

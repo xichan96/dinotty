@@ -19,6 +19,10 @@ pub struct SplitPaneRequest {
 pub struct UpdateLayoutRequest {
     pub layout: serde_json::Value,
     pub active_pane_id: String,
+    /// See `SyncClientMsg::UpdateLayout::activate`: `false` persists and
+    /// broadcasts the layout without moving the server-global active pane.
+    #[serde(default)]
+    pub activate: Option<bool>,
 }
 
 #[derive(Deserialize)]

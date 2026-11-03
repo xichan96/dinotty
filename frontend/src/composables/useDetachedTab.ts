@@ -107,7 +107,10 @@ export function useDetachedTab(tabId: string) {
     termRefs,
     genPaneId,
     sendSync: (msg) => syncWs.sendSync(msg),
-    sendLayoutSync: syncWs.sendLayoutSync,
+    // A detached window may focus/resize/split, but it must never move the
+    // server-global active pane that the main window follows.
+    sendLayoutSync: (tabPaneId, layout, activePaneId) =>
+      syncWs.sendLayoutSync(tabPaneId, layout, activePaneId, { activate: false }),
     persist: () => {},
     showSplitTerminalError: (error) => console.error('[detached] split failed:', error),
   })
@@ -147,7 +150,7 @@ export function useDetachedTab(tabId: string) {
       broadcastActivity: 0,
       cwd: info.cwd,
       connectionId: info.connection_id,
-      workspaceId: info.workspace_id,
+      workspaceId: info.workspace_id ?? undefined,
     }
   }
 
@@ -255,7 +258,9 @@ export function useDetachedTab(tabId: string) {
     if (!current) return
     // Resize is global layout state; unlike the main window there is nothing to
     // persist locally.
-    syncWs.sendLayoutSync(current.paneId, current.layout, current.activePaneId)
+    syncWs.sendLayoutSync(current.paneId, current.layout, current.activePaneId, {
+      activate: false,
+    })
   }
 
   function onReorder(sourcePaneId: string, targetPaneId: string, position: DropPosition): void {

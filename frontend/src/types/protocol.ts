@@ -284,6 +284,8 @@ export interface SyncUpdateLayout {
   pane_id: string
   layout: any
   active_pane_id: string
+  /** `false` updates the layout without moving the server-global active pane. */
+  activate?: boolean
 }
 
 export interface SyncRenameTab {

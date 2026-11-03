@@ -247,3 +247,88 @@ mod tab_workspace_route {
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
+
+// ---------------------------------------------------------------------------
+// PUT /api/tabs/:tab_id/layout
+// ---------------------------------------------------------------------------
+
+mod update_layout_route {
+    use std::sync::Arc;
+
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::put,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    use crate::session::SessionManager;
+
+    fn manager_with_tab() -> Arc<SessionManager> {
+        let manager = Arc::new(SessionManager::new());
+        manager.insert_tab(
+            "tab-1".to_string(),
+            serde_json::json!({
+                "layout": {"type": "leaf", "paneId": "pane-a"},
+                "active_pane_id": "pane-a",
+            }),
+        );
+        manager.set_active_pane_id(Some("pane-a".to_string()));
+        manager
+    }
+
+    fn app(manager: Arc<SessionManager>) -> Router {
+        Router::new()
+            .route("/api/tabs/:tab_id/layout", put(crate::tabs::update_layout))
+            .with_state(manager)
+    }
+
+    async fn put_layout(manager: Arc<SessionManager>, body: &str) -> StatusCode {
+        app(manager)
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/tabs/tab-1/layout")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    fn global_active(manager: &SessionManager) -> Option<String> {
+        manager.active_pane_id.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    #[tokio::test]
+    async fn activate_false_updates_layout_without_moving_global_active_pane() {
+        let manager = manager_with_tab();
+
+        let status = put_layout(
+            manager.clone(),
+            r#"{"layout":{"type":"leaf","paneId":"pane-b"},"active_pane_id":"pane-b","activate":false}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(global_active(&manager).as_deref(), Some("pane-a"));
+        assert_eq!(manager.tab_layouts.get("tab-1").expect("layout")["layout"]["paneId"], "pane-b");
+    }
+
+    #[tokio::test]
+    async fn missing_activate_keeps_the_activating_default() {
+        let manager = manager_with_tab();
+
+        let status = put_layout(
+            manager.clone(),
+            r#"{"layout":{"type":"leaf","paneId":"pane-b"},"active_pane_id":"pane-b"}"#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(global_active(&manager).as_deref(), Some("pane-b"));
+    }
+}

@@ -204,8 +204,21 @@ export function useSyncWebSocket(opts: {
 
   sendMarkReadFn = (payload: SyncMarkRead) => sendSync(payload)
 
-  function sendLayoutSync(tabPaneId: string, layout: any, activePaneIdVal: string) {
-    sendSync({ type: 'update_layout', pane_id: tabPaneId, layout, active_pane_id: activePaneIdVal })
+  function sendLayoutSync(
+    tabPaneId: string,
+    layout: any,
+    activePaneIdVal: string,
+    opts: { activate?: boolean } = {}
+  ) {
+    // Only send `activate` when suppressing global activation, so the main
+    // window's wire payload stays identical to older builds.
+    sendSync({
+      type: 'update_layout',
+      pane_id: tabPaneId,
+      layout,
+      active_pane_id: activePaneIdVal,
+      ...(opts.activate === false ? { activate: false } : {}),
+    })
   }
 
   // SSH keyboard-interactive auth callback
@@ -748,7 +761,9 @@ export function useSyncWebSocket(opts: {
           })
 
           if (activePaneWasRemoved && targetTab.activePaneId !== msg.active_pane_id) {
-            sendLayoutSync(targetTab.paneId, targetTab.layout, targetTab.activePaneId)
+            sendLayoutSync(targetTab.paneId, targetTab.layout, targetTab.activePaneId, {
+              activate: !detached,
+            })
           }
 
           const updatedLeafIds = new Set(getAllLeaves(targetTab.layout).map((l) => l.paneId))

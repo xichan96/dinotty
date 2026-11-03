@@ -12,12 +12,8 @@ vi.mock('../composables/useTransport', () => ({
   tauriInvoke: mocks.invoke,
 }))
 
-const tabApi = vi.hoisted(() => ({ apiActivatePane: vi.fn() }))
-vi.mock('../composables/useTabApi', () => tabApi)
-
 import { useDetachedWindows } from '../composables/useDetachedWindows'
 import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
-import { apiActivatePane } from '../composables/useTabApi'
 
 function terminalTab(paneId: string): TerminalTab {
   return {
@@ -85,16 +81,25 @@ describe('useDetachedWindows', () => {
     delete (window as any).__TAURI__
   })
 
-  it('moves the active tab to a neighbor and opens the window without apiActivatePane', async () => {
-    const { store, activePaneId, commitLocalActivePane, dw } = setup()
-    mocks.invoke.mockResolvedValue(undefined)
+  it('marks the tab detached and unmounts its pane before opening the window', async () => {
+    const { store, activePaneId, commitLocalActivePane, visibleTabList, dw } = setup()
+    const atOpen: Array<{ detached: boolean; mounted: boolean }> = []
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command !== 'open_tab_window') return
+      // Snapshot the render-relevant state at the moment the window is
+      // created: the store must already report the id, and the filtered list
+      // the main window renders must already have dropped the tab.
+      atOpen.push({
+        detached: store.isDetached('a'),
+        mounted: visibleTabList.value.some((tab) => tab.paneId === 'a'),
+      })
+    })
 
     expect(await dw.detachTab('a')).toBe(true)
 
-    expect(store.isDetached('a')).toBe(true)
+    expect(atOpen).toEqual([{ detached: true, mounted: false }])
     expect(commitLocalActivePane).toHaveBeenCalledWith('b')
     expect(activePaneId.value).toBe('b')
-    expect(apiActivatePane).not.toHaveBeenCalled()
     expect(mocks.invoke).toHaveBeenCalledWith('open_tab_window', { tabId: 'a', title: 'a' })
   })
 
@@ -108,30 +113,38 @@ describe('useDetachedWindows', () => {
     expect(commitLocalActivePane).not.toHaveBeenCalled()
   })
 
-  it('restores the active tab and toasts when the window cannot be created', async () => {
-    const { store, activePaneId, toast, dw } = setup()
+  it('rolls the mark back, keeps the tab, and restores activation on failure', async () => {
+    const { store, tabs, activePaneId, visibleTabList, toast, dw } = setup()
     mocks.invoke.mockRejectedValue(new Error('boom'))
 
     expect(await dw.detachTab('a')).toBe(false)
 
     expect(store.isDetached('a')).toBe(false)
+    // The tab never left the store, and it is renderable again.
+    expect(tabs.value.some((tab) => tab.paneId === 'a')).toBe(true)
+    expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(true)
     expect(activePaneId.value).toBe('a')
     expect(toast.error).toHaveBeenCalledWith('tab.detachFailed')
   })
 
-  it('remounts and focuses the tab when its window closes', async () => {
-    const { store, activePaneId, commitLocalActivePane, focusActive, dw } = setup()
+  it('remounts and activates the tab locally when its window closes', async () => {
+    const { store, activePaneId, commitLocalActivePane, focusActive, visibleTabList, dw } = setup()
     mocks.invoke.mockResolvedValue(undefined)
     await dw.detachTab('a')
     expect(activePaneId.value).toBe('b')
+    expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(false)
 
     commitLocalActivePane.mockClear()
+    mocks.invoke.mockClear()
     await dw.onTabWindowClosed('a')
 
     expect(store.isDetached('a')).toBe(false)
     expect(commitLocalActivePane).toHaveBeenCalledWith('a')
     expect(activePaneId.value).toBe('a')
+    expect(visibleTabList.value.some((tab) => tab.paneId === 'a')).toBe(true)
     expect(focusActive).toHaveBeenCalled()
+    // Undetaching is purely local: the server's active pane is not touched.
+    expect(mocks.invoke).not.toHaveBeenCalled()
   })
 
   it('does not steal focus when the returned tab is outside the current workspace', async () => {

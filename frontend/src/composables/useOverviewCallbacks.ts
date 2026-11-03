@@ -6,6 +6,7 @@ import type { TerminalTab, Tab } from '../types/pane'
 import type { SyncClientMsg } from '../types/protocol'
 import { sendMcOp, useMissionControlState } from './useMissionControlState'
 import { toActiveWorkspaceId } from './useWorkspaces'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 
 export interface OverviewCallbacksOptions {
   tabs: Ref<Tab[]>
@@ -65,6 +66,7 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
   } = opts
 
   const mcState = useMissionControlState()
+  const detachedStore = useDetachedWindowsStore()
   const overviewOpen = computed(() => mcState.open)
 
   function openOverview(): void {
@@ -88,6 +90,15 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
   }
 
   function onOverviewActivate(paneId: string): void {
+    // A detached tab has no TerminalPane in this window to activate. Bringing
+    // its native window forward is the whole action: activating the tab here
+    // would move the server-side focus for every client while the pane the
+    // user asked for stays in another window.
+    if (detachedStore.isDetached(paneId)) {
+      void detachedStore.focusDetached(paneId)
+      closeOverview()
+      return
+    }
     void activateTab(paneId)
     closeOverview()
     nextTick(() => {

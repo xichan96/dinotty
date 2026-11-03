@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { useOverviewCallbacks } from '../composables/useOverviewCallbacks'
 import type { Tab } from '../types/pane'
 
@@ -46,6 +47,7 @@ function createOptions() {
 
 describe('useOverviewCallbacks workspace activation', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     mocks.apiCreateSshTab.mockReset()
   })
 

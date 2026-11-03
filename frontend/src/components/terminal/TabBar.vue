@@ -309,6 +309,8 @@ export interface TabInfo {
   index: number
   type: 'terminal' | 'plugin'
   shellType?: string // "ssh" for SSH tabs
+  /** Terminal-typed tabs may still hold only plugin/files/web leaves. */
+  hasTerminalLeaf?: boolean
   /** True when the tab has exactly one pane (tab_id === pane_id ambiguous). */
   singlePane?: boolean
   /** Pane id when `singlePane`, so users can copy either tab id or pane id. */
@@ -589,9 +591,11 @@ function openTabCtx(e: MouseEvent, tab: TabInfo) {
     return sideTabs.filter((t) => t.type !== 'plugin')
   }
 
-  // Detached windows are a desktop-only concept and v1 only carries terminal
-  // (including SSH) tabs; plugin/preview tabs have no terminal to render.
-  const canDetach = tab.type === 'terminal' && isTauri() && !props.isMobile
+  // Detached windows are a desktop-only concept, and a detached window can
+  // only render a PTY-backed pane. A terminal-typed tab may be composed
+  // entirely of plugin/files/web leaves, which have no terminal to carry over.
+  const canDetach =
+    tab.type === 'terminal' && tab.hasTerminalLeaf === true && isTauri() && !props.isMobile
 
   ctxItems.value = [
     {

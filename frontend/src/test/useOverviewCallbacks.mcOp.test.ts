@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import type { SyncClientMsg } from '../types/protocol'
 
 // The open/close paths only need the sender and the MC mirror; every other
@@ -52,6 +53,7 @@ function lastMcOp() {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   sent.length = 0
   mcState.open = false
 })

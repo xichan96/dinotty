@@ -433,6 +433,9 @@ mod delete_workspace_route {
         manager.set_tab_workspace("t1", Some("ws-a".into()));
         manager.set_tab_workspace("t2", Some("ws-b".into()));
 
+        // Observe the sync broadcasts the handler emits to connected clients.
+        let (_client_id, mut rx) = manager.add_sync_client();
+
         let app = Router::new()
             .route("/api/workspaces/:id", delete(super::delete_workspace))
             .with_state((workspaces, settings, Arc::clone(&manager)));
@@ -450,5 +453,19 @@ mod delete_workspace_route {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(manager.explicit_tab_workspace("t1"), None);
         assert_eq!(manager.explicit_tab_workspace("t2").as_deref(), Some("ws-b"));
+
+        let mut messages = Vec::new();
+        while let Ok(raw) = rx.try_recv() {
+            messages.push(serde_json::from_str::<serde_json::Value>(&raw).unwrap());
+        }
+        assert!(
+            messages.iter().any(|msg| msg["type"] == "workspace_deleted" && msg["id"] == "ws-a"),
+            "deleted workspace must be broadcast: {messages:?}"
+        );
+        let cleared: Vec<_> =
+            messages.iter().filter(|msg| msg["type"] == "tab_workspace_updated").collect();
+        assert_eq!(cleared.len(), 1, "only the cleared tab must be broadcast: {messages:?}");
+        assert_eq!(cleared[0]["tab_id"], "t1");
+        assert!(cleared[0]["workspace_id"].is_null());
     }
 }

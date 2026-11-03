@@ -792,11 +792,17 @@ export function useSyncWebSocket(opts: {
         if (activeWorkspaceId.value === msg.id) {
           activeWorkspaceId.value = null
         }
+        // Fallback for clients that missed the per-tab clears: drop explicit
+        // assignments (terminal and plugin tabs alike) pointing at the deleted
+        // workspace so they fall back to derived attribution.
+        let cleared = false
         for (const tab of tabs.value) {
-          if (tab.type === 'plugin' && tab.workspaceId === msg.id) {
+          if (tab.workspaceId === msg.id) {
             tab.workspaceId = undefined
+            cleared = true
           }
         }
+        if (cleared) persist()
       } else if (msg.type === 'workspace_activated') {
         if (detached) return
         activeWorkspaceId.value = toActiveWorkspaceId(msg.id)

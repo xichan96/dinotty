@@ -443,13 +443,16 @@ fn clear_tab_workspace_assignments_drops_only_matching_tabs() {
     manager.set_tab_workspace("t2", Some("workspace-a".into()));
     manager.set_tab_workspace("t3", Some("workspace-b".into()));
 
-    assert_eq!(manager.clear_tab_workspace_assignments("workspace-a"), 2);
+    assert_eq!(
+        manager.clear_tab_workspace_assignments("workspace-a"),
+        vec!["t1".to_string(), "t2".to_string()]
+    );
     assert_eq!(manager.explicit_tab_workspace("t1"), None);
     assert_eq!(manager.explicit_tab_workspace("t2"), None);
     assert_eq!(manager.explicit_tab_workspace("t3").as_deref(), Some("workspace-b"));
 
     // Nothing matches: no-op.
-    assert_eq!(manager.clear_tab_workspace_assignments("workspace-a"), 0);
+    assert!(manager.clear_tab_workspace_assignments("workspace-a").is_empty());
 }
 
 #[test]

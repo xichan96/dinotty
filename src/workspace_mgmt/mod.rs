@@ -494,10 +494,16 @@ pub async fn delete_workspace(
     drop(s);
 
     // Tabs explicitly assigned to the deleted workspace would otherwise keep
-    // a dangling id and disappear from every workspace view.
-    manager.clear_tab_workspace_assignments(&id);
+    // a dangling id and disappear from every workspace view. Collect the ids
+    // under the lifecycle lock, then broadcast after releasing it so connected
+    // clients clear their local assignments too. The `WorkspaceDeleted`
+    // broadcast is the fallback for clients that missed these updates.
+    let cleared_tabs = manager.clear_tab_workspace_assignments(&id);
 
     manager.broadcast_sync(&SyncMsg::WorkspaceDeleted { id: id.clone() });
+    for tab_id in cleared_tabs {
+        manager.broadcast_sync(&SyncMsg::TabWorkspaceUpdated { tab_id, workspace_id: None });
+    }
 
     Json(serde_json::json!({ "ok": true })).into_response()
 }

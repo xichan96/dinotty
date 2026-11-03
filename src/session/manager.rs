@@ -391,13 +391,24 @@ impl SessionManager {
 
     /// Drop every explicit workspace assignment pointing at `workspace_id`,
     /// so tabs previously assigned to a deleted workspace fall back to derived
-    /// attribution. Returns the number of tabs cleared.
-    pub fn clear_tab_workspace_assignments(&self, workspace_id: &str) -> usize {
-        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let before = self.tab_workspaces.len();
-        self.tab_workspaces.retain(|_, assigned| assigned.as_deref() != Some(workspace_id));
-        let cleared = before - self.tab_workspaces.len();
-        if cleared > 0 {
+    /// attribution. Returns the cleared tab ids in sorted order so the caller
+    /// can broadcast them after the lifecycle lock is released.
+    pub fn clear_tab_workspace_assignments(&self, workspace_id: &str) -> Vec<String> {
+        let mut cleared = Vec::new();
+        {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.tab_workspaces.retain(|tab_id, assigned| {
+                if assigned.as_deref() == Some(workspace_id) {
+                    cleared.push(tab_id.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        cleared.sort();
+        if !cleared.is_empty() {
             self.schedule_snapshot();
         }
         cleared

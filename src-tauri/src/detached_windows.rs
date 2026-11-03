@@ -194,6 +194,46 @@ where
     rx.recv().map_err(|error| format!("window task failed: {error}"))
 }
 
+/// Adopt a window that already exists in Tauri (possibly outside the registry)
+/// and bring it to the front.
+fn adopt_and_focus(
+    state: &DetachedTabWindows,
+    tab_id: &str,
+    label: &str,
+    title: Option<String>,
+    window: &WebviewWindow,
+) -> Result<(), String> {
+    state.remember_existing(tab_id, label, title.clone());
+    if let Some(title) = title.as_deref() {
+        if let Err(error) = window.set_title(title) {
+            tracing::warn!(%error, tab_id, "failed to update detached window title");
+        }
+    }
+    focus_window(window)
+}
+
+/// Decide the outcome of losing the creation race for `tab_id`.
+///
+/// Split out from [`open_tab_window`] so both failure branches are unit
+/// testable without a running Tauri application. A settled creation with no
+/// live window means the registry entry is stale; reporting it as an error lets
+/// the frontend roll back its optimistic detach state instead of leaving a tab
+/// hidden with no window to show it.
+fn resolve_waited_creation<T>(
+    tab_id: &str,
+    creation_settled: bool,
+    window: Option<T>,
+) -> Result<T, String> {
+    if !creation_settled {
+        return Err(format!(
+            "detached window for tab {tab_id} did not finish opening in time; try again"
+        ));
+    }
+    window.ok_or_else(|| {
+        format!("detached window for tab {tab_id} is registered but no longer exists; try again")
+    })
+}
+
 /// Create the detached window for `tab_id`, or focus it when it already exists.
 #[tauri::command]
 pub fn open_tab_window(
@@ -205,31 +245,27 @@ pub fn open_tab_window(
     let label = label_for_tab(&tab_id)?;
 
     if let Some(window) = app.get_webview_window(&label) {
-        state.remember_existing(&tab_id, &label, title.clone());
-        if let Some(title) = title.as_deref() {
-            if let Err(error) = window.set_title(title) {
-                tracing::warn!(%error, tab_id, "failed to update detached window title");
-            }
-        }
-        return focus_window(&window);
+        return adopt_and_focus(&state, &tab_id, &label, title, &window);
     }
 
     if !state.begin_create(&tab_id) {
-        // Another call owns creation. Wait briefly for it to publish the
-        // window and focus it, so a second open request is not a silent no-op.
-        if state.wait_for_creation(&tab_id, Duration::from_secs(3)) {
-            if let Some(window) = app.get_webview_window(&label) {
-                state.remember_existing(&tab_id, &label, title.clone());
-                if let Some(title) = title.as_deref() {
-                    if let Err(error) = window.set_title(title) {
-                        tracing::warn!(%error, tab_id, "failed to update detached window title");
-                    }
+        // Another call owns creation (or the registry holds a stale entry).
+        // Wait briefly for it to publish the window and focus it, so a second
+        // open request is not a silent no-op.
+        let settled = state.wait_for_creation(&tab_id, Duration::from_secs(3));
+        let window = if settled { app.get_webview_window(&label) } else { None };
+        return match resolve_waited_creation(&tab_id, settled, window) {
+            Ok(window) => adopt_and_focus(&state, &tab_id, &label, title, &window),
+            Err(error) => {
+                if settled {
+                    // The registry pointed at a window Tauri no longer knows
+                    // about; drop it so a retry can create a fresh one.
+                    state.remove(&tab_id);
                 }
-                return focus_window(&window);
+                tracing::warn!(tab_id, %error, "detached window open failed");
+                Err(error)
             }
-        }
-        tracing::info!(tab_id, "detached window creation already in progress");
-        return Ok(());
+        };
     }
 
     let window_title = title.clone().unwrap_or_else(|| DEFAULT_TITLE.to_string());
@@ -411,6 +447,27 @@ mod tests {
         assert!(registry.begin_create("slow"));
         assert!(!registry.wait_for_creation("slow", Duration::from_millis(10)));
         registry.abort_create("slow");
+    }
+
+    #[test]
+    fn waited_creation_reports_timeout_and_stale_registry_instead_of_succeeding() {
+        // Creation never settled: the caller must retry rather than assume a
+        // window exists.
+        let timeout = resolve_waited_creation::<()>("t", false, None).unwrap_err();
+        assert!(timeout.contains("did not finish opening in time"), "{timeout}");
+        assert!(timeout.contains("tab t"), "{timeout}");
+
+        // A stale registry entry: begin_create refuses, waiting settles, but
+        // Tauri has no window for the label. That must be an error too.
+        let registry = DetachedTabWindows::default();
+        registry.finish_create(info("stale", None));
+        assert!(!registry.begin_create("stale"), "registry believes the window exists");
+        assert!(registry.wait_for_creation("stale", Duration::from_millis(10)));
+        let stale = resolve_waited_creation::<()>("stale", true, None).unwrap_err();
+        assert!(stale.contains("registered but no longer exists"), "{stale}");
+
+        // A live window resolves normally.
+        assert_eq!(resolve_waited_creation("t", true, Some(42)).unwrap(), 42);
     }
 
     #[test]

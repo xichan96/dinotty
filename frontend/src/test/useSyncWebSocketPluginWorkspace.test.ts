@@ -439,4 +439,18 @@ describe('useSyncWebSocket tab workspace updates', () => {
 
     expect(persist).not.toHaveBeenCalled()
   })
+
+  it('clears terminal tab assignments when their workspace is deleted', async () => {
+    const cleared = terminal('tab-a', { workspaceId: 'workspace-a' })
+    const untouched = terminal('tab-b', { workspaceId: 'workspace-b' })
+    const { workspaceState, persist, emit } = await setup([cleared, untouched])
+
+    emit({ type: 'workspace_deleted', id: 'workspace-a' })
+
+    expect(cleared.workspaceId).toBeUndefined()
+    expect(untouched.workspaceId).toBe('workspace-b')
+    expect(workspaceState.workspaces.value.map((w) => w.id)).toEqual(['workspace-b'])
+    expect(workspaceState.activeWorkspaceId.value).toBeNull()
+    expect(persist).toHaveBeenCalledOnce()
+  })
 })

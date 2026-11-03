@@ -452,7 +452,7 @@ fn clear_tab_workspace_assignments_drops_only_matching_tabs() {
     assert_eq!(manager.explicit_tab_workspace("t3").as_deref(), Some("workspace-b"));
 
     // Nothing matches: no-op.
-    assert!(manager.clear_tab_workspace_assignments("workspace-a").is_empty());
+    assert_eq!(manager.clear_tab_workspace_assignments("workspace-a"), Vec::<String>::new());
 }
 
 #[test]

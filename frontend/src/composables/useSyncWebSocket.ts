@@ -339,11 +339,42 @@ export function useSyncWebSocket(opts: {
               broadcastActivity: 0,
               cwd: info.cwd,
               connectionId: info.connection_id,
-              workspaceId: info.workspace_id,
+              workspaceId: info.workspace_id ?? undefined,
             }
             tabs.value.push(current)
-          } else if (info.workspace_id && current.workspaceId !== info.workspace_id) {
-            current.workspaceId = info.workspace_id
+          } else {
+            if (info.workspace_id !== undefined) {
+              // `null` is authoritative for an unassigned tab and must clear it.
+              current.workspaceId = info.workspace_id ?? undefined
+            }
+            // Reconnect snapshot: adopt split/close changes made by other
+            // clients while this window was offline. Only replace the layout
+            // when the leaf set changed — ratios and locally decorated fields
+            // (shell_type) stay local to avoid churn on every reconnect.
+            if (info.layout) {
+              const serverLayout = ensureSplitRoot(info.layout)
+              const localIds = getAllLeaves(current.layout)
+                .map((leaf) => leaf.paneId)
+                .sort()
+              const serverLeaves = getAllLeaves(serverLayout)
+              const serverIds = serverLeaves.map((leaf) => leaf.paneId).sort()
+              const leavesChanged =
+                localIds.length !== serverIds.length ||
+                localIds.some((id, index) => id !== serverIds[index])
+              if (leavesChanged) {
+                current.layout = serverLayout
+                const preferred =
+                  info.active_pane_id && findLeaf(serverLayout, info.active_pane_id)
+                    ? info.active_pane_id
+                    : findFirstLeaf(serverLayout).paneId
+                current.activePaneId = preferred
+                current.paneMru = initializePaneMru(
+                  serverLeaves.map((leaf) => leaf.paneId),
+                  preferred
+                )
+                nextTick(() => focusActive())
+              }
+            }
           }
           return
         }

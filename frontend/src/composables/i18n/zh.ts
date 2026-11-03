@@ -1356,6 +1356,7 @@ export default {
   'detached.newTerminalWindow': '新建终端窗口',
   'detached.broadcastOn': '广播输入',
   'detached.previewPlaceholder': '游离终端渲染尚未接入。',
+  'detached.fileLinkUnavailable': '游离窗口暂不支持打开文件链接。',
   'detached.unsupportedPane': '该类型的窗格不支持游离。',
   'detached.focusFailed': '无法聚焦终端窗口。',
   'detached.reattachedToWorkspace': '终端已收回到所属工作区。',

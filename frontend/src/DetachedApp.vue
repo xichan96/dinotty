@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useToast } from 'vue-toastification'
 import { Ellipsis, Radar } from 'lucide-vue-next'
 import {
   apiUrl,
@@ -36,6 +37,7 @@ import type { DropPosition } from './types/pane'
 type ShellState = 'loading' | 'ready' | 'error'
 
 const settingsStore = useSettingsStore()
+const toast = useToast()
 
 const tabId = new URLSearchParams(window.location.search).get('tabId')?.trim() ?? ''
 
@@ -60,6 +62,9 @@ const {
   onClosePane,
   onDividerDragEnd,
   onReorder,
+  onFileClick,
+  onPreviewLink,
+  onLinkActivate,
   onInput,
   onSplitHorizontal,
   onSplitVertical,
@@ -70,7 +75,7 @@ const {
   sshAuthPrompts,
   onSshAuthSubmit,
   onSshAuthCancel,
-} = useDetachedTab(tabId)
+} = useDetachedTab(tabId, { toast })
 
 const title = computed(() => {
   if (tabTitle.value) return tabTitle.value
@@ -202,10 +207,11 @@ onBeforeUnmount(() => {
       <span
         v-if="broadcastActive"
         class="detached-shell__broadcast"
-        :title="t('detached.broadcastOn')"
-        :aria-label="t('detached.broadcastOn')"
+        :title="t('split.broadcastTooltip')"
+        :aria-label="t('split.broadcastActive')"
       >
         <Radar :size="13" />
+        <span class="detached-shell__broadcast-label">{{ t('split.broadcastActive') }}</span>
       </span>
       <button
         type="button"
@@ -223,6 +229,12 @@ onBeforeUnmount(() => {
     >
       <div id="tab-content" class="detached-shell__content">
         <div class="tab-page active">
+          <!--
+            Cross-tab pane gestures are intentionally unbound: `dropOnTab` /
+            `dropExtract` need the main window's TabBar (`#tabs-list`,
+            `.tab[data-tab-id]`), which does not exist here. Within-tab reorder
+            stays bound; pane close only appears when the tab is split.
+          -->
           <SplitContainer
             :layout="tab.layout"
             :active-pane-id="tab.activePaneId"
@@ -245,6 +257,9 @@ onBeforeUnmount(() => {
             @new-local-terminal="onNewLocalTerminal"
             @reorder="onMenuReorder"
             @divider-drag-end="onDividerDragEnd"
+            @file-click="onFileClick"
+            @preview-link="onPreviewLink"
+            @link-activate="onLinkActivate"
           />
         </div>
       </div>
@@ -334,8 +349,18 @@ onBeforeUnmount(() => {
   flex: none;
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.12);
   color: #ef4444;
+  font-size: 11px;
+  font-weight: 600;
   animation: detached-broadcast-pulse 2s ease-in-out infinite;
+}
+
+.detached-shell__broadcast-label {
+  white-space: nowrap;
 }
 
 @keyframes detached-broadcast-pulse {

@@ -2,6 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import Toast from 'vue-toastification'
 
 /**
  * The detached window is a second view of one tab. These tests pin the
@@ -129,7 +130,9 @@ class MockWebSocket {
 vi.stubGlobal('WebSocket', MockWebSocket)
 
 import DetachedApp from '../DetachedApp.vue'
+import { t } from '../composables/useI18n'
 import { useSessionStore } from '../stores/sessionStore'
+import type { TerminalTab } from '../types/pane'
 
 const TAB_ID = 'tab-1'
 
@@ -154,7 +157,7 @@ async function mountDetached() {
   setActivePinia(pinia)
   const wrapper = mount(DetachedApp, {
     global: {
-      plugins: [pinia],
+      plugins: [pinia, Toast],
       stubs: { SshAuthPromptDialog: true, ConfirmModal: true },
     },
   })
@@ -268,6 +271,77 @@ describe('DetachedApp', () => {
     })
     const tab = session.tabs.find((candidate) => candidate.paneId === TAB_ID)
     expect(tab?.type === 'terminal' ? tab.workspaceId : null).toBe('ws-2')
+
+    wrapper.unmount()
+  })
+
+  it('shows pane headers only while the tab is split', async () => {
+    const split = await mountDetached()
+    expect(split.wrapper.findComponent({ name: 'SplitContainer' }).props('allowClose')).toBe(true)
+    split.wrapper.unmount()
+
+    mocks.apiListTabs.mockResolvedValue({
+      tabs: [
+        {
+          tab_id: TAB_ID,
+          pane_id: 'pane-a',
+          layout: { type: 'leaf', paneId: 'pane-a', title: 'Alpha', ratio: 1, zoomed: false },
+          active_pane_id: 'pane-a',
+        },
+      ],
+      active_pane_id: 'pane-a',
+    })
+    const single = await mountDetached()
+    expect(single.wrapper.findComponent({ name: 'SplitContainer' }).props('allowClose')).toBe(false)
+    single.wrapper.unmount()
+  })
+
+  it('shows the broadcast indicator and marks the native title', async () => {
+    const { wrapper, session } = await mountDetached()
+    expect(wrapper.find('.detached-shell__broadcast').exists()).toBe(false)
+
+    const tab = session.tabs.find((candidate) => candidate.paneId === TAB_ID) as TerminalTab
+    tab.broadcastMode = true
+    await nextTick()
+    await nextTick()
+
+    const badge = wrapper.find('.detached-shell__broadcast')
+    expect(badge.exists()).toBe(true)
+    expect(badge.attributes('aria-label')).toBe(t('split.broadcastActive'))
+    expect(document.title).toBe(`Alpha · ${t('split.broadcastActive')}`)
+
+    wrapper.unmount()
+  })
+
+  it('restores a split layout changed by another client while offline', async () => {
+    const { wrapper, session } = await mountDetached()
+
+    emit({ type: 'tab_list', tabs: [
+      {
+        tab_id: TAB_ID,
+        pane_id: 'pane-c',
+        layout: {
+          type: 'split',
+          id: 'root-3',
+          direction: 'vertical',
+          ratios: [0.5, 0.5],
+          children: [
+            { type: 'leaf', paneId: 'pane-c', title: 'Gamma', ratio: 0.5, zoomed: false },
+            { type: 'leaf', paneId: 'pane-d', title: 'Delta', ratio: 0.5, zoomed: false },
+          ],
+        },
+        active_pane_id: 'pane-d',
+      },
+    ] })
+
+    await vi.waitFor(() => {
+      expect(wrapper.findComponent({ name: 'SplitContainer' }).props('layout')).toMatchObject({
+        direction: 'vertical',
+        children: [{ paneId: 'pane-c' }, { paneId: 'pane-d' }],
+      })
+    })
+    const tab = session.tabs.find((candidate) => candidate.paneId === TAB_ID) as TerminalTab
+    expect(tab.activePaneId).toBe('pane-d')
 
     wrapper.unmount()
   })

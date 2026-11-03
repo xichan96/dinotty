@@ -12,9 +12,20 @@ import { useSessionStore } from '../stores/sessionStore'
 import { setActivePaneId } from './useTerminal'
 import { isTauri, tauriInvoke } from './useTransport'
 import { setTauriWindowTitle } from '../utils/windowTitle'
+import { openUrlInSystemBrowser } from '../utils/openExternalUrl'
 import { useI18n } from './useI18n'
 
 type LoadResult = 'ok' | 'not-found'
+
+/** Minimal toast surface, injected so the composable stays mountable in tests. */
+export interface DetachedToast {
+  info(message: string): void
+  error(message: string): void
+}
+
+export interface DetachedTabOptions {
+  toast?: DetachedToast
+}
 
 /**
  * Single-tab state and actions for a detached terminal window.
@@ -27,10 +38,11 @@ type LoadResult = 'ok' | 'not-found'
  *
  * Broadcast mode is not part of the sync protocol today, so a window opened
  * while the main window has broadcast enabled starts with it off. The title
- * indicator reflects this window's own state; wiring it through sync belongs to
- * the split/broadcast follow-up task.
+ * indicator reflects this window's own state, mirroring the same
+ * `broadcastMode && leaves > 1` rule as `sessionStore.isBroadcastActive`.
  */
-export function useDetachedTab(tabId: string) {
+export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
+  const { toast } = opts
   const session = useSessionStore()
   const { tabs, activePaneId } = storeToRefs(session)
   const { t } = useI18n()
@@ -196,7 +208,7 @@ export function useDetachedTab(tabId: string) {
     [tabTitle, broadcastActive],
     ([name, broadcast]) => {
       if (!name) return
-      const label = broadcast ? `${name} · ${t('detached.broadcastOn')}` : name
+      const label = broadcast ? `${name} · ${t('split.broadcastActive')}` : name
       document.title = label
       if (isTauri()) {
         void setTauriWindowTitle(label, tauriInvoke, () =>
@@ -267,6 +279,45 @@ export function useDetachedTab(tabId: string) {
     splitPane.reorderPane(sourcePaneId, targetPaneId, position)
   }
 
+  /**
+   * Terminal links in a detached window (v1).
+   *
+   * External HTTP(S) links open through the shell plugin, exactly like the
+   * main window's "open in browser" action. File links and in-app web previews
+   * need the main window's files/web pane stack, which the detached entry does
+   * not load — surface a toast instead of silently dropping the click.
+   */
+  function onPreviewLink(_paneId: string, url: string): void {
+    let parsed: URL | null = null
+    try {
+      parsed = new URL(url)
+    } catch {
+      // Not an absolute URL; fall through to the unsupported-link toast.
+    }
+    if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+      toast?.info(t('detached.previewPlaceholder'))
+      return
+    }
+    void openUrlInSystemBrowser(url).then((opened) => {
+      if (!opened) toast?.error(t('detached.previewPlaceholder'))
+    })
+  }
+
+  function onFileClick(path: string, line?: number, column?: number): void {
+    // Documented v1 gap: opening the files preview is a main-window feature.
+    console.info('[detached] file link ignored (unsupported in detached window):', {
+      path,
+      line,
+      column,
+    })
+    toast?.info(t('detached.fileLinkUnavailable'))
+  }
+
+  function onLinkActivate(): void {
+    // Emitted for the mobile IME link-replay guard in the main window. The
+    // detached window is desktop-only, so there is nothing to suppress.
+  }
+
   return {
     tab,
     tabTitle,
@@ -284,6 +335,9 @@ export function useDetachedTab(tabId: string) {
     onClosePane,
     onDividerDragEnd,
     onReorder,
+    onFileClick,
+    onPreviewLink,
+    onLinkActivate,
     onInput: splitPane.onTerminalInput,
     onSplitHorizontal: () => void splitPane.splitPane('horizontal'),
     onSplitVertical: () => void splitPane.splitPane('vertical'),

@@ -1,7 +1,7 @@
 # 游离终端窗口设计
 
-> 状态：设计稿，未开工  
-> 更新时间：2026-11-02  
+> 状态：已实现（Waves 1–3 已合入/在分支验证），第 18 节为实现状态与手工 E2E 清单  
+> 更新时间：2026-11-03  
 > 范围：桌面端（macOS / Windows / Linux）  
 > 英文名：Detached Terminal Window
 
@@ -636,3 +636,40 @@ v1 约定：
 | MC 预览抓取 | `frontend/src/composables/useTabPreview.ts:166-202` |
 | MC 卡片 | `frontend/src/components/overview/TabOverview.vue`、`WorkspaceTabGrid.vue` |
 | 移动端 tab 栏 | `frontend/src/components/terminal/TabBar.vue:1-31` |
+
+---
+
+## 18. 实现状态与手工 E2E 清单（2026-11）
+
+### 已实现（Waves 1–3）
+
+- **多窗口底座**：`tab-<tab_id>` 窗口 registry、去重/聚焦/关闭、`detached.html` 独立入口、`detached-window` capability。
+- **游离/收回**：主窗口游离入口与过滤、关闭窗口收回、Mission Control 聚焦游离窗口（Waves 1–2）。
+- **纯终端视图**：单 tab、强制 WebSocket、忽略 `tab_activated` / `workspace_activated`、不写 `dinotty_tabs`。
+- **分屏**：新建水平/垂直终端分屏、点击聚焦、分隔条 resize、关闭 pane；单 pane 不显示 `PaneHeader`；跨 tab 拖拽/extract/merge 不提供（游离窗口没有 TabBar 落点，相关事件有意不绑定），同 tab 内 pane reorder 保留。
+- **广播指示**：`broadcastMode` 且存在多个 pane 时，标题栏显示“广播中”（`split.broadcastActive`），原生窗口标题追加同一状态。
+- **链接**：外部 http(s) 链接（含 localhost 预览链接）经 shell 插件用系统浏览器打开；文件链接不加载主窗口的 files pane，仅提示（v1 缺口）。
+- **SSH 认证**：复用 sync WS 的 `ssh_auth_prompt` / `ssh_auth_response`，`SshAuthPromptDialog` 在游离窗口内提交/取消。
+- **同步与重连**：任意端 `tab_closed` 关闭游离窗口；`tab_renamed`、`layout_updated`、`tab_workspace_updated` 生效；重连时 `tab_list` 会恢复 pane 集合变化，终端内容由终端 WS snapshot 回放。
+- **关闭语义**：关闭窗口 = 收回主窗口，不杀 PTY；显式“关闭终端”二次确认后结束会话；PTY 退出只影响该终端，不销毁窗口。
+
+### 已知缺口（v1）
+
+- 游离窗口内的文件链接不会打开主窗口的 files pane，仅显示提示；localhost 预览链接改为交给系统浏览器。
+- 输入广播状态按窗口本地维护，不跨窗口同步（与现有 `sessionStore` 语义一致）。
+- Mission Control 的“游离中”卡片/预览属任务 F，不在本波次；跨重启恢复游离窗口、跨原生窗口拖拽按设计暂缓。
+
+### 手工 E2E 清单（桌面端）
+
+1. **游离**：从主窗口把终端 tab 游离到新窗口，新窗口打开且主窗口 tab 栏隐藏该项。
+2. **输入/resize/搜索**：游离窗口输入正常、拖动边框改变尺寸后终端重新 fit、Ctrl/Cmd+F 搜索可用，内容通过 snapshot 恢复。
+3. **关闭窗口 = 收回**：关闭原生窗口后 tab 回主窗口，PTY 未中断。
+4. **显式关闭终端**：标题栏菜单“关闭终端”→二次确认→会话结束，主窗口对应 tab 消失。
+5. **MC 聚焦**：Mission Control 点击“游离中”卡片聚焦已有窗口，不重复激活/创建。
+6. **Web/手机不受影响**：Web 与手机仍按普通 tab 显示，可输入、可关闭；任意端关闭 tab 后游离窗口关闭。
+7. **分屏**：在游离窗口新建水平/垂直分屏、点击聚焦、拖分隔条 resize、关闭其中一个 pane；单 pane 时无 pane header；跨 tab 拖拽无落点。
+8. **广播指示**：开启广播后标题栏显示“广播中”，原生窗口标题含同状态。
+9. **server 切换**：主窗口切换服务器后，游离窗口仍固定原 `(server_id, tab_id)`。
+10. **托盘**：主窗口隐藏到托盘后，游离窗口继续工作。
+11. **SSH 认证**：SSH tab 游离后触发键盘交互认证，对话框在游离窗口弹出，可提交与取消。
+12. **重复游离**：再次点击“游离到新窗口”只聚焦已有窗口，不创建第二个。

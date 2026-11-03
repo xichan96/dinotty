@@ -1409,6 +1409,7 @@ export default {
   'detached.newTerminalWindow': 'New terminal window',
   'detached.broadcastOn': 'Broadcast input',
   'detached.previewPlaceholder': 'Detached terminal rendering is not available yet.',
+  'detached.fileLinkUnavailable': 'File links are not supported in the detached window yet.',
   'detached.unsupportedPane': 'This pane type cannot be detached.',
   'detached.focusFailed': 'Could not focus the terminal window.',
   'detached.reattachedToWorkspace': 'Terminal returned to its workspace.',

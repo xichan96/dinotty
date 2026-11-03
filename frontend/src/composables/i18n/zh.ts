@@ -1348,6 +1348,7 @@ export default {
   'detached.loading': '正在加载终端…',
   'detached.tabNotFound': '该终端标签页已不存在。',
   'detached.connectionFailed': '无法连接服务器。',
+  'detached.focusWindow': '聚焦窗口',
   'detached.reattachToMain': '收回主窗口',
   'detached.closeTerminal': '关闭终端',
   'detached.closeTerminalConfirm': '关闭此终端？正在运行的进程将被终止。',

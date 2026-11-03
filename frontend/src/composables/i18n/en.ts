@@ -1401,6 +1401,7 @@ export default {
   'detached.loading': 'Loading terminal…',
   'detached.tabNotFound': 'This terminal tab no longer exists.',
   'detached.connectionFailed': 'Could not connect to the server.',
+  'detached.focusWindow': 'Focus window',
   'detached.reattachToMain': 'Return to main window',
   'detached.closeTerminal': 'Close terminal',
   'detached.closeTerminalConfirm': 'Close this terminal? The running process will be terminated.',

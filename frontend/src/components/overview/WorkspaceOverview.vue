@@ -86,6 +86,7 @@
             @activate="(id: string) => $emit('activate', id)"
             @close-tab="(id: string) => $emit('close-tab', id)"
             @close-tabs="(ids: string[]) => $emit('close-tabs', ids)"
+            @close-terminal="(id: string) => $emit('close-terminal', id)"
             @rename-tab="onRenameTab"
             @new-tab="onNewTabForSelected"
           />
@@ -110,6 +111,7 @@ import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
 import { useSessionStore } from '../../stores/sessionStore'
 import { useUiStore } from '../../stores/uiStore'
+import { useDetachedWindowsStore } from '../../stores/detachedWindowsStore'
 import { useTabPreview, type TabCard } from '../../composables/useTabPreview'
 import { useMissionControlState, sendMcOp } from '../../composables/useMissionControlState'
 import {
@@ -137,6 +139,7 @@ const emit = defineEmits<{
   activate: [paneId: string]
   'close-tab': [paneId: string]
   'close-tabs': [paneIds: string[]]
+  'close-terminal': [paneId: string]
   'new-tab': [cwd?: string, workspaceId?: string | null]
   'new-tab-ssh': [connectionId: string, initialCwd?: string, workspaceId?: string]
   'rename-tab': [paneId: string, title: string]
@@ -147,6 +150,7 @@ const { workspaces, defaultWorkspace, activeWorkspaceId, matchWorkspace, deleteW
 const { t } = useI18n()
 const session = useSessionStore()
 const ui = useUiStore()
+const detachedStore = useDetachedWindowsStore()
 const tabPreview = useTabPreview()
 const mcState = useMissionControlState()
 
@@ -385,6 +389,20 @@ watch(
   }
 )
 
+// Detaching unmounts the pane (nothing to capture) and reattaching remounts it.
+// Re-snapshot on that transition so the placeholder appears/disappears without
+// reopening Mission Control.
+watch(
+  () => detachedStore.detachedTabIds,
+  () => {
+    if (!props.visible) return
+    clearTimeout(tabChangeTimer)
+    tabChangeTimer = window.setTimeout(() => {
+      allCards.value = tabPreview.captureAll(session.tabs, props.termRefs)
+    }, 100)
+  }
+)
+
 // Build tab→workspace mapping
 interface CardGroup {
   workspaceId: string | null // null = ungrouped
@@ -396,6 +414,8 @@ const tabCounts = computed(() => {
   for (const ws of workspaces.value) {
     counts[ws.id] = 0
   }
+  // Counts deliberately read the full session list: a tab detached into its
+  // own window still belongs to its workspace and must keep its count.
   for (const tab of session.tabs) {
     if (tab.type !== 'terminal') continue
     const ws = matchWorkspace(
@@ -435,8 +455,15 @@ const filteredCards = computed(() => {
     const ws = getCardWorkspace(card)
     return ws === sel || (ws === null && sel === DEFAULT_WORKSPACE_ID)
   })
-  // Reindex for display (1-based)
-  return cards.map((card, i) => ({ ...card, index: i + 1 }))
+  // Reindex for display (1-based) and overlay the live detached state. Reading
+  // the store here (rather than only in `captureAll`) keeps the badge reactive
+  // when a tab is detached or reattached while Mission Control stays open.
+  return cards.map((card, i) => ({
+    ...card,
+    index: i + 1,
+    detached: detachedStore.isDetached(card.paneId),
+    windowLabel: detachedStore.windowTitleOf(card.paneId),
+  }))
 })
 
 function onSelectWorkspace(id: string | null) {

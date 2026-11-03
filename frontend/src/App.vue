@@ -355,6 +355,7 @@
       @activate="onOverviewActivate"
       @close-tab="onOverviewCloseTab"
       @close-tabs="onCloseTabsBulk"
+      @close-terminal="onOverviewCloseTerminal"
       @new-tab="onOverviewNewTab"
       @new-tab-ssh="onOverviewNewTabSsh"
       @rename-tab="onOverviewRenameTab"
@@ -670,6 +671,7 @@ const {
   closeOverview,
   onOverviewActivate,
   onOverviewCloseTab,
+  onOverviewCloseTerminal,
   onOverviewNewTab,
   onOverviewNewTabSsh,
   onOverviewRenameTab,

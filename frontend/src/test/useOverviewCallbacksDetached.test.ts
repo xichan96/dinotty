@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -19,6 +20,11 @@ vi.mock('../composables/serverCapabilities', () => ({
   ensureCapabilities: async () => new Set(['mc_op_set']),
 }))
 
+// The composable pulls the translator itself; keep assertions on keys.
+vi.mock('../composables/useI18n', () => ({
+  useI18n: () => ({ t: (key: string) => key }),
+}))
+
 import { useOverviewCallbacks } from '../composables/useOverviewCallbacks'
 import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 import { setMcSender, useMissionControlState } from '../composables/useMissionControlState'
@@ -27,25 +33,29 @@ import type { SyncClientMsg } from '../types/protocol'
 const mcState = useMissionControlState()
 let sent: SyncClientMsg[] = []
 
-function setup() {
+function setup(toast = { error: vi.fn() }) {
   const activateTab = vi.fn(async () => true)
+  const closeTab = vi.fn(async () => {})
+  const requestCloseTab = vi.fn()
+  const termFocus = vi.fn()
   const callbacks = useOverviewCallbacks({
     tabs: ref([]) as never,
     activePaneId: ref<string | null>(null),
     activeWorkspaceId: ref<string | null>(null),
-    termRefs: {},
+    termRefs: { a: { focus: termFocus } },
     session: { renameTab: vi.fn() },
     activateTab,
     activateWorkspace: vi.fn(async () => true),
-    closeTab: vi.fn(async () => {}),
-    requestCloseTab: vi.fn(),
+    closeTab,
+    requestCloseTab,
     newTab: vi.fn(async () => {}),
     persist: vi.fn(),
     commitLocalActivePane: vi.fn(),
     focusActive: vi.fn(),
     sendSync: (msg: SyncClientMsg) => sent.push(msg),
+    toast,
   })
-  return { callbacks, activateTab }
+  return { callbacks, activateTab, closeTab, requestCloseTab, toast, termFocus }
 }
 
 beforeEach(() => {
@@ -83,5 +93,62 @@ describe('useOverviewCallbacks activating a detached tab', () => {
 
     expect(activateTab).toHaveBeenCalledWith('a')
     expect(mocks.invoke).not.toHaveBeenCalledWith('focus_tab_window', expect.anything())
+  })
+
+  async function detachInStore(store: ReturnType<typeof useDetachedWindowsStore>, title?: string) {
+    mocks.invoke.mockResolvedValueOnce([
+      { tab_id: 'a', label: 'tab-a', title: title ?? null },
+    ])
+    await store.refreshFromRust()
+    mocks.invoke.mockReset()
+  }
+
+  it('refreshes the registry and activates normally when the window is gone', async () => {
+    const store = useDetachedWindowsStore()
+    await detachInStore(store, 'Alpha')
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'focus_tab_window') throw new Error('no such window')
+      if (command === 'list_detached_tab_windows') return []
+      return undefined
+    })
+    mcState.open = true
+
+    const { callbacks, activateTab, toast, termFocus } = setup()
+    callbacks.onOverviewActivate('a')
+    await flushPromises()
+
+    expect(store.isDetached('a')).toBe(false)
+    expect(activateTab).toHaveBeenCalledWith('a')
+    expect(toast.error).toHaveBeenCalledWith('detached.focusFailed')
+    expect(termFocus).toHaveBeenCalled()
+  })
+
+  it('reports a failed focus without activating when the window still exists', async () => {
+    const store = useDetachedWindowsStore()
+    await detachInStore(store)
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'focus_tab_window') throw new Error('display asleep')
+      if (command === 'list_detached_tab_windows')
+        return [{ tab_id: 'a', label: 'tab-a', title: null }]
+      return undefined
+    })
+    mcState.open = true
+
+    const { callbacks, activateTab, toast } = setup()
+    callbacks.onOverviewActivate('a')
+    await flushPromises()
+
+    expect(store.isDetached('a')).toBe(true)
+    expect(activateTab).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('detached.focusFailed')
+  })
+
+  it('closes a terminal through closeTab without the generic prompt', () => {
+    const { callbacks, closeTab, requestCloseTab } = setup()
+
+    callbacks.onOverviewCloseTerminal('a')
+
+    expect(closeTab).toHaveBeenCalledWith('a')
+    expect(requestCloseTab).not.toHaveBeenCalled()
   })
 })

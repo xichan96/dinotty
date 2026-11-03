@@ -450,6 +450,7 @@ export function useAppCore(options: AppCoreOptions) {
     closeOverview,
     onOverviewActivate,
     onOverviewCloseTab,
+    onOverviewCloseTerminal,
     onCloseTabsBulk,
     onOverviewNewTab,
     onOverviewNewTabSsh,
@@ -469,6 +470,7 @@ export function useAppCore(options: AppCoreOptions) {
     commitLocalActivePane,
     focusActive,
     sendSync: (msg) => sendSyncFn(msg),
+    toast,
   })
   const currentTabIndex = computed(
     () => visibleTabList.value.findIndex((t) => t.paneId === activePaneId.value) + 1
@@ -1321,6 +1323,7 @@ export function useAppCore(options: AppCoreOptions) {
     closeOverview,
     onOverviewActivate,
     onOverviewCloseTab,
+    onOverviewCloseTerminal,
     onCloseTabsBulk,
     onOverviewNewTab,
     onOverviewNewTabSsh,

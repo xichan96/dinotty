@@ -2,6 +2,7 @@ import type { Tab, PaneLayout } from '../types/pane'
 import { getAllLeaves, findLeaf } from '../types/pane'
 import type TerminalPane from '../components/terminal/TerminalPane.vue'
 import type { TerminalInstance } from './useTerminal'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 
 const MAX_PREVIEW_ROWS = 28
 const MAX_PREVIEW_COLS = 120 // beyond this, preview chars are <2px wide and invisible
@@ -24,6 +25,10 @@ export interface TabCard {
   htmlContent: string | PanePreviewNode
   pluginIcon?: string
   splitCount: number
+  /** The tab is open in its own native window on this client. */
+  detached?: boolean
+  /** Native window title, when the Rust registry reported one. */
+  windowLabel?: string | null
 }
 
 // P2: canvas screenshot disabled by default
@@ -333,11 +338,16 @@ export function invalidatePluginPreview(paneId: string): void {
 }
 
 export function useTabPreview() {
+  const detachedStore = useDetachedWindowsStore()
+
   function captureAll(
     tabs: Tab[],
     termRefs: Record<string, InstanceType<typeof TerminalPane>>
   ): TabCard[] {
     return tabs.map((tab, index) => {
+      const detached = detachedStore.isDetached(tab.paneId)
+      const windowLabel = detachedStore.windowTitleOf(tab.paneId)
+
       if (tab.type === 'plugin') {
         return {
           paneId: tab.paneId,
@@ -348,6 +358,28 @@ export function useTabPreview() {
           textContent: '',
           htmlContent: '',
           splitCount: 0,
+          detached,
+          windowLabel,
+        }
+      }
+
+      // A detached tab has no TerminalPane in this window to read a buffer
+      // from. Skip the capture entirely rather than rendering an empty frame;
+      // Mission Control shows a placeholder for these cards.
+      if (detached) {
+        const leaves = getAllLeaves(tab.layout)
+        const activeLeaf = findLeaf(tab.layout, tab.activePaneId) ?? leaves[0]
+        return {
+          paneId: tab.paneId,
+          index: index + 1,
+          title: tab.customTitle || activeLeaf.title,
+          type: 'terminal',
+          previewImage: null,
+          textContent: '',
+          htmlContent: '',
+          splitCount: leaves.length,
+          detached: true,
+          windowLabel,
         }
       }
 
@@ -369,6 +401,8 @@ export function useTabPreview() {
         textContent: '',
         htmlContent,
         splitCount: leaves.length,
+        detached,
+        windowLabel,
       }
     })
   }

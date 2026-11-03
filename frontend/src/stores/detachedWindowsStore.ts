@@ -19,9 +19,16 @@ export interface DetachedWindowInfo {
  */
 export const useDetachedWindowsStore = defineStore('detachedWindows', () => {
   const detachedTabIds = ref<Set<string>>(new Set())
+  /** Per-window registry copy, used for labels/tooltips in Mission Control. */
+  const detachedWindows = ref<Map<string, DetachedWindowInfo>>(new Map())
 
   function isDetached(tabId: string): boolean {
     return detachedTabIds.value.has(tabId)
+  }
+
+  /** Native window title for a detached tab, when the registry knows one. */
+  function windowTitleOf(tabId: string): string | null {
+    return detachedWindows.value.get(tabId)?.title ?? null
   }
 
   /** Drop ids that used to be detached from `items`, keeping the input order. */
@@ -29,13 +36,21 @@ export const useDetachedWindowsStore = defineStore('detachedWindows', () => {
     return items.filter((item) => !detachedTabIds.value.has(item.paneId))
   }
 
-  // Replacing the Set (instead of mutating it) keeps every computed that reads
-  // this store's state invalidated without relying on deep collection tracking.
-  function setDetached(tabId: string, detached: boolean) {
+  // Replacing the Set/Map (instead of mutating them) keeps every computed that
+  // reads this store's state invalidated without relying on deep collection
+  // tracking.
+  function setDetached(tabId: string, detached: boolean, info?: DetachedWindowInfo) {
     const next = new Set(detachedTabIds.value)
-    if (detached) next.add(tabId)
-    else next.delete(tabId)
+    const nextWindows = new Map(detachedWindows.value)
+    if (detached) {
+      next.add(tabId)
+      if (info) nextWindows.set(tabId, info)
+    } else {
+      next.delete(tabId)
+      nextWindows.delete(tabId)
+    }
     detachedTabIds.value = next
+    detachedWindows.value = nextWindows
   }
 
   async function focusDetached(tabId: string): Promise<boolean> {
@@ -61,7 +76,7 @@ export const useDetachedWindowsStore = defineStore('detachedWindows', () => {
     if (!isTauri()) return false
     if (detachedTabIds.value.has(tabId)) return focusDetached(tabId)
 
-    setDetached(tabId, true)
+    setDetached(tabId, true, { tab_id: tabId, label: `tab-${tabId}`, title: title ?? null })
     await nextTick()
 
     const args: Record<string, unknown> = { tabId }
@@ -97,9 +112,9 @@ export const useDetachedWindowsStore = defineStore('detachedWindows', () => {
     try {
       const list = await tauriInvoke('list_detached_tab_windows')
       const entries = Array.isArray(list) ? (list as DetachedWindowInfo[]) : []
-      detachedTabIds.value = new Set(
-        entries.map((entry) => entry.tab_id).filter((id): id is string => typeof id === 'string')
-      )
+      const valid = entries.filter((entry) => typeof entry?.tab_id === 'string')
+      detachedTabIds.value = new Set(valid.map((entry) => entry.tab_id))
+      detachedWindows.value = new Map(valid.map((entry) => [entry.tab_id, entry]))
     } catch (error) {
       console.warn('[detached] failed to list windows', error)
     }
@@ -113,7 +128,9 @@ export const useDetachedWindowsStore = defineStore('detachedWindows', () => {
 
   return {
     detachedTabIds,
+    detachedWindows,
     isDetached,
+    windowTitleOf,
     withoutDetached,
     focusDetached,
     openDetached,

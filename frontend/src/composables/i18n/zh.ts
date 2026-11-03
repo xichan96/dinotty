@@ -52,6 +52,7 @@ export default {
   'filePreview.symlink': '符号链接',
   'filePreview.symlinkCycle': '符号链接成环，已阻止展开',
   'filePreview.closeTree': '关闭文件树',
+  'filePreview.treeWidthHint': '拖动调整宽度 · 双击自适应内容',
   'filePreview.newFile': '新建文件',
   'filePreview.newFolder': '新建文件夹',
   'filePreview.collapseAll': '全部折叠',

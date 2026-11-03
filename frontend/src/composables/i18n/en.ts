@@ -52,6 +52,7 @@ export default {
   'filePreview.symlink': 'Symbolic link',
   'filePreview.symlinkCycle': 'Symbolic link loops back to an ancestor folder; expansion blocked',
   'filePreview.closeTree': 'Close file tree',
+  'filePreview.treeWidthHint': 'Drag to resize · double-click to fit contents',
   'filePreview.newFile': 'New file',
   'filePreview.newFolder': 'New folder',
   'filePreview.collapseAll': 'Collapse All',

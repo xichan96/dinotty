@@ -94,7 +94,7 @@
       v-else
       :model-value="sourceText"
       :language="format"
-      :readonly="truncated"
+      :readonly="readOnly || truncated"
       :file-path="filePath"
       :pane-id="paneId"
       :leaf-id="leafId"
@@ -136,6 +136,7 @@ const props = withDefaults(
     outlineOpen?: boolean
     outlineAvailable?: boolean
     outlinePanelId?: string
+    readOnly?: boolean
   }>(),
   {
     rawUrl: '',
@@ -149,6 +150,7 @@ const props = withDefaults(
     outlineOpen: false,
     outlineAvailable: false,
     outlinePanelId: '',
+    readOnly: false,
   }
 )
 

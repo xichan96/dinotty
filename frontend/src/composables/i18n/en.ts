@@ -23,6 +23,12 @@ export default {
   'previewWindow.dockHint': 'Release to merge into the active terminal pane',
   'previewWindow.dockEmptyTarget': 'This preview has no address to merge.',
   'previewWindow.dockFailed': 'Could not merge the preview.',
+  // Standalone read-only file viewer (kind=file preview window / web overlay).
+  'fileViewer.label': 'File viewer',
+  'fileViewer.loading': 'Loading file…',
+  'fileViewer.error': 'Could not load this file.',
+  'fileViewer.reload': 'Reload',
+  'fileViewer.close': 'Close',
   'previewToolbar.more': 'More actions',
   'devtools.console': 'Console',
   'devtools.network': 'Network',

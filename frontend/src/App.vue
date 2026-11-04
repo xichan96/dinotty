@@ -393,6 +393,8 @@
     :get-preview-content="getPreviewFloatContent"
     :workspace-id="activeWorkspaceId ?? undefined"
   />
+  <!-- Lazy so Monaco only loads once a viewer request actually needs the overlay. -->
+  <FileViewerOverlay v-if="authenticated && fileViewerRequest" />
 </template>
 
 <script setup lang="ts">
@@ -431,6 +433,9 @@ import PluginFloatWindowHost from './components/plugin/PluginFloatWindowHost.vue
 const WorkspaceOverview = defineAsyncComponent(
   () => import('./components/overview/WorkspaceOverview.vue')
 )
+const FileViewerOverlay = defineAsyncComponent(
+  () => import('./components/preview/FileViewerOverlay.vue')
+)
 import MobileKeyboard from './components/keyboard/MobileKeyboard.vue'
 import SystemKeyboardToolbar from './components/keyboard/SystemKeyboardToolbar.vue'
 import MobileInputGuide from './components/keyboard/MobileInputGuide.vue'
@@ -438,6 +443,7 @@ import KbDebugOverlay from './components/keyboard/KbDebugOverlay.vue'
 import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import LoginPage from './components/LoginPage.vue'
 import SetupPage from './components/SetupPage.vue'
+import { useFileViewerPresenter } from './composables/useFileViewerPresenter'
 import { useTabPlacement } from './composables/useTabPlacement'
 import { confirmState, confirmResolve, confirmCancel } from './composables/useConfirm'
 import { alertState, alertResolve } from './composables/useAlert'
@@ -594,6 +600,8 @@ const tauri = useAppTauri({
   lastTabCloseShortcutAt,
 })
 const bridge = usePluginBridge({ core })
+// Main window only: turns `open_file_viewer` into a native window or the overlay.
+const { request: fileViewerRequest } = useFileViewerPresenter()
 
 // ── Re-exports for the template ─────────────────────────────────
 const {

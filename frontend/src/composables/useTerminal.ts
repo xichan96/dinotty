@@ -37,6 +37,7 @@ import {
 } from '../utils/terminalInput'
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { attachImeHeuristic } from '../utils/imeAnchor'
+import { recordImeInput } from '../utils/imeDiagnostics'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { findTerminalFileLinks, type TerminalFileTarget } from '../utils/terminalFileLink'
 import { createTerminalOverlay } from './useTerminalOverlay'
@@ -1030,6 +1031,7 @@ export class TerminalInstance {
   }
 
   private _handleXtermData(rawData: string, fromIme229 = false) {
+    recordImeInput(fromIme229 ? 'ime229' : 'onData', rawData)
     // Mouse reports produced synchronously by our synthetic wheel dispatches
     // (wheel.sendWheelEvent) are legitimate identical repeats; the WKWebView
     // key-replay dedup below must not eat them.
@@ -1086,6 +1088,7 @@ export class TerminalInstance {
   private _emitInput(data: string): boolean {
     if (this._sessionExited) return false
     if (_activePaneId !== null && _activePaneId !== this.paneId) return false
+    recordImeInput('emit', data)
     this.onInput?.(data)
     this.sendData(data)
     return true

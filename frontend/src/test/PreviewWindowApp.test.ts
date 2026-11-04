@@ -74,6 +74,24 @@ vi.mock('../components/preview/FileWorkspacePreview.vue', async () => {
   }
 })
 
+vi.mock('../components/preview/FileViewer.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      name: 'FileViewer',
+      props: {
+        sourcePaneId: { type: String, default: '' },
+        path: { type: String, default: '' },
+        title: { type: String, default: undefined },
+      },
+      setup(_props, { expose }) {
+        expose({ reload: vi.fn() })
+        return () => h('div', { class: 'file-viewer-stub' })
+      },
+    }),
+  }
+})
+
 vi.mock('../components/preview/WebPreview.vue', async () => {
   const { defineComponent, h } = await import('vue')
   return {
@@ -166,6 +184,49 @@ describe('PreviewWindowApp', () => {
     expect(files.props('sourcePaneId')).toBe('pane-2')
     expect(files.props('paneId')).toBe('window:files:pane-2')
     expect(files.props('initialPath')).toBe('/tmp/c.md')
+
+    wrapper.unmount()
+  })
+
+  it('renders the standalone viewer for kind=file without installing the dock', async () => {
+    const wrapper = await mountPreview('kind=file&sourcePaneId=pane-1&path=%2Ftmp%2Fa.png')
+
+    const viewer = wrapper.findComponent({ name: 'FileViewer' })
+    expect(viewer.exists()).toBe(true)
+    expect(viewer.props()).toMatchObject({
+      sourcePaneId: 'pane-1',
+      path: '/tmp/a.png',
+    })
+    expect(wrapper.findComponent({ name: 'FileWorkspacePreview' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'WebPreview' }).exists()).toBe(false)
+    expect(mocks.usePreviewWindowDock).not.toHaveBeenCalled()
+    expect(wrapper.find('.preview-window-shell__dock-hint').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('navigates the standalone viewer when the same pane reopens it', async () => {
+    const wrapper = await mountPreview('kind=file&sourcePaneId=pane-1&path=%2Ftmp%2Fa.png')
+
+    fireNavigate({ kind: 'file', sourcePaneId: 'pane-1', path: '/tmp/b.md' })
+    await nextTick()
+
+    expect(wrapper.findComponent({ name: 'FileViewer' }).props('path')).toBe('/tmp/b.md')
+    expect(wrapper.findComponent({ name: 'FileViewer' }).props('sourcePaneId')).toBe('pane-1')
+
+    wrapper.unmount()
+  })
+
+  it('follows a new source pane for the standalone viewer', async () => {
+    const wrapper = await mountPreview('kind=file&sourcePaneId=pane-1&path=%2Ftmp%2Fa.png')
+
+    fireNavigate({ kind: 'file', sourcePaneId: 'pane-2', path: '/tmp/c.md' })
+    await nextTick()
+
+    expect(wrapper.findComponent({ name: 'FileViewer' }).props()).toMatchObject({
+      sourcePaneId: 'pane-2',
+      path: '/tmp/c.md',
+    })
 
     wrapper.unmount()
   })

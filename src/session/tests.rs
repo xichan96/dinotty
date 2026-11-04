@@ -541,3 +541,55 @@ fn tab_created_serializes_explicit_workspace_assignment() {
 
     assert_eq!(value["workspace_id"], "workspace-b");
 }
+
+#[test]
+fn open_file_viewer_serializes_wire_shape() {
+    let msg = SyncMsg::OpenFileViewer {
+        request_id: "req-1".into(),
+        pane_id: "pane-1".into(),
+        path: "docs/design.md".into(),
+        title: Some("design.md".into()),
+    };
+
+    let value = serde_json::to_value(msg).unwrap();
+
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "type": "open_file_viewer",
+            "request_id": "req-1",
+            "pane_id": "pane-1",
+            "path": "docs/design.md",
+            "title": "design.md",
+        })
+    );
+}
+
+#[test]
+fn sync_role_broadcast_counts_only_the_requested_role() {
+    let manager = SessionManager::new();
+    let (_, mut main_rx) = manager.add_sync_client();
+    let (_, mut detached_rx) = manager.add_sync_client_with_role(SyncClientRole::Detached);
+    let msg = SyncMsg::TabClosed { pane_id: "pane-1".into() };
+
+    assert_eq!(manager.broadcast_sync_counted_role(&msg, SyncClientRole::Main), 1);
+
+    let main_msg: serde_json::Value =
+        serde_json::from_str(&main_rx.try_recv().expect("main client")).unwrap();
+    assert_eq!(main_msg["type"], "tab_closed");
+    assert!(detached_rx.try_recv().is_err(), "detached client is not a Main target");
+}
+
+#[test]
+fn sync_role_broadcast_is_zero_when_the_main_client_is_gone() {
+    let manager = SessionManager::new();
+    let (_, main_rx) = manager.add_sync_client();
+    drop(main_rx);
+    let msg = SyncMsg::TabClosed { pane_id: "pane-1".into() };
+
+    assert_eq!(manager.broadcast_sync_counted_role(&msg, SyncClientRole::Main), 0);
+    assert!(
+        manager.sync_clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty(),
+        "closed clients are reaped by the broadcast"
+    );
+}

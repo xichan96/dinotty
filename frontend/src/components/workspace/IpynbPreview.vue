@@ -138,7 +138,7 @@
       v-else
       :model-value="editorText"
       language="json"
-      :readonly="truncated"
+      :readonly="readOnly || truncated"
       :file-path="filePath"
       :pane-id="paneId"
       :leaf-id="leafId"
@@ -186,6 +186,7 @@ const props = withDefaults(
     editorText?: string
     editorDirty?: boolean
     canSaveEditor?: boolean
+    readOnly?: boolean
   }>(),
   {
     rawUrl: '',
@@ -196,6 +197,7 @@ const props = withDefaults(
     editorText: '',
     editorDirty: false,
     canSaveEditor: false,
+    readOnly: false,
   }
 )
 

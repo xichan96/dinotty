@@ -118,14 +118,14 @@
             v-if="htmlShowPreview"
             class="file-pdf"
             :title="t('filePreview.preview')"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            :sandbox="htmlSandbox"
             :srcdoc="htmlPreviewSrcdoc"
           ></iframe>
           <MonacoEditor
             v-else
             :model-value="editorText"
             :language="language"
-            :readonly="!!meta?.truncated"
+            :readonly="readOnly || !!meta?.truncated"
             :file-path="filePath"
             :pane-id="paneId"
             :leaf-id="leafId"
@@ -146,6 +146,7 @@
         :editor-dirty="editorDirty"
         :show-save="showSave"
         :can-save-editor="canSaveEditor"
+        :read-only="readOnly"
         @update:editor-text="$emit('update:editorText', $event)"
         @save-editor="$emit('saveEditor')"
         @selection-change="(p) => $emit('selection-change', p)"
@@ -162,6 +163,7 @@
         :editor-text="editorText"
         :editor-dirty="editorDirty"
         :can-save-editor="canSaveEditor"
+        :read-only="readOnly"
         @update:editor-text="$emit('update:editorText', $event)"
         @save-editor="$emit('saveEditor')"
         @selection-change="(payload) => $emit('selection-change', payload)"
@@ -182,6 +184,7 @@
         :outline-open="outlineOpen"
         :outline-available="outlineAvailable"
         :outline-panel-id="outlinePanelId"
+        :read-only="readOnly"
         @update:editor-text="$emit('update:editorText', $event)"
         @save-editor="$emit('saveEditor')"
         @selection-change="(payload) => $emit('selection-change', payload)"
@@ -199,6 +202,7 @@
         :can-save-editor="canSaveEditor"
         :pane-id="paneId"
         :leaf-id="leafId"
+        :read-only="readOnly"
         @update:editor-text="$emit('update:editorText', $event)"
         @save-editor="$emit('saveEditor')"
         @selection-change="(payload) => $emit('selection-change', payload)"
@@ -283,7 +287,7 @@
             v-else
             :model-value="editorText"
             :language="language"
-            :readonly="!!meta?.truncated"
+            :readonly="readOnly || !!meta?.truncated"
             :file-path="filePath"
             :pane-id="paneId"
             :leaf-id="leafId"
@@ -375,6 +379,8 @@ const props = defineProps<{
   paneId?: string
   filePath?: string
   leafId?: string
+  /** Standalone viewer mode: no editing, and workspace HTML loses same-origin. */
+  readOnly?: boolean
   outlineOpen?: boolean
   outlineAvailable?: boolean
   outlinePanelId?: string
@@ -416,6 +422,16 @@ const structuredFormat = computed(function computeStructuredFormat() {
   if (props.meta?.kind !== 'text') return null
   if (isIpynb.value || isLogFile.value || isCsvFile.value) return null
   return structuredFormatForPath(structuredFilePath.value)
+})
+
+const htmlSandbox = computed(function computeHtmlSandbox() {
+  // allow-same-origin would give workspace HTML the Dinotty origin, and with it
+  // the user's authenticated API access. The read-only viewer keeps scripts so
+  // chart-style documents still work, but drops same-origin, forms, popups and
+  // modals.
+  return props.readOnly
+    ? 'allow-scripts'
+    : 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
 })
 
 const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {

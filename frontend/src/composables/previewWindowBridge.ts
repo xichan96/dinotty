@@ -29,7 +29,8 @@ export const PREVIEW_DOCK_REQUEST_EVENT = 'preview-window-dock-request'
 export const PREVIEW_DOCK_RESULT_EVENT = 'preview-window-dock-result'
 
 export interface PreviewWindowPayload {
-  kind: 'files' | 'web'
+  /** `file` is the standalone read-only viewer; it never docks. */
+  kind: 'files' | 'web' | 'file'
   /** Workspace-relative or absolute path for the file browser. */
   path?: string | null
   /** Target URL for the web preview. */

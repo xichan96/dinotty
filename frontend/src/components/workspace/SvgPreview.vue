@@ -52,7 +52,7 @@
       v-if="activeTab === 'source'"
       :model-value="sourceText"
       language="xml"
-      :readonly="truncated"
+      :readonly="readOnly || truncated"
       :file-path="filePath"
       :pane-id="paneId"
       :leaf-id="leafId"
@@ -83,6 +83,7 @@ const props = withDefaults(
     canSaveEditor?: boolean
     paneId?: string
     leafId?: string
+    readOnly?: boolean
   }>(),
   {
     truncated: false,
@@ -91,6 +92,7 @@ const props = withDefaults(
     canSaveEditor: false,
     paneId: '',
     leafId: undefined,
+    readOnly: false,
   }
 )
 

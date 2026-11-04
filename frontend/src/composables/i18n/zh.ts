@@ -23,6 +23,12 @@ export default {
   'previewWindow.dockHint': '松开以合并到当前终端窗格',
   'previewWindow.dockEmptyTarget': '此预览暂无可合并的地址。',
   'previewWindow.dockFailed': '合并预览失败。',
+  // 独立只读文件查看器（kind=file 预览窗口 / Web 浮层）。
+  'fileViewer.label': '文件查看器',
+  'fileViewer.loading': '正在加载文件…',
+  'fileViewer.error': '无法加载该文件。',
+  'fileViewer.reload': '重新加载',
+  'fileViewer.close': '关闭',
   'previewToolbar.more': '更多功能',
   'devtools.console': '控制台',
   'devtools.network': '网络',

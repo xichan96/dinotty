@@ -68,7 +68,7 @@
       <MonacoEditor
         :model-value="editorText"
         :language="meta?.language || 'plaintext'"
-        :readonly="!!meta?.truncated"
+        :readonly="readOnly || !!meta?.truncated"
         :file-path="filePath"
         :pane-id="paneId"
         :leaf-id="leafId"
@@ -154,6 +154,7 @@ const props = defineProps<{
   editorDirty: boolean
   showSave: boolean
   canSaveEditor: boolean
+  readOnly?: boolean
 }>()
 
 defineEmits<{

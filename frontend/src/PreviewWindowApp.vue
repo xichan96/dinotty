@@ -12,30 +12,36 @@ import { usePreviewWindowDock } from './composables/usePreviewWindowDock'
 import { tauriInvoke } from './composables/useTransport'
 import { t } from './composables/useI18n'
 import FileWorkspacePreview from './components/preview/FileWorkspacePreview.vue'
+import FileViewer from './components/preview/FileViewer.vue'
 import WebPreview from './components/preview/WebPreview.vue'
 
 /**
- * Native preview window (`preview.html?kind=files|web&…`).
+ * Native preview window (`preview.html?kind=files|web|file&…`).
  *
  * Desktop-only companion of the split/floating previews: the settings'
- * `preview_open_modes` may route the file browser and web preview here. The
- * window owns no tab state — it talks to the same server as the main window
- * and keeps its own workspace state, scoped by `window:files:<sourcePaneId>`.
+ * `preview_open_modes` may route the file browser and web preview here, and
+ * `open_file_viewer` always uses `kind=file`. The window owns no tab state — it
+ * talks to the same server as the main window and keeps its own workspace
+ * state, scoped by `window:files:<sourcePaneId>`.
  *
  * Windows are multi-instance: a file browser window is bound to the terminal
  * session it browses (one window per `sourcePaneId`, so different workspaces
  * get their own), and every web preview open creates a fresh window. Reopening
- * the same file-browser session focuses its window and emits
- * `preview-window-navigate` with the new target.
+ * the same preview focuses its window and emits `preview-window-navigate` with
+ * the new target.
  *
- * Releasing the native title bar over the main window's tab strip merges this
- * preview into the current workspace (`usePreviewWindowDock`).
+ * Releasing the native title bar over the main window's tab strip merges a
+ * file-browser/web preview into the current workspace
+ * (`usePreviewWindowDock`). A standalone file viewer is not a workspace tab and
+ * therefore never docks.
  */
 
 type ShellState = 'loading' | 'ready' | 'error'
+type PreviewKind = 'files' | 'web' | 'file'
 
 const params = new URLSearchParams(window.location.search)
-const kind: 'files' | 'web' = params.get('kind') === 'web' ? 'web' : 'files'
+const rawKind = params.get('kind')
+const kind: PreviewKind = rawKind === 'web' ? 'web' : rawKind === 'file' ? 'file' : 'files'
 
 function tauriWindowLabel(): string {
   try {
@@ -62,6 +68,7 @@ const filePath = ref(params.get('path') ?? '')
 const webUrl = ref(params.get('url') ?? '')
 
 const filesRef = ref<InstanceType<typeof FileWorkspacePreview> | null>(null)
+const fileViewerRef = ref<InstanceType<typeof FileViewer> | null>(null)
 const webRef = ref<InstanceType<typeof WebPreview> | null>(null)
 
 /** Per-window workspace state key; switching source terminals remounts the
@@ -78,6 +85,7 @@ const dockHint = ref(false)
 
 /** Live target carried when the window is docked into the main window. */
 function currentLocation(): { path?: string; url?: string } {
+  if (kind === 'file') return { path: filePath.value }
   if (kind === 'files') {
     const path = filesRef.value?.getCurrentPath?.() || filePath.value
     return { path }
@@ -107,6 +115,13 @@ function onNavigate(payload: PreviewWindowPayload | null | undefined) {
   if (!payload || payload.kind !== kind) return
   if (kind === 'web') {
     if (payload.url) webUrl.value = payload.url
+    return
+  }
+  if (kind === 'file') {
+    // The viewer's own watcher reloads when either prop changes, so opening the
+    // same file again deliberately stays a no-op.
+    if (payload.sourcePaneId) sourcePaneId.value = payload.sourcePaneId
+    if (payload.path) filePath.value = payload.path
     return
   }
   const nextSource = payload.sourcePaneId || sourcePaneId.value
@@ -162,19 +177,22 @@ onMounted(async () => {
     await nextTick()
     listenNavigate()
     // Releasing this window's title bar over the main window's tab strip merges
-    // it into the current workspace.
-    disposeDock = usePreviewWindowDock({
-      windowLabel,
-      kind,
-      sourcePaneId: () => sourcePaneId.value,
-      getLocation: currentLocation,
-      onHintChange: (active) => {
-        dockHint.value = active
-      },
-      onRejected: () => {
-        dockHint.value = false
-      },
-    })
+    // it into the current workspace. A standalone file viewer is not a tab and
+    // has no workspace to merge into, so it deliberately opts out.
+    if (kind !== 'file') {
+      disposeDock = usePreviewWindowDock({
+        windowLabel,
+        kind,
+        sourcePaneId: () => sourcePaneId.value,
+        getLocation: currentLocation,
+        onHintChange: (active) => {
+          dockHint.value = active
+        },
+        onRejected: () => {
+          dockHint.value = false
+        },
+      })
+    }
   } catch (error) {
     console.error('[preview-window] bootstrap failed:', error)
     state.value = 'error'
@@ -206,6 +224,12 @@ onBeforeUnmount(() => {
         :initial-path="filePath || undefined"
         :is-window="true"
       />
+      <FileViewer
+        v-else-if="kind === 'file'"
+        ref="fileViewerRef"
+        :source-pane-id="sourcePaneId"
+        :path="filePath"
+      />
       <WebPreview
         v-else-if="kind === 'web'"
         ref="webRef"
@@ -230,7 +254,7 @@ onBeforeUnmount(() => {
     </p>
 
     <div
-      v-if="state === 'ready' && dockHint"
+      v-if="state === 'ready' && kind !== 'file' && dockHint"
       class="preview-window-shell__dock-hint"
       aria-hidden="true"
     >

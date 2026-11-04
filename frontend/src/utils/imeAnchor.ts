@@ -1,4 +1,10 @@
 import type { Terminal } from '@xterm/xterm'
+import {
+  isImeDiagnosticsEnabled,
+  recordImeAnchorDecision,
+  recordImeCompositionEnd,
+  recordImeDomPlacement,
+} from './imeDiagnostics'
 
 // IME anchor heuristic ported from
 // https://github.com/msdshsk/xterm-ime-anchor (MIT).
@@ -47,7 +53,7 @@ import type { Terminal } from '@xterm/xterm'
 // xterm.js keep its default hardware-cursor anchor (correct for normal
 // shells, because shells naturally cursor-park after their prompt).
 
-export type ImeAnchorSource = 'heuristic' | 'hardware' | 'contentEnd'
+export type ImeAnchorSource = 'heuristic' | 'hardware' | 'contentEnd' | 'cached'
 
 export type ImeAnchor = {
   source: ImeAnchorSource
@@ -158,26 +164,107 @@ export interface AnchorFallbackContext {
   lineAt(viewportRow: number): ImeBufferLineLike | undefined
 }
 
+// Characters TUIs use to draw horizontal rules / box borders. A row made only
+// of these is chrome, never an input line.
+const HORIZONTAL_BORDER_CHARS = '─━═╌╍┄┅┈┉'
+
+// How far above the ConPTY-parked row we look for the real input row.
+const MAX_FALLBACK_SCAN_ROWS = 8
+
+// Rows whose content reaches into this fraction of the width are right-aligned
+// chrome (status bars, badges), not a prompt/input line.
+const RIGHT_EDGE_CHROME_RATIO = 0.85
+
+// True when every visible (non-blank, non-continuation) cell is a horizontal
+// border glyph — pi's editor draws `─`-rows above and below the input box, and
+// ConPTY can park the cursor at the right edge of such a row.
+export function isHorizontalBorderRow(line: ImeBufferLineLike | undefined): boolean {
+  if (!line) return false
+  let sawBorder = false
+  for (let x = 0; x < line.length; x++) {
+    const cell = line.getCell(x)
+    if (!cell) continue
+    if ((cell.getWidth?.() ?? 1) === 0) continue
+    const chars = cell.getChars?.() ?? ''
+    if (chars.trim() === '') continue
+    if (chars.length !== 1 || !HORIZONTAL_BORDER_CHARS.includes(chars)) return false
+    sawBorder = true
+  }
+  return sawBorder
+}
+
+// True when the row's final cell carries no visible content. A ConPTY sweep
+// parks the cursor on the last column, which on an input row is blank padding;
+// a shell line that genuinely filled the row ends with a character.
+export function isLastCellBlank(line: ImeBufferLineLike | undefined, cols: number): boolean {
+  if (!line) return true
+  for (let x = Math.min(line.length, cols) - 1; x >= 0; x--) {
+    const cell = line.getCell(x)
+    if (!cell) return true
+    if ((cell.getWidth?.() ?? 1) === 0) continue // continuation of a wide glyph
+    return !cell.isInverse() && (cell.getChars?.() ?? '').trim() === ''
+  }
+  return true
+}
+
+// Nearest row at or above `fromRow` that looks like the input line: some
+// content, not a border row, and not right-edge chrome.
+export function findInputRowAbove(
+  ctx: AnchorFallbackContext,
+  fromRow: number
+): { row: number; end: number } | null {
+  const floor = Math.max(0, fromRow - MAX_FALLBACK_SCAN_ROWS)
+  for (let row = fromRow; row >= floor; row--) {
+    const line = ctx.lineAt(row)
+    if (!line || isHorizontalBorderRow(line)) continue
+    const end = findRowContentEnd(line)
+    if (end === null) continue
+    if (end > ctx.cols * RIGHT_EDGE_CHROME_RATIO) continue
+    return { row, end }
+  }
+  return null
+}
+
 // Second-chance anchor for when the inverse-cell scan found nothing (#323).
 // Returns null to keep xterm's hardware-cursor anchor, which is correct
 // whenever the cursor is legitimately parked — shells park exactly at the end
 // of the typed text (within one cell, to allow a space before the caret).
-// A hardware cursor further past the content end is a ConPTY sweep artifact;
-// then the plausible input position is the content end of the cursor's row.
+//
+// Two ConPTY-specific shapes are repaired here:
+//   1. the cursor is parked past its row's content (it swept the row and left
+//      the cursor at the end of the emitted text) — anchor at the content end;
+//   2. the cursor is parked on the last columns of a row whose right edge is
+//      blank padding or a horizontal border. The column is then a sweep
+//      artifact, not a real caret position, so walk up to the nearest row that
+//      looks like an input line and anchor at its content end.
 export function resolveFallbackAnchor(ctx: AnchorFallbackContext): ImeAnchor | null {
   const hw = ctx.hardwareCursor
   if (hw.row < 0 || hw.row >= ctx.rows) return null
-  const end = findRowContentEnd(ctx.lineAt(hw.row))
+  const line = ctx.lineAt(hw.row)
+  const end = findRowContentEnd(line)
   // +1 tolerance: prompts like "> " park the caret one cell past the text.
   const suspect = end === null ? hw.col > 1 : hw.col > end + 1
-  if (!suspect) return null
-  if (end === null) {
-    // Blank row (ConPTY swept an empty input's inverse-space caret away):
-    // anchor at the row start rather than the right edge. The candidate
-    // window lands at the prompt's leading edge — near the input, no stretch.
-    return { source: 'contentEnd', col: 0, row: hw.row }
+  if (suspect) {
+    if (end === null) {
+      // Blank row (ConPTY swept an empty input's inverse-space caret away):
+      // anchor at the row start rather than the right edge. The candidate
+      // window lands at the prompt's leading edge — near the input, no stretch.
+      return { source: 'contentEnd', col: 0, row: hw.row }
+    }
+    return { source: 'contentEnd', col: Math.min(end, ctx.cols - 1), row: hw.row }
   }
-  return { source: 'contentEnd', col: Math.min(end, ctx.cols - 1), row: hw.row }
+
+  // Right-edge parking. A real shell line that fills the row ends with a
+  // character, so `isLastCellBlank` keeps this branch away from normal shells.
+  if (hw.col >= ctx.cols - 2 && end !== null) {
+    if (isLastCellBlank(line, ctx.cols) || isHorizontalBorderRow(line)) {
+      const found = findInputRowAbove(ctx, hw.row)
+      if (found) {
+        return { source: 'contentEnd', col: Math.min(found.end, ctx.cols - 1), row: found.row }
+      }
+    }
+  }
+  return null
 }
 
 export function computeCellSize(
@@ -241,6 +328,14 @@ export function attachImeHeuristic(terminal: Terminal, options: AttachOptions = 
   let pinned: { left: string; top: string } | null = null
   let renderDisposable: { dispose(): void } | null = null
 
+  // Last inverse caret observed while idle. A blinking caret can be off when
+  // the composition starts; the cell seen a moment earlier is still the input
+  // position, which is better than any cursor-row heuristic.
+  const IDLE_HIT_TTL_MS = 3000
+  const IDLE_SCAN_INTERVAL_MS = 200
+  let cachedIdleHit: { col: number; row: number; at: number } | null = null
+  let lastIdleScan = 0
+
   // A single MutationObserver routed at both elements — we re-apply whenever
   // xterm's recursive setTimeout writes the hardware-cursor coordinates back.
   const reapply = (el: HTMLElement) => {
@@ -299,11 +394,36 @@ export function attachImeHeuristic(terminal: Terminal, options: AttachOptions = 
     pin({ source: 'heuristic', col: hit.col, row: hit.row })
   }
 
+  function cachedHit(now = Date.now()): { col: number; row: number; ageMs: number } | null {
+    if (!cachedIdleHit) return null
+    const ageMs = now - cachedIdleHit.at
+    if (ageMs > IDLE_HIT_TTL_MS) return null
+    if (cachedIdleHit.row < 0 || cachedIdleHit.row >= terminal.rows) return null
+    return { col: cachedIdleHit.col, row: cachedIdleHit.row, ageMs }
+  }
+
+  // Remember the last inverse caret seen while idle. A caret that is blinking
+  // (Ink) or gets swept on the next ConPTY rebuild can be missing exactly when
+  // composition starts; the cell observed a moment earlier is still where the
+  // user is typing. Throttled — renders can fire at frame rate.
+  function cacheIdleHit() {
+    if (composing) return
+    const now = Date.now()
+    if (now - lastIdleScan < IDLE_SCAN_INTERVAL_MS) return
+    lastIdleScan = now
+    const hit = findInverseCell(terminal.buffer.active, terminal.rows, requireIsolatedCell)
+    // Keep the previous hit when this tick finds none (blink-off), so a short
+    // blink cycle does not evict the caret.
+    if (hit) cachedIdleHit = { ...hit, at: now }
+  }
+
   // Resolve the compositionstart anchor when the inverse-cell scan found
-  // nothing: hardware cursor if it looks legitimately parked, otherwise the
-  // content-end heuristic (#323: ConPTY-parked cursors on TUI input rows).
+  // nothing: the caret seen a moment ago, then the content-end heuristic
+  // (#323: ConPTY-parked cursors on TUI input rows), then the hardware cursor.
   function resolveStartAnchor(): ImeAnchor {
     const buffer = terminal.buffer.active
+    const cached = cachedHit()
+    if (cached) return { source: 'cached', col: cached.col, row: cached.row }
     const fallback = resolveFallbackAnchor({
       cols: terminal.cols,
       rows: terminal.rows,
@@ -314,16 +434,41 @@ export function attachImeHeuristic(terminal: Terminal, options: AttachOptions = 
     return fallback ?? { source: 'hardware', col: buffer.cursorX, row: buffer.cursorY }
   }
 
+  function recordStart(anchor: ImeAnchor, hit: { col: number; row: number } | null) {
+    if (!isImeDiagnosticsEnabled()) return
+    const buffer = terminal.buffer.active
+    const clamped: ImeAnchor = {
+      source: anchor.source,
+      col: Math.min(Math.max(anchor.col, 0), terminal.cols - 1),
+      row: Math.min(Math.max(anchor.row, 0), terminal.rows - 1),
+    }
+    recordImeAnchorDecision({
+      anchor: clamped,
+      hit,
+      cached: cachedHit(),
+      buffer,
+      cols: terminal.cols,
+      rows: terminal.rows,
+    })
+    const root = terminal.element ?? null
+    const probe = () => recordImeDomPlacement(clamped, root)
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(probe)
+    else setTimeout(probe, 0)
+  }
+
   function onCompositionStart() {
     composing = true
 
-    // Initial scan. If no inverse cell is present right now, try the
-    // content-end fallback before deferring to xterm's hardware anchor.
+    // Initial scan. If no inverse cell is present right now, try the cached
+    // caret and the content-end fallback before deferring to the hardware
+    // anchor.
     const hit = findInverseCell(terminal.buffer.active, terminal.rows, requireIsolatedCell)
+    let anchor: ImeAnchor
     if (hit) {
-      recomputeAndPin()
+      anchor = { source: 'heuristic', col: hit.col, row: hit.row }
+      pin(anchor)
     } else {
-      const anchor = resolveStartAnchor()
+      anchor = resolveStartAnchor()
       if (anchor.source === 'hardware') {
         // Let xterm.js position the elements (correct for normal shells).
         pinned = null
@@ -332,6 +477,7 @@ export function attachImeHeuristic(terminal: Terminal, options: AttachOptions = 
         pin(anchor)
       }
     }
+    recordStart(anchor, hit)
 
     // Follow subsequent renders — catches the partial-commit case where Ink
     // redraws its caret mid-composition, and picks up the inverse caret as
@@ -344,6 +490,7 @@ export function attachImeHeuristic(terminal: Terminal, options: AttachOptions = 
     pinned = null
     renderDisposable?.dispose()
     renderDisposable = null
+    recordImeCompositionEnd()
     // Let xterm.js take its natural position back on the next cursor tick.
   }
 
@@ -352,12 +499,19 @@ export function attachImeHeuristic(terminal: Terminal, options: AttachOptions = 
   moTa.observe(textarea, { attributes: true, attributeFilter: ['style'] })
   moCv.observe(compositionView, { attributes: true, attributeFilter: ['style'] })
 
+  // Seed the idle cache now and keep it warm on renders, so the caret is known
+  // even if it is hidden/swept at the instant a composition begins.
+  const idleRenderDisposable = terminal.onRender(() => cacheIdleHit())
+  cacheIdleHit()
+
   return {
     detach() {
       composing = false
       pinned = null
       renderDisposable?.dispose()
       renderDisposable = null
+      idleRenderDisposable.dispose()
+      cachedIdleHit = null
       textarea.removeEventListener('compositionstart', onCompositionStart)
       textarea.removeEventListener('compositionend', onCompositionEnd)
       moTa.disconnect()

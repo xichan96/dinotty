@@ -63,6 +63,7 @@ const zhSidebar = [
           { text: '总览', link: '/zh/api/' },
           { text: 'Tabs & Panes API', link: '/zh/api/tabs-panes-api' },
           { text: 'Open API（终端读写）', link: '/zh/api/open-api' },
+          { text: 'File Viewer API（独立文件查看器）', link: '/zh/api/file-viewer' },
           { text: 'Mission Control API', link: '/zh/api/mission-control-api' },
           { text: 'Clipboard API', link: '/zh/api/clipboard-api' },
           { text: 'MCP Server', link: '/zh/api/mcp-server' }
@@ -74,7 +75,8 @@ const zhSidebar = [
           { text: 'Event Bus', link: '/zh/internals/event-bus' },
           { text: 'Token 权限系统', link: '/zh/internals/token-system' },
           { text: '审计与 Webhook', link: '/zh/internals/audit-webhook' },
-          { text: '游离终端窗口（设计稿）', link: '/zh/internals/detached-terminal-window' }
+          { text: '游离终端窗口（设计稿）', link: '/zh/internals/detached-terminal-window' },
+          { text: '独立文件查看器（设计稿）', link: '/zh/internals/standalone-file-viewer' }
         ]
       },
       { text: '贡献指南', link: '/zh/getting-started/contributing' },
@@ -132,6 +134,7 @@ const enSidebar = [
           { text: 'Overview', link: '/en/api/' },
           { text: 'Tabs & Panes API', link: '/en/api/tabs-panes-api' },
           { text: 'Open API (Terminal I/O)', link: '/en/api/open-api' },
+          { text: 'File Viewer API', link: '/en/api/file-viewer' },
           { text: 'Mission Control API', link: '/en/api/mission-control-api' },
           { text: 'Clipboard API', link: '/en/api/clipboard-api' },
           { text: 'MCP Server', link: '/en/api/mcp-server' }

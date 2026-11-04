@@ -22,6 +22,11 @@ import { isTauri, tauriInvoke } from './useTransport'
 import { isTouchDevice, setKbTypingLock } from './useTerminal'
 import { useI18n } from './useI18n'
 import { hasOpenGuard } from '../utils/keyboardGuardMode'
+import {
+  isImeDiagnosticsEnabled,
+  setImeDiagnosticsEnabled,
+  syncImeDiagnosticsFromLocation,
+} from '../utils/imeDiagnostics'
 import { FOCUS_ACTIVE_KEY } from './useFocusActive'
 import { useSshAuth } from './useSshAuth'
 import { useCursorPicker } from './useCursorPicker'
@@ -186,6 +191,19 @@ export function useAppCore(options: AppCoreOptions) {
   const kbDebugEnabled = ref(false)
   function syncKbDebugFlag() {
     kbDebugEnabled.value = /kbdebug/i.test(location.search + location.hash)
+  }
+  // #ime-debug turns on the gated IME-anchor recorder (utils/imeDiagnostics).
+  // Reports for Windows IME bugs can then be captured without DevTools.
+  const imeDebugEnabled = ref(false)
+  function syncImeDebugFlag() {
+    imeDebugEnabled.value = syncImeDiagnosticsFromLocation(location.search, location.hash)
+  }
+  // The desktop app's URL is not user-editable, so the hash switch has a
+  // keyboard twin: Ctrl/Cmd+Shift+Alt+I toggles the recorder + overlay.
+  function toggleImeDebug() {
+    const next = !isImeDiagnosticsEnabled()
+    setImeDiagnosticsEnabled(next)
+    imeDebugEnabled.value = next
   }
 
   initHostKeyboardProviders()
@@ -1367,6 +1385,9 @@ export function useAppCore(options: AppCoreOptions) {
     systemActionKeyboardOpen,
     kbDebugEnabled,
     syncKbDebugFlag,
+    imeDebugEnabled,
+    syncImeDebugFlag,
+    toggleImeDebug,
     keyboardHostRef,
     systemToolbarRef,
     keyboardProviders,

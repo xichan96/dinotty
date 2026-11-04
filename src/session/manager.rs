@@ -4,7 +4,7 @@ use super::layout::{
 };
 #[cfg(test)]
 use super::types::SessionStatus;
-use super::types::{CloseReason, SyncClient, SyncMsg, TabInfo};
+use super::types::{CloseReason, SyncClient, SyncClientRole, SyncMsg, TabInfo};
 use super::Session;
 use crate::events::{BusEvent, EventBus};
 use dashmap::DashMap;
@@ -602,12 +602,42 @@ impl SessionManager {
     /// Panics if `SyncMsg` serialization fails (should be infallible).
     #[allow(clippy::expect_used)]
     pub fn broadcast_sync(&self, msg: &SyncMsg) {
+        self.broadcast_sync_counted_filter(msg, None);
+    }
+
+    /// Broadcast to clients with the given role only, returning how many
+    /// received the message. Used to distinguish "a UI actually saw this"
+    /// from "some client is connected" - detached terminal windows are sync
+    /// clients but cannot present UI.
+    ///
+    /// # Panics
+    /// Panics if `SyncMsg` serialization fails (should be infallible).
+    #[allow(clippy::expect_used)]
+    pub fn broadcast_sync_counted_role(&self, msg: &SyncMsg, role: SyncClientRole) -> usize {
+        self.broadcast_sync_counted_filter(msg, Some(role))
+    }
+
+    #[allow(clippy::expect_used)]
+    fn broadcast_sync_counted_filter(&self, msg: &SyncMsg, role: Option<SyncClientRole>) -> usize {
         let json = serde_json::to_string(msg).expect("serialization is infallible");
-        let mut clients =
-            self.sync_clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        clients.retain(|c| c.tx.send(json.clone()).is_ok());
-        drop(clients);
+        let mut delivered = 0;
+        {
+            let mut clients =
+                self.sync_clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            clients.retain(|c| {
+                if role.is_some_and(|role| c.role != role) {
+                    return true;
+                }
+                if c.tx.send(json.clone()).is_ok() {
+                    delivered += 1;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
         self.publish_bus_event_for_sync_msg(msg);
+        delivered
     }
 
     /// Mirror select `SyncMsg` variants onto the event bus so plugins (which
@@ -676,12 +706,19 @@ impl SessionManager {
     }
 
     pub fn add_sync_client(&self) -> (String, mpsc::UnboundedReceiver<String>) {
+        self.add_sync_client_with_role(SyncClientRole::Main)
+    }
+
+    pub fn add_sync_client_with_role(
+        &self,
+        role: SyncClientRole,
+    ) -> (String, mpsc::UnboundedReceiver<String>) {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::unbounded_channel();
         self.sync_clients
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(SyncClient { id: id.clone(), tx });
+            .push(SyncClient { id: id.clone(), tx, role });
         (id, rx)
     }
 

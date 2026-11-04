@@ -17,7 +17,7 @@ pub use layout::{
 pub use manager::SessionManager;
 pub use restore::restore_session;
 pub use snapshot::{SessionSnapshot, SessionSnapshotStore, TabSnapshot};
-pub use types::{CloseReason, SessionStatus, SyncClient, SyncMsg, TabInfo};
+pub use types::{CloseReason, SessionStatus, SyncClient, SyncClientRole, SyncMsg, TabInfo};
 
 #[cfg(test)]
 pub(crate) use cwd::{find_subslice, parse_title_cwd, sniff_cwd_from_title_osc, OSC_SNIFF_CAP};

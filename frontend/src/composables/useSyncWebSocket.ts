@@ -1,6 +1,12 @@
 import { nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
-import type { SyncServerMsg, SyncClientMsg, SyncEvent, SyncMarkRead } from '../types/protocol'
+import type {
+  SyncServerMsg,
+  SyncClientMsg,
+  SyncEvent,
+  SyncMarkRead,
+  SyncOpenFileViewer,
+} from '../types/protocol'
 import type { Tab, TerminalTab } from '../types/pane'
 import {
   getAllLeaves,
@@ -41,6 +47,8 @@ type MonitorDataHandler = (data: Record<string, unknown>) => void
 const monitorDataHandlers = new Set<MonitorDataHandler>()
 type MonitorHistoryHandler = (data: Record<string, unknown>[]) => void
 const monitorHistoryHandlers = new Set<MonitorHistoryHandler>()
+type OpenFileViewerHandler = (msg: SyncOpenFileViewer) => void
+const openFileViewerHandlers = new Set<OpenFileViewerHandler>()
 let currentClientId: string | null = null
 let sendMarkReadFn: ((payload: SyncMarkRead) => void) | null = null
 // Late-bound from useAppCore: usePluginLoader is a sibling in the module graph
@@ -99,6 +107,17 @@ export function onMonitorHistory(handler: MonitorHistoryHandler): () => void {
   monitorHistoryHandlers.add(handler)
   return () => {
     monitorHistoryHandlers.delete(handler)
+  }
+}
+
+/**
+ * Subscribe to `open_file_viewer` requests. Registration only - the caller
+ * decides whether that means a native window, an overlay, or nothing.
+ */
+export function onOpenFileViewer(handler: OpenFileViewerHandler): () => void {
+  openFileViewerHandlers.add(handler)
+  return () => {
+    openFileViewerHandlers.delete(handler)
   }
 }
 
@@ -280,7 +299,9 @@ export function useSyncWebSocket(opts: {
     // here (it is a no-op in the browser) is what makes that call correct —
     // see the contract on `wsUrl` in `apiBase.ts`.
     await getApiBase()
-    const url = wsUrl('/ws/sync')
+    // Detached single-tab windows are sync clients too, but the server must
+    // not count them as a UI that can present a viewer.
+    const url = wsUrl(detached ? '/ws/sync?role=detached' : '/ws/sync')
     intentionalClose = false
     syncWs = new WebSocket(url)
 
@@ -874,6 +895,8 @@ export function useSyncWebSocket(opts: {
         monitorDataHandlers.forEach((h) => h(msg.data))
       } else if (msg.type === 'monitor_history') {
         monitorHistoryHandlers.forEach((h) => h(msg.data))
+      } else if (msg.type === 'open_file_viewer') {
+        openFileViewerHandlers.forEach((h) => h(msg))
       } else if (
         msg.type === 'bell' ||
         msg.type === 'notify' ||

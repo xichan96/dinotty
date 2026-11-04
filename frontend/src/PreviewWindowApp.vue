@@ -28,8 +28,8 @@ import WebPreview from './components/preview/WebPreview.vue'
  * the same file-browser session focuses its window and emits
  * `preview-window-navigate` with the new target.
  *
- * Dragging the native title bar over the main window merges this preview into
- * the current workspace (`usePreviewWindowDock`).
+ * Releasing the native title bar over the main window's tab strip merges this
+ * preview into the current workspace (`usePreviewWindowDock`).
  */
 
 type ShellState = 'loading' | 'ready' | 'error'
@@ -161,8 +161,8 @@ onMounted(async () => {
     state.value = 'ready'
     await nextTick()
     listenNavigate()
-    // Dragging this window's title bar onto the main window merges it into the
-    // current workspace.
+    // Releasing this window's title bar over the main window's tab strip merges
+    // it into the current workspace.
     disposeDock = usePreviewWindowDock({
       windowLabel,
       kind,

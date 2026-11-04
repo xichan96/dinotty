@@ -77,10 +77,11 @@ in a native desktop window instead of a split pane or in-app float.
 - **Web browser: a new window per open.** Each window is an independent browser
   with its own address bar and history.
 - **Drag to merge.** Drag a preview window by its native title bar over the main
-  window and hold briefly. The preview becomes a split pane in the current
-  workspace's active terminal tab, and the native window closes. A file browser
-  from another workspace rebinds to the current workspace root; a web preview
-  keeps its current URL.
+  window's tab bar (a highlight appears while you are over it) and release. The
+  preview becomes a split pane in the current workspace's active terminal tab,
+  and the native window closes. A file browser from another workspace rebinds
+  to the current workspace root; a web preview keeps its current URL. Releasing
+  anywhere else — including the terminal area — leaves the window open.
 - If the active tab is not a terminal tab, the merge is refused with a toast and
   the preview window stays open.
 

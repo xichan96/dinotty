@@ -335,6 +335,7 @@
     />
 
     <KbDebugOverlay v-if="kbDebugEnabled" />
+    <ImeDebugOverlay v-if="imeDebugEnabled" />
 
     <KbToggleButton
       v-show="
@@ -440,6 +441,7 @@ import MobileKeyboard from './components/keyboard/MobileKeyboard.vue'
 import SystemKeyboardToolbar from './components/keyboard/SystemKeyboardToolbar.vue'
 import MobileInputGuide from './components/keyboard/MobileInputGuide.vue'
 import KbDebugOverlay from './components/keyboard/KbDebugOverlay.vue'
+import ImeDebugOverlay from './components/terminal/ImeDebugOverlay.vue'
 import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import LoginPage from './components/LoginPage.vue'
 import SetupPage from './components/SetupPage.vue'
@@ -618,6 +620,7 @@ const {
   systemActionKeyboardOpen,
   mobileInputGuideVisible,
   kbDebugEnabled,
+  imeDebugEnabled,
   keyboardProviderComponent,
   keyboardHostRef,
   systemToolbarRef,
@@ -701,6 +704,8 @@ const {
   loadAll,
   focusActive,
   syncKbDebugFlag,
+  syncImeDebugFlag,
+  toggleImeDebug,
   clearToastInstance,
   clearActiveReadContext,
   stopForegroundGainSubscription,
@@ -756,6 +761,17 @@ watch(overviewOpen, (v) => {
 
 const { paletteCommands, onGlobalKeydown, hostClipboardPaste } = actions
 
+// Desktop builds have no editable URL, so the #ime-debug switch also has a
+// hotkey. Only toggles the opt-in recorder + overlay; inert otherwise.
+function onImeDebugHotkey(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || !e.altKey || e.code !== 'KeyI') return
+  // Capture-phase: keep the chord away from xterm's textarea so it does not
+  // also reach the PTY as Ctrl+I (Tab).
+  e.preventDefault()
+  e.stopPropagation()
+  toggleImeDebug()
+}
+
 const {
   systemKeyboardOpen,
   keyboardCtx,
@@ -804,6 +820,9 @@ onMounted(async () => {
   disposeDockTargetReporter = useDockTargetReporter()
   syncKbDebugFlag()
   window.addEventListener('hashchange', syncKbDebugFlag)
+  syncImeDebugFlag()
+  window.addEventListener('hashchange', syncImeDebugFlag)
+  document.addEventListener('keydown', onImeDebugHotkey, true)
   await desktopLifecycle.setup()
   document.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('focusin', onDocumentFocusIn)
@@ -957,6 +976,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('dinotty:open-settings', onOpenSettingsRequest)
   window.removeEventListener('pane-drag-hover-switch', onPaneDragHoverSwitch)
   window.removeEventListener('hashchange', syncKbDebugFlag)
+  window.removeEventListener('hashchange', syncImeDebugFlag)
+  document.removeEventListener('keydown', onImeDebugHotkey, true)
   disposeViewport()
   disposePanLock()
   syncWs.closeWs()

@@ -4,7 +4,10 @@ import {
   attachImeHeuristic,
   computeCellSize,
   findInverseCell,
+  findInputRowAbove,
   findRowContentEnd,
+  isHorizontalBorderRow,
+  isLastCellBlank,
   resolveFallbackAnchor,
   resolveImeAnchor,
 } from '../imeAnchor'
@@ -215,6 +218,87 @@ describe('resolveFallbackAnchor (ConPTY-parked cursor heuristic, #323)', () => {
   })
 })
 
+describe('isHorizontalBorderRow / isLastCellBlank', () => {
+  it('detects a full-width horizontal rule', () => {
+    expect(isHorizontalBorderRow(fakeLine(['─', '─', '─']))).toBe(true)
+    expect(isHorizontalBorderRow(fakeLine(['┄', '┄']))).toBe(true)
+  })
+
+  it('rejects text, blank rows, and mixed rows', () => {
+    expect(isHorizontalBorderRow(fakeLine(['>', ' ', '─']))).toBe(false)
+    expect(isHorizontalBorderRow(fakeLine(['norm', 'norm']))).toBe(false)
+    expect(isHorizontalBorderRow(undefined)).toBe(false)
+  })
+
+  it('treats right padding as blank but a trailing character as content', () => {
+    expect(isLastCellBlank(fakeLine(['a', 'b', ' ', ' ']), 4)).toBe(true)
+    expect(isLastCellBlank(fakeLine(['a', 'b', 'c', 'd']), 4)).toBe(false)
+    expect(isLastCellBlank(fakeLine(['norm', 'norm']), 2)).toBe(true)
+    expect(isLastCellBlank(undefined, 4)).toBe(true)
+  })
+
+  it('does not mistake the continuation half of a wide glyph for padding', () => {
+    const line = fakeLine(['a', ' ', { chars: '你', width: 2 }, { chars: '', width: 0 }])
+    expect(isLastCellBlank(line, 4)).toBe(false)
+  })
+})
+
+describe('resolveFallbackAnchor (right-edge parking on chrome rows)', () => {
+  const padTo = (cells: (CellMark | FakeCell)[], cols: number): (CellMark | FakeCell)[] => [
+    ...cells,
+    ...Array<CellMark>(Math.max(0, cols - cells.length)).fill('norm'),
+  ]
+  const ctxWith = (
+    lines: Array<(CellMark | FakeCell)[]>,
+    opts: { cols?: number; rows?: number; col?: number; row?: number } = {}
+  ) => {
+    const cols = opts.cols ?? 10
+    return {
+      cols,
+      rows: opts.rows ?? 6,
+      viewportY: 0,
+      hardwareCursor: { col: opts.col ?? cols - 1, row: opts.row ?? 2 },
+      lineAt: (r: number) => (lines[r] ? fakeLine(lines[r]) : undefined),
+    }
+  }
+  const inputRow = padTo(['>', ' ', { chars: '你', width: 2 }, { chars: '', width: 0 }], 10)
+
+  it('walks up past a border row to the input row', () => {
+    // ConPTY parked the cursor at the right edge of the `─` border under the
+    // input box. The border fills the row, so branch 1 cannot see the artifact.
+    const border = Array<string>(10).fill('─')
+    const ctx = ctxWith([padTo(['norm'], 10), inputRow, border, padTo([], 10)], { row: 2 })
+    expect(resolveFallbackAnchor(ctx)).toEqual({ source: 'contentEnd', col: 4, row: 1 })
+  })
+
+  it('skips a right-aligned status row and keeps walking up', () => {
+    // The status badge ends near the right edge; it is chrome, not the caret.
+    const ctx = ctxWith(
+      [padTo(['norm'], 10), inputRow, padTo(['s', 't', 'a', 't', 'u', 's', ' ', ' ', 'x'], 10)],
+      { row: 2 }
+    )
+    expect(resolveFallbackAnchor(ctx)).toEqual({ source: 'contentEnd', col: 4, row: 1 })
+  })
+
+  it('anchors on the cursor row itself when only the final cell is padding', () => {
+    // Content ends at col 5 with the cursor parked at the last, blank cell.
+    const row = padTo(['o', 'k', ' ', ' ', 'x'], 6)
+    const ctx = ctxWith([padTo(['norm'], 6), row, padTo(['norm'], 6)], { cols: 6, row: 1, col: 5 })
+    expect(resolveFallbackAnchor(ctx)).toEqual({ source: 'contentEnd', col: 5, row: 1 })
+  })
+
+  it('returns null when no plausible input row is above the chrome row', () => {
+    const border = Array<string>(10).fill('─')
+    const ctx = ctxWith([border, border], { row: 1 })
+    expect(resolveFallbackAnchor(ctx)).toBeNull()
+  })
+
+  it('exposes the upward scan separately', () => {
+    const ctx = ctxWith([padTo(['norm'], 10), inputRow, padTo(['─'], 10)], { row: 2 })
+    expect(findInputRowAbove(ctx, 2)).toEqual({ row: 1, end: 4 })
+  })
+})
+
 describe('computeCellSize (render-service cell vs rect fallback)', () => {
   it('prefers the render-service CSS cell size (letter_spacing/line_height correct)', () => {
     const screen = { getBoundingClientRect: () => ({ width: 900, height: 300 }) }
@@ -265,7 +349,7 @@ function setup(opts: {
   const rows = opts.rows ?? 3
   const cols = opts.cols ?? 10
   const lines = opts.lines.map(fakeLine)
-  let renderCb: (() => void) | null = null
+  let renderCbs: Array<() => void> = []
   const buffer = {
     viewportY: opts.viewportY ?? 0,
     cursorX: opts.cursorX ?? 0,
@@ -278,10 +362,10 @@ function setup(opts: {
     rows,
     buffer: { active: buffer },
     onRender(cb: () => void) {
-      renderCb = cb
+      renderCbs.push(cb)
       return {
         dispose() {
-          renderCb = null
+          renderCbs = renderCbs.filter((fn) => fn !== cb)
         },
       }
     },
@@ -300,7 +384,7 @@ function setup(opts: {
     setLine: (y: number, cells: (CellMark | FakeCell)[]) => {
       lines[y] = fakeLine(cells)
     },
-    fireRender: () => renderCb?.(),
+    fireRender: () => renderCbs.slice().forEach((cb) => cb()),
   }
 }
 
@@ -441,6 +525,37 @@ describe('attachImeHeuristic (DOM integration)', () => {
     setLine(1, ['>', ' ', ' ', 'inv', ' ', ' ', ' '])
     fireRender()
     expect(textarea.style.getPropertyValue('left')).toBe('30px')
+  })
+
+  it('reuses the idle inverse caret when it is gone at compositionstart', () => {
+    // The caret is visible while idle, then a blink-off / ConPTY sweep removes
+    // it exactly when composition begins. The position observed a moment
+    // earlier is still where the user is typing.
+    const { terminal, textarea, buffer, setLine } = setup({
+      lines: [
+        ['norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm'],
+        ['>', ' ', ' ', 'inv', ' ', ' ', ' '],
+        ['norm', 'norm', 'norm', 'norm', 'norm', 'norm', 'norm'],
+      ],
+      cols: 7,
+      rows: 3,
+      cursorX: 6,
+      cursorY: 1,
+      cellW: 10,
+      cellH: 20,
+    })
+    const onAnchor = vi.fn()
+    attachImeHeuristic(terminal as unknown as Terminal, { onAnchor })
+
+    // Caret gone; cursor parked at the content end so the content-end fallback
+    // has nothing to fix (it would keep the hardware anchor).
+    setLine(1, ['>', ' ', ' ', ' ', ' ', ' ', ' '])
+    buffer.cursorX = 1
+    textarea.dispatchEvent(new Event('compositionstart'))
+
+    expect(onAnchor).toHaveBeenCalledWith({ source: 'cached', col: 3, row: 1 })
+    expect(textarea.style.getPropertyValue('left')).toBe('30px')
+    expect(textarea.style.getPropertyValue('top')).toBe('20px')
   })
 
   it('follows the caret on render (IME partial commit) but keeps the last pin if it transiently disappears', () => {

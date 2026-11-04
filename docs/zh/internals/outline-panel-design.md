@@ -4,7 +4,7 @@
 > 更新时间：2026-11-02  
 > 范围：文件预览 / 编辑器（桌面端与移动端）  
 > 关联 issue：[#329](https://github.com/xichan96/dinotty/issues/329)、[#330](https://github.com/xichan96/dinotty/issues/330)、[#292](https://github.com/xichan96/dinotty/issues/292)  
-> 原型：[`docs/public/prototypes/outline-panel.html`](../../public/prototypes/outline-panel.html)
+> 原型：[`docs/public/prototypes/outline-panel.html`](/prototypes/outline-panel.html)
 
 ## 1. 背景与目标
 
@@ -307,7 +307,7 @@ export interface OutlineSource {
 
 ## 10. 原型说明
 
-打开 [`docs/public/prototypes/outline-panel.html`](../../public/prototypes/outline-panel.html)（直接双击，无需构建或联网）。
+打开 [`docs/public/prototypes/outline-panel.html`](/prototypes/outline-panel.html)（无需构建或联网）。
 
 顶部控制条可切换：
 

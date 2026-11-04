@@ -27,11 +27,12 @@ pub struct DetachedWindowInfo {
 }
 
 /// Tab ids become part of a window label and a URL query, so keep them to a
-/// conservative character set. Generated ids (UUIDs) qualify.
+/// conservative character set. Generated ids (UUIDs) qualify, and so do plugin
+/// tabs (`plugin:<plugin_id>:<workspace_id>`), which use `:` as a separator.
 #[must_use]
 pub fn is_valid_tab_id(tab_id: &str) -> bool {
     !tab_id.is_empty()
-        && tab_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        && tab_id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b':'))
 }
 
 pub fn label_for_tab(tab_id: &str) -> Result<String, String> {
@@ -267,7 +268,7 @@ pub fn open_tab_window(
     }
 
     let window_title = title.clone().unwrap_or_else(|| DEFAULT_TITLE.to_string());
-    let url = PathBuf::from(format!("detached.html?tabId={tab_id}"));
+    let url = PathBuf::from(format!("detached.html?tabId={}", urlencoding::encode(&tab_id)));
     let app_for_create = app.clone();
     let label_for_create = label.clone();
     let tab_id_for_log = tab_id.clone();
@@ -404,8 +405,18 @@ mod tests {
     }
 
     #[test]
+    fn labels_round_trip_and_accept_plugin_tab_ids() {
+        // Plugin tabs use `plugin:<plugin_id>:<workspace_id>` as the tab id.
+        for id in ["plugin:session-browser:workspace-a", "plugin:json-formatter:"] {
+            assert!(is_valid_tab_id(id), "{id:?} should be accepted");
+            assert_eq!(label_for_tab(id).unwrap(), format!("tab-{id}"));
+            assert_eq!(tab_id_from_label(&format!("tab-{id}")).as_deref(), Some(id));
+        }
+    }
+
+    #[test]
     fn invalid_tab_ids_are_rejected() {
-        for id in ["", "has space", "a/b", "a.b", "a:b", "café", "a?b", "a#b"] {
+        for id in ["", "has space", "a/b", "a.b", "café", "a?b", "a#b"] {
             assert!(!is_valid_tab_id(id), "{id:?} should be rejected");
             assert!(label_for_tab(id).is_err(), "{id:?} should be rejected");
         }

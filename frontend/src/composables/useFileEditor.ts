@@ -83,6 +83,23 @@ export function getDOMPurify() {
   return _domPurifyPromise
 }
 
+/**
+ * Render markdown source to sanitized HTML. The editor watcher and the
+ * standalone file viewer both go through this function, so there is exactly
+ * one place where rendered markdown is sanitized.
+ */
+export async function renderMarkdownPreview(
+  src: string,
+  filePath: string,
+  paneId: string
+): Promise<string> {
+  if (!src) return ''
+  const [m, dp] = await Promise.all([getMarked(), getDOMPurify()])
+  let html = m.parser(m.lexer(src)) as string
+  if (filePath) html = rewriteImageSrcs(html, filePath, paneId)
+  return dp.default.sanitize(html)
+}
+
 export function useFileEditor(opts: {
   paneId: () => string
   selectedRel: Ref<string | null>
@@ -128,15 +145,16 @@ export function useFileEditor(opts: {
     }
     mdDebounceTimer = setTimeout(async () => {
       try {
-        const [m, dp] = await Promise.all([getMarked(), getDOMPurify()])
-        // Lex once: the parser consumes the same token list, and the heading
-        // outline keeps the source offsets without a second full parse.
-        const tokens = m.lexer(src)
-        const outline = outlineFromMarkedTokens(tokens)
-        let html = m.parser(tokens) as string
         const filePath = opts.selectedRel.value
-        if (filePath) html = rewriteImageSrcs(html, filePath, opts.paneId())
-        markdownEditorHtml.value = dp.default.sanitize(html)
+        // The preview HTML goes through the shared sanitization entry point;
+        // the outline still needs the lexer tokens, so keep the marked module
+        // around for that second, small pass.
+        const [html, m] = await Promise.all([
+          renderMarkdownPreview(src, filePath ?? '', opts.paneId()),
+          getMarked(),
+        ])
+        const outline = outlineFromMarkedTokens(m.lexer(src))
+        markdownEditorHtml.value = html
         // The buffer may have changed while the async imports were resolving.
         if (editorText.value === src) {
           markdownOutline.value = outline

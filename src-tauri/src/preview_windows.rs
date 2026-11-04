@@ -14,6 +14,7 @@ pub const LABEL_PREFIX: &str = "preview-";
 pub const NAVIGATE_EVENT: &str = "preview-window-navigate";
 
 const FILES_LABEL_PREFIX: &str = "preview-files-";
+const FILE_LABEL_PREFIX: &str = "preview-file-";
 const WEB_LABEL_PREFIX: &str = "preview-web-";
 const DEFAULT_TITLE: &str = "Preview";
 const WINDOW_WIDTH: f64 = 960.0;
@@ -30,6 +31,7 @@ const CREATE_WAIT: Duration = Duration::from_secs(3);
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum PreviewKind {
     Files,
+    File,
     Web,
 }
 
@@ -37,6 +39,7 @@ impl PreviewKind {
     fn parse(kind: &str) -> Result<Self, String> {
         match kind {
             "files" => Ok(Self::Files),
+            "file" => Ok(Self::File),
             "web" => Ok(Self::Web),
             other => Err(format!("unsupported preview kind: {other:?}")),
         }
@@ -45,6 +48,7 @@ impl PreviewKind {
     fn slug(self) -> &'static str {
         match self {
             Self::Files => "files",
+            Self::File => "file",
             Self::Web => "web",
         }
     }
@@ -195,6 +199,15 @@ fn files_label(source_pane_id: &str) -> Result<String, String> {
     Ok(format!("{FILES_LABEL_PREFIX}{source_pane_id}"))
 }
 
+/// The standalone file viewer is one window per terminal session: reopening
+/// the same pane focuses it and navigates to the new file.
+fn file_label(source_pane_id: &str) -> Result<String, String> {
+    if !is_safe_source_pane_id(source_pane_id) {
+        return Err(format!("invalid source pane id: {source_pane_id:?}"));
+    }
+    Ok(format!("{FILE_LABEL_PREFIX}{source_pane_id}"))
+}
+
 /// Web preview windows are independent browsers: every open gets a fresh
 /// label (and therefore a fresh window).
 fn web_label() -> String {
@@ -320,6 +333,13 @@ pub fn open_preview_window(
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| "file preview requires a source pane id".to_string())?;
             files_label(source_pane_id)?
+        }
+        PreviewKind::File => {
+            let source_pane_id = source_pane_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| "file viewer requires a source pane id".to_string())?;
+            file_label(source_pane_id)?
         }
         PreviewKind::Web => web_label(),
     };
@@ -450,9 +470,44 @@ mod tests {
     #[test]
     fn kind_parsing_maps_to_stable_slugs() {
         assert_eq!(PreviewKind::parse("files").unwrap().slug(), "files");
+        assert_eq!(PreviewKind::parse("file").unwrap().slug(), "file");
         assert_eq!(PreviewKind::parse("web").unwrap().slug(), "web");
         assert!(PreviewKind::parse("plugin").is_err());
         assert!(PreviewKind::parse("").is_err());
+    }
+
+    #[test]
+    fn file_labels_are_deterministic_per_source_and_distinct_from_files() {
+        let label = file_label("pane-1").unwrap();
+        assert_eq!(label, "preview-file-pane-1");
+        assert_eq!(file_label("pane-1").unwrap(), label);
+        assert_ne!(file_label("pane-2").unwrap(), label);
+        assert_ne!(label, files_label("pane-1").unwrap());
+        assert!(is_preview_label(&label));
+    }
+
+    #[test]
+    fn file_labels_reject_unsafe_source_ids() {
+        for id in ["", "has space", "a/b", "a.b", "a:b", "café", "a?b", "a#b"] {
+            assert!(file_label(id).is_err(), "{id:?} should be rejected");
+        }
+        assert!(file_label("f47ac10b-58cc-4372-a567-0e02b2c3d479").is_ok());
+    }
+
+    #[test]
+    fn file_url_carries_kind_file_and_encoded_path() {
+        let url = preview_url(
+            PreviewKind::File,
+            Some("docs/a b.md"),
+            None,
+            Some("pane-1"),
+            "preview-file-pane-1",
+        );
+        let url = url.to_string_lossy();
+        assert!(url.starts_with("preview.html?kind=file&"));
+        assert!(url.contains("windowLabel=preview-file-pane-1"));
+        assert!(url.contains("sourcePaneId=pane-1"));
+        assert!(url.contains("path=docs%2Fa%20b.md"));
     }
 
     #[test]

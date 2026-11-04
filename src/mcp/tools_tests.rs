@@ -310,3 +310,107 @@ async fn handle_request_gates_terminal_create() {
         error.message
     );
 }
+
+fn viewer_server(root: &std::path::Path) -> (McpServer, Arc<SessionManager>) {
+    let manager = Arc::new(SessionManager::new());
+    manager.sessions.insert(
+        "pane-1".into(),
+        crate::session::test_support::stub_session_with_cwd(root.to_path_buf()),
+    );
+    let server = McpServer::new(
+        manager.clone(),
+        Arc::new(tokio::sync::RwLock::new(crate::settings::Settings::default())),
+        Arc::new(crate::platform::shell_probe::ShellProbeService::new()),
+    );
+    (server, manager)
+}
+
+#[tokio::test]
+async fn file_viewer_open_is_listed_with_read_only_annotations() {
+    let server = make_server();
+    let tool = server
+        .tools
+        .list_tools()
+        .into_iter()
+        .find(|tool| tool.name == "file_viewer_open")
+        .expect("file_viewer_open missing from tools/list");
+    assert_eq!(tool.input_schema["required"], serde_json::json!(["path"]));
+    let annotations = tool.annotations.expect("annotations");
+    assert_eq!(annotations["readOnlyHint"], true);
+    assert_eq!(annotations["idempotentHint"], true);
+}
+
+#[tokio::test]
+async fn file_viewer_open_requires_workspace_read_capability() {
+    let server = make_server();
+    let token = scoped_token("terminal:read", vec![]);
+
+    let request = JsonRpcRequest {
+        jsonrpc: "2.0".into(),
+        id: Some(serde_json::json!(1)),
+        method: "tools/call".into(),
+        params: Some(serde_json::json!({
+            "name": "file_viewer_open",
+            "arguments": {"pane_id": "pane-1", "path": "README.md"}
+        })),
+    };
+
+    let response = handle_request(&server, request, &token).await.expect("response");
+    let error = response.error.expect("missing capability must fail before the tool runs");
+    assert!(error.message.contains("Token lacks workspace:read capability"), "{}", error.message);
+}
+
+#[tokio::test]
+async fn file_viewer_open_respects_path_scope_and_delivers_to_main_clients() {
+    let _env = crate::test_support::EnvGuard::new(&["HOME"]);
+    let sandbox = HomeSandbox::new("viewer");
+    let (server, manager) = viewer_server(&sandbox.root.join("inside"));
+
+    // A disconnected UI cannot present the viewer.
+    let token = scoped_token(
+        "workspace:read",
+        vec![sandbox.root.join("inside").to_string_lossy().into_owned()],
+    );
+    let denied =
+        call_tool(&server, "file_viewer_open", serde_json::json!({"path": "f.txt"}), &token).await;
+    assert_eq!(denied.unwrap_err(), "NO_UI_CLIENT: no connected main UI client");
+
+    // Detached windows are not a presentation target either.
+    let (_, _detached_rx) =
+        manager.add_sync_client_with_role(crate::session::SyncClientRole::Detached);
+    let denied =
+        call_tool(&server, "file_viewer_open", serde_json::json!({"path": "f.txt"}), &token).await;
+    assert_eq!(denied.unwrap_err(), "NO_UI_CLIENT: no connected main UI client");
+
+    let (_, mut main_rx) = manager.add_sync_client();
+    let out = call_tool(&server, "file_viewer_open", serde_json::json!({"path": "f.txt"}), &token)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["pane_id"], "pane-1");
+    assert_eq!(value["path"], "f.txt");
+    assert_eq!(value["title"], "f.txt");
+    assert_eq!(value["delivered_clients"], 1);
+
+    let msg: serde_json::Value =
+        serde_json::from_str(&main_rx.try_recv().expect("main client")).unwrap();
+    assert_eq!(msg["type"], "open_file_viewer");
+    assert_eq!(msg["request_id"], value["request_id"]);
+}
+
+#[tokio::test]
+async fn file_viewer_open_denied_outside_the_agent_scope() {
+    let _env = crate::test_support::EnvGuard::new(&["HOME"]);
+    let sandbox = HomeSandbox::new("viewer-scope");
+    let (server, manager) = viewer_server(&sandbox.root.join("inside"));
+    let (_, _main_rx) = manager.add_sync_client();
+    let token = scoped_token(
+        "workspace:read",
+        vec![sandbox.root.join("outside").to_string_lossy().into_owned()],
+    );
+
+    let denied =
+        call_tool(&server, "file_viewer_open", serde_json::json!({"path": "f.txt"}), &token).await;
+    assert_eq!(denied.unwrap_err(), "SCOPE_DENIED: token scope does not include path");
+}

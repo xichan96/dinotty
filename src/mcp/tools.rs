@@ -169,6 +169,30 @@ impl McpTools {
                 annotations: Some(serde_json::json!({"readOnlyHint": true})),
             },
             ToolDef {
+                name: "file_viewer_open".into(),
+                description: "Open a file in a standalone read-only viewer window.".into(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path under the pane's workspace root. Relative paths are resolved against the workspace root; absolute paths are accepted only if they stay inside it."
+                        },
+                        "pane_id": {
+                            "type": "string",
+                            "description": "Terminal pane whose workspace root confines the path; defaults to the active pane. Agents should pass DINOTTY_PANE_ID."
+                        }
+                    },
+                    "required": ["path"]
+                }),
+                annotations: Some(serde_json::json!({
+                    "readOnlyHint": true,
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                })),
+            },
+            ToolDef {
                 name: "git_status".into(),
                 description: "Get git status for the workspace".into(),
                 input_schema: serde_json::json!({
@@ -209,6 +233,7 @@ impl McpTools {
             "file_read" => self.tool_file_read(args, token_info),
             "file_write" => self.tool_file_write(args, token_info),
             "file_list" => self.tool_file_list(args, token_info),
+            "file_viewer_open" => self.tool_file_viewer_open(args, token_info),
             "git_status" => self.tool_git_status(args),
             "git_diff" => self.tool_git_diff(args, token_info),
             _ => Err(format!("Unknown tool: {name}")),
@@ -539,6 +564,29 @@ impl McpTools {
             })
             .collect();
         Ok(serde_json::to_string(&entries).unwrap_or_default())
+    }
+
+    fn tool_file_viewer_open(&self, args: Value, token_info: &TokenInfo) -> Result<String, String> {
+        let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing path")?;
+        let requested = args.get("pane_id").and_then(|v| v.as_str()).unwrap_or("active");
+        let pane_id = resolve_pane(requested, &self.manager)?;
+
+        let target = crate::workspace::resolve_viewer_target(&self.manager, &pane_id, path)
+            .map_err(|error| error.to_string())?;
+        crate::workspace::check_viewer_access(token_info, &target)
+            .map_err(|error| error.to_string())?;
+        let delivery = crate::workspace::present_file_viewer(&self.manager, &target)
+            .map_err(|error| error.to_string())?;
+
+        Ok(serde_json::json!({
+            "ok": true,
+            "request_id": delivery.request_id,
+            "pane_id": target.pane_id,
+            "path": target.rel_path,
+            "title": target.title,
+            "delivered_clients": delivery.delivered_clients,
+        })
+        .to_string())
     }
 
     fn tool_git_status(&self, _args: Value) -> Result<String, String> {

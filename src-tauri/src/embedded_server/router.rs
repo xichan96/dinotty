@@ -207,6 +207,7 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/api/sessions/:pane_id/run", post(agent::sessions_run))
                 .route("/api/sessions/:pane_id/send", post(agent::sessions_send))
                 .route("/api/sessions/:pane_id/read", get(agent::sessions_read))
+                .route("/api/sessions/:pane_id/viewer", post(workspace::open_viewer_handler))
                 .route("/ws/events", get(agent::events_ws_handler))
                 .route("/api/tokens", post(token::create_token).get(token::list_tokens))
                 .route(

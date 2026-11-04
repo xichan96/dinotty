@@ -3,11 +3,36 @@ use super::*;
 use std::sync::atomic::AtomicU64;
 
 pub(crate) fn stub_session() -> Arc<Session> {
+    stub_session_impl(PathBuf::from("/"), None)
+}
+
+/// Stub session whose workspace root is `cwd` (local, no PTY).
+pub(crate) fn stub_session_with_cwd(cwd: PathBuf) -> Arc<Session> {
+    stub_session_impl(cwd, None)
+}
+
+/// Stub SSH session. `workspace_root` only matters for tests that inspect the
+/// remote cwd; viewer resolution must reject SSH before touching it.
+pub(crate) fn stub_ssh_session() -> Arc<Session> {
+    let ssh_params = SshSessionParams {
+        host: "example.invalid".into(),
+        port: 22,
+        username: "tester".into(),
+        auth_method: crate::settings::SshAuthMethod::default(),
+        default_command: None,
+        profile_id: None,
+        workspace_id: None,
+        initial_cwd: None,
+    };
+    stub_session_impl(PathBuf::from("/"), Some(ssh_params))
+}
+
+fn stub_session_impl(cwd: PathBuf, ssh_params: Option<SshSessionParams>) -> Arc<Session> {
     let (resize_tx, _resize_rx) = watch::channel(None);
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     Arc::new(Session {
         backend: tokio::sync::Mutex::new(SessionBackend::Exited),
-        ssh_params: None,
+        ssh_params,
         screen: Mutex::new(VirtualScreen::new(80, 24)),
         clients: Mutex::new(Vec::new()),
         next_client_id: AtomicU64::new(1),
@@ -21,8 +46,8 @@ pub(crate) fn stub_session() -> Arc<Session> {
         shell_launch_kind: crate::platform::shell::ShellLaunchKind::Native,
         tauri_on_exit: Mutex::new(None),
         cwd_state: Mutex::new(CwdState {
-            cwd: PathBuf::from("/"),
-            host_cwd: Some(PathBuf::from("/")),
+            cwd: cwd.clone(),
+            host_cwd: Some(cwd),
             sniff_buf: Vec::new(),
         }),
         sync: Mutex::new(SyncState::default()),

@@ -1,3 +1,5 @@
+import type { WindowRect } from '../utils/windowDock'
+
 /**
  * Event contract between the main window (through Rust) and a native preview
  * window.
@@ -9,12 +11,18 @@
  * travels in the URL (`windowLabel`) and in dock payloads.
  *
  * Rust owns the emission of `preview-window-navigate`
- * (`preview_windows.rs`); the dock pair is frontend-only. Keeping the names and
- * payload shapes here stops the two sides drifting apart.
+ * (`preview_windows.rs`); the dock target and merge pairs are frontend-only.
+ * Keeping the names and payload shapes here stops the two sides drifting apart.
  */
 export const PREVIEW_WINDOW_NAVIGATE_EVENT = 'preview-window-navigate'
 
-/** Preview window → main: its title bar is over the main window; merge it. */
+/** Preview window → main: whose tab-strip rectangle should the drop target be? */
+export const PREVIEW_DOCK_TARGET_REQUEST_EVENT = 'preview-window-dock-target-request'
+
+/** Main → preview window: the tab-strip drop rectangle, or null if unavailable. */
+export const PREVIEW_DOCK_TARGET_EVENT = 'preview-window-dock-target'
+
+/** Preview window → main: its title bar was released over the tab strip; merge it. */
 export const PREVIEW_DOCK_REQUEST_EVENT = 'preview-window-dock-request'
 
 /** Main → preview window: the merge succeeded (window is closing) or failed. */
@@ -46,4 +54,15 @@ export interface PreviewDockResult {
   requestId: string
   ok: boolean
   reason?: PreviewDockFailureReason
+}
+
+/** Asks the main window where the tab-strip drop target is right now. */
+export interface PreviewDockTargetRequest {
+  requestId: string
+}
+
+/** Tab-strip rectangle in physical screen pixels, shared by both windows. */
+export interface PreviewDockTargetReply {
+  requestId: string
+  rect: WindowRect | null
 }

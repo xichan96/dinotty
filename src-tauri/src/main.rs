@@ -16,6 +16,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
 mod autostart;
 mod detached_windows;
 mod embedded_server;
+mod pointer_state;
 mod preview_windows;
 mod shutdown;
 mod tray;
@@ -876,6 +877,7 @@ fn main() {
             detached_windows::close_tab_window,
             preview_windows::open_preview_window,
             preview_windows::close_preview_window,
+            pointer_state::pointer_buttons_down,
             window_actions::open_system_tray_settings,
             autostart::autostart_status,
             autostart::set_autostart,

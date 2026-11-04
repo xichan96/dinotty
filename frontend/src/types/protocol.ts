@@ -183,6 +183,16 @@ export interface SyncMcSnapshot {
   selected_tab_id?: string
 }
 
+/// Server -> client: open a file in the standalone read-only viewer. Only
+/// main windows receive this; `path` is relative to the pane's workspace root.
+export interface SyncOpenFileViewer {
+  type: 'open_file_viewer'
+  request_id: string
+  pane_id: string
+  path: string
+  title?: string
+}
+
 export interface SyncPluginChanged {
   type: 'plugin_changed'
   plugin_id: string
@@ -434,6 +444,7 @@ export type SyncServerMsg =
   | SyncMissionControlToggled
   | SyncSelectionChanged
   | SyncMcSnapshot
+  | SyncOpenFileViewer
   | SyncEvent
   | SyncHello
   | SyncBell

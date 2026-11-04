@@ -18,9 +18,19 @@ pub enum SessionStatus {
     Detached { since: Instant },
 }
 
+/// Which kind of UI a `/ws/sync` client is. Main windows are the ones that
+/// can present UI (native preview windows, overlays); detached terminal
+/// windows connect too but must not count as a display target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyncClientRole {
+    Main,
+    Detached,
+}
+
 pub struct SyncClient {
     pub id: String,
     pub tx: mpsc::UnboundedSender<String>,
+    pub role: SyncClientRole,
 }
 
 #[derive(Serialize)]
@@ -213,6 +223,15 @@ pub enum SyncMsg {
         open: bool,
         selected_workspace_id: Option<String>,
         selected_tab_id: Option<String>,
+    },
+    /// Ask every main-window client to open `path` in the standalone file
+    /// viewer. `path` is workspace-relative; `pane_id` names the pane whose
+    /// workspace root confines it.
+    OpenFileViewer {
+        request_id: String,
+        pane_id: String,
+        path: String,
+        title: Option<String>,
     },
 }
 

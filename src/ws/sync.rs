@@ -7,7 +7,7 @@ use std::sync::{
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        ConnectInfo, State, WebSocketUpgrade,
+        ConnectInfo, Query, State, WebSocketUpgrade,
     },
     http::StatusCode,
     response::IntoResponse,
@@ -18,11 +18,25 @@ use crate::history::HistoryState;
 use crate::mission_control::{MissionControlState, NavDir};
 use crate::monitor::MonitorState;
 use crate::notification::NotificationBroadcast;
-use crate::session::{SessionManager, SyncMsg, TabInfo};
+use crate::session::{SessionManager, SyncClientRole, SyncMsg, TabInfo};
 use crate::settings::SettingsState;
 use crate::workspace_mgmt::{tab_workspace_id, Workspace, WorkspacesState};
 
 use super::types::SyncClientMsg;
+
+/// `?role=detached` marks a single-tab terminal window: it may receive
+/// broadcasts but must not count as a UI that can present something.
+#[derive(serde::Deserialize)]
+pub struct SyncRoleQuery {
+    role: Option<String>,
+}
+
+fn role_from_query(role: Option<&str>) -> SyncClientRole {
+    match role {
+        Some("detached") => SyncClientRole::Detached,
+        _ => SyncClientRole::Main,
+    }
+}
 
 #[allow(clippy::unused_async, clippy::too_many_arguments)]
 pub async fn sync_handler(
@@ -37,6 +51,7 @@ pub async fn sync_handler(
     State(monitor): State<MonitorState>,
     State(mc): State<MissionControlState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(query): Query<SyncRoleQuery>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     let s = settings.read().await;
@@ -47,8 +62,11 @@ pub async fn sync_handler(
     if !crate::auth::check_ws_origin(&headers, &allowed_origins, real_ip, &trusted_proxies) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    let role = role_from_query(query.role.as_deref());
     ws.on_upgrade(move |socket| {
-        handle_sync_socket(socket, manager, workspaces, settings, notifier, history, monitor, mc)
+        handle_sync_socket(
+            socket, manager, workspaces, settings, notifier, history, monitor, mc, role,
+        )
     })
     .into_response()
 }
@@ -63,6 +81,7 @@ async fn handle_sync_socket(
     history: HistoryState,
     monitor: MonitorState,
     mc: MissionControlState,
+    role: SyncClientRole,
 ) {
     let (ws_tx, mut ws_rx) = socket.split();
 
@@ -114,7 +133,7 @@ async fn handle_sync_socket(
 
     // Register as sync client BEFORE sending tab_list so we don't miss any
     // broadcasts that happen between tab_list and registration.
-    let (client_id, mut rx) = manager.add_sync_client();
+    let (client_id, mut rx) = manager.add_sync_client_with_role(role);
 
     // Send client_id to the client first (for echo suppression in HTTP POST emit)
     let hello = serde_json::to_string(&SyncMsg::SyncHello { client_id: client_id.clone() })

@@ -110,7 +110,9 @@ pub async fn proxy_websocket(
         // for why the browser's own `Origin` must not survive.
         if let Some(host) = request.headers().get(axum::http::header::HOST).cloned() {
             if let Ok(h) = host.to_str() {
-                if let Ok(v) = format!("http://{h}").parse() {
+                let origin_scheme =
+                    if request.uri().scheme_str() == Some("wss") { "https" } else { "http" };
+                if let Ok(v) = format!("{origin_scheme}://{h}").parse() {
                     request.headers_mut().insert(axum::http::header::ORIGIN, v);
                 }
             }

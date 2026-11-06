@@ -8,11 +8,17 @@ use super::rewrite::{
 };
 use super::BASE_TAG_RE;
 
+/// Build the response Dinotty sends for a proxied document.
+///
+/// `base_url` is the *upstream request URL*, not just its origin: relative
+/// references resolve against the document's own path, so an app served from
+/// `/slaves/abc/` keeps its sub-path when its assets are rewritten.
 pub async fn build_proxied_response(
     upstream_resp: reqwest::Response,
     inject_base: &str,
     inject_script: &str,
     rewrite_mode: Option<RewriteMode>,
+    base_url: &str,
 ) -> Response {
     let status = upstream_resp.status();
     let resp_headers = upstream_resp.headers().clone();
@@ -47,11 +53,7 @@ pub async fn build_proxied_response(
         }
         if n == "location" {
             if let (Ok(loc), Some(mode)) = (value.to_str(), &rewrite_mode) {
-                let base = match mode {
-                    RewriteMode::Internal { ref host, port } => format!("http://{host}:{port}"),
-                    RewriteMode::External(url) => url.clone(),
-                };
-                if let Some(rewritten) = rewrite_url(loc, &base, mode) {
+                if let Some(rewritten) = rewrite_url(loc, base_url, mode) {
                     builder = builder.header(n, rewritten);
                     continue;
                 }
@@ -73,11 +75,7 @@ pub async fn build_proxied_response(
         let html_raw = String::from_utf8_lossy(&full_body);
         let html = BASE_TAG_RE.replace_all(&html_raw, "");
         let html = if let Some(mode) = &rewrite_mode {
-            let base = match mode {
-                RewriteMode::Internal { ref host, port } => format!("http://{host}:{port}"),
-                RewriteMode::External(ref url) => url.clone(),
-            };
-            std::borrow::Cow::Owned(rewrite_html_urls(&html, &base, mode))
+            std::borrow::Cow::Owned(rewrite_html_urls(&html, base_url, mode))
         } else {
             html
         };
@@ -97,13 +95,9 @@ pub async fn build_proxied_response(
         builder.header(header::CONTENT_LENGTH, buf.len()).body(Body::from(buf)).unwrap()
     } else if is_css {
         if let Some(mode) = &rewrite_mode {
-            let base = match mode {
-                RewriteMode::Internal { ref host, port } => format!("http://{host}:{port}"),
-                RewriteMode::External(ref url) => url.clone(),
-            };
             let full_body = upstream_resp.bytes().await.unwrap_or_default();
             let css_raw = String::from_utf8_lossy(&full_body);
-            let rewritten = rewrite_css_urls(&css_raw, &base, mode);
+            let rewritten = rewrite_css_urls(&css_raw, base_url, mode);
             builder
                 .header(header::CONTENT_LENGTH, rewritten.len())
                 .body(Body::from(rewritten))

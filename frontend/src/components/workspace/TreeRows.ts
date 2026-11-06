@@ -3,6 +3,7 @@ import type { VNode } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import { setInternalDrag, clearInternalDrag } from '../../composables/internalDragState'
 import { fileTypeGlyph } from './fileTypeIcons'
+import { folderIconUrl } from './folderIcons'
 
 function hasType(dt: DataTransfer | undefined | null, type: string): boolean {
   if (!dt) return false
@@ -48,17 +49,14 @@ function treeSymlinkBadge(title: string): VNode {
   ])
 }
 
-export function treeFolderIcon(expanded: boolean): VNode {
-  const d = expanded
-    ? 'M2 5h5l1 1h7v7H2V5zm1 1v6h10V7H8L7 6H3z'
-    : 'M2 4h4.5l1 1H14v9H2V4zm1 1v8h10V7H8l-1-1H3z'
-  return h('span', { class: ['tree-kind-icon', 'tree-kind-icon-folder', { open: expanded }] }, [
-    h(
-      'svg',
-      { viewBox: '0 0 16 16', class: 'tree-svg', fill: 'currentColor', 'aria-hidden': 'true' },
-      [h('path', { d })]
-    ),
-  ])
+export function treeFolderIcon(expanded: boolean, name = ''): VNode {
+  return h('img', {
+    class: ['tree-kind-icon', 'tree-kind-icon-folder', { open: expanded }],
+    src: folderIconUrl(name, expanded),
+    alt: '',
+    // Rows are draggable; a native image drag would shadow the row drag.
+    draggable: 'false',
+  })
 }
 
 export function treeFileIcon(name = ''): VNode {
@@ -612,7 +610,7 @@ export const TreeRows = defineComponent({
                       emit('select-dir', rel)
                     },
                   },
-                  [treeFolderIcon(isExp), labelContent]
+                  [treeFolderIcon(isExp, e.name), labelContent]
                 ),
                 !isRenaming
                   ? h('div', { class: 'tree-swipe-actions' }, [

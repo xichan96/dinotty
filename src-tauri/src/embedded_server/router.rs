@@ -228,9 +228,12 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route("/api/proxy", any(proxy::external_proxy_handler))
-        .route("/preview/:port", any(proxy::proxy_handler_root))
-        .route("/preview/:port/", any(proxy::proxy_handler_root))
-        .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+        // One wildcard handler: the canonical form puts the upstream origin in
+        // a single opaque segment, so a `:port` pattern would capture it and
+        // reject the URL before parsing. Keep in sync with `src/main.rs`.
+        .route("/preview", any(proxy::proxy_handler_wildcard))
+        .route("/preview/", any(proxy::proxy_handler_wildcard))
+        .route("/preview/*path", any(proxy::proxy_handler_wildcard))
         // Keep in sync with `src/main.rs` - this route table is a separate copy
         // because `src-tauri` is not part of the lib.
         .route("/__srv/:id", any(proxy::relay_dispatch_handler))

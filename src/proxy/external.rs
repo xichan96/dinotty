@@ -302,7 +302,7 @@ pub async fn external_proxy_handler(
             let content_type_val =
                 headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
             if content_type_val.contains("application/x-www-form-urlencoded") {
-                let mode = RewriteMode::External(current_url.to_string());
+                let mode = RewriteMode::External;
                 if let Some(rewritten) =
                     rewrite_form_urlencoded_body(&current_body, current_url.as_str(), &mode)
                 {
@@ -385,7 +385,8 @@ pub async fn external_proxy_handler(
         upstream_resp,
         inject_base,
         &inject_script,
-        Some(RewriteMode::External(final_url_str)),
+        Some(RewriteMode::External),
+        &final_url_str,
     )
     .await
 }

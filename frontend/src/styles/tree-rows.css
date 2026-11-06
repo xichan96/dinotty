@@ -186,6 +186,15 @@
   height: var(--tree-icon-size);
   color: var(--tree-folder-icon, #dcb67a);
 }
+
+/* vscode-icons folder SVGs: colours are baked in, so selection leaves them
+   untouched. */
+.tree-host img.tree-kind-icon-folder {
+  display: inline-block;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
 .tree-host .tree-kind-icon-file {
   color: var(--tree-file-icon, #90caf9);
 }
@@ -214,15 +223,6 @@
   font-style: normal;
   -webkit-font-smoothing: antialiased;
   user-select: none;
-}
-
-.tree-host .tree-svg {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  display: block;
-  flex-shrink: 0;
 }
 
 .tree-host .tree-inline-create {

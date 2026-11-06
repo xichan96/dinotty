@@ -210,6 +210,29 @@ fn v15_adds_an_empty_remote_server_roster_without_touching_anything_else() {
 }
 
 #[test]
+fn v16_enables_external_preview_access_for_legacy_configs() {
+    // Older versions persisted the old default explicitly, so a plain key
+    // default change would leave every existing install 403-ing phones.
+    let mut settings: Settings = serde_json::from_str(
+        r#"{"settings_version":15,"preview":{"allow_external":false},"locale":"zh"}"#,
+    )
+    .unwrap();
+    assert!(!settings.preview.allow_external);
+
+    assert!(migrate_settings(&mut settings));
+    assert_eq!(settings.settings_version, CURRENT_SETTINGS_VERSION);
+    assert!(settings.preview.allow_external);
+    // A migration must not disturb unrelated fields.
+    assert_eq!(settings.locale, "zh");
+
+    // Idempotent: the user can still opt out afterwards.
+    assert!(!migrate_settings(&mut settings));
+    settings.preview.allow_external = false;
+    assert!(!migrate_settings(&mut settings));
+    assert!(!settings.preview.allow_external);
+}
+
+#[test]
 fn a_v15_roster_round_trips_through_save_and_load() {
     let mut settings = Settings {
         settings_version: CURRENT_SETTINGS_VERSION,

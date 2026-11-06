@@ -17,19 +17,20 @@ export function filesStatePaneId(sourcePaneId: string): string {
 }
 
 /** Where a built-in preview opens. 'window' is a native desktop window and is
- *  unavailable outside the Tauri shell (and on touch), where it falls back. */
+ *  unavailable outside the Tauri shell, where it falls back to a float. */
 export type PreviewOpenMode = 'split' | 'floating' | 'window'
 
 export function resolvePreviewOpenMode(
   explicit: PreviewOpenMode | undefined,
   pref: PreviewOpenMode,
-  touch: boolean,
   desktop: boolean
 ): PreviewOpenMode {
-  if (touch) return 'split'
   const mode = explicit ?? pref
   // The native-window mode is a desktop-only capability; web/touch clients
   // that received the preference from the server still get an in-app float.
+  // Touch devices are no longer forced to split: the float is pointer-drag
+  // based and PluginFloatWindow clamps its size to the viewport, so a phone
+  // can use it too.
   if (mode === 'window' && !desktop) return 'floating'
   return mode
 }

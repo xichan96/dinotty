@@ -1016,12 +1016,7 @@ export function useAppCore(options: AppCoreOptions) {
     payload: PreviewOpenPayload = {},
     explicit?: PreviewOpenMode
   ) {
-    const mode = resolvePreviewOpenMode(
-      explicit,
-      previewOpenModePref(kind),
-      isTouchDevice(),
-      isTauri()
-    )
+    const mode = resolvePreviewOpenMode(explicit, previewOpenModePref(kind), isTauri())
     if (mode === 'split') {
       openOrFocusPreview(kind, payload)
       return

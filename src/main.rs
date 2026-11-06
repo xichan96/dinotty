@@ -614,9 +614,12 @@ async fn main() {
                         token::sessions_token_middleware,
                     )),
             )
-            .route("/preview/:port", any(proxy::proxy_handler_root))
-            .route("/preview/:port/", any(proxy::proxy_handler_root))
-            .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+            // One wildcard handler: the canonical form puts the upstream
+            // origin in a single opaque segment, so the old `:port` pattern
+            // would capture it and reject the URL before parsing.
+            .route("/preview", any(proxy::proxy_handler_wildcard))
+            .route("/preview/", any(proxy::proxy_handler_wildcard))
+            .route("/preview/*path", any(proxy::proxy_handler_wildcard))
             // Hub relay to a roster server. One dispatcher serves all three
             // shapes and splits HTTP from WebSocket on the Upgrade header; the
             // gate lives inside the relay, not in auth_middleware (see the

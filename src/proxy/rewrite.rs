@@ -9,10 +9,46 @@ static CSS_URL_RE: LazyLock<regex::Regex> =
 static JS_IMPORT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"((?:from|import)\s*\(?)(["'])/([^/"'])"#).unwrap());
 
+// Vite's production preload helper builds chunk URLs as `"/" + dep`, where
+// `dep` is a bare `assets/...` entry from `__vite__mapDeps`. The browser
+// resolves those against the origin, so lazy chunks 404 unless the map itself
+// carries the preview prefix.
+static VITE_DEP_DOUBLE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#""assets/([^"{}\s]+)""#).unwrap());
+static VITE_DEP_SINGLE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"'assets/([^'"{}\s]+)'"#).unwrap());
+
+/// The upstream a proxied page came from.
+#[derive(Clone)]
+pub struct InternalTarget {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    /// Browser-visible prefix already including any hub relay prefix, e.g.
+    /// `/__srv/abc/preview/aHR0cDovLzEwLjAuMC41OjgwODk`.
+    pub prefix: String,
+    /// Hub relay prefix (`/__srv/<id>`) or empty when served directly.
+    pub relay_prefix: String,
+}
+
 #[derive(Clone)]
 pub enum RewriteMode {
-    External(String),
-    Internal { host: String, port: u16 },
+    External,
+    Internal(InternalTarget),
+}
+
+/// Proxy prefix for one upstream origin.
+///
+/// The page's own origin keeps its prefix verbatim; a resource on a different
+/// scheme or port builds a new opaque target segment, carrying the relay
+/// prefix over so relayed previews stay reachable through the hub.
+fn target_prefix(target: &InternalTarget, scheme: &str, host: &str, port: u16) -> String {
+    if scheme == target.scheme && host == target.host && port == target.port {
+        target.prefix.clone()
+    } else {
+        let segment = super::encode_preview_target(scheme, host, port);
+        format!("{}/preview/{segment}", target.relay_prefix)
+    }
 }
 
 pub fn rewrite_url(raw: &str, base_url: &str, mode: &RewriteMode) -> Option<String> {
@@ -42,30 +78,25 @@ pub fn rewrite_url(raw: &str, base_url: &str, mode: &RewriteMode) -> Option<Stri
         return None;
     };
     match mode {
-        RewriteMode::External(_) => Some(format!("/api/proxy?url={}", urlencoding::encode(&abs))),
-        RewriteMode::Internal { host, port } => {
-            if let Ok(parsed) = reqwest::Url::parse(&abs) {
-                let h = parsed.host_str().unwrap_or("");
-                if h == "127.0.0.1" || h == "localhost" || h == "0.0.0.0" || h == host {
-                    let p = parsed.port().unwrap_or(*port);
-                    let target_host = if h == host { host.as_str() } else { "127.0.0.1" };
-                    let prefix = if target_host == "127.0.0.1" {
-                        format!("/preview/{p}")
-                    } else {
-                        format!("/preview/{target_host}/{p}")
-                    };
-                    Some(format!(
-                        "{}{}{}",
-                        prefix,
-                        parsed.path(),
-                        parsed.query().map(|q| format!("?{q}")).unwrap_or_default()
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
+        RewriteMode::External => Some(format!("/api/proxy?url={}", urlencoding::encode(&abs))),
+        RewriteMode::Internal(target) => {
+            let Ok(parsed) = reqwest::Url::parse(&abs) else { return None };
+            let h = parsed.host_str().unwrap_or("");
+            let ours = h == "127.0.0.1" || h == "localhost" || h == "0.0.0.0" || h == target.host;
+            if !ours {
+                return None;
             }
+            let port = parsed.port_or_known_default().unwrap_or(target.port);
+            // Keep the resource's own scheme: an HTTPS page that pulls a
+            // resource over HTTP must still be dialed as HTTP.
+            let scheme = if parsed.scheme() == "https" { "https" } else { "http" };
+            let prefix = target_prefix(target, scheme, h, port);
+            Some(format!(
+                "{}{}{}",
+                prefix,
+                parsed.path(),
+                parsed.query().map(|q| format!("?{q}")).unwrap_or_default()
+            ))
         }
     }
 }
@@ -85,20 +116,32 @@ pub fn rewrite_css_urls(css: &str, base_url: &str, mode: &RewriteMode) -> String
 
 pub fn rewrite_js_imports(js: &str, mode: &RewriteMode) -> String {
     let prefix = match mode {
-        RewriteMode::Internal { host, port } => {
-            if host == "127.0.0.1" {
-                format!("/preview/{port}")
-            } else {
-                format!("/preview/{host}/{port}")
-            }
-        }
-        RewriteMode::External(_) => return js.to_string(),
+        RewriteMode::Internal(target) => target.prefix.clone(),
+        RewriteMode::External => return js.to_string(),
     };
-    JS_IMPORT_RE
+    let mut out = JS_IMPORT_RE
         .replace_all(js, |caps: &regex::Captures| {
             format!("{}{}{}/{}", &caps[1], &caps[2], prefix, &caps[3])
         })
-        .into_owned()
+        .into_owned();
+
+    // No `__vite__mapDeps` means the bundle does not use Vite's `"/" + dep`
+    // preload scheme, and rewriting every "assets/..." string would be too
+    // broad. When it is present, the map is exactly where those strings live.
+    if out.contains("__vite__mapDeps") {
+        let dep_prefix = prefix.trim_start_matches('/');
+        out = VITE_DEP_DOUBLE_RE
+            .replace_all(&out, |caps: &regex::Captures| {
+                format!("\"{dep_prefix}/assets/{}\"", &caps[1])
+            })
+            .into_owned();
+        out = VITE_DEP_SINGLE_RE
+            .replace_all(&out, |caps: &regex::Captures| {
+                format!("'{dep_prefix}/assets/{}'", &caps[1])
+            })
+            .into_owned();
+    }
+    out
 }
 
 pub fn rewrite_html_urls(html: &str, base_url: &str, mode: &RewriteMode) -> String {
@@ -251,14 +294,8 @@ pub fn rewrite_set_cookie(cookie: &str, mode: Option<&RewriteMode>) -> String {
     result = SAMESITE_RE.replace_all(&result, "").into_owned();
 
     let path_prefix = match mode {
-        Some(RewriteMode::Internal { host, port }) => {
-            if host == "127.0.0.1" {
-                format!("/preview/{port}")
-            } else {
-                format!("/preview/{host}/{port}")
-            }
-        }
-        Some(RewriteMode::External(_)) => "/api/proxy".to_string(),
+        Some(RewriteMode::Internal(target)) => target.prefix.clone(),
+        Some(RewriteMode::External) => "/api/proxy".to_string(),
         None => return result,
     };
 
@@ -271,4 +308,97 @@ pub fn rewrite_set_cookie(cookie: &str, mode: Option<&RewriteMode>) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(relay_prefix: &str) -> InternalTarget {
+        let segment = crate::proxy::encode_preview_target("https", "10.0.0.5", 443);
+        InternalTarget {
+            scheme: "https".into(),
+            host: "10.0.0.5".into(),
+            port: 443,
+            prefix: format!("{relay_prefix}/preview/{segment}"),
+            relay_prefix: relay_prefix.into(),
+        }
+    }
+
+    fn https_mode() -> RewriteMode {
+        RewriteMode::Internal(target(""))
+    }
+
+    fn prefix(mode: &RewriteMode) -> String {
+        match mode {
+            RewriteMode::Internal(t) => t.prefix.clone(),
+            RewriteMode::External => unreachable!(),
+        }
+    }
+
+    /// Vite lazy chunks are addressed by `"/" + dep` at runtime. The dep map
+    /// must already carry the preview prefix, or every dynamic import 404s at
+    /// the Dinotty origin and the SPA never mounts.
+    #[test]
+    fn vite_dep_map_gets_the_preview_prefix() {
+        let js = r#"const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/a.js",'assets/b.css'])))=>i.map(i=>d[i]);"#;
+        let mode = https_mode();
+        let out = rewrite_js_imports(js, &mode);
+        let dep = prefix(&mode).trim_start_matches('/').to_string();
+        assert!(out.contains(&format!("\"{dep}/assets/a.js\"")), "{out}");
+        assert!(out.contains(&format!("'{dep}/assets/b.css'")), "{out}");
+    }
+
+    /// Without the Vite map marker the rewrite would be too broad; ordinary
+    /// "assets/..." strings must survive untouched.
+    #[test]
+    fn bare_assets_strings_are_left_alone_without_vite_map() {
+        let js = r#"const x = "assets/keep.js";"#;
+        assert_eq!(rewrite_js_imports(js, &https_mode()), js);
+    }
+
+    #[test]
+    fn absolute_js_imports_carry_the_prefix() {
+        let js = r#"import x from "/assets/a.js";"#;
+        let mode = https_mode();
+        let out = rewrite_js_imports(js, &mode);
+        assert!(out.contains(&format!("from \"{}/assets/a.js\"", prefix(&mode))), "{out}");
+    }
+
+    #[test]
+    fn internal_rewrites_keep_the_resource_scheme() {
+        let out = rewrite_url("http://10.0.0.5/plain.js", "https://10.0.0.5:443/", &https_mode())
+            .unwrap();
+        let http_segment = crate::proxy::encode_preview_target("http", "10.0.0.5", 80);
+        assert_eq!(out, format!("/preview/{http_segment}/plain.js"));
+    }
+
+    /// The upstream's path is part of the base, not the target root: an app
+    /// mounted at `/slaves/x/` that says `logo.png` means `/slaves/x/logo.png`.
+    #[test]
+    fn relative_urls_resolve_against_the_document_path() {
+        let out = rewrite_url(
+            "logo.png",
+            "http://10.70.11.20:8089/slaves/abc/workflow-manage",
+            &RewriteMode::Internal(InternalTarget {
+                scheme: "http".into(),
+                host: "10.70.11.20".into(),
+                port: 8089,
+                prefix: "/preview/seg".into(),
+                relay_prefix: String::new(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(out, "/preview/seg/slaves/abc/logo.png");
+    }
+
+    /// Through the hub relay every rewritten URL must stay under `/__srv/<id>`,
+    /// including the prefixes built for a different scheme or port.
+    #[test]
+    fn relayed_rewrites_keep_the_relay_prefix() {
+        let mode = RewriteMode::Internal(target("/__srv/abc"));
+        let out = rewrite_url("http://10.0.0.5/plain.js", "https://10.0.0.5:443/", &mode).unwrap();
+        let http_segment = crate::proxy::encode_preview_target("http", "10.0.0.5", 80);
+        assert_eq!(out, format!("/__srv/abc/preview/{http_segment}/plain.js"));
+    }
 }

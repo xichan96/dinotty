@@ -18,9 +18,19 @@ pub enum SessionStatus {
     Detached { since: Instant },
 }
 
+/// Which kind of UI a `/ws/sync` client is. Main windows are the ones that
+/// can present UI (native preview windows, overlays); detached terminal
+/// windows connect too but must not count as a display target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyncClientRole {
+    Main,
+    Detached,
+}
+
 pub struct SyncClient {
     pub id: String,
     pub tx: mpsc::UnboundedSender<String>,
+    pub role: SyncClientRole,
 }
 
 #[derive(Serialize)]
@@ -174,6 +184,12 @@ pub enum SyncMsg {
         tab_id: String,
         title: String,
     },
+    /// Explicit workspace assignment changed. `workspace_id` is always sent
+    /// (`null` when cleared) so clients can tell "cleared" from "unchanged".
+    TabWorkspaceUpdated {
+        tab_id: String,
+        workspace_id: Option<String>,
+    },
     TabReordered {
         tab_ids: Vec<String>,
     },
@@ -208,6 +224,15 @@ pub enum SyncMsg {
         selected_workspace_id: Option<String>,
         selected_tab_id: Option<String>,
     },
+    /// Ask every main-window client to open `path` in the standalone file
+    /// viewer. `path` is workspace-relative; `pane_id` names the pane whose
+    /// workspace root confines it.
+    OpenFileViewer {
+        request_id: String,
+        pane_id: String,
+        path: String,
+        title: Option<String>,
+    },
 }
 
 #[derive(Serialize, Clone)]
@@ -224,7 +249,10 @@ pub struct TabInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<String>,
     /// Explicit workspace assignment for tabs that cannot be identified by CWD.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// Always serialized (including `null`) so a full `tab_list` resync can
+    /// clear a stale assignment on the client; an omitted field would be
+    /// indistinguishable from "unchanged" for older payloads.
     pub workspace_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,

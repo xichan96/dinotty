@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { makeWorkspaceError, useFileWorkspaceBoot } from '../useFileWorkspaceBoot'
 import type { DirEntry } from '../../components/workspace/TreeRows'
+import { createEditorLeaf } from '../../types/editorPane'
 
 const entry = (name: string): DirEntry => ({ name, is_dir: false, size: 0 })
 
@@ -50,6 +51,24 @@ function setup(fetchList: (rel: string) => Promise<DirEntry[]>) {
   })
   return { boot, childCache, expanded, selectedRel, previewErr, meta, fetchGitStatus }
 }
+
+describe('useFileWorkspaceBoot.applyState', () => {
+  it('resets a persisted collapsed-split ratio so the lone pane fills the editor', () => {
+    const { boot } = setup(async () => [])
+    const leaf = createEditorLeaf('a.ts')
+    leaf.ratio = 0.5 // state saved after closing one group of a split
+
+    boot.applyState({
+      editorLayout: leaf,
+      activeEditorLeafId: leaf.id,
+      childCache: {},
+      expanded: new Set(),
+      cwdLabel: '/root',
+    })
+
+    expect(leaf.ratio).toBe(1)
+  })
+})
 
 describe('useFileWorkspaceBoot.reloadAll', () => {
   it('refetches root and expanded dirs without collapsing or clearing selection', async () => {

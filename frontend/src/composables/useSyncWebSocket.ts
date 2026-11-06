@@ -1,9 +1,16 @@
 import { nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
-import type { SyncServerMsg, SyncClientMsg, SyncEvent, SyncMarkRead } from '../types/protocol'
+import type {
+  SyncServerMsg,
+  SyncClientMsg,
+  SyncEvent,
+  SyncMarkRead,
+  SyncOpenFileViewer,
+} from '../types/protocol'
 import type { Tab, TerminalTab } from '../types/pane'
 import {
   getAllLeaves,
+  findFirstLeaf,
   findLeaf,
   migrateTab,
   migratePreviewToLeaf,
@@ -17,6 +24,7 @@ import {
 } from '../types/paneMru'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 import { getApiBase, wsUrl } from './apiBase'
 import { isLocalActive } from './activeServer'
 import { scopedKey } from './serverScope'
@@ -39,6 +47,8 @@ type MonitorDataHandler = (data: Record<string, unknown>) => void
 const monitorDataHandlers = new Set<MonitorDataHandler>()
 type MonitorHistoryHandler = (data: Record<string, unknown>[]) => void
 const monitorHistoryHandlers = new Set<MonitorHistoryHandler>()
+type OpenFileViewerHandler = (msg: SyncOpenFileViewer) => void
+const openFileViewerHandlers = new Set<OpenFileViewerHandler>()
 let currentClientId: string | null = null
 let sendMarkReadFn: ((payload: SyncMarkRead) => void) | null = null
 // Late-bound from useAppCore: usePluginLoader is a sibling in the module graph
@@ -100,6 +110,17 @@ export function onMonitorHistory(handler: MonitorHistoryHandler): () => void {
   }
 }
 
+/**
+ * Subscribe to `open_file_viewer` requests. Registration only - the caller
+ * decides whether that means a native window, an overlay, or nothing.
+ */
+export function onOpenFileViewer(handler: OpenFileViewerHandler): () => void {
+  openFileViewerHandlers.add(handler)
+  return () => {
+    openFileViewerHandlers.delete(handler)
+  }
+}
+
 export function getClientId(): string | null {
   return currentClientId
 }
@@ -108,14 +129,29 @@ export function sendMarkRead(payload: SyncMarkRead): void {
   sendMarkReadFn?.(payload)
 }
 
+/**
+ * Single-tab detached-window mode.
+ *
+ * A detached window is a second view of exactly one tab. It must not drive
+ * global activation, and it must not adopt the server's whole tab list: the
+ * main window owns that selection. Setting this option makes `useSyncWebSocket`
+ * track only `tabId` and report its disappearance through `onTabClosed`.
+ */
+export interface DetachedSyncOptions {
+  tabId: string
+  onTabClosed?: (tabId: string) => void
+}
+
 export function useSyncWebSocket(opts: {
   termRefs: Record<string, InstanceType<typeof TerminalPane>>
   persist: () => void
   focusActive: () => void
   newTab: () => Promise<void>
+  detached?: DetachedSyncOptions
 }) {
-  const { termRefs, persist, focusActive, newTab } = opts
+  const { termRefs, persist, focusActive, newTab, detached } = opts
   const session = useSessionStore()
+  const detachedWindows = useDetachedWindowsStore()
   const { tabs, activePaneId } = storeToRefs(session)
   const ui = useUiStore()
   const { syncConnected } = storeToRefs(ui)
@@ -187,8 +223,21 @@ export function useSyncWebSocket(opts: {
 
   sendMarkReadFn = (payload: SyncMarkRead) => sendSync(payload)
 
-  function sendLayoutSync(tabPaneId: string, layout: any, activePaneIdVal: string) {
-    sendSync({ type: 'update_layout', pane_id: tabPaneId, layout, active_pane_id: activePaneIdVal })
+  function sendLayoutSync(
+    tabPaneId: string,
+    layout: any,
+    activePaneIdVal: string,
+    opts: { activate?: boolean } = {}
+  ) {
+    // Only send `activate` when suppressing global activation, so the main
+    // window's wire payload stays identical to older builds.
+    sendSync({
+      type: 'update_layout',
+      pane_id: tabPaneId,
+      layout,
+      active_pane_id: activePaneIdVal,
+      ...(opts.activate === false ? { activate: false } : {}),
+    })
   }
 
   // SSH keyboard-interactive auth callback
@@ -250,7 +299,9 @@ export function useSyncWebSocket(opts: {
     // here (it is a no-op in the browser) is what makes that call correct —
     // see the contract on `wsUrl` in `apiBase.ts`.
     await getApiBase()
-    const url = wsUrl('/ws/sync')
+    // Detached single-tab windows are sync clients too, but the server must
+    // not count them as a UI that can present a viewer.
+    const url = wsUrl(detached ? '/ws/sync?role=detached' : '/ws/sync')
     intentionalClose = false
     syncWs = new WebSocket(url)
 
@@ -269,6 +320,86 @@ export function useSyncWebSocket(opts: {
       }
 
       if (msg.type === 'tab_list') {
+        // Detached window: only this tab exists here. `tab_list` is
+        // authoritative for liveness — its absence means the tab was closed
+        // while we were reconnecting.
+        if (detached) {
+          const info = msg.tabs.find((candidate) => candidate.tab_id === detached.tabId)
+          if (!info) {
+            detached.onTabClosed?.(detached.tabId)
+            return
+          }
+          let current = tabs.value.find(
+            (candidate): candidate is TerminalTab =>
+              candidate.type === 'terminal' && candidate.paneId === detached.tabId
+          )
+          if (!current) {
+            const layout = ensureSplitRoot(
+              info.layout ?? {
+                type: 'leaf',
+                paneId: info.pane_id,
+                title: 'Terminal',
+                ratio: 1,
+                zoomed: false,
+              }
+            )
+            const preferredPaneId =
+              info.active_pane_id && findLeaf(layout, info.active_pane_id)
+                ? info.active_pane_id
+                : findFirstLeaf(layout).paneId
+            current = {
+              type: 'terminal',
+              paneId: info.tab_id,
+              layout,
+              activePaneId: preferredPaneId,
+              paneMru: initializePaneMru(
+                getAllLeaves(layout).map((leaf) => leaf.paneId),
+                preferredPaneId
+              ),
+              broadcastMode: false,
+              broadcastActivity: 0,
+              cwd: info.cwd,
+              connectionId: info.connection_id,
+              workspaceId: info.workspace_id ?? undefined,
+            }
+            tabs.value.push(current)
+          } else {
+            if (info.workspace_id !== undefined) {
+              // `null` is authoritative for an unassigned tab and must clear it.
+              current.workspaceId = info.workspace_id ?? undefined
+            }
+            // Reconnect snapshot: adopt split/close changes made by other
+            // clients while this window was offline. Only replace the layout
+            // when the leaf set changed — ratios and locally decorated fields
+            // (shell_type) stay local to avoid churn on every reconnect.
+            if (info.layout) {
+              const serverLayout = ensureSplitRoot(info.layout)
+              const localIds = getAllLeaves(current.layout)
+                .map((leaf) => leaf.paneId)
+                .sort()
+              const serverLeaves = getAllLeaves(serverLayout)
+              const serverIds = serverLeaves.map((leaf) => leaf.paneId).sort()
+              const leavesChanged =
+                localIds.length !== serverIds.length ||
+                localIds.some((id, index) => id !== serverIds[index])
+              if (leavesChanged) {
+                current.layout = serverLayout
+                const preferred =
+                  info.active_pane_id && findLeaf(serverLayout, info.active_pane_id)
+                    ? info.active_pane_id
+                    : findFirstLeaf(serverLayout).paneId
+                current.activePaneId = preferred
+                current.paneMru = initializePaneMru(
+                  serverLeaves.map((leaf) => leaf.paneId),
+                  preferred
+                )
+                nextTick(() => focusActive())
+              }
+            }
+          }
+          return
+        }
+
         const localLeafIds = new Set<string>()
         const localTabIds = new Set<string>()
         for (const t of tabs.value) {
@@ -285,8 +416,15 @@ export function useSyncWebSocket(opts: {
             if (candidate.type !== 'terminal') return false
             return candidate.paneId === tab.tab_id || !!findLeaf(candidate.layout, tab.pane_id)
           }) as TerminalTab | undefined
-          if (existingTab && tab.workspace_id) {
-            existingTab.workspaceId = tab.workspace_id
+          if (existingTab) {
+            if (tab.workspace_id) {
+              existingTab.workspaceId = tab.workspace_id
+            } else if (tab.workspace_id === null) {
+              // Explicit null means the server holds no assignment: drop a
+              // stale local id. An omitted field (older payloads) means
+              // "unchanged" and must not clear it.
+              existingTab.workspaceId = undefined
+            }
           }
           if (
             !localLeafIds.has(tab.pane_id) &&
@@ -336,7 +474,9 @@ export function useSyncWebSocket(opts: {
               cwd: tab.cwd,
               connectionId: tab.connection_id,
               workspaceId:
-                tab.workspace_id ?? migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
+                tab.workspace_id === null
+                  ? workspaceIdFromPaneId(tab.tab_id)
+                  : tab.workspace_id ?? migrated?.workspaceId ?? workspaceIdFromPaneId(tab.tab_id),
             })
           }
         }
@@ -415,6 +555,8 @@ export function useSyncWebSocket(opts: {
         persist()
         nextTick(() => focusActive())
       } else if (msg.type === 'tab_created') {
+        // A detached window only ever renders its own tab.
+        if (detached) return
         const existing = tabs.value.find((t) => {
           if (t.type !== 'terminal') return false
           return t.paneId === msg.tab_id || !!findLeaf(t.layout, msg.pane_id)
@@ -472,6 +614,15 @@ export function useSyncWebSocket(opts: {
           nextTick(() => focusActive())
         }
       } else if (msg.type === 'tab_closed') {
+        // The window exists to show one tab; the tab is gone, so ask the shell
+        // to close the window rather than rotating to a sibling tab.
+        if (detached) {
+          if (msg.pane_id === detached.tabId) detached.onTabClosed?.(detached.tabId)
+          return
+        }
+        // A tab closed from any client also ends its detached window (the
+        // window closes itself); stop hiding the id and let the tab be pruned.
+        detachedWindows.handleClosed(msg.pane_id)
         // Match by tab paneId only. The backend always broadcasts
         // `tab_closed` with the tab's paneId (a.k.a. tab_id), never a leaf
         // paneId. A previous fallback that searched layouts by leaf paneId
@@ -537,6 +688,10 @@ export function useSyncWebSocket(opts: {
           }
         }
       } else if (msg.type === 'tab_activated') {
+        // Global activation is a main-window concern. Mirroring it here would
+        // steal focus between the window's panes (and, on tab_list, point the
+        // local store at a tab this window does not render).
+        if (detached) return
         const cur = tabs.value.find((t) => t.paneId === activePaneId.value)
         if (!cur || cur.type !== 'plugin') {
           const targetTab = tabs.value.find((t) => {
@@ -556,7 +711,16 @@ export function useSyncWebSocket(opts: {
         if (targetTab) {
           ;(targetTab as TerminalTab).customTitle = msg.title
         }
+      } else if (msg.type === 'tab_workspace_updated') {
+        // Authoritative mirror: the broadcast includes the sender. `null`
+        // clears the explicit assignment so derived attribution takes over.
+        const targetTab = tabs.value.find((t) => t.paneId === msg.tab_id)
+        if (targetTab) {
+          targetTab.workspaceId = msg.workspace_id ?? undefined
+          persist()
+        }
       } else if (msg.type === 'tab_reordered') {
+        if (detached) return
         // Apply the server's canonical order to the tabs we have. Tabs not in
         // the list (e.g. local-only plugin tabs) keep their slots; only the
         // listed tabs are rearranged into the given sequence. withSuppressed
@@ -649,7 +813,9 @@ export function useSyncWebSocket(opts: {
           })
 
           if (activePaneWasRemoved && targetTab.activePaneId !== msg.active_pane_id) {
-            sendLayoutSync(targetTab.paneId, targetTab.layout, targetTab.activePaneId)
+            sendLayoutSync(targetTab.paneId, targetTab.layout, targetTab.activePaneId, {
+              activate: !detached,
+            })
           }
 
           const updatedLeafIds = new Set(getAllLeaves(targetTab.layout).map((l) => l.paneId))
@@ -698,12 +864,19 @@ export function useSyncWebSocket(opts: {
         if (activeWorkspaceId.value === msg.id) {
           activeWorkspaceId.value = null
         }
+        // Fallback for clients that missed the per-tab clears: drop explicit
+        // assignments (terminal and plugin tabs alike) pointing at the deleted
+        // workspace so they fall back to derived attribution.
+        let cleared = false
         for (const tab of tabs.value) {
-          if (tab.type === 'plugin' && tab.workspaceId === msg.id) {
+          if (tab.workspaceId === msg.id) {
             tab.workspaceId = undefined
+            cleared = true
           }
         }
+        if (cleared) persist()
       } else if (msg.type === 'workspace_activated') {
+        if (detached) return
         activeWorkspaceId.value = toActiveWorkspaceId(msg.id)
       } else if (msg.type === 'workspace_reordered') {
         for (let i = 0; i < msg.ids.length; i++) {
@@ -722,6 +895,8 @@ export function useSyncWebSocket(opts: {
         monitorDataHandlers.forEach((h) => h(msg.data))
       } else if (msg.type === 'monitor_history') {
         monitorHistoryHandlers.forEach((h) => h(msg.data))
+      } else if (msg.type === 'open_file_viewer') {
+        openFileViewerHandlers.forEach((h) => h(msg))
       } else if (
         msg.type === 'bell' ||
         msg.type === 'notify' ||

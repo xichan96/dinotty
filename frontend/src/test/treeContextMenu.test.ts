@@ -1,9 +1,5 @@
 import { nextTick, ref } from 'vue'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-const transportMocks = vi.hoisted(() => ({ tauriInvoke: vi.fn() }))
-
-vi.mock('../composables/useTransport', () => ({ tauriInvoke: transportMocks.tauriInvoke }))
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { useTreeContextMenu } from '../composables/useTreeContextMenu'
 
@@ -69,66 +65,6 @@ function createContextMenu(isSsh = ref(false)) {
 function contextMenuEvent(): MouseEvent {
   return new MouseEvent('contextmenu', { clientX: 20, clientY: 30 })
 }
-
-describe('tree context menu open folder', () => {
-  beforeEach(() => {
-    transportMocks.tauriInvoke.mockReset()
-  })
-
-  it('opens the folder itself when right-clicking a directory', async () => {
-    // 步骤1：右键目录并执行“打开文件夹”。
-    const { contextMenu } = createContextMenu()
-    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src', isDir: true })
-    await contextMenu.ctxOpenFolder()
-
-    // 步骤2：reveal_path 收到目录绝对路径，菜单已关闭。
-    expect(transportMocks.tauriInvoke).toHaveBeenCalledOnce()
-    expect(transportMocks.tauriInvoke).toHaveBeenCalledWith('reveal_path', {
-      path: '/workspace/src',
-    })
-    expect(contextMenu.contextMenu.value).toBeNull()
-  })
-
-  it('reveals a file in its containing folder', async () => {
-    const { contextMenu } = createContextMenu()
-    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src/main.ts', isDir: false })
-    await contextMenu.ctxOpenFolder()
-
-    expect(transportMocks.tauriInvoke).toHaveBeenCalledWith('reveal_path', {
-      path: '/workspace/src/main.ts',
-    })
-  })
-
-  it('falls back to the selected entry for the background menu', async () => {
-    const { contextMenu, selectedRel } = createContextMenu()
-    selectedRel.value = 'README.md'
-    contextMenu.onTreeBgContextMenu(contextMenuEvent())
-    await contextMenu.ctxOpenFolder()
-
-    expect(transportMocks.tauriInvoke).toHaveBeenCalledWith('reveal_path', {
-      path: '/workspace/README.md',
-    })
-  })
-
-  it('is unavailable on SSH panes, where there is no local folder to open', async () => {
-    const { contextMenu } = createContextMenu(ref(true))
-    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src', isDir: true })
-
-    expect(contextMenu.isRemote.value).toBe(true)
-    await contextMenu.ctxOpenFolder()
-    await contextMenu.ctxReveal()
-
-    expect(transportMocks.tauriInvoke).not.toHaveBeenCalled()
-  })
-
-  it('does nothing when the background menu has no selection', async () => {
-    const { contextMenu } = createContextMenu()
-    contextMenu.onTreeBgContextMenu(contextMenuEvent())
-    await contextMenu.ctxOpenFolder()
-
-    expect(transportMocks.tauriInvoke).not.toHaveBeenCalled()
-  })
-})
 
 describe('tree context menu placement and keyboard', () => {
   const menus: HTMLElement[] = []

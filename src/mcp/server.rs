@@ -192,7 +192,7 @@ async fn handle_tools_call(
         "terminal_execute" | "terminal_send" => "terminal:write",
         "terminal_read" | "terminal_list" => "terminal:read",
         "tab_create" | "pane_split" => "terminal:create",
-        "file_read" | "file_list" => "workspace:read",
+        "file_read" | "file_list" | "file_viewer_open" => "workspace:read",
         "file_write" => "workspace:write",
         "git_status" | "git_diff" => "workspace:read",
         _ => {

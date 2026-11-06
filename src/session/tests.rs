@@ -385,6 +385,132 @@ fn tab_list_restores_ssh_workspace_assignment_from_session() {
     assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-b"));
 }
 
+fn ssh_session_with_workspace(profile: &str, workspace: &str) -> Arc<Session> {
+    let mut session = local_session_for_write_input();
+    Arc::get_mut(&mut session).unwrap().ssh_params = Some(SshSessionParams {
+        host: "example.test".into(),
+        port: 22,
+        username: "user".into(),
+        auth_method: crate::settings::SshAuthMethod::default(),
+        default_command: None,
+        profile_id: Some(profile.into()),
+        workspace_id: Some(workspace.into()),
+        initial_cwd: Some("/srv/b".into()),
+    });
+    session
+}
+
+#[test]
+fn set_and_clear_tab_workspace() {
+    let manager = SessionManager::new();
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+
+    assert!(manager.set_tab_workspace("t1", Some("workspace-a".into())));
+    assert_eq!(manager.explicit_tab_workspace("t1").as_deref(), Some("workspace-a"));
+
+    // Clearing removes the entry so derived attribution takes over again.
+    assert!(manager.set_tab_workspace("t1", None));
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+
+    // Unknown tabs are rejected and store nothing.
+    assert!(!manager.set_tab_workspace("missing", Some("workspace-a".into())));
+    assert_eq!(manager.explicit_tab_workspace("missing"), None);
+}
+
+#[test]
+fn remove_tab_drops_workspace_assignment() {
+    let manager = SessionManager::new();
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+    assert!(manager.set_tab_workspace("t1", Some("workspace-a".into())));
+
+    assert!(manager.remove_tab("t1"));
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+}
+
+#[test]
+fn clear_tab_workspace_assignments_drops_only_matching_tabs() {
+    let manager = SessionManager::new();
+    for tab in ["t1", "t2", "t3"] {
+        manager.insert_tab(
+            tab.into(),
+            serde_json::json!({"layout": leaf("p"), "active_pane_id": "p"}),
+        );
+    }
+    manager.set_tab_workspace("t1", Some("workspace-a".into()));
+    manager.set_tab_workspace("t2", Some("workspace-a".into()));
+    manager.set_tab_workspace("t3", Some("workspace-b".into()));
+
+    assert_eq!(
+        manager.clear_tab_workspace_assignments("workspace-a"),
+        vec!["t1".to_string(), "t2".to_string()]
+    );
+    assert_eq!(manager.explicit_tab_workspace("t1"), None);
+    assert_eq!(manager.explicit_tab_workspace("t2"), None);
+    assert_eq!(manager.explicit_tab_workspace("t3").as_deref(), Some("workspace-b"));
+
+    // Nothing matches: no-op.
+    assert_eq!(manager.clear_tab_workspace_assignments("workspace-a"), Vec::<String>::new());
+}
+
+#[test]
+fn tab_list_prefers_explicit_workspace_over_ssh_params() {
+    let manager = SessionManager::new();
+    manager
+        .sessions
+        .insert("p1".into(), ssh_session_with_workspace("shared-profile", "workspace-b"));
+    manager
+        .insert_tab("t1".into(), serde_json::json!({"layout": leaf("p1"), "active_pane_id": "p1"}));
+
+    assert!(manager.set_tab_workspace("t1", Some("workspace-a".into())));
+    let (tabs, _) = manager.tab_list();
+    assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-a"));
+
+    // Clearing falls back to the SSH params' workspace.
+    assert!(manager.set_tab_workspace("t1", None));
+    let (tabs, _) = manager.tab_list();
+    assert_eq!(tabs[0].workspace_id.as_deref(), Some("workspace-b"));
+}
+
+#[test]
+fn tab_list_serializes_absent_workspace_as_explicit_null() {
+    // A full resync must be able to clear a stale client id, so an absent
+    // explicit assignment is serialized as `null` rather than omitted.
+    let msg = SyncMsg::TabList {
+        tabs: vec![TabInfo {
+            tab_id: "t1".into(),
+            pane_id: "p1".into(),
+            layout: None,
+            active_pane_id: None,
+            cwd: None,
+            connection_id: None,
+            workspace_id: None,
+            title: None,
+        }],
+        active_pane_id: None,
+    };
+    let value = serde_json::to_value(msg).unwrap();
+    let tab = value["tabs"][0].as_object().expect("tab object");
+    assert!(tab.contains_key("workspace_id"), "workspace_id must be present");
+    assert!(tab["workspace_id"].is_null());
+}
+
+#[test]
+fn tab_workspace_updated_serializes_clear_as_null() {
+    let msg = SyncMsg::TabWorkspaceUpdated { tab_id: "t1".into(), workspace_id: None };
+    let value = serde_json::to_value(msg).unwrap();
+    assert_eq!(value["type"], "tab_workspace_updated");
+    assert_eq!(value["tab_id"], "t1");
+    assert!(value["workspace_id"].is_null());
+
+    let msg =
+        SyncMsg::TabWorkspaceUpdated { tab_id: "t1".into(), workspace_id: Some("ws-a".into()) };
+    let value = serde_json::to_value(msg).unwrap();
+    assert_eq!(value["workspace_id"], "ws-a");
+}
+
 // ── CWD state tracking ─────────────────────────────────────────────
 
 #[test]
@@ -414,4 +540,56 @@ fn tab_created_serializes_explicit_workspace_assignment() {
     let value = serde_json::to_value(msg).unwrap();
 
     assert_eq!(value["workspace_id"], "workspace-b");
+}
+
+#[test]
+fn open_file_viewer_serializes_wire_shape() {
+    let msg = SyncMsg::OpenFileViewer {
+        request_id: "req-1".into(),
+        pane_id: "pane-1".into(),
+        path: "docs/design.md".into(),
+        title: Some("design.md".into()),
+    };
+
+    let value = serde_json::to_value(msg).unwrap();
+
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "type": "open_file_viewer",
+            "request_id": "req-1",
+            "pane_id": "pane-1",
+            "path": "docs/design.md",
+            "title": "design.md",
+        })
+    );
+}
+
+#[test]
+fn sync_role_broadcast_counts_only_the_requested_role() {
+    let manager = SessionManager::new();
+    let (_, mut main_rx) = manager.add_sync_client();
+    let (_, mut detached_rx) = manager.add_sync_client_with_role(SyncClientRole::Detached);
+    let msg = SyncMsg::TabClosed { pane_id: "pane-1".into() };
+
+    assert_eq!(manager.broadcast_sync_counted_role(&msg, SyncClientRole::Main), 1);
+
+    let main_msg: serde_json::Value =
+        serde_json::from_str(&main_rx.try_recv().expect("main client")).unwrap();
+    assert_eq!(main_msg["type"], "tab_closed");
+    assert!(detached_rx.try_recv().is_err(), "detached client is not a Main target");
+}
+
+#[test]
+fn sync_role_broadcast_is_zero_when_the_main_client_is_gone() {
+    let manager = SessionManager::new();
+    let (_, main_rx) = manager.add_sync_client();
+    drop(main_rx);
+    let msg = SyncMsg::TabClosed { pane_id: "pane-1".into() };
+
+    assert_eq!(manager.broadcast_sync_counted_role(&msg, SyncClientRole::Main), 0);
+    assert!(
+        manager.sync_clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty(),
+        "closed clients are reaped by the broadcast"
+    );
 }

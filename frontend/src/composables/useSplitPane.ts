@@ -39,7 +39,12 @@ export function useSplitPane(opts: {
   termRefs: Record<string, InstanceType<typeof TerminalPane>>
   genPaneId: () => string
   sendSync: (msg: SyncClientMsg) => void
-  sendLayoutSync: (tabPaneId: string, layout: any, activePaneId: string) => void
+  sendLayoutSync: (
+    tabPaneId: string,
+    layout: any,
+    activePaneId: string,
+    opts?: { activate?: boolean }
+  ) => void
   persist: () => void
   showSplitTerminalError: (error: unknown) => void
 }) {
@@ -180,35 +185,25 @@ export function useSplitPane(opts: {
   async function insertNonTerminalPane(
     kind: 'plugin' | 'files' | 'web',
     payload: { pluginId?: string; path?: string; url?: string },
-    direction: 'horizontal' | 'vertical' = 'horizontal'
+    direction: 'horizontal' | 'vertical' = 'horizontal',
+    /** Pane to split from; defaults to the tab's active pane. Terminal path
+     *  clicks pass the originating pane so it is also used as the files pane's
+     *  `sourcePaneId` (and therefore its cwd). */
+    targetPaneId?: string
   ): Promise<boolean> {
     const tab = getActiveTerminal()
     if (!tab) return false
     const apiDirection = direction === 'horizontal' ? 'right' : 'bottom'
+    const target = targetPaneId ?? tab.activePaneId
     try {
       let result
       if (kind === 'plugin') {
         if (!payload.pluginId) throw new Error('pluginId required')
-        result = await apiCreatePluginPane(
-          tab.paneId,
-          payload.pluginId,
-          tab.activePaneId,
-          apiDirection
-        )
+        result = await apiCreatePluginPane(tab.paneId, payload.pluginId, target, apiDirection)
       } else if (kind === 'files') {
-        result = await apiCreateFilesPane(
-          tab.paneId,
-          payload.path ?? '',
-          tab.activePaneId,
-          apiDirection
-        )
+        result = await apiCreateFilesPane(tab.paneId, payload.path ?? '', target, apiDirection)
       } else {
-        result = await apiCreateWebPane(
-          tab.paneId,
-          payload.url ?? '',
-          tab.activePaneId,
-          apiDirection
-        )
+        result = await apiCreateWebPane(tab.paneId, payload.url ?? '', target, apiDirection)
       }
       tab.layout = ensureSplitRoot(result.layout)
       tab.paneMru = reconcilePaneMru(

@@ -71,6 +71,7 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     settings.inherit_cwd_for_new_tab = false
     settings.space_confirms_dialogs = false
     settings.workspace_badge_mode = null
+    settings.preview_open_modes = {}
     settings.upload_dir = ''
     settings.shell = 'auto'
     settings.shell_path = null
@@ -107,6 +108,41 @@ describe('GeneralTab - confirm-before-close-tab toggle', () => {
     expect(input.exists()).toBe(true)
     // Initial value mirrors reactive default (true).
     expect(input.element.checked).toBe(true)
+  })
+
+  it('offers the native preview window mode only in the desktop shell', async () => {
+    generalMocks.isTauri = false
+    const web = mount(GeneralTab)
+    await flush()
+    expect(web.findAll('option[value="window"]')).toHaveLength(0)
+    web.unmount()
+
+    generalMocks.isTauri = true
+    const desktop = mount(GeneralTab)
+    await flush()
+    expect(desktop.findAll('option[value="window"]')).toHaveLength(2)
+
+    // Selecting it persists the mode for that kind.
+    const files = desktop.get<HTMLSelectElement>('select[data-setting="preview-open-mode-files"]')
+    await files.setValue('window')
+    expect(settings.preview_open_modes?.files).toBe('window')
+
+    desktop.unmount()
+  })
+
+  it('presents a stored window mode as the float it falls back to on web', async () => {
+    generalMocks.isTauri = false
+    settings.preview_open_modes = { files: 'window', web: 'window' }
+
+    const wrapper = mount(GeneralTab)
+    await flush()
+
+    const files = wrapper.get<HTMLSelectElement>('select[data-setting="preview-open-mode-files"]')
+    const web = wrapper.get<HTMLSelectElement>('select[data-setting="preview-open-mode-web"]')
+    expect(files.element.value).toBe('floating')
+    expect(web.element.value).toBe('floating')
+
+    wrapper.unmount()
   })
 
   it('refreshes the access URL whenever the General settings tab becomes visible', async () => {

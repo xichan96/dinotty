@@ -149,8 +149,11 @@ export function useWorkspaces() {
     connectionId?: string,
     workspaceId?: string
   ): Workspace | null {
-    // Explicit workspace assignment takes priority
+    // Explicit workspace assignment takes priority. The default workspace is
+    // client-owned and never in `workspaces`, so pin it explicitly instead of
+    // falling through to cwd/SSH attribution.
     if (workspaceId) {
+      if (workspaceId === DEFAULT_WORKSPACE_ID) return defaultWorkspace.value
       const explicit = workspaces.value.find((w) => w.id === workspaceId)
       if (explicit) return explicit
     }

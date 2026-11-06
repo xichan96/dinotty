@@ -22,6 +22,11 @@ import { isTauri, tauriInvoke } from './useTransport'
 import { isTouchDevice, setKbTypingLock } from './useTerminal'
 import { useI18n } from './useI18n'
 import { hasOpenGuard } from '../utils/keyboardGuardMode'
+import {
+  isImeDiagnosticsEnabled,
+  setImeDiagnosticsEnabled,
+  syncImeDiagnosticsFromLocation,
+} from '../utils/imeDiagnostics'
 import { FOCUS_ACTIVE_KEY } from './useFocusActive'
 import { useSshAuth } from './useSshAuth'
 import { useCursorPicker } from './useCursorPicker'
@@ -42,9 +47,13 @@ import type { FloatWindowContent, PreviewOpenMode } from '../types/floatWindow'
 import { floatWindowId, resolvePreviewOpenMode } from '../types/floatWindow'
 import { settings } from './useSettings'
 import { useTabLifecycle } from './useTabLifecycle'
+import { useDetachedWindows } from './useDetachedWindows'
+import { usePreviewDockReceiver, type PreviewDockOutcome } from './usePreviewDockReceiver'
+import type { PreviewDockRequest } from './previewWindowBridge'
 import { setMcSender, sendMcOp, useMissionControlState } from './useMissionControlState'
 import { ensureCapabilities } from './serverCapabilities'
 import { useSplitPane } from './useSplitPane'
+import { setPendingFileReveal } from './pendingFileReveal'
 import { useSyncWebSocket, setPluginChangedHandler } from './useSyncWebSocket'
 import type { SyncClientMsg } from '../types/protocol'
 import { workspaceIdFromPaneId } from '../utils/pluginPaneId'
@@ -80,6 +89,7 @@ import type { MobileInputMode } from './useSettings'
 import { useSessionStore } from '../stores/sessionStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
 import { useDesktopLifecycle } from './useDesktopLifecycle'
 import { useNotification } from './useNotification'
 import { useToast } from 'vue-toastification'
@@ -166,6 +176,7 @@ export function useAppCore(options: AppCoreOptions) {
   const { tabs, activePaneId, tabList, activeTabType, activeTab, isBroadcastActive, canBroadcast } =
     storeToRefs(session)
   const { kbVisible, settingsOpen, authenticated, authProbe, needsSetup } = storeToRefs(ui)
+  const detachedStore = useDetachedWindowsStore()
   const appSettings = settingsStore.settings
   const { t, locale } = useI18n()
   const presentationSettings = useNotificationPresentation().settings
@@ -180,6 +191,19 @@ export function useAppCore(options: AppCoreOptions) {
   const kbDebugEnabled = ref(false)
   function syncKbDebugFlag() {
     kbDebugEnabled.value = /kbdebug/i.test(location.search + location.hash)
+  }
+  // #ime-debug turns on the gated IME-anchor recorder (utils/imeDiagnostics).
+  // Reports for Windows IME bugs can then be captured without DevTools.
+  const imeDebugEnabled = ref(false)
+  function syncImeDebugFlag() {
+    imeDebugEnabled.value = syncImeDiagnosticsFromLocation(location.search, location.hash)
+  }
+  // The desktop app's URL is not user-editable, so the hash switch has a
+  // keyboard twin: Ctrl/Cmd+Shift+Alt+I toggles the recorder + overlay.
+  function toggleImeDebug() {
+    const next = !isImeDiagnosticsEnabled()
+    setImeDiagnosticsEnabled(next)
+    imeDebugEnabled.value = next
   }
 
   initHostKeyboardProviders()
@@ -311,6 +335,9 @@ export function useAppCore(options: AppCoreOptions) {
 
   const visibleTabList = computed(() => {
     const list = tabList.value.filter((info) => {
+      // Detached tabs stay in the store (Mission Control and workspace counts
+      // still see them) but never reach the main window's tab bar.
+      if (detachedStore.isDetached(info.paneId)) return false
       const rawTab = tabs.value.find((t) => t.paneId === info.paneId)
       if (!rawTab) return false
       if (rawTab.type === 'plugin') return true
@@ -334,6 +361,11 @@ export function useAppCore(options: AppCoreOptions) {
     // Reindex: workspace-relative 1-based indices
     return list.map((t, i) => ({ ...t, index: i + 1 }))
   })
+
+  /** Tabs the main window actually mounts. App.vue renders this instead of the
+   *  full store list so a detached tab's TerminalPane unmounts (no double
+   *  attach); the tab itself stays in the store for Mission Control. */
+  const contentTabs = computed(() => detachedStore.withoutDetached(tabs.value))
 
   /** Aggregated per-tab unread notification severity (rolls up all leaves of a split tab). */
   const tabIndicators = computed(() => {
@@ -416,6 +448,21 @@ export function useAppCore(options: AppCoreOptions) {
     showCreateTerminalError: (error) => showShellApiError(error, 'terminal.createFailed'),
   })
 
+  // Detaching a tab is a local display move: it never calls `apiActivatePane`,
+  // so other clients keep their own focus (design "Active tab / active workspace").
+  const detachedWindows = useDetachedWindows({
+    tabs,
+    activePaneId,
+    activeWorkspaceId,
+    workspaceIdOfTab,
+    visibleTabList,
+    commitLocalActivePane,
+    focusActive,
+    closeTab,
+    toast,
+    t,
+  })
+
   // Overlay host is a sibling of #app-root and cannot reach this per-instance
   // composable state directly, so focusActive is provided for it (design R4).
   provide(FOCUS_ACTIVE_KEY, focusActive)
@@ -426,6 +473,7 @@ export function useAppCore(options: AppCoreOptions) {
     closeOverview,
     onOverviewActivate,
     onOverviewCloseTab,
+    onOverviewCloseTerminal,
     onCloseTabsBulk,
     onOverviewNewTab,
     onOverviewNewTabSsh,
@@ -445,6 +493,7 @@ export function useAppCore(options: AppCoreOptions) {
     commitLocalActivePane,
     focusActive,
     sendSync: (msg) => sendSyncFn(msg),
+    toast,
   })
   const currentTabIndex = computed(
     () => visibleTabList.value.findIndex((t) => t.paneId === activePaneId.value) + 1
@@ -721,19 +770,33 @@ export function useAppCore(options: AppCoreOptions) {
     return splitPane.insertNonTerminalPane('plugin', { pluginId })
   }
 
-  function onFileClick(path: string) {
-    const tabId = activePaneId.value
-    if (!tabId) return
-    const tab = tabs.value.find((t) => t.paneId === tabId)
+  function onFileClick(path: string, line?: number, column?: number, originPaneId?: string) {
+    // Resolve relative paths against the pane that emitted the click: a
+    // non-active split pane may have a different cwd than the active one.
+    const tab =
+      (originPaneId ? splitPane.findTabByPaneId(originPaneId) : null) ??
+      tabs.value.find((t) => t.paneId === activePaneId.value)
     if (!tab || tab.type !== 'terminal') return
 
     const existing = getAllLeaves(tab.layout).find((l) => paneKind(l) === 'files')
     if (existing) {
       splitPane.focusPane(existing.paneId)
-      nextTick(() => filesRefs[existing.paneId]?.openFromTerminal(path))
+      nextTick(() =>
+        filesRefs[existing.paneId]?.openFromTerminal(path, { line, column }, originPaneId)
+      )
       return
     }
-    void splitPane.insertNonTerminalPane('files', { path })
+    void splitPane
+      .insertNonTerminalPane('files', { path }, 'horizontal', originPaneId)
+      .then((ok) => {
+        if (!ok || (!line && !column)) return
+        // insertNonTerminalPane splits the active tab and makes the new pane
+        // active; the boot flow only has `path`, so stash the position here.
+        const inserted = tabs.value.find((t) => t.paneId === activePaneId.value)
+        if (inserted?.type === 'terminal') {
+          setPendingFileReveal(inserted.activePaneId, { path, line, column })
+        }
+      })
   }
 
   function getSendFn(): SendDataFn | null {
@@ -802,6 +865,9 @@ export function useAppCore(options: AppCoreOptions) {
     markCookieAuthenticated()
     ui.setAuthenticated(true)
     await getApiBase()
+    // The Rust process still owns any windows from before a reload, and tabs
+    // are about to arrive: rebuild the filter before they mount their panes.
+    await detachedStore.refreshFromRust()
     await settingsStore.load()
     void loadAll()
     void syncWs.connectSyncWS()
@@ -878,8 +944,10 @@ export function useAppCore(options: AppCoreOptions) {
   })
 
   // ── Built-in preview floats (files/web) ─────────────────────────────
-  // Open ids are 'float:files' / 'float:web' (single window per kind). The
-  // rendered content lives here so the host layer can resolve — and drop — it.
+  // In-app floats still use one id per kind ('float:files' / 'float:web');
+  // native preview windows are multi-instance (see `openPreviewWindow`). The
+  // rendered float content lives here so the host layer can resolve — and
+  // drop — it.
   const previewFloatContents = shallowReactive<Record<string, FloatWindowContent>>({})
 
   function isLiveTerminalLeaf(paneId: string): boolean {
@@ -910,16 +978,46 @@ export function useAppCore(options: AppCoreOptions) {
     return settings.preview_open_modes?.[kind] ?? 'split'
   }
 
+  /** Built-in previews only; plugins keep their own launcher/window path. */
+  type PreviewWindowContent = Extract<FloatWindowContent, { kind: 'files' | 'web' }>
+
+  /** Open a built-in preview in its own native window. File-browser windows are
+   *  keyed by `sourcePaneId`: reopening the same terminal session focuses its
+   *  window and sends the new path (`preview-window-navigate`), while a
+   *  different workspace/session gets its own window. Every web preview open
+   *  creates a fresh window. Resolves false when the native window could not be
+   *  opened. */
+  async function openPreviewWindow(content: PreviewWindowContent): Promise<boolean> {
+    const args: Record<string, unknown> = {
+      kind: content.kind,
+      title: t(content.kind === 'files' ? 'previewPanel.switchFiles' : 'previewPanel.switchWeb'),
+    }
+    if (content.kind === 'files') {
+      args.sourcePaneId = content.sourcePaneId
+      if (content.initialPath) args.path = content.initialPath
+    } else if (content.initialUrl) {
+      args.url = content.initialUrl
+    }
+    try {
+      await tauriInvoke('open_preview_window', args)
+      return true
+    } catch (error) {
+      console.warn('[preview] failed to open native window', error)
+      return false
+    }
+  }
+
   /** Open the built-in file/web preview, honoring the per-kind preference (and
    *  falling back to a split pane on touch). 'floating' opens a draggable
-   *  window; files floats bind to the active terminal session. */
+   *  window; 'window' opens a native desktop window; files previews bind to the
+   *  active terminal session. */
   function openPreview(
     kind: 'files' | 'web',
     payload: PreviewOpenPayload = {},
     explicit?: PreviewOpenMode
   ) {
-    const mode = resolvePreviewOpenMode(explicit, previewOpenModePref(kind), isTouchDevice())
-    if (mode !== 'floating') {
+    const mode = resolvePreviewOpenMode(explicit, previewOpenModePref(kind), isTauri())
+    if (mode === 'split') {
       openOrFocusPreview(kind, payload)
       return
     }
@@ -931,14 +1029,81 @@ export function useAppCore(options: AppCoreOptions) {
       }
       const tab = activeTab.value
       const cwd = tab && tab.type === 'terminal' ? (tab.cwd ?? '') : ''
-      openPreviewFloat({
+      const content: PreviewWindowContent = {
         kind: 'files',
         sourcePaneId,
         initialPath: payload.path ?? (cwd || undefined),
+      }
+      if (mode === 'window') {
+        void openPreviewWindow(content).then((opened) => {
+          if (!opened) openPreviewFloat(content)
+        })
+        return
+      }
+      openPreviewFloat(content)
+      return
+    }
+    const content: PreviewWindowContent = { kind: 'web', initialUrl: payload.url }
+    if (mode === 'window') {
+      void openPreviewWindow(content).then((opened) => {
+        if (!opened) openPreviewFloat(content)
       })
       return
     }
-    openPreviewFloat({ kind: 'web', initialUrl: payload.url })
+    openPreviewFloat(content)
+  }
+
+  /** Merge a preview window into the current workspace: split the active
+   *  terminal tab so the new pane is bound to its live session. Returns a
+   *  failure reason instead of throwing so the preview window can stay open. */
+  async function dockPreviewWindow(request: PreviewDockRequest): Promise<PreviewDockOutcome> {
+    const tab = activeTab.value
+    if (!tab || tab.type !== 'terminal') return 'no-active-terminal'
+    // Never split a files/web/plugin leaf: the backend binds the new pane's
+    // `sourcePaneId` to the split target, which must be a live terminal.
+    const targetPaneId =
+      activeTerminalLeaf.value?.paneId ??
+      getAllLeaves(tab.layout).find((leaf) => paneKind(leaf) === 'terminal')?.paneId
+    if (!targetPaneId) return 'no-active-terminal'
+
+    const url = request.url?.trim()
+    if (request.kind === 'web' && !url) return 'invalid-target'
+    // A file browser bound to another workspace/session cannot reuse its
+    // absolute path: the new pane is scoped to the target session's root and
+    // would reject paths outside it. Only carry the path when the merge stays
+    // on the same session; otherwise boot at the current workspace root.
+    const sameSession = !!request.sourcePaneId && request.sourcePaneId === targetPaneId
+    const payload =
+      request.kind === 'files'
+        ? { path: sameSession ? (request.path ?? '') : '' }
+        : { url: url ?? '' }
+    const inserted = await splitPane.insertNonTerminalPane(
+      request.kind,
+      payload,
+      'horizontal',
+      targetPaneId
+    )
+    return inserted ? 'ok' : 'insert-failed'
+  }
+
+  /** Listen for preview windows dropped onto the main window. The Rust side
+   *  closes the source window only after the pane exists. */
+  function setupPreviewWindowDockListener(): () => void {
+    return usePreviewDockReceiver({
+      dock: dockPreviewWindow,
+      closeWindow: async (windowLabel) => {
+        await tauriInvoke('close_preview_window', { windowLabel })
+      },
+      notify: (outcome) => {
+        if (outcome === 'no-active-terminal') {
+          toast?.warning(t('previewPanel.needActiveTerminal'))
+        } else if (outcome === 'invalid-target') {
+          toast?.warning(t('previewWindow.dockEmptyTarget'))
+        } else {
+          toast?.warning(t('previewWindow.dockFailed'))
+        }
+      },
+    })
   }
 
   // ─── Server switching (Phase B4) ───────────────────────────────────
@@ -1215,6 +1380,9 @@ export function useAppCore(options: AppCoreOptions) {
     systemActionKeyboardOpen,
     kbDebugEnabled,
     syncKbDebugFlag,
+    imeDebugEnabled,
+    syncImeDebugFlag,
+    toggleImeDebug,
     keyboardHostRef,
     systemToolbarRef,
     keyboardProviders,
@@ -1249,6 +1417,7 @@ export function useAppCore(options: AppCoreOptions) {
     activeWorkspaceColor,
     // tab metadata
     visibleTabList,
+    contentTabs,
     tabIndicators,
     notificationPaneLabels,
     currentTabIndex,
@@ -1269,12 +1438,18 @@ export function useAppCore(options: AppCoreOptions) {
     requestCloseTab,
     closeTab,
     focusActive,
+    // detached windows
+    detachTab: detachedWindows.detachTab,
+    setupDetachedWindowListener: detachedWindows.setupListener,
+    refreshDetachedWindows: detachedWindows.refresh,
+    setupPreviewWindowDockListener,
     // overview
     overviewOpen,
     openOverview,
     closeOverview,
     onOverviewActivate,
     onOverviewCloseTab,
+    onOverviewCloseTerminal,
     onCloseTabsBulk,
     onOverviewNewTab,
     onOverviewNewTabSsh,

@@ -33,7 +33,9 @@ use super::handlers::{
     request_code, revoke_other_sessions, revoke_session_handler, token_configured, update_token,
 };
 use super::state::AppState;
-use super::static_handlers::{icon_handler, index, manifest_handler, server_info, static_handler};
+use super::static_handlers::{
+    icon_handler, index, manifest_handler, server_info, static_handler, sw_handler,
+};
 use super::StaticFiles;
 
 pub fn build_router(state: AppState) -> Router {
@@ -41,12 +43,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws", get(ws::ws_handler))
         .route("/ws/sync", get(ws::sync_handler))
         .route("/ws/watch", get(file_watcher::watch_handler))
+        .route("/ws/plugins/:id/workspace/watch", get(plugin::plugin_workspace_watch))
         // Tab/Pane management
         .route("/api/tabs", get(tabs::list_tabs).post(tabs::create_tab))
         // SSH tab routes (must be before :tab_id routes)
         .route("/api/tabs/ssh/quick", post(tabs::create_ssh_quick_tab))
         .route("/api/tabs/ssh", post(tabs::create_ssh_tab))
         .route("/api/tabs/:tab_id", delete(tabs::close_tab))
+        .route("/api/tabs/:tab_id/rename", post(tabs::rename_tab))
+        .route("/api/tabs/:tab_id/workspace", put(tabs::set_tab_workspace))
         .route("/api/tabs/:tab_id/pane", post(tabs::split_pane))
         .route("/api/tabs/:tab_id/pane/plugin", post(tabs::create_plugin_pane))
         .route("/api/tabs/:tab_id/pane/files", post(tabs::create_files_pane))
@@ -94,6 +99,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/workspace/list", get(workspace::workspace_list))
         .route("/api/workspace/meta", get(workspace::workspace_meta))
         .route("/api/workspace/raw", get(workspace::workspace_raw))
+        .route("/api/workspace/cwd", get(workspace::workspace_cwd))
+        .route("/api/workspace/reveal", get(workspace::workspace_reveal))
         .merge(
             Router::new()
                 .route("/api/workspace/upload", post(workspace::workspace_upload))
@@ -117,9 +124,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/workspace/move", post(workspace::workspace_move))
         .route("/api/workspace/git-status", get(workspace::workspace_git_status))
         .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
+        .route("/api/workspace/git-changes", get(workspace::workspace_git_changes))
+        .route("/api/workspace/git-file-diff", get(workspace::workspace_git_file_diff))
         .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
         .route("/api/workspace/git-revert-lines", post(workspace::workspace_git_revert_lines))
         .route("/api/workspace/syntax-check", post(workspace::workspace_syntax_check))
+        .route("/api/workspace/search", post(workspace::workspace_search))
         // Workspace management
         .route(
             "/api/workspaces",
@@ -132,6 +142,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/workspaces/:id/activate", put(workspace_mgmt::activate_workspace))
         .route("/api/workspaces/active", delete(workspace_mgmt::deactivate_workspace))
+        .route("/api/list-dirs", get(workspace_mgmt::list_dirs))
         .route("/api/notify", post(notification::post_notify))
         .route("/api/events/emit", post(events::emit_event))
         .route("/api/history", get(history::get_history).delete(history::delete_history))
@@ -196,6 +207,7 @@ pub fn build_router(state: AppState) -> Router {
                 .route("/api/sessions/:pane_id/run", post(agent::sessions_run))
                 .route("/api/sessions/:pane_id/send", post(agent::sessions_send))
                 .route("/api/sessions/:pane_id/read", get(agent::sessions_read))
+                .route("/api/sessions/:pane_id/viewer", post(workspace::open_viewer_handler))
                 .route("/ws/events", get(agent::events_ws_handler))
                 .route("/api/tokens", post(token::create_token).get(token::list_tokens))
                 .route(
@@ -216,9 +228,12 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route("/api/proxy", any(proxy::external_proxy_handler))
-        .route("/preview/:port", any(proxy::proxy_handler_root))
-        .route("/preview/:port/", any(proxy::proxy_handler_root))
-        .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+        // One wildcard handler: the canonical form puts the upstream origin in
+        // a single opaque segment, so a `:port` pattern would capture it and
+        // reject the URL before parsing. Keep in sync with `src/main.rs`.
+        .route("/preview", any(proxy::proxy_handler_wildcard))
+        .route("/preview/", any(proxy::proxy_handler_wildcard))
+        .route("/preview/*path", any(proxy::proxy_handler_wildcard))
         // Keep in sync with `src/main.rs` - this route table is a separate copy
         // because `src-tauri` is not part of the lib.
         .route("/__srv/:id", any(proxy::relay_dispatch_handler))
@@ -232,6 +247,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/assets/*path", get(static_handler))
         .route("/icons/*path", get(icon_handler))
         .route("/manifest.json", get(manifest_handler))
+        .route("/sw.js", get(sw_handler))
         .route(
             "/logo.png",
             get(|| async {

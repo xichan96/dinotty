@@ -119,6 +119,10 @@ import { openUrlInSystemBrowser } from '../../utils/openExternalUrl'
 const props = defineProps<{
   paneId: string
   sshHost?: string // "user@host:port" for SSH tabs
+  /** Detached windows must use WebSocket even when Tauri IPC is available:
+   *  `TauriIpcTransport` is single-owner per pane and would kick the main
+   *  window off a pane both windows render. See `createTransport`. */
+  forceWebSocket?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -126,7 +130,7 @@ const emit = defineEmits<{
   shellInfo: [shell: string]
   connect: []
   disconnect: []
-  fileClick: [path: string]
+  fileClick: [path: string, line?: number, column?: number]
   previewLink: [url: string]
   linkActivate: []
   input: [data: string]
@@ -233,6 +237,10 @@ const EDGE_SCROLL_INTERVAL_MS = 60
 // Link context menu state
 const linkType = ref<'file' | 'link'>()
 const linkTarget = ref<string>()
+// Position parsed from a `file:line:col` terminal link; applies only to the
+// link that produced the current menu.
+let linkLine: number | undefined
+let linkColumn: number | undefined
 // Last URL the pointer hovered. Right-click consults it so the single
 // context menu is link-aware; cleared on leave and on menu close (#306).
 const hoveredLinkUrl = ref<string | null>(null)
@@ -326,6 +334,10 @@ function onContextMenu(e: MouseEvent) {
   } else if (hoveredFilePath.value) {
     linkType.value = 'file'
     linkTarget.value = hoveredFilePath.value
+    // Hovering only carries the path, so a previously clicked line/column must
+    // not leak into this menu.
+    linkLine = undefined
+    linkColumn = undefined
   }
   menuVisible.value = true
 }
@@ -335,6 +347,8 @@ function closeMenu() {
   handlesVisible.value = false
   linkType.value = undefined
   linkTarget.value = undefined
+  linkLine = undefined
+  linkColumn = undefined
   hoveredLinkUrl.value = null
   hoveredFilePath.value = null
   nextTick(() => terminal?.focus())
@@ -401,7 +415,7 @@ function onMenuSelectAll() {
 }
 
 function onMenuOpenFile(path: string) {
-  emit('fileClick', path)
+  emit('fileClick', path, linkLine, linkColumn)
 }
 
 function onMenuOpenLink(url: string) {
@@ -1011,7 +1025,7 @@ function onHandleDragEnd(canceled = false) {
 }
 
 onMounted(() => {
-  terminal = new TerminalInstance(props.paneId)
+  terminal = new TerminalInstance(props.paneId, { forceWebSocket: props.forceWebSocket })
   paneAlive = true
   const self = terminal
   if (props.sshHost) self.sshHost = props.sshHost
@@ -1021,10 +1035,12 @@ onMounted(() => {
   self.onDisconnect = () => emit('disconnect')
   self.onInput = (data) => emit('input', data)
   self.onReconnect = () => emit('reconnect')
-  self.onFileClick = (path, x, y) => {
+  self.onFileClick = (target, x, y) => {
     emit('linkActivate')
     linkType.value = 'file'
-    linkTarget.value = path
+    linkTarget.value = target.path
+    linkLine = target.line
+    linkColumn = target.column
     if (x != null && y != null) {
       menuX.value = x
       menuY.value = y

@@ -39,6 +39,7 @@
         @merge-tab-into-pane="onMergeTabIntoPane"
         @open-plugin="openPlugin"
         @rename="onRenameTab"
+        @detach-to-window="detachTab"
         @open-overview="openOverview"
         @save-as-template="openSaveTemplateDialog"
         @apply-template="templatePickerVisible = true"
@@ -160,7 +161,7 @@
         @touchcancel.capture="onTabContentTouchCancelCapture"
       >
         <div
-          v-for="tab in tabs"
+          v-for="tab in contentTabs"
           :key="tabKey(tab)"
           class="tab-page"
           :class="{
@@ -215,6 +216,8 @@
     <NotificationPanel :pane-labels="notificationPaneLabels" @goto-pane="revealPane" />
 
     <DropPreview />
+
+    <DetachedWindowDropHint />
 
     <StatusBar />
 
@@ -332,6 +335,7 @@
     />
 
     <KbDebugOverlay v-if="kbDebugEnabled" />
+    <ImeDebugOverlay v-if="imeDebugEnabled" />
 
     <KbToggleButton
       v-show="
@@ -354,6 +358,7 @@
       @activate="onOverviewActivate"
       @close-tab="onOverviewCloseTab"
       @close-tabs="onCloseTabsBulk"
+      @close-terminal="onOverviewCloseTerminal"
       @new-tab="onOverviewNewTab"
       @new-tab-ssh="onOverviewNewTabSsh"
       @rename-tab="onOverviewRenameTab"
@@ -389,6 +394,8 @@
     :get-preview-content="getPreviewFloatContent"
     :workspace-id="activeWorkspaceId ?? undefined"
   />
+  <!-- Lazy so Monaco only loads once a viewer request actually needs the overlay. -->
+  <FileViewerOverlay v-if="authenticated && fileViewerRequest" />
 </template>
 
 <script setup lang="ts">
@@ -408,6 +415,7 @@ import SshHostsPanel from './components/ssh/SshHostsPanel.vue'
 import SshAuthPromptDialog from './components/ssh/SshAuthPromptDialog.vue'
 import NotificationPanel from './components/notification/NotificationPanel.vue'
 import DropPreview from './components/split/DropPreview.vue'
+import DetachedWindowDropHint from './components/terminal/DetachedWindowDropHint.vue'
 import SplitContainer from './components/split/SplitContainer.vue'
 import StatusBar from './components/terminal/StatusBar.vue'
 const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
@@ -426,13 +434,18 @@ import PluginFloatWindowHost from './components/plugin/PluginFloatWindowHost.vue
 const WorkspaceOverview = defineAsyncComponent(
   () => import('./components/overview/WorkspaceOverview.vue')
 )
+const FileViewerOverlay = defineAsyncComponent(
+  () => import('./components/preview/FileViewerOverlay.vue')
+)
 import MobileKeyboard from './components/keyboard/MobileKeyboard.vue'
 import SystemKeyboardToolbar from './components/keyboard/SystemKeyboardToolbar.vue'
 import MobileInputGuide from './components/keyboard/MobileInputGuide.vue'
 import KbDebugOverlay from './components/keyboard/KbDebugOverlay.vue'
+import ImeDebugOverlay from './components/terminal/ImeDebugOverlay.vue'
 import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import LoginPage from './components/LoginPage.vue'
 import SetupPage from './components/SetupPage.vue'
+import { useFileViewerPresenter } from './composables/useFileViewerPresenter'
 import { useTabPlacement } from './composables/useTabPlacement'
 import { confirmState, confirmResolve, confirmCancel } from './composables/useConfirm'
 import { alertState, alertResolve } from './composables/useAlert'
@@ -467,6 +480,7 @@ import { useUiStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useTabPersistence } from './composables/useTabPersistence'
 import { useDesktopLifecycle } from './composables/useDesktopLifecycle'
+import { useDockTargetReporter } from './composables/useDockTargetReporter'
 import { useAppCore } from './composables/useAppCore'
 import { useSettingsSync } from './composables/useSettingsSync'
 import { useAppActions } from './composables/useAppActions'
@@ -513,6 +527,9 @@ const windowCloseConfirmVisible = ref(false)
 const trayVisibilityDialogVisible = ref(false)
 const previewMenuOpen = ref(false)
 const lastTabCloseShortcutAt = ref(0)
+let disposeDetachedListener: (() => void) | undefined
+let disposePreviewDockListener: (() => void) | undefined
+let disposeDockTargetReporter: (() => void) | undefined
 
 // ── Tab bar placement (device-scoped; never written to the server settings) ──
 const tabPlacement = useTabPlacement()
@@ -585,6 +602,8 @@ const tauri = useAppTauri({
   lastTabCloseShortcutAt,
 })
 const bridge = usePluginBridge({ core })
+// Main window only: turns `open_file_viewer` into a native window or the overlay.
+const { request: fileViewerRequest } = useFileViewerPresenter()
 
 // ── Re-exports for the template ─────────────────────────────────
 const {
@@ -601,11 +620,13 @@ const {
   systemActionKeyboardOpen,
   mobileInputGuideVisible,
   kbDebugEnabled,
+  imeDebugEnabled,
   keyboardProviderComponent,
   keyboardHostRef,
   systemToolbarRef,
   activeTabType,
   visibleTabList,
+  contentTabs,
   tabIndicators,
   notificationPaneLabels,
   currentTabIndex,
@@ -622,6 +643,10 @@ const {
   activateTab,
   closeTab,
   requestCloseTab,
+  detachTab,
+  setupDetachedWindowListener,
+  setupPreviewWindowDockListener,
+  refreshDetachedWindows,
   onCloseTabsBulk,
   reorderTab,
   onRenameTab,
@@ -664,6 +689,7 @@ const {
   closeOverview,
   onOverviewActivate,
   onOverviewCloseTab,
+  onOverviewCloseTerminal,
   onOverviewNewTab,
   onOverviewNewTabSsh,
   onOverviewRenameTab,
@@ -678,6 +704,8 @@ const {
   loadAll,
   focusActive,
   syncKbDebugFlag,
+  syncImeDebugFlag,
+  toggleImeDebug,
   clearToastInstance,
   clearActiveReadContext,
   stopForegroundGainSubscription,
@@ -733,6 +761,17 @@ watch(overviewOpen, (v) => {
 
 const { paletteCommands, onGlobalKeydown, hostClipboardPaste } = actions
 
+// Desktop builds have no editable URL, so the #ime-debug switch also has a
+// hotkey. Only toggles the opt-in recorder + overlay; inert otherwise.
+function onImeDebugHotkey(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || !e.altKey || e.code !== 'KeyI') return
+  // Capture-phase: keep the chord away from xterm's textarea so it does not
+  // also reach the PTY as Ctrl+I (Tab).
+  e.preventDefault()
+  e.stopPropagation()
+  toggleImeDebug()
+}
+
 const {
   systemKeyboardOpen,
   keyboardCtx,
@@ -772,8 +811,18 @@ const { pluginNotifyBridge } = bridge
 
 onMounted(async () => {
   setupTauriWindowClose()
+  disposeDetachedListener = setupDetachedWindowListener()
+  // Preview windows merged onto the main window insert into the current
+  // workspace and then close themselves.
+  disposePreviewDockListener = setupPreviewWindowDockListener()
+  // Detached windows ask for the tab-bar rectangle while their title bar is
+  // being dragged; it is the only valid recall target.
+  disposeDockTargetReporter = useDockTargetReporter()
   syncKbDebugFlag()
   window.addEventListener('hashchange', syncKbDebugFlag)
+  syncImeDebugFlag()
+  window.addEventListener('hashchange', syncImeDebugFlag)
+  document.addEventListener('keydown', onImeDebugHotkey, true)
   await desktopLifecycle.setup()
   document.addEventListener('keydown', onGlobalKeydown)
   document.addEventListener('focusin', onDocumentFocusIn)
@@ -787,6 +836,10 @@ onMounted(async () => {
   try {
     if (authenticated.value) {
       await getApiBase()
+      // The Rust process may still own detached windows from before a reload.
+      // Rebuild the filter before sync WS/REST deliver tabs, so those panes
+      // never mount in the main window first.
+      await refreshDetachedWindows()
       // Packs live on the server, so this can only run once we know where the
       // server is and that we may talk to it. Deliberately not awaited: a
       // missing or slow route must not hold up the first paint, and until it
@@ -899,6 +952,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposeDetachedListener?.()
+  disposePreviewDockListener?.()
+  disposePreviewDockListener = undefined
+  disposeDockTargetReporter?.()
+  disposeDockTargetReporter = undefined
   hostClipboardPaste.dispose()
   stopForegroundGainSubscription()
   pluginNotifyBridge.dispose()
@@ -918,6 +976,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('dinotty:open-settings', onOpenSettingsRequest)
   window.removeEventListener('pane-drag-hover-switch', onPaneDragHoverSwitch)
   window.removeEventListener('hashchange', syncKbDebugFlag)
+  window.removeEventListener('hashchange', syncImeDebugFlag)
+  document.removeEventListener('keydown', onImeDebugHotkey, true)
   disposeViewport()
   disposePanLock()
   syncWs.closeWs()

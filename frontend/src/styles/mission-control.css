@@ -84,6 +84,38 @@
   white-space: nowrap;
 }
 
+/* "Detached" pill: the label text is always present, so the state never relies
+   on color or an icon alone. */
+.mc-detached-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--accent, #8a8a8a);
+  border-radius: 999px;
+  background: var(--bg-surface-hover, rgba(255, 255, 255, 0.08));
+  color: var(--fg-bright);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* A detached tab has no mounted terminal in this window to preview. */
+.mc-detached-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+  color: var(--text-muted, #888);
+  font-size: 12px;
+  text-align: center;
+}
+
 .mc-notif-dot {
   width: 7px;
   height: 7px;

@@ -79,6 +79,12 @@ impl axum::extract::FromRef<AppState> for (Arc<SessionManager>, Arc<FileWatcherS
     }
 }
 
+impl axum::extract::FromRef<AppState> for Arc<FileWatcherState> {
+    fn from_ref(state: &AppState) -> Self {
+        state.file_watcher.clone()
+    }
+}
+
 impl axum::extract::FromRef<AppState> for MonitorState {
     fn from_ref(state: &AppState) -> Self {
         state.monitor.clone()

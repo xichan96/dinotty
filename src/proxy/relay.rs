@@ -45,6 +45,15 @@ pub const RELAY_PREFIX: &str = "/__srv";
 /// header-less requests for `<img>`-style subresources.
 pub const RELAY_CSRF_HEADER: &str = "x-dinotty-relay";
 
+/// Tells a relayed `/preview` response where the browser will reach it.
+///
+/// The remote server rewrites the previewed app's URLs to `/preview/...`, but
+/// the browser is on the *hub* origin: without this hint those URLs skip the
+/// relay and hit the hub's own server. Written by the hub on every relayed
+/// request (never forwarded from the client) and read only by the preview
+/// handler, which validates the shape before embedding it in a page.
+pub const RELAY_PREFIX_HEADER: &str = "x-dinotty-relay-prefix";
+
 /// Split `/__srv/<id>/<rest>` into its server id and the remainder.
 ///
 /// Returns `None` when the path is not under [`RELAY_PREFIX`] or carries an
@@ -97,6 +106,7 @@ fn is_hop_by_hop(name: &str) -> bool {
 fn should_forward_header(name: &str) -> bool {
     !is_hop_by_hop(name)
         && name != RELAY_CSRF_HEADER
+        && name != RELAY_PREFIX_HEADER
         && !matches!(name, "authorization" | "cookie" | "content-length")
         && super::should_forward_header(name)
 }
@@ -317,7 +327,7 @@ pub async fn relay_http_handler(
     // `Bearer ` there would only add a header that authenticates nothing.
     let upstream_token = target.token.as_ref().map_or("", SensitiveString::expose);
 
-    forward_http(req, &origin, rest, upstream_token).await
+    forward_http(req, &origin, rest, upstream_token, &id).await
 }
 
 /// Copy `req` to `origin/rest` and stream the answer back.
@@ -326,7 +336,13 @@ pub async fn relay_http_handler(
 /// traffic includes workspace uploads, and the buffered `/preview/` path's
 /// 10 MB ceiling does not exist on the hub's own upload route, so imposing it
 /// here would break exactly the calls the relay exists to carry.
-async fn forward_http(req: Request, origin: &str, rest: &str, upstream_token: &str) -> Response {
+async fn forward_http(
+    req: Request,
+    origin: &str,
+    rest: &str,
+    upstream_token: &str,
+    id: &str,
+) -> Response {
     let query = req.uri().query().map_or(String::new(), |q| format!("?{q}"));
     let Ok(target_url) = reqwest::Url::parse(&format!("{origin}/{rest}{query}")) else {
         return (StatusCode::BAD_REQUEST, "Cannot build the upstream url").into_response();
@@ -366,6 +382,9 @@ async fn forward_http(req: Request, origin: &str, rest: &str, upstream_token: &s
     if !upstream_token.is_empty() {
         proxy_req = proxy_req.header(header::AUTHORIZATION, format!("Bearer {upstream_token}"));
     }
+    // Injected last so a client-supplied value can never steer the remote's
+    // rewrite prefixes.
+    proxy_req = proxy_req.header(RELAY_PREFIX_HEADER, format!("{RELAY_PREFIX}/{id}"));
     if has_body {
         proxy_req = proxy_req.body(reqwest::Body::wrap_stream(body.into_data_stream()));
     }

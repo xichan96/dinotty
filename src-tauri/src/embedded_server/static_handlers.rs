@@ -36,6 +36,20 @@ pub async fn index() -> impl IntoResponse {
     )
 }
 
+pub async fn sw_handler() -> impl IntoResponse {
+    match StaticFiles::get("sw.js") {
+        Some(content) => Response::builder()
+            .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
+            .header(header::CACHE_CONTROL, "no-cache")
+            .header("Service-Worker-Allowed", "/")
+            .body(Body::from(content.data.into_owned()))
+            .unwrap(),
+        None => {
+            Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("not found")).unwrap()
+        }
+    }
+}
+
 pub async fn icon_handler(Path(path): Path<String>) -> impl IntoResponse {
     let lookup = format!("icons/{}", path);
     match StaticFiles::get(&lookup) {

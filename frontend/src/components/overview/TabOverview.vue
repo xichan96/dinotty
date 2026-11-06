@@ -26,6 +26,15 @@
             <span class="mc-card-index">{{ card.index }}</span>
             <span class="mc-card-title">{{ card.title }}</span>
             <span
+              v-if="card.detached"
+              class="mc-detached-badge"
+              :aria-label="detachedBadgeLabel(card)"
+              :title="card.windowLabel || undefined"
+            >
+              <AppWindow :size="11" />
+              <span>{{ t('tab.detachedBadge') }}</span>
+            </span>
+            <span
               v-if="indicators[card.paneId]"
               class="mc-notif-dot"
               :class="'dot-' + indicators[card.paneId]"
@@ -39,7 +48,11 @@
             </button>
           </div>
           <div class="mc-card-preview">
-            <img v-if="card.previewImage" :src="card.previewImage" />
+            <div v-if="card.detached" class="mc-detached-preview">
+              <AppWindow :size="24" />
+              <span>{{ t('detached.openedInNewWindow') }}</span>
+            </div>
+            <img v-else-if="card.previewImage" :src="card.previewImage" />
             <SplitPreviewNode
               v-else-if="isSplitPreview(card.htmlContent)"
               :node="card.htmlContent"
@@ -111,6 +124,15 @@
           <div class="mc-card-header">
             <span class="mc-card-index">{{ card.index }}</span>
             <span class="mc-card-title">{{ card.title }}</span>
+            <span
+              v-if="card.detached"
+              class="mc-detached-badge"
+              :aria-label="detachedBadgeLabel(card)"
+              :title="card.windowLabel || undefined"
+            >
+              <AppWindow :size="11" />
+              <span>{{ t('tab.detachedBadge') }}</span>
+            </span>
             <button
               class="mc-card-close"
               :aria-label="`Close ${card.title}`"
@@ -120,7 +142,11 @@
             </button>
           </div>
           <div class="mc-card-preview">
-            <img v-if="card.previewImage" :src="card.previewImage" />
+            <div v-if="card.detached" class="mc-detached-preview">
+              <AppWindow :size="24" />
+              <span>{{ t('detached.openedInNewWindow') }}</span>
+            </div>
+            <img v-else-if="card.previewImage" :src="card.previewImage" />
             <SplitPreviewNode
               v-else-if="isSplitPreview(card.htmlContent)"
               :node="card.htmlContent"
@@ -175,6 +201,8 @@ import {
   Layers,
   ArrowLeftToLine,
   ArrowRightToLine,
+  AppWindow,
+  Import,
 } from 'lucide-vue-next'
 import type { TabCard, PanePreviewNode } from '../../composables/useTabPreview'
 import SplitPreviewNode from './SplitPreviewNode.vue'
@@ -184,6 +212,7 @@ import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
 import { uiPrompt } from '../../composables/usePrompt'
 import { useMissionControlState, sendMcOp } from '../../composables/useMissionControlState'
+import { useDetachedWindowsStore } from '../../stores/detachedWindowsStore'
 
 const { t } = useI18n()
 
@@ -211,9 +240,18 @@ const emit = defineEmits<{
   activate: [paneId: string]
   'close-tab': [paneId: string]
   'close-tabs': [paneIds: string[]]
+  'close-terminal': [paneId: string]
   'rename-tab': [paneId: string, title: string]
   'new-tab': []
 }>()
+
+const detachedStore = useDetachedWindowsStore()
+
+/** Accessible name for the badge; the window title is the useful detail. */
+function detachedBadgeLabel(card: TabCard): string {
+  const base = t('tab.detachedBadge')
+  return card.windowLabel ? `${base}: ${card.windowLabel}` : base
+}
 
 // Context menu for tab cards
 const ctxVisible = ref(false)
@@ -221,9 +259,49 @@ const ctxX = ref(0)
 const ctxY = ref(0)
 const ctxItems = ref<ContextMenuItem[]>([])
 
+async function confirmCloseTerminal(card: TabCard): Promise<void> {
+  const ok = await uiConfirm(t('detached.closeTerminalConfirm'), {
+    title: t('detached.closeTerminal'),
+    confirmText: t('detached.closeTerminal'),
+    cancelText: t('filePreview.cancel'),
+  })
+  if (ok) emit('close-terminal', card.paneId)
+}
+
+/**
+ * Detached cards replace the ordinary tab menu: the tab is not in this window,
+ * so rename / close-left / close-right do not apply. Focus routes back through
+ * `activate` so it shares the same fallback as clicking the card.
+ */
+function detachedMenuItems(card: TabCard): ContextMenuItem[] {
+  return [
+    {
+      label: t('detached.focusWindow'),
+      icon: AppWindow,
+      action: () => emit('activate', card.paneId),
+    },
+    {
+      label: t('detached.reattachToMain'),
+      icon: Import,
+      action: () => void detachedStore.closeDetached(card.paneId),
+    },
+    {
+      label: t('detached.closeTerminal'),
+      icon: Square,
+      danger: true,
+      action: () => void confirmCloseTerminal(card),
+    },
+  ]
+}
+
 function openCardCtx(e: MouseEvent, card: TabCard) {
   ctxX.value = e.clientX
   ctxY.value = e.clientY
+  if (card.detached) {
+    ctxItems.value = detachedMenuItems(card)
+    ctxVisible.value = true
+    return
+  }
   const idx = props.cards.findIndex((c) => c.paneId === card.paneId)
   const workspaceTabs = props.cards.filter((c) => c.type !== 'plugin')
   const leftTabs = props.cards.slice(0, idx).filter((c) => c.type !== 'plugin')

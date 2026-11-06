@@ -39,12 +39,25 @@
         <div class="mc-card-header">
           <span class="mc-card-index">{{ card.index }}</span>
           <span class="mc-card-title">{{ card.title }}</span>
+          <span
+            v-if="card.detached"
+            class="mc-detached-badge"
+            :aria-label="card.windowLabel ? `${t('tab.detachedBadge')}: ${card.windowLabel}` : t('tab.detachedBadge')"
+            :title="card.windowLabel || undefined"
+          >
+            <AppWindow :size="11" />
+            <span>{{ t('tab.detachedBadge') }}</span>
+          </span>
           <button class="mc-card-close" @click.stop="$emit('close-tab', card.paneId)">
             <X :size="14" />
           </button>
         </div>
         <div class="mc-card-preview">
-          <img v-if="card.previewImage" :src="card.previewImage" />
+          <div v-if="card.detached" class="mc-detached-preview">
+            <AppWindow :size="24" />
+            <span>{{ t('detached.openedInNewWindow') }}</span>
+          </div>
+          <img v-else-if="card.previewImage" :src="card.previewImage" />
           <pre v-else-if="card.htmlContent" class="mc-card-text" v-html="card.htmlContent"></pre>
           <pre v-else-if="card.textContent" class="mc-card-text">{{ card.textContent }}</pre>
           <div v-else-if="card.type === 'plugin'" class="mc-plugin-placeholder">
@@ -73,7 +86,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Motion } from 'motion-v'
-import { ChevronLeft, X, Puzzle, Plus, Pencil, Square } from 'lucide-vue-next'
+import { ChevronLeft, X, Puzzle, Plus, Pencil, Square, AppWindow } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { DEFAULT_WORKSPACE_ID } from '../../composables/useWorkspaces'
 import { uiPrompt } from '../../composables/usePrompt'

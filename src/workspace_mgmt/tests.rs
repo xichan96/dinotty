@@ -300,11 +300,11 @@ fn ws_remote(id: &str, path: &str, connection_id: &str) -> Workspace {
 fn tab_workspace_id_local_tab_longest_prefix_wins() {
     let workspaces = vec![ws_local("outer", "/Users/me"), ws_local("inner", "/Users/me/work")];
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me/work/project"), None),
+        tab_workspace_id(&workspaces, None, Some("/Users/me/work/project"), None),
         Some("inner".to_string())
     );
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me/other"), None),
+        tab_workspace_id(&workspaces, None, Some("/Users/me/other"), None),
         Some("outer".to_string())
     );
 }
@@ -312,16 +312,16 @@ fn tab_workspace_id_local_tab_longest_prefix_wins() {
 #[test]
 fn tab_workspace_id_no_match_returns_none() {
     let workspaces = vec![ws_local("ws1", "/Users/me/work")];
-    assert_eq!(tab_workspace_id(&workspaces, Some("/tmp"), None), None);
-    assert_eq!(tab_workspace_id(&workspaces, None, None), None);
-    assert_eq!(tab_workspace_id(&workspaces, Some(""), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some("/tmp"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, None, None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some(""), None), None);
 }
 
 #[test]
 fn tab_workspace_id_sibling_prefix_not_match() {
     // `/etcfoo` should NOT match workspace at `/etc` (no path separator)
     let workspaces = vec![ws_local("etc", "/etc")];
-    assert_eq!(tab_workspace_id(&workspaces, Some("/etcfoo"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some("/etcfoo"), None), None);
 }
 
 #[test]
@@ -331,11 +331,14 @@ fn tab_workspace_id_ssh_tab_matches_by_connection_id() {
         ws_remote("remote", "/home/deploy/app", "ssh-profile-1"),
     ];
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me"), Some("ssh-profile-1")),
+        tab_workspace_id(&workspaces, None, Some("/Users/me"), Some("ssh-profile-1")),
         Some("remote".to_string())
     );
     // SSH tab with connection_id that matches no workspace -> default (None)
-    assert_eq!(tab_workspace_id(&workspaces, Some("/Users/me"), Some("unknown-profile")), None);
+    assert_eq!(
+        tab_workspace_id(&workspaces, None, Some("/Users/me"), Some("unknown-profile")),
+        None
+    );
 }
 
 #[test]
@@ -343,14 +346,126 @@ fn tab_workspace_id_local_tab_skips_remote_workspaces() {
     // Local tab (no connection_id) should not match a remote workspace even
     // if its path happens to prefix-match.
     let workspaces = vec![ws_remote("remote", "/Users/me", "ssh-profile-1")];
-    assert_eq!(tab_workspace_id(&workspaces, Some("/Users/me/project"), None), None);
+    assert_eq!(tab_workspace_id(&workspaces, None, Some("/Users/me/project"), None), None);
+}
+
+#[test]
+fn tab_workspace_id_explicit_assignment_wins() {
+    let workspaces = vec![ws_local("a", "/Users/me/a"), ws_local("b", "/Users/me/b")];
+    // Explicit wins over cwd attribution.
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("b"), Some("/Users/me/a"), None),
+        Some("b".to_string())
+    );
+    // A stale explicit id (workspace deleted) falls through to cwd.
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("deleted"), Some("/Users/me/a"), None),
+        Some("a".to_string())
+    );
+}
+
+#[test]
+fn tab_workspace_id_explicit_assignment_beats_connection_id() {
+    let workspaces =
+        vec![ws_local("a", "/Users/me/a"), ws_remote("remote", "/srv", "ssh-profile-1")];
+    assert_eq!(
+        tab_workspace_id(&workspaces, Some("a"), None, Some("ssh-profile-1")),
+        Some("a".to_string())
+    );
 }
 
 #[test]
 fn tab_workspace_id_trailing_slash_on_workspace_path_is_tolerated() {
     let workspaces = vec![ws_local("ws1", "/Users/me/work/")];
     assert_eq!(
-        tab_workspace_id(&workspaces, Some("/Users/me/work/project"), None),
+        tab_workspace_id(&workspaces, None, Some("/Users/me/work/project"), None),
         Some("ws1".to_string())
     );
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/workspaces/:id
+// ---------------------------------------------------------------------------
+
+mod delete_workspace_route {
+    use std::sync::Arc;
+
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::delete,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    use crate::session::SessionManager;
+    use crate::settings::{Settings, SettingsState};
+    use crate::test_support::EnvGuard;
+
+    fn workspace(id: &str) -> super::Workspace {
+        super::Workspace {
+            id: id.to_string(),
+            name: id.to_string(),
+            path: format!("/tmp/{id}"),
+            order: 0,
+            connection_id: None,
+            abbr: None,
+            color: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn clears_explicit_tab_assignments_for_the_deleted_workspace() {
+        // Keep the handler's saves out of the real config directory.
+        let _env = EnvGuard::new(&["DINOTTY_CONFIG_SUFFIX"]);
+        std::env::set_var("DINOTTY_CONFIG_SUFFIX", "-workspace-delete-unit-test");
+
+        let workspaces: super::WorkspacesState =
+            Arc::new(tokio::sync::RwLock::new(vec![workspace("ws-a"), workspace("ws-b")]));
+        let settings: SettingsState = Arc::new(tokio::sync::RwLock::new(Settings::default()));
+        let manager = Arc::new(SessionManager::new());
+        for tab in ["t1", "t2"] {
+            manager.insert_tab(
+                tab.into(),
+                serde_json::json!({"layout": {"type": "leaf", "paneId": tab}, "active_pane_id": tab}),
+            );
+        }
+        manager.set_tab_workspace("t1", Some("ws-a".into()));
+        manager.set_tab_workspace("t2", Some("ws-b".into()));
+
+        // Observe the sync broadcasts the handler emits to connected clients.
+        let (_client_id, mut rx) = manager.add_sync_client();
+
+        let app = Router::new()
+            .route("/api/workspaces/:id", delete(super::delete_workspace))
+            .with_state((workspaces, settings, Arc::clone(&manager)));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/workspaces/ws-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(manager.explicit_tab_workspace("t1"), None);
+        assert_eq!(manager.explicit_tab_workspace("t2").as_deref(), Some("ws-b"));
+
+        let mut messages = Vec::new();
+        while let Ok(raw) = rx.try_recv() {
+            messages.push(serde_json::from_str::<serde_json::Value>(&raw).unwrap());
+        }
+        assert!(
+            messages.iter().any(|msg| msg["type"] == "workspace_deleted" && msg["id"] == "ws-a"),
+            "deleted workspace must be broadcast: {messages:?}"
+        );
+        let cleared: Vec<_> =
+            messages.iter().filter(|msg| msg["type"] == "tab_workspace_updated").collect();
+        assert_eq!(cleared.len(), 1, "only the cleared tab must be broadcast: {messages:?}");
+        assert_eq!(cleared[0]["tab_id"], "t1");
+        assert!(cleared[0]["workspace_id"].is_null());
+    }
 }

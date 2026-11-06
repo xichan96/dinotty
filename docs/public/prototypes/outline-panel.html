@@ -1,0 +1,3284 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dinotty — Outline panel prototype (#329)</title>
+    <style>
+      /* ── Dinotty design tokens (frontend/src/styles/base.css, dark theme) ── */
+      :root {
+        color-scheme: dark;
+        --bg: #1e1e1e;
+        --bg-surface: #252526;
+        --bg-overlay: #1e1e1e;
+        --bg-input: #2a2a2c;
+        --bg-hover: #2a2a2c;
+        --bg-surface-hover: #333333;
+        --border: #3c3c3c;
+        --border-hover: #555555;
+        --border-focus: #8a8a8a;
+        --divider: #2d2d2d;
+        --fg: #cccccc;
+        --fg-bright: #d0d0d0;
+        --fg-muted: #858585;
+        --accent: #8a8a8a;
+        --accent-hover: #9e9e9e;
+        --tab-bg: #181818;
+        --tab-active-bg: #1e1e1e;
+        --tab-hover-bg: #2a2a2c;
+        --tab-text: #858585;
+        --tab-active-text: #d0d0d0;
+        --palette-select: #2a2d2e;
+        --scrollbar-thumb: #4a4a4a;
+        --scrollbar-thumb-hover: #5a5a5a;
+        --color-red: #f44747;
+        --color-green: #6a9955;
+        --color-yellow: #d7ba7d;
+        --color-blue: #569cd6;
+        --color-magenta: #c586c0;
+        --color-cyan: #4ec9b0;
+        --radius: 4px;
+        --dialog-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+        --row-h: 26px;
+        --panel-w: 300px;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+      }
+      *::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      *::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thumb);
+        border-radius: 4px;
+      }
+      *::-webkit-scrollbar-thumb:hover {
+        background: var(--scrollbar-thumb-hover);
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background:
+          radial-gradient(1100px 560px at 50% -12%, rgba(138, 138, 138, 0.07), transparent 68%),
+          #141414;
+        color: var(--fg);
+        font-family: var(--font-ui);
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button {
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
+        border: none;
+        background: none;
+        cursor: pointer;
+      }
+      input {
+        font-family: inherit;
+        font-size: inherit;
+      }
+      svg {
+        display: block;
+      }
+      [hidden] {
+        display: none !important;
+      }
+
+      .icon-btn {
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--radius);
+        color: var(--fg-muted);
+        flex: 0 0 auto;
+      }
+      .icon-btn:hover {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .icon-btn:focus-visible {
+        outline: 1px solid var(--border-focus);
+        outline-offset: -1px;
+      }
+      .icon-btn.active {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .icon-btn svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      /* ── Prototype control strip (not part of the product UI) ── */
+      .demo-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+        padding: 9px 18px;
+        background: #181818;
+        border-bottom: 1px solid var(--divider);
+        position: relative;
+        z-index: 100;
+      }
+      .demo-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--fg-bright);
+        white-space: nowrap;
+      }
+      .demo-brand .mark {
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--fg-muted);
+        background: var(--bg);
+      }
+      .demo-brand .mark svg {
+        width: 13px;
+        height: 13px;
+      }
+      .demo-issue {
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        color: var(--fg-muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 1px 6px;
+        font-weight: 500;
+      }
+      .demo-group {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .demo-label {
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-muted);
+      }
+      .seg {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        padding: 2px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--bg);
+      }
+      .seg button {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 3px;
+        font-size: 10.5px;
+        color: var(--fg-muted);
+        white-space: nowrap;
+      }
+      .seg button:hover {
+        color: var(--fg);
+        background: var(--bg-hover);
+      }
+      .seg button.active {
+        color: var(--fg-bright);
+        background: var(--bg-surface-hover);
+      }
+      .seg button:focus-visible {
+        outline: 1px solid var(--border-focus);
+        outline-offset: -1px;
+      }
+      .seg button:disabled {
+        opacity: 0.42;
+        cursor: default;
+      }
+      .seg button:disabled:hover {
+        color: var(--fg-muted);
+        background: transparent;
+      }
+      .seg button svg {
+        width: 12px;
+        height: 12px;
+      }
+      .seg button .file-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 1px;
+        background: currentColor;
+        opacity: 0.7;
+      }
+      .demo-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .demo-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--bg);
+        color: var(--fg);
+        font-size: 10.5px;
+      }
+      .demo-btn:hover {
+        border-color: var(--border-hover);
+        background: var(--bg-hover);
+      }
+      .demo-btn.active {
+        background: var(--bg-surface-hover);
+        color: var(--fg-bright);
+      }
+      .demo-btn svg {
+        width: 13px;
+        height: 13px;
+        color: var(--fg-muted);
+      }
+      .demo-btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      /* ── App frame ── */
+      .app-stage {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+      }
+      .app-frame {
+        width: min(1320px, 100%);
+        height: 100%;
+        max-height: 900px;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+        position: relative;
+      }
+
+      /* Tab strip */
+      .tabbar {
+        flex: 0 0 auto;
+        height: 36px;
+        display: flex;
+        align-items: stretch;
+        background: var(--tab-bg);
+        border-bottom: 1px solid var(--divider);
+        overflow: hidden;
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        max-width: 260px;
+        padding: 0 9px 0 12px;
+        border-right: 1px solid var(--divider);
+        color: var(--tab-text);
+        font-size: 12px;
+        position: relative;
+      }
+      .tab.active {
+        background: var(--tab-active-bg);
+        color: var(--tab-active-text);
+        box-shadow: inset 0 1px 0 var(--accent);
+      }
+      .tab .tab-icon {
+        width: 15px;
+        height: 15px;
+        display: grid;
+        place-items: center;
+        border-radius: 3px;
+        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: 7.5px;
+        line-height: 1;
+        flex: 0 0 auto;
+      }
+      .tab .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tab .close {
+        width: 18px;
+        height: 18px;
+        display: grid;
+        place-items: center;
+        border-radius: 3px;
+        color: var(--fg-muted);
+        flex: 0 0 auto;
+      }
+      .tab .close:hover {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .tab .close svg {
+        width: 11px;
+        height: 11px;
+      }
+      .tabbar .add {
+        width: 30px;
+        display: grid;
+        place-items: center;
+        color: var(--fg-muted);
+        font-size: 16px;
+        font-weight: 300;
+      }
+      .tabbar .add:hover {
+        color: var(--fg-bright);
+        background: var(--tab-hover-bg);
+      }
+      .tabbar-spacer {
+        flex: 1;
+      }
+      .tabbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 0 8px;
+      }
+      .tabbar-actions .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+
+      /* Breadcrumbs */
+      .crumbs {
+        flex: 0 0 auto;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 0 14px;
+        background: var(--tab-active-bg);
+        border-bottom: 1px solid var(--divider);
+        color: var(--fg-muted);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .crumbs .crumb-sep {
+        color: #4c4c4c;
+        font-size: 10px;
+      }
+      .crumbs .crumb-current {
+        color: var(--fg);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .crumb-spacer {
+        flex: 1;
+      }
+      .crumb-hint {
+        color: var(--fg-muted);
+        font-size: 10.5px;
+        font-family: var(--font-mono);
+        opacity: 0.75;
+      }
+
+      /* Editor chrome */
+      .editor-chrome {
+        flex: 0 0 auto;
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--tab-bg);
+      }
+      .view-tab {
+        height: 22px;
+        padding: 0 9px;
+        border-radius: 3px;
+        font-size: 11.5px;
+        color: var(--fg-muted);
+      }
+      .view-tab:hover {
+        color: var(--fg);
+      }
+      .view-tab.active {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .lang-pill,
+      .dirty-pill {
+        font-size: 10.5px;
+        color: var(--fg-muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 1px 7px;
+        letter-spacing: 0.02em;
+      }
+      .dirty-pill {
+        color: var(--color-yellow);
+        border-color: transparent;
+        padding-left: 0;
+      }
+      .chrome-spacer {
+        flex: 1;
+      }
+      .save-btn {
+        height: 23px;
+        padding: 0 11px;
+        border-radius: 3px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 11px;
+        opacity: 0.38;
+        cursor: default;
+      }
+      .chrome-btn.active {
+        background: var(--bg-surface-hover);
+        color: var(--fg-bright);
+      }
+
+      /* Workspace body */
+      .workspace-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+      }
+
+      /* File tree */
+      .file-tree {
+        flex: 0 0 208px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-surface);
+        border-right: 1px solid var(--border);
+      }
+      .tree-head {
+        height: 30px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        color: var(--fg-muted);
+        font-size: 9.5px;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+      .tree-head svg {
+        width: 12px;
+        height: 12px;
+      }
+      .tree-scroll {
+        flex: 1;
+        overflow: auto;
+        padding: 2px 0 10px;
+      }
+      .tree-row {
+        height: 23px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 0 10px;
+        color: var(--fg);
+        font-size: 11.5px;
+        white-space: nowrap;
+        cursor: default;
+      }
+      .tree-row:hover {
+        background: var(--bg-hover);
+      }
+      .tree-row.folder {
+        color: var(--fg-muted);
+      }
+      .tree-row.d1 {
+        padding-left: 24px;
+      }
+      .tree-row.d2 {
+        padding-left: 38px;
+      }
+      .tree-row .tw {
+        width: 9px;
+        color: #6f6f6f;
+        font-size: 8px;
+        flex: 0 0 9px;
+      }
+      .tree-row .fi {
+        width: 12px;
+        height: 12px;
+        display: grid;
+        place-items: center;
+        border-radius: 2px;
+        background: var(--bg-hover);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: 6.5px;
+        line-height: 1;
+        flex: 0 0 auto;
+      }
+      .tree-row.file {
+        cursor: pointer;
+      }
+      .tree-row.file.active {
+        background: var(--palette-select);
+        color: var(--fg-bright);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      .tree-row.file.active .fi {
+        color: var(--fg-bright);
+        background: var(--bg-surface-hover);
+      }
+      .tree-row .label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Preview area is the positioning context for the overlay panel */
+      .preview-wrap {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        position: relative;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      .preview-scroll {
+        position: absolute;
+        inset: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+      }
+      .content-view {
+        min-height: 100%;
+      }
+
+      /* Status bar */
+      .statusbar {
+        flex: 0 0 auto;
+        height: 23px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 12px;
+        background: var(--tab-bg);
+        border-top: 1px solid var(--divider);
+        color: var(--fg-muted);
+        font-size: 10.5px;
+        white-space: nowrap;
+      }
+      .statusbar .branch {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--fg);
+      }
+      .statusbar .branch svg {
+        width: 11px;
+        height: 11px;
+      }
+      .status-spacer {
+        flex: 1;
+      }
+      .status-overlay {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .status-overlay .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      /* ── Markdown preview (mirrors FilePreviewContent.vue .file-md-body) ── */
+      .md-content {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 30px 40px 120px;
+        font-family: var(--font-ui);
+        font-size: 14px;
+        line-height: 1.55;
+        color: var(--fg);
+        white-space: normal;
+        word-break: break-word;
+      }
+      .md-content h1,
+      .md-content h2,
+      .md-content h3,
+      .md-content h4 {
+        margin: 1.1em 0 0.45em;
+        font-weight: 600;
+        line-height: 1.25;
+        color: var(--fg-bright);
+        scroll-margin-top: 22px;
+        border-radius: 3px;
+        transition: background 0.18s ease;
+      }
+      .md-content h1 {
+        margin-top: 0;
+        font-size: 1.45em;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.25em;
+      }
+      .md-content h2 {
+        font-size: 1.25em;
+        margin-top: 1.55em;
+      }
+      .md-content h3 {
+        font-size: 1.08em;
+      }
+      .md-content h4 {
+        font-size: 1em;
+      }
+      .md-content p {
+        margin: 0.55em 0;
+      }
+      .md-content a {
+        color: var(--accent);
+        text-decoration: none;
+        border-bottom: 1px solid rgba(138, 138, 138, 0.35);
+      }
+      .md-content a:hover {
+        color: var(--accent-hover);
+        border-bottom-color: currentColor;
+      }
+      .md-content ul,
+      .md-content ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+      }
+      .md-content li {
+        margin: 0.18em 0;
+      }
+      .md-content li::marker {
+        color: var(--fg-muted);
+      }
+      .md-content blockquote {
+        margin: 0.85em 0;
+        padding: 0.2em 0 0.2em 0.85em;
+        border-left: 3px solid var(--border-hover);
+        color: var(--fg-muted);
+      }
+      .md-content hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.2em 0;
+      }
+      .md-content strong {
+        color: var(--fg-bright);
+        font-weight: 600;
+      }
+      .md-content .lede {
+        font-size: 1.02em;
+        color: var(--fg-muted);
+        margin-top: 0.8em;
+      }
+      .md-content .doc-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0.9em 0 1.1em;
+      }
+      .md-content .doc-meta span {
+        font-size: 10.5px;
+        color: var(--fg-muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 1px 8px;
+      }
+      .md-content code:not(pre code) {
+        font-family: var(--font-mono);
+        font-size: 0.88em;
+        padding: 0.12em 0.38em;
+        background: var(--tab-bg);
+        border: 1px solid rgba(60, 60, 60, 0.55);
+        border-radius: 3px;
+        color: var(--fg-bright);
+      }
+      .md-content pre {
+        margin: 0.75em 0;
+        padding: 10px 12px;
+        overflow: auto;
+        background: var(--tab-bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+      .md-content pre code {
+        font-family: inherit;
+        font-size: inherit;
+        background: none;
+        border: 0;
+        padding: 0;
+        color: var(--fg);
+      }
+      .md-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 0.8em 0;
+        font-size: 0.92em;
+      }
+      .md-content th,
+      .md-content td {
+        border: 1px solid var(--border);
+        padding: 0.35em 0.55em;
+        text-align: left;
+        vertical-align: top;
+      }
+      .md-content th {
+        background: var(--tab-bg);
+        color: var(--fg-bright);
+        font-weight: 600;
+      }
+      .md-content h1.flash,
+      .md-content h2.flash,
+      .md-content h3.flash,
+      .md-content h4.flash {
+        animation: heading-flash 1.25s ease-out;
+      }
+      @keyframes heading-flash {
+        0% {
+          background: rgba(138, 138, 138, 0.2);
+          box-shadow: 0 0 0 6px rgba(138, 138, 138, 0.08);
+        }
+        100% {
+          background: transparent;
+          box-shadow: 0 0 0 6px transparent;
+        }
+      }
+
+      /* ── Source views (code + JSON) ── */
+      .source-view {
+        padding: 16px 0 80px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 20px;
+        min-width: max-content;
+      }
+      .source-file-label {
+        position: sticky;
+        left: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 18px;
+        margin-bottom: 8px;
+        color: var(--fg-muted);
+        font-family: var(--font-ui);
+        font-size: 10.5px;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+      }
+      .source-file-label .lang {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0 6px;
+        font-size: 9.5px;
+      }
+      .source-line {
+        display: flex;
+        align-items: flex-start;
+        min-height: 20px;
+        padding-right: 24px;
+        border-radius: 2px;
+      }
+      .source-line .ln {
+        position: sticky;
+        left: 0;
+        flex: 0 0 52px;
+        padding-right: 14px;
+        text-align: right;
+        color: #5f5f5f;
+        background: var(--bg);
+        user-select: none;
+      }
+      .source-line .lc {
+        white-space: pre;
+        padding-left: 10px;
+        color: var(--fg);
+      }
+      .source-line.flash {
+        animation: line-flash 1.25s ease-out;
+      }
+      @keyframes line-flash {
+        0% {
+          background: rgba(138, 138, 138, 0.2);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .tok-com {
+        color: var(--color-green);
+        font-style: italic;
+      }
+      .tok-str {
+        color: var(--color-yellow);
+      }
+      .tok-kw {
+        color: var(--color-magenta);
+      }
+      .tok-type {
+        color: var(--color-cyan);
+      }
+      .tok-fn {
+        color: var(--color-blue);
+      }
+      .tok-num {
+        color: var(--color-yellow);
+      }
+      .tok-key {
+        color: var(--color-blue);
+      }
+      .tok-punct {
+        color: var(--fg-muted);
+      }
+
+      /* ── Overlay outline panel ──
+         Absolute inside .preview-wrap: opening/closing never changes content width. */
+      .outline-panel {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 40;
+        width: var(--panel-w);
+        max-width: calc(100% - 64px);
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-surface);
+        border-left: 1px solid var(--border);
+        box-shadow:
+          -18px 0 44px rgba(0, 0, 0, 0.46),
+          -1px 0 0 rgba(255, 255, 255, 0.035),
+          inset 1px 0 0 rgba(255, 255, 255, 0.025);
+        transform: translateX(calc(100% + 26px));
+        opacity: 0;
+        visibility: hidden;
+        transition:
+          transform 0.18s cubic-bezier(0.2, 0, 0, 1),
+          opacity 0.18s ease,
+          visibility 0s linear 0.18s;
+      }
+      .outline-panel.open {
+        transform: translateX(0);
+        opacity: 1;
+        visibility: visible;
+        transition:
+          transform 0.18s cubic-bezier(0.2, 0, 0, 1),
+          opacity 0.18s ease,
+          visibility 0s;
+      }
+      /* A short fade keeps the covered text readable-but-receded without a modal scrim. */
+      .outline-panel::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -22px;
+        width: 22px;
+        pointer-events: none;
+        background: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.22));
+      }
+      .outline-panel.resizing {
+        transition: none;
+        user-select: none;
+      }
+      body.resizing,
+      body.resizing * {
+        cursor: col-resize !important;
+        user-select: none !important;
+      }
+
+      .resize-handle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -4px;
+        width: 8px;
+        z-index: 3;
+        cursor: col-resize;
+        touch-action: none;
+      }
+      .resize-handle::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 3px;
+        width: 2px;
+        background: transparent;
+        transition: background 0.12s;
+      }
+      .resize-handle:hover::after,
+      .outline-panel.resizing .resize-handle::after {
+        background: var(--accent);
+      }
+
+      .panel-grip {
+        display: none;
+      }
+
+      .panel-head {
+        flex: 0 0 auto;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 7px 0 12px;
+        border-bottom: 1px solid var(--divider);
+      }
+      .panel-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--fg-bright);
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+      }
+      .panel-title svg {
+        width: 13px;
+        height: 13px;
+        color: var(--fg-muted);
+      }
+      .count-pill {
+        min-width: 20px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 5px;
+        border-radius: 999px;
+        background: var(--bg-hover);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-variant-numeric: tabular-nums;
+      }
+      .panel-spacer {
+        flex: 1;
+      }
+      .panel-head .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+      .panel-head .icon-btn svg {
+        width: 13px;
+        height: 13px;
+      }
+      .panel-close {
+        margin-left: 1px;
+      }
+
+      .panel-meta {
+        flex: 0 0 auto;
+        height: 27px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--divider);
+        background: rgba(24, 24, 24, 0.35);
+      }
+      .file-glyph {
+        width: 17px;
+        height: 15px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--bg-hover);
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: 7px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        flex: 0 0 auto;
+      }
+      .file-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--fg-muted);
+        font-size: 10.5px;
+      }
+      .type-pill {
+        margin-left: auto;
+        flex: 0 0 auto;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0 6px;
+        color: var(--fg-muted);
+        font-size: 9px;
+        letter-spacing: 0.03em;
+      }
+
+      .search-wrap {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 8px 8px 6px;
+        height: 30px;
+        padding: 0 7px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-input);
+        transition:
+          border-color 0.12s,
+          box-shadow 0.12s;
+      }
+      .search-wrap:focus-within {
+        border-color: var(--border-focus);
+        box-shadow: 0 0 0 1px rgba(138, 138, 138, 0.18);
+      }
+      .search-icon {
+        width: 13px;
+        height: 13px;
+        color: var(--fg-muted);
+        flex: 0 0 auto;
+      }
+      .search-wrap input {
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--fg-bright);
+        font-size: 11.5px;
+      }
+      .search-wrap input::placeholder {
+        color: #6f6f6f;
+      }
+      .search-wrap input:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .search-clear {
+        width: 18px;
+        height: 18px;
+        display: grid;
+        place-items: center;
+        border-radius: 3px;
+        color: var(--fg-muted);
+        flex: 0 0 auto;
+      }
+      .search-clear:hover {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .search-clear svg {
+        width: 11px;
+        height: 11px;
+      }
+
+      .outline-scroll {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding: 1px 0 8px;
+      }
+      .outline-tree {
+        display: flex;
+        flex-direction: column;
+        min-height: 100%;
+      }
+
+      /* ── Outline rows ── */
+      .outline-row {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: var(--row-h);
+        padding: 0 8px 0 5px;
+        color: var(--fg);
+        font-size: 12px;
+        text-align: left;
+        white-space: nowrap;
+        position: relative;
+        flex: 0 0 auto;
+        border-radius: 0;
+      }
+      .outline-row:hover {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .outline-row:focus-visible {
+        outline: 1px solid var(--border-focus);
+        outline-offset: -1px;
+      }
+      .outline-row.active {
+        background: var(--palette-select);
+        color: var(--fg-bright);
+      }
+      .outline-row.active::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 3px;
+        bottom: 3px;
+        width: 2px;
+        border-radius: 0 1px 1px 0;
+        background: var(--accent);
+      }
+      .guides {
+        display: flex;
+        align-self: stretch;
+        flex: 0 0 auto;
+        pointer-events: none;
+      }
+      .guides i {
+        width: 12px;
+        height: 100%;
+        flex: 0 0 12px;
+        background-image: linear-gradient(
+          to right,
+          transparent 5px,
+          rgba(255, 255, 255, 0.065) 5px,
+          rgba(255, 255, 255, 0.065) 6px,
+          transparent 6px
+        );
+      }
+      .outline-row .chev {
+        width: 15px;
+        height: 15px;
+        display: grid;
+        place-items: center;
+        border-radius: 3px;
+        color: var(--fg-muted);
+        flex: 0 0 15px;
+        margin-right: 1px;
+      }
+      .outline-row .chev:hover {
+        background: var(--bg-surface-hover);
+        color: var(--fg-bright);
+      }
+      .outline-row .chev svg {
+        width: 11px;
+        height: 11px;
+        transition: transform 0.12s ease;
+      }
+      .outline-row .chev.open svg {
+        transform: rotate(90deg);
+      }
+      .chev-spacer {
+        width: 15px;
+        height: 15px;
+        flex: 0 0 15px;
+        margin-right: 1px;
+      }
+      .row-icon {
+        width: 16px;
+        height: 16px;
+        display: grid;
+        place-items: center;
+        flex: 0 0 16px;
+        margin-right: 5px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        line-height: 1;
+      }
+      .hbadge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 13px;
+        padding: 0 3px;
+        border: 1px solid var(--border-hover);
+        border-radius: 2px;
+        color: var(--fg-muted);
+        font-size: 7.5px;
+        letter-spacing: 0.02em;
+        font-weight: 500;
+      }
+      .outline-row.active .hbadge {
+        border-color: #6f6f6f;
+        color: var(--fg-bright);
+      }
+      .kind-interface {
+        color: var(--color-cyan);
+      }
+      .kind-class {
+        color: var(--color-yellow);
+      }
+      .kind-fn {
+        color: var(--color-magenta);
+        font-size: 11px;
+        font-style: italic;
+      }
+      .kind-prop {
+        color: var(--color-blue);
+        font-size: 12px;
+      }
+      .kind-const {
+        color: var(--color-yellow);
+      }
+      .kind-type {
+        color: var(--color-cyan);
+      }
+      .kind-object {
+        color: var(--color-blue);
+      }
+      .kind-array {
+        color: var(--color-yellow);
+      }
+      .kind-leaf {
+        color: #9a9a9a;
+        font-size: 12px;
+      }
+      .row-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row-label mark {
+        background: rgba(215, 186, 125, 0.24);
+        color: #efdfbb;
+        border-radius: 2px;
+        padding: 0 1px;
+      }
+      .row-meta {
+        margin-left: auto;
+        padding-left: 8px;
+        color: #6f6f6f;
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        font-variant-numeric: tabular-nums;
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      .outline-row.active .row-meta {
+        color: var(--fg-muted);
+      }
+      .row-meta.value {
+        max-width: 92px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* ── Panel states ── */
+      .panel-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        min-height: 100%;
+        padding: 40px 22px;
+        text-align: center;
+      }
+      .empty-icon {
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--bg-hover);
+        border: 1px solid var(--border);
+        color: var(--fg-muted);
+        margin-bottom: 2px;
+      }
+      .empty-icon svg {
+        width: 17px;
+        height: 17px;
+      }
+      .empty-icon.warn {
+        color: var(--color-yellow);
+      }
+      .empty-title {
+        color: var(--fg-bright);
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .empty-desc {
+        max-width: 220px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      .empty-detail {
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+        color: var(--color-red);
+        opacity: 0.85;
+        max-width: 230px;
+        overflow-wrap: anywhere;
+      }
+      .empty-action {
+        margin-top: 5px;
+        height: 24px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-hover);
+        color: var(--fg);
+        font-size: 10.5px;
+      }
+      .empty-action:hover {
+        border-color: var(--border-hover);
+        background: var(--bg-surface-hover);
+        color: var(--fg-bright);
+      }
+      .empty-kbd {
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: 9.5px;
+      }
+
+      .panel-foot {
+        flex: 0 0 auto;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 11px;
+        border-top: 1px solid var(--divider);
+        color: #6f6f6f;
+        font-size: 9.5px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .panel-foot #panelHint {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .width-readout {
+        margin-left: auto;
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Mobile-only affordances ── */
+      .preview-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 30;
+        background: rgba(0, 0, 0, 0.45);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease;
+      }
+      .outline-fab {
+        display: none;
+        position: absolute;
+        right: 16px;
+        bottom: 16px;
+        z-index: 25;
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        border: 1px solid var(--border-hover);
+        background: var(--bg-surface);
+        color: var(--fg);
+        place-items: center;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        transition:
+          background 0.12s,
+          opacity 0.16s;
+      }
+
+      .proto-toast {
+        position: absolute;
+        left: 50%;
+        bottom: 20px;
+        z-index: 90;
+        max-width: calc(100% - 32px);
+        padding: 6px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--bg-surface);
+        color: var(--fg);
+        font-size: 11px;
+        box-shadow: var(--dialog-shadow);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-50%, 6px);
+        transition:
+          opacity 0.15s,
+          transform 0.15s;
+      }
+      .proto-toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+      .outline-fab:hover {
+        background: var(--bg-surface-hover);
+        color: var(--fg-bright);
+      }
+      .outline-fab svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      /* ── Mobile: bottom sheet, no content reflow ── */
+      .app-frame.mobile {
+        width: 390px;
+        max-width: calc(100vw - 32px);
+        height: min(780px, calc(100% - 4px));
+        border-radius: 24px;
+        border-color: #3a3a3a;
+        box-shadow:
+          0 30px 90px rgba(0, 0, 0, 0.65),
+          0 0 0 1px rgba(255, 255, 255, 0.025);
+      }
+      .app-frame.mobile .file-tree,
+      .app-frame.mobile .crumbs,
+      .app-frame.mobile .statusbar {
+        display: none;
+      }
+      .app-frame.mobile .tab {
+        max-width: none;
+        flex: 1;
+      }
+      .app-frame.mobile .tabbar-actions {
+        display: none;
+      }
+      .app-frame.mobile .editor-chrome {
+        min-height: 36px;
+      }
+      .app-frame.mobile .save-btn {
+        display: none;
+      }
+      .app-frame.mobile .md-content {
+        padding: 20px 18px 110px;
+        font-size: 13.5px;
+      }
+      .app-frame.mobile .md-content h1 {
+        font-size: 1.35em;
+      }
+      .app-frame.mobile .md-content table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .app-frame.mobile .source-view {
+        font-size: 11px;
+      }
+      .app-frame.mobile .outline-panel {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: auto !important;
+        max-width: none;
+        height: 72%;
+        border-left: 0;
+        border-top: 1px solid var(--border);
+        border-radius: 16px 16px 0 0;
+        background: var(--bg-surface);
+        box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.5);
+        transform: translateY(104%);
+        opacity: 1;
+        visibility: visible;
+        transition:
+          transform 0.22s cubic-bezier(0.2, 0, 0, 1),
+          visibility 0s linear 0.22s;
+      }
+      .app-frame.mobile .outline-panel::before {
+        display: none;
+      }
+      .app-frame.mobile .outline-panel.open {
+        transform: translateY(0);
+        visibility: visible;
+        transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1);
+      }
+      .app-frame.mobile .resize-handle {
+        display: none;
+      }
+      .app-frame.mobile .panel-grip {
+        display: block;
+        width: 34px;
+        height: 4px;
+        margin: 7px auto 3px;
+        border-radius: 999px;
+        background: #4a4a4a;
+        flex: 0 0 auto;
+      }
+      .app-frame.mobile .panel-head {
+        height: 34px;
+        border-bottom: 0;
+      }
+      .app-frame.mobile .panel-meta {
+        background: transparent;
+      }
+      .app-frame.mobile .outline-row {
+        --row-h: 32px;
+        font-size: 12.5px;
+      }
+      .app-frame.mobile .search-wrap {
+        height: 34px;
+        margin: 8px 10px;
+      }
+      .app-frame.mobile .panel-foot {
+        height: 28px;
+      }
+      .app-frame.mobile .outline-fab {
+        display: grid;
+      }
+      .app-frame.mobile .preview-scrim.show {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      @media (max-width: 1120px) {
+        .demo-bar {
+          gap: 12px;
+        }
+        .demo-brand .demo-issue {
+          display: none;
+        }
+      }
+      @media (max-width: 860px) {
+        .app-stage {
+          padding: 10px;
+        }
+        .demo-bar {
+          padding: 8px 10px;
+        }
+        .demo-label {
+          display: none;
+        }
+        .file-tree {
+          display: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .outline-panel,
+        .outline-panel.open,
+        .app-frame.mobile .outline-panel,
+        .app-frame.mobile .outline-panel.open,
+        .preview-scrim,
+        .source-line,
+        .outline-row .chev svg {
+          transition: none !important;
+          animation: none !important;
+        }
+        .preview-scroll {
+          scroll-behavior: auto;
+        }
+      }
+
+    </style>
+  </head>
+  <body>
+    <!-- Prototype-only controls -->
+    <header class="demo-bar">
+      <div class="demo-brand">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 6h13M8 12h13M8 18h13" />
+            <path d="M3 6h.01M3 12h.01M3 18h.01" />
+          </svg>
+        </span>
+        Outline panel
+        <span class="demo-issue">#329</span>
+      </div>
+
+      <div class="demo-group">
+        <span class="demo-label">File</span>
+        <div class="seg" id="fileSeg">
+          <button type="button" data-mode="md" class="active"><span class="file-dot"></span>Markdown</button>
+          <button type="button" data-mode="code"><span class="file-dot"></span>TypeScript</button>
+          <button type="button" data-mode="json"><span class="file-dot"></span>JSON</button>
+        </div>
+      </div>
+
+      <div class="demo-group">
+        <span class="demo-label">Width</span>
+        <div class="seg" id="widthSeg">
+          <button type="button" data-width="240">Narrow</button>
+          <button type="button" data-width="300" class="active">Default</button>
+          <button type="button" data-width="420">Wide</button>
+        </div>
+      </div>
+
+      <div class="demo-group">
+        <span class="demo-label">State</span>
+        <div class="seg" id="stateSeg">
+          <button type="button" data-state="normal" class="active">Normal</button>
+          <button type="button" data-state="empty">Empty</button>
+          <button type="button" data-state="error">Parse error</button>
+        </div>
+      </div>
+
+      <div class="demo-actions">
+        <button type="button" class="demo-btn" id="mobileBtn" title="Toggle mobile bottom-sheet demo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="7" y="2" width="10" height="20" rx="2" />
+            <path d="M12 18h.01" />
+          </svg>
+          <span>Mobile</span>
+        </button>
+        <button type="button" class="demo-btn" id="resetBtn" title="Reset prototype state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          <span>Reset</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="app-stage">
+      <div class="app-frame" id="appFrame">
+        <!-- Tabs -->
+        <div class="tabbar">
+          <div class="tab active">
+            <span class="tab-icon" id="tabFileIcon">M↓</span>
+            <span class="name" id="tabName">outline-panel-design.md</span>
+            <span class="close" title="Close" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </span>
+          </div>
+          <button type="button" class="add" title="New tab" aria-label="New tab">+</button>
+          <span class="tabbar-spacer"></span>
+          <span class="tabbar-actions">
+            <button type="button" class="icon-btn" title="Split editor" aria-label="Split editor">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="1.5" />
+                <path d="M12 4v16" />
+              </svg>
+            </button>
+            <button type="button" class="icon-btn" title="More actions" aria-label="More actions">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
+            </button>
+          </span>
+        </div>
+
+        <!-- Breadcrumbs -->
+        <nav class="crumbs" aria-label="Breadcrumbs">
+          <span>docs</span><span class="crumb-sep">/</span>
+          <span>zh</span><span class="crumb-sep">/</span>
+          <span>internals</span><span class="crumb-sep">/</span>
+          <span class="crumb-current" id="crumbName">outline-panel-design.md</span>
+          <span class="crumb-spacer"></span>
+          <span class="crumb-hint" id="crumbHint">preview · scroll-spy on</span>
+        </nav>
+
+        <!-- Editor chrome -->
+        <div class="editor-chrome">
+          <button type="button" class="view-tab active" id="viewTab">Preview</button>
+          <span class="lang-pill" id="langPill" hidden>TypeScript</span>
+          <span class="dirty-pill" hidden>Modified</span>
+          <span class="chrome-spacer"></span>
+          <button
+            type="button"
+            class="icon-btn chrome-btn active"
+            id="panelToggle"
+            aria-pressed="true"
+            aria-controls="outlinePanel"
+            title="Toggle outline — Esc to close"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 6h13M8 12h13M8 18h13" />
+              <path d="M3 6h.01M3 12h.01M3 18h.01" />
+            </svg>
+          </button>
+          <button type="button" class="save-btn" disabled>Save</button>
+        </div>
+
+        <div class="workspace-body">
+          <!-- Explorer -->
+          <aside class="file-tree" aria-label="Explorer">
+            <div class="tree-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              </svg>
+              Explorer
+            </div>
+            <div class="tree-scroll">
+              <div class="tree-row folder"><span class="tw">▾</span>docs</div>
+              <div class="tree-row folder d1"><span class="tw">▾</span>internals</div>
+              <div class="tree-row file d2 active" data-open="md"><span class="fi">M↓</span><span class="label">outline-panel-design.md</span></div>
+              <div class="tree-row file d2" data-open="event"><span class="fi">md</span><span class="label">event-bus.md</span></div>
+              <div class="tree-row folder d1"><span class="tw">▸</span>guide</div>
+              <div class="tree-row folder"><span class="tw">▾</span>frontend</div>
+              <div class="tree-row folder d1"><span class="tw">▾</span>workspace</div>
+              <div class="tree-row file d2" data-open="code"><span class="fi">ts</span><span class="label">outlinePanel.ts</span></div>
+              <div class="tree-row file d2" data-open="json"><span class="fi">{}</span><span class="label">outline.config.json</span></div>
+              <div class="tree-row file d1" data-open="themes"><span class="fi">ts</span><span class="label">themes.ts</span></div>
+            </div>
+          </aside>
+
+          <!-- Preview + overlay -->
+          <div class="preview-wrap" id="previewWrap">
+            <div class="preview-scroll" id="previewScroll">
+              <article class="content-view md-content" id="mdView"></article>
+              <div class="content-view source-view" id="codeView" hidden></div>
+              <div class="content-view source-view" id="jsonView" hidden></div>
+            </div>
+
+            <div class="preview-scrim" id="previewScrim" aria-hidden="true"></div>
+
+            <aside class="outline-panel open" id="outlinePanel" aria-label="Outline">
+              <div class="resize-handle" id="resizeHandle" title="Drag to resize · double-click to reset"></div>
+              <div class="panel-grip" aria-hidden="true"></div>
+
+              <header class="panel-head">
+                <span class="panel-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 6h13M8 12h13M8 18h13" />
+                    <path d="M3 6h.01M3 12h.01M3 18h.01" />
+                  </svg>
+                  Outline
+                </span>
+                <span class="count-pill" id="outlineCount">33</span>
+                <span class="panel-spacer"></span>
+                <button type="button" class="icon-btn" id="expandAll" title="Expand all" aria-label="Expand all">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m7 6 5-4 5 4M7 18l5 4 5-4M12 2v20" />
+                  </svg>
+                </button>
+                <button type="button" class="icon-btn" id="collapseAll" title="Collapse all" aria-label="Collapse all">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m7 9 5 4 5-4M7 15l5-4 5 4M12 2v20" />
+                  </svg>
+                </button>
+                <button type="button" class="icon-btn panel-close" id="panelClose" title="Close outline (Esc)" aria-label="Close outline">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              </header>
+
+              <div class="panel-meta">
+                <span class="file-glyph" id="fileGlyph">M↓</span>
+                <span class="file-name" id="fileName">outline-panel-design.md</span>
+                <span class="type-pill" id="typePill">Markdown</span>
+              </div>
+
+              <div class="search-wrap">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+                <input
+                  id="filterInput"
+                  type="text"
+                  placeholder="Filter headings…"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-label="Filter outline"
+                />
+                <button type="button" class="search-clear" id="filterClear" title="Clear filter" aria-label="Clear filter" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                </button>
+              </div>
+
+              <div class="outline-scroll" id="outlineScroll">
+                <div class="outline-tree" id="outlineTree" role="tree" aria-label="Outline entries"></div>
+              </div>
+
+              <footer class="panel-foot">
+                <span id="panelHint">Esc close · drag edge to resize · / to filter</span>
+                <span class="width-readout" id="widthReadout">300 px</span>
+              </footer>
+            </aside>
+
+            <button type="button" class="outline-fab" id="outlineFab" aria-label="Open outline">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 6h13M8 12h13M8 18h13" />
+                <path d="M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Status bar -->
+        <footer class="statusbar">
+          <span class="branch">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" />
+              <path d="M6 7v10M18 9c0 4-6 3-6 8" />
+            </svg>
+            opt/outline329
+          </span>
+          <span id="statusPos">Ln 1, Col 1</span>
+          <span id="statusLang">Markdown</span>
+          <span class="status-spacer"></span>
+          <span>UTF-8</span>
+          <span class="status-overlay"><span class="dot"></span>Outline overlay</span>
+        </footer>
+      </div>
+    </main>
+
+    <script>
+      'use strict'
+
+      /* ============================================================
+       * Mock document content
+       * ============================================================ */
+
+      const MD_CONTENT = `
+        <h1 id="outline-panel">Outline panel</h1>
+        <p class="lede">A file-aware structure view for the Dinotty preview and editor. It opens as an
+        overlay on the right so long documents gain navigation without losing a single column of prose.</p>
+        <div class="doc-meta"><span>Status: prototype</span><span>Issue #329</span><span>Related #330</span><span>Owner: frontend</span></div>
+        <blockquote>Design note: the outline is a view over the document, never a second copy of it.
+        Collapsing a branch or closing the panel must not touch the underlying buffer.</blockquote>
+
+        <h2 id="summary">Summary</h2>
+        <p>Long README files, agent-written design docs and large source files are hard to navigate with a
+        scrollbar alone. Dinotty already previews Markdown, text, code and structured data in
+        <code>FilePreviewContent.vue</code>. The outline panel adds a compact, filterable tree that maps
+        directly onto headings, document symbols and object keys.</p>
+        <p>The panel is an <strong>overlay</strong>, not a split pane. It floats above the right edge of the
+        preview, owns its own scroll position, and leaves the editor layout exactly as it was.</p>
+
+        <h2 id="goals-and-non-goals">Goals and non-goals</h2>
+        <h3 id="goals">Goals</h3>
+        <ul>
+          <li>Answer “where am I?” and “where can I go?” in one glance.</li>
+          <li>Work identically for Markdown preview, Markdown source, code and JSON/YAML/TOML.</li>
+          <li>Keep the covered content readable: light shadow, border and a short fade, not a modal scrim.</li>
+          <li>Stay usable on a phone through a bottom sheet and a floating action button.</li>
+          <li>Degrade honestly: no headings, no symbols or a parse failure each get a distinct empty state.</li>
+        </ul>
+        <h3 id="non-goals">Non-goals</h3>
+        <ul>
+          <li>Replacing the file tree, search panel or breadcrumbs. They answer different questions.</li>
+          <li>Editing structure from the outline. It is read-only in the first iteration.</li>
+          <li>Rendering a second Markdown copy. Headings are read from the rendered preview or the source tokens.</li>
+        </ul>
+
+        <h2 id="panel-behavior">Panel behavior</h2>
+        <h3 id="open-and-close">Open and close</h3>
+        <p>The toolbar toggle in the editor chrome opens and closes the panel. The button keeps
+        <code>aria-pressed</code> in sync, and the panel slides in from the right edge over 180 ms. Press
+        <kbd>Esc</kbd> to close it; the panel footer always advertises the shortcut.</p>
+        <pre><code>toggle button  →  panel.open
+Esc            →  panel.close
+/ (panel open) →  focus filter input</code></pre>
+        <p>Closing never discards the active row or the expanded branches. Reopening restores the same visual
+        state, which makes the toggle cheap to use while reading.</p>
+
+        <h3 id="resize-and-overlay">Resize and overlay</h3>
+        <p>The panel is positioned absolutely inside the preview surface. Its width comes from a CSS custom
+        property, so dragging the left edge only changes <code>--panel-w</code>; no layout reflow, no width
+        animation on the article. The default is 300 px, clamped to 220–480 px.</p>
+        <table>
+          <thead><tr><th>State</th><th>Width</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td>Narrow</td><td>240 px</td><td>Dense files, small windows</td></tr>
+            <tr><td>Default</td><td>300 px</td><td>Balanced prose + line metadata</td></tr>
+            <tr><td>Wide</td><td>420 px</td><td>Deep JSON trees and long symbol names</td></tr>
+          </tbody>
+        </table>
+        <p>The covered text recedes through three small cues: a 1 px border, a left-side shadow and a 22 px
+        gradient fade. Background opacity stays near 0.97 so the panel itself remains crisp and readable.</p>
+
+        <h3 id="mobile-fallback">Mobile fallback</h3>
+        <p>Below the mobile breakpoint the same component becomes a 72%-height bottom sheet. A floating
+        outline button sits above the content when the sheet is closed. Tapping the scrim, pressing
+        <code>Esc</code> or swiping down closes it. No second tree implementation is required.</p>
+
+        <h2 id="data-sources">Data sources</h2>
+        <h3 id="markdown-headings">Markdown headings</h3>
+        <p><code>useFileEditor.ts</code> already owns a debounced <code>marked</code> pass for
+        <code>markdownEditorHtml</code>. The outline reuses the same tokens instead of re-parsing the file:
+        <code>marked.lexer()</code> yields heading tokens with text, depth and raw source offsets. No
+        second parser, no second source of truth.</p>
+        <h3 id="code-symbols">Code symbols</h3>
+        <p>For an editable text buffer, the outline asks Monaco for document symbols. When no provider is
+        registered, a conservative regex fallback extracts top-level declarations. The fallback is
+        explicitly labelled in the UI so users do not mistake it for language-server accuracy.</p>
+        <h3 id="json-yaml-toml">JSON, YAML, TOML</h3>
+        <p>Structured files are parsed into a tree of keys. Objects and arrays expose children lazily; scalar
+        leaves show a short value preview and the source line. The same node model serves all three formats.</p>
+
+        <h2 id="markdown-details">Markdown details</h2>
+        <h3 id="slug-scheme">Slug scheme</h3>
+        <p>Heading ids follow GitHub’s slugger so the outline, <code>#anchor</code> links and issue #330 agree:</p>
+        <pre><code>lowercase → strip punctuation → spaces to hyphens → dedupe (-1, -2)
+“Goals & non-goals”  →  goals--non-goals
+“Goals & non-goals”  →  goals--non-goals-1   (second occurrence)</code></pre>
+        <p>Use a single slugger instance per document. Reusing ids across preview rerenders is what makes
+        scroll-spy and anchor links stable.</p>
+        <h3 id="preview-mode">Preview mode</h3>
+        <p>Clicking a heading scrolls the preview container to the element with the matching id. The active row
+        is updated immediately and the target heading flashes once. Scroll-spy listens to the preview
+        scroll container, not the window, and picks the last heading above a 88 px reading line.</p>
+        <h3 id="source-mode">Source mode</h3>
+        <p>In source mode the outline calls <code>revealLineInCenter(line)</code> on the Monaco editor and
+        focuses it. Heading line numbers come from the token’s source offset, so preview and source stay
+        aligned even after edits.</p>
+
+        <h2 id="code-details">Code details</h2>
+        <h3 id="monaco-document-symbols">Monaco document symbols</h3>
+        <p>The preferred path is <code>monaco.languages.executeDocumentSymbolProvider</code> against the
+        current model. Nested symbols become children; ranges become line numbers. This covers Rust,
+        TypeScript, JavaScript, Python, Go and anything else with a registered provider, including symbols
+        contributed by plugins.</p>
+        <h3 id="regex-fallback">Regex fallback</h3>
+        <p>When no provider exists, a per-language pattern table extracts declarations. It is intentionally
+        shallow: top-level only, no type resolution, no macro expansion.</p>
+        <h4 id="supported-languages">Supported languages</h4>
+        <table>
+          <thead><tr><th>Language</th><th>Extracted</th><th>Confidence</th></tr></thead>
+          <tbody>
+            <tr><td>Rust</td><td>fn, struct, enum, trait, impl, mod, const</td><td>High for top level</td></tr>
+            <tr><td>TypeScript / JS</td><td>function, class, interface, type, const</td><td>High, misses exports in blocks</td></tr>
+            <tr><td>Python</td><td>def, class, top-level assignments</td><td>High, ignores decorators</td></tr>
+            <tr><td>Go</td><td>func, type, const, var</td><td>High, methods grouped by receiver</td></tr>
+            <tr><td>Shell / SQL</td><td>function, CREATE statements</td><td>Experimental</td></tr>
+          </tbody>
+        </table>
+        <h4 id="confidence-boundaries">Confidence boundaries</h4>
+        <ul>
+          <li>Nested declarations, closures and destructuring are not guaranteed.</li>
+          <li>Declarations inside comments or strings can produce false positives.</li>
+          <li>Macros, generated code and minified bundles should disable the fallback.</li>
+          <li>If the result is empty, show the empty state rather than a misleading partial tree.</li>
+        </ul>
+
+        <h2 id="structured-data">Structured data</h2>
+        <h3 id="lazy-expansion">Lazy expansion</h3>
+        <p>Parse the document once into a lightweight node list. Only expanded branches are rendered. This keeps
+        a 5,000-key file responsive while preserving a familiar tree interaction.</p>
+        <h3 id="large-files">Large files</h3>
+        <p>Above the configured threshold, expand only the first two levels and virtualize rows. Parsing runs in
+        a worker for JSON/YAML/TOML so a pathological file cannot block typing. When parsing fails, the panel
+        shows the failing line and a retry action instead of an empty tree.</p>
+
+        <h2 id="integration-points">Integration points</h2>
+        <h3 id="filepreviewcontent">FilePreviewContent</h3>
+        <p><code>FilePreviewContent.vue</code> already exposes the Markdown preview element. Wrap the preview in
+        a positioned container and mount <code>OutlinePanel</code> as a sibling so the overlay can sit above
+        both Monaco and rendered HTML.</p>
+        <h3 id="usefileeditor">useFileEditor</h3>
+        <p>Add one memoized <code>markdownOutline</code> computed beside <code>markdownEditorHtml</code>. Both
+        consume the same <code>marked.lexer</code> result. Reset it with the existing debounce and keep the
+        slugger per buffer, not per mount.</p>
+        <h3 id="editorpane">EditorPane</h3>
+        <p><code>EditorPane.vue</code> already registers the Monaco instance via
+        <code>whenEditorReady(leafId)</code> and uses <code>revealLineInCenter</code> for search results. The
+        outline reveal host can reuse that exact path, which avoids a new editor registry.</p>
+
+        <h2 id="open-questions">Open questions</h2>
+        <h3 id="default-width">Default width</h3>
+        <p>300 px feels right against the current 820 px prose column, but users on 13-inch laptops may prefer
+        260 px. Decide whether width is per-device, per-workspace or global.</p>
+        <h3 id="expansion-memory">Expansion memory</h3>
+        <p>Remembering collapsed branches per file is useful for long docs but adds storage and invalidation.
+        The first version can reset to two levels on every open.</p>
+        <h3 id="mobile-shape">Mobile shape</h3>
+        <p>Bottom sheet is the strongest option for reachability. A full-screen drawer is easier to scroll for
+        very long outlines. Confirm which one ships, and whether the floating button is always visible.</p>
+
+        <h2 id="references">References</h2>
+        <ul>
+          <li>Issue #329 — file preview outline panel.</li>
+          <li>Issue #330 — GitHub-style heading anchors and in-document links.</li>
+          <li>Issue #292 — configurable expansion depth in the file tree.</li>
+          <li>Prototype — <code>docs/public/prototypes/outline-panel.html</code>.</li>
+        </ul>
+      `
+
+      const MD_TREE = [
+        {
+          id: 'outline-panel', label: 'Outline panel', level: 1, line: 1, anchor: 'outline-panel',
+          children: [
+            { id: 'summary', label: 'Summary', level: 2, line: 7, anchor: 'summary' },
+            {
+              id: 'goals-and-non-goals', label: 'Goals and non-goals', level: 2, line: 15, anchor: 'goals-and-non-goals',
+              children: [
+                { id: 'goals', label: 'Goals', level: 3, line: 16, anchor: 'goals' },
+                { id: 'non-goals', label: 'Non-goals', level: 3, line: 24, anchor: 'non-goals' },
+              ],
+            },
+            {
+              id: 'panel-behavior', label: 'Panel behavior', level: 2, line: 30, anchor: 'panel-behavior',
+              children: [
+                { id: 'open-and-close', label: 'Open and close', level: 3, line: 31, anchor: 'open-and-close' },
+                { id: 'resize-and-overlay', label: 'Resize and overlay', level: 3, line: 42, anchor: 'resize-and-overlay' },
+                { id: 'mobile-fallback', label: 'Mobile fallback', level: 3, line: 58, anchor: 'mobile-fallback' },
+              ],
+            },
+            {
+              id: 'data-sources', label: 'Data sources', level: 2, line: 64, anchor: 'data-sources',
+              children: [
+                { id: 'markdown-headings', label: 'Markdown headings', level: 3, line: 65, anchor: 'markdown-headings' },
+                { id: 'code-symbols', label: 'Code symbols', level: 3, line: 71, anchor: 'code-symbols' },
+                { id: 'json-yaml-toml', label: 'JSON, YAML, TOML', level: 3, line: 76, anchor: 'json-yaml-toml' },
+              ],
+            },
+            {
+              id: 'markdown-details', label: 'Markdown details', level: 2, line: 82, anchor: 'markdown-details',
+              children: [
+                { id: 'slug-scheme', label: 'Slug scheme', level: 3, line: 83, anchor: 'slug-scheme' },
+                { id: 'preview-mode', label: 'Preview mode', level: 3, line: 90, anchor: 'preview-mode' },
+                { id: 'source-mode', label: 'Source mode', level: 3, line: 95, anchor: 'source-mode' },
+              ],
+            },
+            {
+              id: 'code-details', label: 'Code details', level: 2, line: 100, anchor: 'code-details',
+              children: [
+                { id: 'monaco-document-symbols', label: 'Monaco document symbols', level: 3, line: 101, anchor: 'monaco-document-symbols' },
+                {
+                  id: 'regex-fallback', label: 'Regex fallback', level: 3, line: 107, anchor: 'regex-fallback',
+                  children: [
+                    { id: 'supported-languages', label: 'Supported languages', level: 4, line: 111, anchor: 'supported-languages' },
+                    { id: 'confidence-boundaries', label: 'Confidence boundaries', level: 4, line: 121, anchor: 'confidence-boundaries' },
+                  ],
+                },
+              ],
+            },
+            {
+              id: 'structured-data', label: 'Structured data', level: 2, line: 128, anchor: 'structured-data',
+              children: [
+                { id: 'lazy-expansion', label: 'Lazy expansion', level: 3, line: 129, anchor: 'lazy-expansion' },
+                { id: 'large-files', label: 'Large files', level: 3, line: 134, anchor: 'large-files' },
+              ],
+            },
+            {
+              id: 'integration-points', label: 'Integration points', level: 2, line: 140, anchor: 'integration-points',
+              children: [
+                { id: 'filepreviewcontent', label: 'FilePreviewContent', level: 3, line: 141, anchor: 'filepreviewcontent' },
+                { id: 'usefileeditor', label: 'useFileEditor', level: 3, line: 147, anchor: 'usefileeditor' },
+                { id: 'editorpane', label: 'EditorPane', level: 3, line: 153, anchor: 'editorpane' },
+              ],
+            },
+            {
+              id: 'open-questions', label: 'Open questions', level: 2, line: 159, anchor: 'open-questions',
+              children: [
+                { id: 'default-width', label: 'Default width', level: 3, line: 160, anchor: 'default-width' },
+                { id: 'expansion-memory', label: 'Expansion memory', level: 3, line: 165, anchor: 'expansion-memory' },
+                { id: 'mobile-shape', label: 'Mobile shape', level: 3, line: 170, anchor: 'mobile-shape' },
+              ],
+            },
+            { id: 'references', label: 'References', level: 2, line: 175, anchor: 'references' },
+          ],
+        },
+      ]
+
+      /* ============================================================
+       * TypeScript mock source
+       * ============================================================ */
+
+      const CODE_LINES = [
+        "import type * as monaco from 'monaco-editor'",
+        "import { Marked } from 'marked'",
+        "import GithubSlugger from 'github-slugger'",
+        '',
+        "export type OutlineKind =",
+        "  | 'heading'",
+        "  | 'interface'",
+        "  | 'class'",
+        "  | 'function'",
+        "  | 'method'",
+        "  | 'property'",
+        '',
+        'export interface OutlineItem {',
+        '  id: string',
+        '  label: string',
+        '  kind: OutlineKind',
+        '  line: number',
+        '  children?: OutlineItem[]',
+        '}',
+        '',
+        'export const DEFAULT_PANEL_WIDTH = 300',
+        'const MIN_PANEL_WIDTH = 220',
+        'const MAX_PANEL_WIDTH = 480',
+        '',
+        'export function parseMarkdownHeadings(source: string): OutlineItem[] {',
+        '  const slugger = new GithubSlugger()',
+        '  const items: OutlineItem[] = []',
+        '  const lexer = new Marked().lexer(source)',
+        '',
+        '  for (const token of lexer) {',
+        "    if (token.type !== 'heading') continue",
+        '    items.push({',
+        '      id: slugger.slug(token.text),',
+        '      label: token.text,',
+        "      kind: 'heading',",
+        "      line: token.raw.split('\\n').length,",
+        '    })',
+        '  }',
+        '  return items',
+        '}',
+        '',
+        'export function collectDocumentSymbols(',
+        '  model: monaco.editor.ITextModel',
+        '): OutlineItem[] {',
+        '  const provider = getSymbolProvider(model.getLanguageId())',
+        '  if (!provider) return regexFallback(model.getValue())',
+        '  return flattenSymbols(provider, model)',
+        '}',
+        '',
+        'function flattenSymbols(',
+        '  symbols: monaco.languages.DocumentSymbol[],',
+        '  model: monaco.editor.ITextModel',
+        '): OutlineItem[] {',
+        '  return symbols.map((symbol) => ({',
+        '    id: `${symbol.name}:${symbol.range.startLineNumber}`,',
+        '    label: symbol.name,',
+        '    kind: symbolKind(symbol.kind),',
+        '    line: symbol.range.startLineNumber,',
+        '    children: flattenSymbols(symbol.children ?? [], model),',
+        '  }))',
+        '}',
+        '',
+        'export class OutlineStore {',
+        '  private expanded = new Set<string>()',
+        "  private activeId = ''",
+        '',
+        '  constructor(public items: OutlineItem[]) {}',
+        '',
+        '  filter(query: string): OutlineItem[] {',
+        '    const needle = query.trim().toLowerCase()',
+        '    if (!needle) return this.items',
+        '    return retainMatches(this.items, needle)',
+        '  }',
+        '',
+        '  toggle(id: string): void {',
+        '    if (this.expanded.has(id)) this.expanded.delete(id)',
+        '    else this.expanded.add(id)',
+        '  }',
+        '',
+        '  setActive(id: string): void {',
+        '    this.activeId = id',
+        '    this.revealAncestors(id)',
+        '  }',
+        '}',
+        '',
+        'export class OutlinePanelController {',
+        '  private open = false',
+        '  private width = DEFAULT_PANEL_WIDTH',
+        '',
+        '  constructor(private readonly store: OutlineStore) {}',
+        '',
+        '  toggle(): void {',
+        '    this.open = !this.open',
+        '  }',
+        '',
+        '  reveal(item: OutlineItem): void {',
+        '    this.store.setActive(item.id)',
+        '    this.editor.revealLineInCenter(item.line)',
+        '  }',
+        '',
+        '  resize(width: number): void {',
+        '    this.width = clamp(width, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH)',
+        '  }',
+        '}',
+        '',
+        'export function mountOutlinePanel(el: HTMLElement): OutlinePanelController {',
+        '  const store = new OutlineStore([])',
+        '  return new OutlinePanelController(store)',
+        '}',
+      ]
+
+      function codeLineOf(needle, nth) {
+        const wanted = nth || 1
+        let seen = 0
+        for (let i = 0; i < CODE_LINES.length; i++) {
+          if (CODE_LINES[i].includes(needle)) {
+            seen++
+            if (seen === wanted) return i + 1
+          }
+        }
+        return 1
+      }
+
+      const CODE_TREE = [
+        {
+          id: 'code-kind', label: 'OutlineKind', kind: 'type', line: codeLineOf('export type OutlineKind'),
+        },
+        {
+          id: 'code-item', label: 'OutlineItem', kind: 'interface', line: codeLineOf('export interface OutlineItem'),
+          children: [
+            { id: 'code-item-id', label: 'id: string', kind: 'property', line: codeLineOf('  id: string') },
+            { id: 'code-item-label', label: 'label: string', kind: 'property', line: codeLineOf('  label: string') },
+            { id: 'code-item-kind', label: 'kind: OutlineKind', kind: 'property', line: codeLineOf('  kind: OutlineKind') },
+            { id: 'code-item-line', label: 'line: number', kind: 'property', line: codeLineOf('  line: number') },
+            { id: 'code-item-children', label: 'children?: OutlineItem[]', kind: 'property', line: codeLineOf('  children?: OutlineItem[]') },
+          ],
+        },
+        {
+          id: 'code-default-width', label: 'DEFAULT_PANEL_WIDTH', kind: 'const', line: codeLineOf('export const DEFAULT_PANEL_WIDTH'),
+        },
+        {
+          id: 'code-parse-md', label: 'parseMarkdownHeadings()', kind: 'function', line: codeLineOf('export function parseMarkdownHeadings'),
+        },
+        {
+          id: 'code-collect', label: 'collectDocumentSymbols()', kind: 'function', line: codeLineOf('export function collectDocumentSymbols'),
+        },
+        {
+          id: 'code-flatten', label: 'flattenSymbols()', kind: 'function', line: codeLineOf('function flattenSymbols'),
+        },
+        {
+          id: 'code-store', label: 'OutlineStore', kind: 'class', line: codeLineOf('export class OutlineStore'),
+          children: [
+            { id: 'code-store-filter', label: 'filter(query: string)', kind: 'method', line: codeLineOf('  filter(query: string)') },
+            { id: 'code-store-toggle', label: 'toggle(id: string)', kind: 'method', line: codeLineOf('  toggle(id: string)') },
+            { id: 'code-store-active', label: 'setActive(id: string)', kind: 'method', line: codeLineOf('  setActive(id: string)') },
+          ],
+        },
+        {
+          id: 'code-controller', label: 'OutlinePanelController', kind: 'class', line: codeLineOf('export class OutlinePanelController'),
+          children: [
+            { id: 'code-controller-toggle', label: 'toggle()', kind: 'method', line: codeLineOf('  toggle(): void') },
+            { id: 'code-controller-reveal', label: 'reveal(item: OutlineItem)', kind: 'method', line: codeLineOf('  reveal(item: OutlineItem)') },
+            { id: 'code-controller-resize', label: 'resize(width: number)', kind: 'method', line: codeLineOf('  resize(width: number)') },
+          ],
+        },
+        {
+          id: 'code-mount', label: 'mountOutlinePanel()', kind: 'function', line: codeLineOf('export function mountOutlinePanel'),
+        },
+      ]
+
+      /* ============================================================
+       * JSON mock source
+       * ============================================================ */
+
+      const JSON_CONFIG = {
+        panel: {
+          defaultWidth: 300,
+          minWidth: 220,
+          maxWidth: 480,
+          rememberOpenState: true,
+        },
+        markdown: {
+          slugStyle: 'github',
+          defaultExpandDepth: 2,
+          scrollSpy: true,
+          breadcrumb: false,
+        },
+        code: {
+          symbolProvider: 'monaco',
+          regexFallback: true,
+          fallbackLanguages: ['rust', 'typescript', 'go', 'python'],
+        },
+        structuredData: {
+          formats: ['json', 'yaml', 'toml'],
+          lazyExpandAfter: 500,
+          virtualizeAfter: 2000,
+        },
+        mobile: {
+          presentation: 'bottom-sheet',
+          floatingButton: true,
+        },
+        emptyStates: {
+          noHeadings: 'No headings found',
+          parseError: "Couldn't parse this file",
+        },
+      }
+
+      const JSON_TEXT = JSON.stringify(JSON_CONFIG, null, 2)
+      const JSON_LINES = JSON_TEXT.split('\n')
+
+      function jsonLineOf(key, depth) {
+        const indent = '  '.repeat(depth + 1)
+        const needle = indent + '"' + key + '":'
+        for (let i = 0; i < JSON_LINES.length; i++) {
+          if (JSON_LINES[i].startsWith(needle)) return i + 1
+        }
+        return 1
+      }
+
+      function jsonType(value) {
+        if (Array.isArray(value)) return 'array'
+        if (value === null) return 'null'
+        return typeof value
+      }
+
+      function jsonPreview(value) {
+        if (Array.isArray(value)) return '[' + value.length + ']'
+        if (typeof value === 'string') return '"' + value + '"'
+        if (typeof value === 'boolean') return String(value)
+        if (typeof value === 'number') return String(value)
+        return '{}'
+      }
+
+      function jsonNode(id, key, depth) {
+        const value = depth === 0 ? JSON_CONFIG[key] : null
+        return {
+          id, label: key, kind: jsonType(value), line: jsonLineOf(key, 1), value: jsonPreview(value),
+        }
+      }
+
+      const JSON_TREE = [
+        {
+          id: 'json-panel', label: 'panel', kind: 'object', line: jsonLineOf('panel', 0), value: '{4}',
+          children: [
+            { id: 'json-panel-default', label: 'defaultWidth', kind: 'number', line: jsonLineOf('defaultWidth', 1), value: '300' },
+            { id: 'json-panel-min', label: 'minWidth', kind: 'number', line: jsonLineOf('minWidth', 1), value: '220' },
+            { id: 'json-panel-max', label: 'maxWidth', kind: 'number', line: jsonLineOf('maxWidth', 1), value: '480' },
+            { id: 'json-panel-remember', label: 'rememberOpenState', kind: 'boolean', line: jsonLineOf('rememberOpenState', 1), value: 'true' },
+          ],
+        },
+        {
+          id: 'json-markdown', label: 'markdown', kind: 'object', line: jsonLineOf('markdown', 0), value: '{4}',
+          children: [
+            { id: 'json-md-slug', label: 'slugStyle', kind: 'string', line: jsonLineOf('slugStyle', 1), value: '"github"' },
+            { id: 'json-md-depth', label: 'defaultExpandDepth', kind: 'number', line: jsonLineOf('defaultExpandDepth', 1), value: '2' },
+            { id: 'json-md-spy', label: 'scrollSpy', kind: 'boolean', line: jsonLineOf('scrollSpy', 1), value: 'true' },
+            { id: 'json-md-crumb', label: 'breadcrumb', kind: 'boolean', line: jsonLineOf('breadcrumb', 1), value: 'false' },
+          ],
+        },
+        {
+          id: 'json-code', label: 'code', kind: 'object', line: jsonLineOf('code', 0), value: '{3}',
+          children: [
+            { id: 'json-code-provider', label: 'symbolProvider', kind: 'string', line: jsonLineOf('symbolProvider', 1), value: '"monaco"' },
+            { id: 'json-code-regex', label: 'regexFallback', kind: 'boolean', line: jsonLineOf('regexFallback', 1), value: 'true' },
+            { id: 'json-code-langs', label: 'fallbackLanguages', kind: 'array', line: jsonLineOf('fallbackLanguages', 1), value: '[4]' },
+          ],
+        },
+        {
+          id: 'json-structured', label: 'structuredData', kind: 'object', line: jsonLineOf('structuredData', 0), value: '{3}',
+          children: [
+            { id: 'json-sd-formats', label: 'formats', kind: 'array', line: jsonLineOf('formats', 1), value: '[3]' },
+            { id: 'json-sd-lazy', label: 'lazyExpandAfter', kind: 'number', line: jsonLineOf('lazyExpandAfter', 1), value: '500' },
+            { id: 'json-sd-virtual', label: 'virtualizeAfter', kind: 'number', line: jsonLineOf('virtualizeAfter', 1), value: '2000' },
+          ],
+        },
+        {
+          id: 'json-mobile', label: 'mobile', kind: 'object', line: jsonLineOf('mobile', 0), value: '{2}',
+          children: [
+            { id: 'json-mobile-presentation', label: 'presentation', kind: 'string', line: jsonLineOf('presentation', 1), value: '"bottom-sheet"' },
+            { id: 'json-mobile-fab', label: 'floatingButton', kind: 'boolean', line: jsonLineOf('floatingButton', 1), value: 'true' },
+          ],
+        },
+        {
+          id: 'json-empty', label: 'emptyStates', kind: 'object', line: jsonLineOf('emptyStates', 0), value: '{2}',
+          children: [
+            { id: 'json-empty-headings', label: 'noHeadings', kind: 'string', line: jsonLineOf('noHeadings', 1), value: '"No headings found"' },
+            { id: 'json-empty-error', label: 'parseError', kind: 'string', line: jsonLineOf('parseError', 1), value: '"Couldn\'t parse this file"' },
+          ],
+        },
+      ]
+
+      /* ============================================================
+       * Mode config, state and derived indexes
+       * ============================================================ */
+
+      const MODES = {
+        md: {
+          file: 'outline-panel-design.md', glyph: 'M↓', type: 'Markdown', unit: 'headings',
+          placeholder: 'Filter headings…', tree: MD_TREE, view: 'mdView',
+          statusLang: 'Markdown', crumbHint: 'preview · scroll-spy on', linePrefix: null,
+        },
+        code: {
+          file: 'outlinePanel.ts', glyph: 'ts', type: 'TypeScript', unit: 'symbols',
+          placeholder: 'Filter symbols…', tree: CODE_TREE, view: 'codeView',
+          statusLang: 'TypeScript', crumbHint: 'source · document symbols', linePrefix: 'code-line-',
+        },
+        json: {
+          file: 'outline.config.json', glyph: '{}', type: 'JSON', unit: 'keys',
+          placeholder: 'Filter keys…', tree: JSON_TREE, view: 'jsonView',
+          statusLang: 'JSON', crumbHint: 'source · key tree', linePrefix: 'json-line-',
+        },
+      }
+
+      const state = {
+        mode: 'md',
+        contentState: 'normal',
+        panelOpen: true,
+        width: 300,
+        mobile: false,
+        query: '',
+        activeId: 'outline-panel',
+        expanded: { md: null, code: null, json: null },
+        suppressSpyUntil: 0,
+        flashTimer: null,
+      }
+
+      const indexes = {}
+
+      function esc(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+      }
+
+      function walkTree(items, depth, parents, out) {
+        for (const item of items) {
+          out.push({ item, depth, parents })
+          if (item.children && item.children.length) {
+            walkTree(item.children, depth + 1, parents.concat(item.id), out)
+          }
+        }
+        return out
+      }
+
+      function getIndex(mode) {
+        if (!indexes[mode]) {
+          const all = walkTree(MODES[mode].tree, 0, [], [])
+          const byId = new Map()
+          for (const entry of all) byId.set(entry.item.id, entry)
+          const byLine = all.slice().sort((a, b) => a.item.line - b.item.line || a.depth - b.depth)
+          indexes[mode] = { all, byId, byLine }
+        }
+        return indexes[mode]
+      }
+
+      function defaultExpanded(items, depth, set) {
+        for (const item of items) {
+          if (item.children && item.children.length) {
+            if (depth < 2) set.add(item.id)
+            defaultExpanded(item.children, depth + 1, set)
+          }
+        }
+        return set
+      }
+
+      function ensureExpanded(mode) {
+        if (!state.expanded[mode]) {
+          state.expanded[mode] = defaultExpanded(MODES[mode].tree, 0, new Set())
+        }
+        return state.expanded[mode]
+      }
+
+      function resetExpanded() {
+        state.expanded = { md: null, code: null, json: null }
+      }
+
+      /* ============================================================
+       * Outline rendering
+       * ============================================================ */
+
+      const outlinePanel = document.getElementById('outlinePanel')
+      const outlineTree = document.getElementById('outlineTree')
+      const outlineScroll = document.getElementById('outlineScroll')
+      const outlineCount = document.getElementById('outlineCount')
+      const filterInput = document.getElementById('filterInput')
+      const filterClear = document.getElementById('filterClear')
+      const widthReadout = document.getElementById('widthReadout')
+      const panelHint = document.getElementById('panelHint')
+      const fileName = document.getElementById('fileName')
+      const fileGlyph = document.getElementById('fileGlyph')
+      const typePill = document.getElementById('typePill')
+      const previewScroll = document.getElementById('previewScroll')
+      const previewWrap = document.getElementById('previewWrap')
+      const mdView = document.getElementById('mdView')
+      const codeView = document.getElementById('codeView')
+      const jsonView = document.getElementById('jsonView')
+
+      const CHEV =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>'
+      const ICON_LIST =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h9M8 18h5"/><path d="m17 15 5 5M22 15l-5 5"/></svg>'
+      const ICON_SEARCH =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>'
+      const ICON_WARN =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>'
+
+      function markLabel(text, query) {
+        const raw = String(text)
+        if (!query) return esc(raw)
+        const needle = query.toLowerCase()
+        const lower = raw.toLowerCase()
+        let cursor = 0
+        let html = ''
+        let at = lower.indexOf(needle, cursor)
+        if (at < 0) return esc(raw)
+        while (at >= 0) {
+          html += esc(raw.slice(cursor, at))
+          html += '<mark>' + esc(raw.slice(at, at + needle.length)) + '</mark>'
+          cursor = at + needle.length
+          at = lower.indexOf(needle, cursor)
+        }
+        html += esc(raw.slice(cursor))
+        return html
+      }
+
+      function iconFor(item, mode) {
+        if (mode === 'md') {
+          return '<span class="hbadge">H' + item.level + '</span>'
+        }
+        if (mode === 'code') {
+          switch (item.kind) {
+            case 'interface':
+              return '<span class="kind-interface">&lt;&gt;</span>'
+            case 'class':
+              return '<span class="kind-class">C</span>'
+            case 'function':
+            case 'method':
+              return '<span class="kind-fn">ƒ</span>'
+            case 'property':
+              return '<span class="kind-prop">•</span>'
+            case 'const':
+              return '<span class="kind-const">c</span>'
+            case 'type':
+              return '<span class="kind-type">T</span>'
+            default:
+              return '<span class="kind-prop">•</span>'
+          }
+        }
+        switch (item.kind) {
+          case 'object':
+            return '<span class="kind-object">{}</span>'
+          case 'array':
+            return '<span class="kind-array">[]</span>'
+          default:
+            return '<span class="kind-leaf">·</span>'
+        }
+      }
+
+      function metaFor(item, mode) {
+        if (mode === 'json') {
+          return '<span class="row-meta value">' + esc(item.value || '') + '</span>'
+        }
+        return '<span class="row-meta">' + item.line + '</span>'
+      }
+
+      function rowHtml(entry, mode, query, forceOpen) {
+        const item = entry.item
+        const hasKids = !!(item.children && item.children.length)
+        const expanded = forceOpen || (state.expanded[mode] && state.expanded[mode].has(item.id))
+        const guides = entry.depth
+          ? '<span class="guides" aria-hidden="true">' + '<i></i>'.repeat(entry.depth) + '</span>'
+          : ''
+        const chev = hasKids
+          ? '<span class="chev' + (expanded ? ' open' : '') + '" data-toggle="' + item.id +
+            '" role="button" aria-label="' + (expanded ? 'Collapse' : 'Expand') + '">' + CHEV + '</span>'
+          : '<span class="chev-spacer"></span>'
+        const active = item.id === state.activeId ? ' active' : ''
+        const ariaExpanded = hasKids ? ' aria-expanded="' + expanded + '"' : ''
+        return (
+          '<div class="outline-row' + active + '" data-id="' + item.id + '" role="treeitem" tabindex="-1"' +
+          ' aria-level="' + (entry.depth + 1) + '"' + ariaExpanded + '>' +
+          guides +
+          chev +
+          '<span class="row-icon">' + iconFor(item, mode) + '</span>' +
+          '<span class="row-label">' + markLabel(item.label, query) + '</span>' +
+          metaFor(item, mode) +
+          '</div>'
+        )
+      }
+
+      function matchStats(mode, query) {
+        const index = getIndex(mode)
+        if (!query) return { matches: index.all.length, include: null }
+        const needle = query.toLowerCase()
+        const include = new Set()
+        let matches = 0
+        for (const entry of index.all) {
+          if (entry.item.label.toLowerCase().includes(needle)) {
+            matches++
+            include.add(entry.item.id)
+            for (const parent of entry.parents) include.add(parent)
+          }
+        }
+        return { matches, include }
+      }
+
+      function visibleRows(mode, query, include) {
+        const rows = []
+        const expanded = ensureExpanded(mode)
+        function visit(items, depth, parents) {
+          for (const item of items) {
+            if (query) {
+              if (!include.has(item.id)) continue
+            }
+            rows.push({ item, depth, parents })
+            if (item.children && item.children.length) {
+              if (query || expanded.has(item.id)) visit(item.children, depth + 1, parents.concat(item.id))
+            }
+          }
+        }
+        visit(MODES[mode].tree, 0, [])
+        return rows
+      }
+
+      const EMPTY_COPY = {
+        md: {
+          title: 'No headings found',
+          desc: 'This Markdown file has no H1–H6 headings yet. Add a heading to build the outline.',
+        },
+        code: {
+          title: 'No symbols found',
+          desc: 'The language server returned no document symbols, and the regex fallback found nothing at the top level.',
+        },
+        json: {
+          title: 'No keys found',
+          desc: 'This file is empty or contains only a scalar value. The outline needs an object at the top level.',
+        },
+      }
+
+      const ERROR_COPY = {
+        md: {
+          desc: 'The Markdown tokenizer stopped before the first heading.',
+          detail: 'Unexpected end of input at line 42',
+        },
+        code: {
+          desc: 'Document symbols failed to load for this model.',
+          detail: 'No document symbol provider (timeout after 1.2s)',
+        },
+        json: {
+          desc: 'The outline parser stopped while reading an object.',
+          detail: 'Expected “:” after property name at line 42:7',
+        },
+      }
+
+      function emptyBlock(mode) {
+        if (state.contentState === 'error') {
+          const copy = ERROR_COPY[mode]
+          return (
+            '<div class="panel-empty" style="height:100%">' +
+            '<span class="empty-icon warn">' + ICON_WARN + '</span>' +
+            '<span class="empty-title">Couldn’t parse this file</span>' +
+            '<span class="empty-desc">' + esc(copy.desc) + '</span>' +
+            '<span class="empty-detail">' + esc(copy.detail) + '</span>' +
+            '<button type="button" class="empty-action" data-action="retry">Retry</button>' +
+            '</div>'
+          )
+        }
+        if (state.contentState === 'empty') {
+          const copy = EMPTY_COPY[mode]
+          return (
+            '<div class="panel-empty" style="height:100%">' +
+            '<span class="empty-icon">' + ICON_LIST + '</span>' +
+            '<span class="empty-title">' + esc(copy.title) + '</span>' +
+            '<span class="empty-desc">' + esc(copy.desc) + '</span>' +
+            '<button type="button" class="empty-action" data-action="retry">Rescan file</button>' +
+            '</div>'
+          )
+        }
+        if (state.query) {
+          return (
+            '<div class="panel-empty" style="height:100%">' +
+            '<span class="empty-icon">' + ICON_SEARCH + '</span>' +
+            '<span class="empty-title">No matches</span>' +
+            '<span class="empty-desc">Nothing matches “' + esc(state.query) + '”. Try a shorter keyword.</span>' +
+            '<button type="button" class="empty-action" data-action="clear-filter">Clear filter</button>' +
+            '</div>'
+          )
+        }
+        return ''
+      }
+
+      function renderOutline() {
+        const mode = state.mode
+        const index = getIndex(mode)
+        const stats = matchStats(mode, state.query)
+        const showEmpty =
+          state.contentState !== 'normal' || (state.query && stats.matches === 0)
+
+        if (showEmpty) {
+          outlineTree.innerHTML = emptyBlock(mode)
+          outlineCount.textContent =
+            state.contentState === 'error' ? '!' : state.contentState === 'empty' ? '0' : '0/' + index.all.length
+        } else {
+          const rows = visibleRows(mode, state.query, stats.include)
+          outlineTree.innerHTML = rows.map((entry) => rowHtml(entry, mode, state.query, false)).join('')
+          outlineCount.textContent = state.query
+            ? stats.matches + '/' + index.all.length
+            : String(index.all.length)
+        }
+        filterClear.hidden = !state.query
+      }
+
+      function syncActiveRow(shouldScroll) {
+        const rows = outlineTree.querySelectorAll('.outline-row')
+        for (const row of rows) row.classList.toggle('active', row.dataset.id === state.activeId)
+        if (!shouldScroll) return
+        const active = outlineTree.querySelector('.outline-row.active')
+        if (active) active.scrollIntoView({ block: 'nearest' })
+      }
+
+      /* ============================================================
+       * Source views (hand-rolled, prototype-only highlighters)
+       * ============================================================ */
+
+      function highlightCodeLine(line) {
+        const re =
+          /(\/\/.*$)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)|(\b(?:import|export|from|type|interface|class|function|const|let|private|readonly|public|return|if|else|for|of|new|this|continue|void|string|number|boolean|true|false|null|undefined)\b)|(\b[A-Z][A-Za-z0-9_]*\b)|(\b[a-zA-Z_$][\w$]*(?=\())|(\b\d+\b)/g
+        let out = ''
+        let last = 0
+        let match
+        while ((match = re.exec(line))) {
+          out += esc(line.slice(last, match.index))
+          let cls = 'tok-fn'
+          if (match[1]) cls = 'tok-com'
+          else if (match[2]) cls = 'tok-str'
+          else if (match[3]) cls = 'tok-kw'
+          else if (match[4]) cls = 'tok-type'
+          else if (match[5]) cls = 'tok-fn'
+          else if (match[6]) cls = 'tok-num'
+          out += '<span class="' + cls + '">' + esc(match[0]) + '</span>'
+          last = re.lastIndex
+        }
+        out += esc(line.slice(last))
+        return out || ' '
+      }
+
+      function highlightJsonLine(line) {
+        const re = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+(?:\.\d+)?)|\b(true|false|null)\b|([{}\[\],:])/g
+        let out = ''
+        let last = 0
+        let match
+        while ((match = re.exec(line))) {
+          out += esc(line.slice(last, match.index))
+          if (match[1]) {
+            out += '<span class="tok-key">' + esc(match[1]) + '</span>'
+            if (match[2]) out += '<span class="tok-punct">' + esc(match[2]) + '</span>'
+          } else if (match[3]) {
+            out += '<span class="tok-num">' + esc(match[3]) + '</span>'
+          } else if (match[4]) {
+            out += '<span class="tok-kw">' + esc(match[4]) + '</span>'
+          } else if (match[5]) {
+            out += '<span class="tok-punct">' + esc(match[5]) + '</span>'
+          }
+          last = re.lastIndex
+        }
+        out += esc(line.slice(last))
+        return out || ' '
+      }
+
+      function renderSourceViews() {
+        codeView.innerHTML =
+          '<div class="source-file-label">outlinePanel.ts <span class="lang">TypeScript</span></div>' +
+          CODE_LINES.map(
+            (line, i) =>
+              '<div class="source-line" id="code-line-' + (i + 1) + '" data-line="' + (i + 1) + '">' +
+              '<span class="ln">' + (i + 1) + '</span>' +
+              '<span class="lc">' + highlightCodeLine(line) + '</span></div>'
+          ).join('')
+
+        jsonView.innerHTML =
+          '<div class="source-file-label">outline.config.json <span class="lang">JSON</span></div>' +
+          JSON_LINES.map(
+            (line, i) =>
+              '<div class="source-line" id="json-line-' + (i + 1) + '" data-line="' + (i + 1) + '">' +
+              '<span class="ln">' + (i + 1) + '</span>' +
+              '<span class="lc">' + highlightJsonLine(line) + '</span></div>'
+          ).join('')
+      }
+
+      /* ============================================================
+       * DOM refs and UI state transitions
+       * ============================================================ */
+
+      const appFrame = document.getElementById('appFrame')
+      const panelToggle = document.getElementById('panelToggle')
+      const panelClose = document.getElementById('panelClose')
+      const resizeHandle = document.getElementById('resizeHandle')
+      const expandAllBtn = document.getElementById('expandAll')
+      const collapseAllBtn = document.getElementById('collapseAll')
+      const previewScrim = document.getElementById('previewScrim')
+      const outlineFab = document.getElementById('outlineFab')
+      const tabName = document.getElementById('tabName')
+      const tabFileIcon = document.getElementById('tabFileIcon')
+      const crumbName = document.getElementById('crumbName')
+      const crumbHint = document.getElementById('crumbHint')
+      const statusLang = document.getElementById('statusLang')
+      const statusPos = document.getElementById('statusPos')
+      const viewTab = document.getElementById('viewTab')
+      const langPill = document.getElementById('langPill')
+      const fileSeg = document.getElementById('fileSeg')
+      const widthSeg = document.getElementById('widthSeg')
+      const stateSeg = document.getElementById('stateSeg')
+      const mobileBtn = document.getElementById('mobileBtn')
+      const resetBtn = document.getElementById('resetBtn')
+
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+      function applyWidth(width) {
+        state.width = Math.round(width)
+        outlinePanel.style.setProperty('--panel-w', state.width + 'px')
+        widthReadout.textContent = state.width + ' px'
+        for (const btn of widthSeg.querySelectorAll('button')) {
+          btn.classList.toggle('active', Number(btn.dataset.width) === state.width)
+        }
+      }
+
+      function setPanelOpen(open) {
+        state.panelOpen = open
+        outlinePanel.classList.toggle('open', open)
+        panelToggle.classList.toggle('active', open)
+        panelToggle.setAttribute('aria-pressed', String(open))
+        previewScrim.classList.toggle('show', open && state.mobile)
+        outlineFab.hidden = state.mobile && open
+        if (open) {
+          syncActiveRow(false)
+          computeSpy()
+        }
+      }
+
+      function updateStatusPos() {
+        const entry = getIndex(state.mode).byId.get(state.activeId)
+        statusPos.textContent = 'Ln ' + (entry ? entry.item.line : 1) + ', Col 1'
+      }
+
+      function updateChrome(mode) {
+        const cfg = MODES[mode]
+        fileName.textContent = cfg.file
+        fileGlyph.textContent = cfg.glyph
+        typePill.textContent = cfg.type
+        tabName.textContent = cfg.file
+        tabFileIcon.textContent = cfg.glyph
+        crumbName.textContent = cfg.file
+        crumbHint.textContent = cfg.crumbHint
+        statusLang.textContent = cfg.statusLang
+        filterInput.placeholder = cfg.placeholder
+        viewTab.hidden = mode !== 'md'
+        langPill.hidden = mode === 'md'
+        if (mode !== 'md') langPill.textContent = cfg.type
+        for (const row of document.querySelectorAll('.tree-row.file')) {
+          row.classList.toggle('active', row.dataset.open === mode)
+        }
+        for (const btn of fileSeg.querySelectorAll('button')) {
+          btn.classList.toggle('active', btn.dataset.mode === mode)
+        }
+      }
+
+      function setMode(mode) {
+        if (!MODES[mode]) return
+        state.mode = mode
+        state.query = ''
+        filterInput.value = ''
+        ensureExpanded(mode)
+        const first = getIndex(mode).all[0]
+        state.activeId = first ? first.item.id : null
+
+        for (const key of Object.keys(MODES)) {
+          document.getElementById(MODES[key].view).hidden = key !== mode
+        }
+        updateChrome(mode)
+
+        if (state.contentState !== 'normal') filterInput.disabled = true
+        renderSourceViews()
+        renderOutline()
+        syncActiveRow(false)
+        updateStatusPos()
+        previewScroll.scrollTop = 0
+        state.suppressSpyUntil = performance.now() + 320
+      }
+
+      function setContentState(next) {
+        state.contentState = next
+        for (const btn of stateSeg.querySelectorAll('button')) {
+          btn.classList.toggle('active', btn.dataset.state === next)
+        }
+        if (next !== 'normal') {
+          state.query = ''
+          filterInput.value = ''
+        }
+        filterInput.disabled = next !== 'normal'
+        renderOutline()
+      }
+
+      function setMobile(on) {
+        state.mobile = on
+        appFrame.classList.toggle('mobile', on)
+        mobileBtn.classList.toggle('active', on)
+        const label = mobileBtn.querySelector('span')
+        if (label) label.textContent = on ? 'Desktop' : 'Mobile'
+        for (const btn of widthSeg.querySelectorAll('button')) btn.disabled = on
+        panelHint.textContent = on
+          ? 'Tap outside or Esc to close'
+          : 'Esc close · drag edge to resize · / to filter'
+        widthReadout.hidden = on
+        setPanelOpen(!on)
+      }
+
+      /* ============================================================
+       * Reveal, active row and scroll spy
+       * ============================================================ */
+
+      function flashElement(el) {
+        if (!el) return
+        if (state.flashTimer) clearTimeout(state.flashTimer)
+        el.classList.remove('flash')
+        void el.offsetWidth
+        el.classList.add('flash')
+        state.flashTimer = setTimeout(function () {
+          el.classList.remove('flash')
+          state.flashTimer = null
+        }, 1300)
+      }
+
+      function scrollToElement(el, offset) {
+        const wrapTop = previewScroll.getBoundingClientRect().top
+        const top = previewScroll.scrollTop + el.getBoundingClientRect().top - wrapTop - offset
+        previewScroll.scrollTo({
+          top: Math.max(0, top),
+          behavior: reducedMotion ? 'auto' : 'smooth',
+        })
+      }
+
+      function expandAncestors(entry, mode) {
+        const set = ensureExpanded(mode)
+        let changed = false
+        for (const parent of entry.parents) {
+          if (!set.has(parent)) {
+            set.add(parent)
+            changed = true
+          }
+        }
+        return changed
+      }
+
+      function setActive(id, opts) {
+        const options = opts || {}
+        const mode = state.mode
+        const entry = getIndex(mode).byId.get(id)
+        if (!entry) return
+        const changed = state.activeId !== id
+        state.activeId = id
+        let rendered = false
+        if (options.expandAncestors && expandAncestors(entry, mode)) {
+          renderOutline()
+          rendered = true
+        }
+        if (!rendered) syncActiveRow(false)
+        if (options.scrollRow || (changed && options.scrollRowOnChange)) {
+          syncActiveRow(true)
+        }
+        updateStatusPos()
+      }
+
+      function revealItem(id) {
+        const mode = state.mode
+        const entry = getIndex(mode).byId.get(id)
+        if (!entry) return
+        state.suppressSpyUntil = performance.now() + 1200
+        setActive(id, { expandAncestors: true, scrollRow: true })
+
+        let target = null
+        let offset = 26
+        if (mode === 'md') {
+          target = document.getElementById(entry.item.anchor)
+        } else {
+          target = document.getElementById(MODES[mode].linePrefix + entry.item.line)
+          offset = 72
+        }
+        if (!target) return
+        scrollToElement(target, offset)
+        flashElement(target)
+        const row = outlineTree.querySelector('.outline-row[data-id="' + id + '"]')
+        if (row) row.focus({ preventScroll: true })
+      }
+
+      function computeSpy() {
+        if (!state.panelOpen) return
+        if (performance.now() < state.suppressSpyUntil) return
+        const mode = state.mode
+        const threshold = previewScroll.getBoundingClientRect().top + 88
+        let active = null
+
+        if (mode === 'md') {
+          const headings = mdView.querySelectorAll('h1,h2,h3,h4')
+          for (const heading of headings) {
+            if (heading.getBoundingClientRect().top <= threshold) active = heading.id
+            else break
+          }
+          if (!active && headings[0]) active = headings[0].id
+        } else {
+          const index = getIndex(mode)
+          const prefix = MODES[mode].linePrefix
+          for (const entry of index.byLine) {
+            const el = document.getElementById(prefix + entry.item.line)
+            if (!el) continue
+            if (el.getBoundingClientRect().top <= threshold) active = entry.item.id
+            else break
+          }
+          if (!active && index.byLine[0]) active = index.byLine[0].item.id
+        }
+
+        if (!active || active === state.activeId) return
+        const entry = getIndex(mode).byId.get(active)
+        if (!entry) return
+        state.activeId = active
+        if (expandAncestors(entry, mode)) renderOutline()
+        syncActiveRow(false)
+        updateStatusPos()
+      }
+
+      let spyFrame = 0
+      previewScroll.addEventListener(
+        'scroll',
+        function () {
+          if (performance.now() < state.suppressSpyUntil) return
+          if (spyFrame) return
+          spyFrame = requestAnimationFrame(function () {
+            spyFrame = 0
+            computeSpy()
+          })
+        },
+        { passive: true }
+      )
+
+      /* ============================================================
+       * Tree interactions
+       * ============================================================ */
+
+      function toggleBranch(id) {
+        const set = ensureExpanded(state.mode)
+        if (set.has(id)) set.delete(id)
+        else set.add(id)
+        renderOutline()
+        syncActiveRow(false)
+      }
+
+      outlineTree.addEventListener('click', function (event) {
+        const action = event.target.closest('[data-action]')
+        if (action) {
+          if (action.dataset.action === 'retry') {
+            setContentState('normal')
+          } else if (action.dataset.action === 'clear-filter') {
+            state.query = ''
+            filterInput.value = ''
+            renderOutline()
+            filterInput.focus()
+          }
+          return
+        }
+
+        const toggle = event.target.closest('[data-toggle]')
+        if (toggle) {
+          event.stopPropagation()
+          toggleBranch(toggle.dataset.toggle)
+          return
+        }
+
+        const row = event.target.closest('.outline-row')
+        if (row) revealItem(row.dataset.id)
+      })
+
+      filterInput.addEventListener('input', function () {
+        state.query = filterInput.value.trim()
+        renderOutline()
+        if (state.query) {
+          const first = outlineTree.querySelector('.outline-row')
+          if (first) first.setAttribute('tabindex', '0')
+        }
+      })
+
+      filterClear.addEventListener('click', function () {
+        state.query = ''
+        filterInput.value = ''
+        renderOutline()
+        filterInput.focus()
+      })
+
+      expandAllBtn.addEventListener('click', function () {
+        const set = ensureExpanded(state.mode)
+        for (const entry of getIndex(state.mode).all) {
+          if (entry.item.children && entry.item.children.length) set.add(entry.item.id)
+        }
+        renderOutline()
+        syncActiveRow(false)
+      })
+
+      collapseAllBtn.addEventListener('click', function () {
+        ensureExpanded(state.mode).clear()
+        renderOutline()
+        syncActiveRow(false)
+      })
+
+      /* ============================================================
+       * Panel chrome, resize and mobile
+       * ============================================================ */
+
+      panelToggle.addEventListener('click', function () {
+        setPanelOpen(!state.panelOpen)
+      })
+      panelClose.addEventListener('click', function () {
+        setPanelOpen(false)
+      })
+      outlineFab.addEventListener('click', function () {
+        setPanelOpen(true)
+      })
+      previewScrim.addEventListener('click', function () {
+        setPanelOpen(false)
+      })
+
+      let resizing = false
+
+      resizeHandle.addEventListener('pointerdown', function (event) {
+        if (state.mobile) return
+        resizing = true
+        event.preventDefault()
+        outlinePanel.classList.add('resizing')
+        document.body.classList.add('resizing')
+        if (resizeHandle.setPointerCapture) resizeHandle.setPointerCapture(event.pointerId)
+      })
+
+      window.addEventListener('pointermove', function (event) {
+        if (!resizing) return
+        const right = previewWrap.getBoundingClientRect().right
+        const max = Math.min(480, previewWrap.clientWidth - 64)
+        const width = Math.max(220, Math.min(max, Math.round(right - event.clientX)))
+        applyWidth(width)
+      })
+
+      function endResize() {
+        if (!resizing) return
+        resizing = false
+        outlinePanel.classList.remove('resizing')
+        document.body.classList.remove('resizing')
+      }
+      window.addEventListener('pointerup', endResize)
+      window.addEventListener('pointercancel', endResize)
+
+      resizeHandle.addEventListener('dblclick', function () {
+        applyWidth(300)
+      })
+
+      mobileBtn.addEventListener('click', function () {
+        setMobile(!state.mobile)
+      })
+
+      widthSeg.addEventListener('click', function (event) {
+        const btn = event.target.closest('button[data-width]')
+        if (!btn || btn.disabled) return
+        applyWidth(Number(btn.dataset.width))
+      })
+
+      stateSeg.addEventListener('click', function (event) {
+        const btn = event.target.closest('button[data-state]')
+        if (!btn) return
+        setContentState(btn.dataset.state)
+      })
+
+      fileSeg.addEventListener('click', function (event) {
+        const btn = event.target.closest('button[data-mode]')
+        if (!btn) return
+        setMode(btn.dataset.mode)
+      })
+
+      document.querySelector('.file-tree .tree-scroll').addEventListener('click', function (event) {
+        const row = event.target.closest('.tree-row.file')
+        if (!row) return
+        if (row.dataset.open === 'md' || row.dataset.open === 'code' || row.dataset.open === 'json') {
+          setMode(row.dataset.open)
+          return
+        }
+        showToast('Only the outline demo files are wired in this prototype.')
+      })
+
+      let toastTimer = null
+      function showToast(message) {
+        let toast = document.getElementById('protoToast')
+        if (!toast) {
+          toast = document.createElement('div')
+          toast.id = 'protoToast'
+          toast.className = 'proto-toast'
+          appFrame.appendChild(toast)
+        }
+        toast.textContent = message
+        toast.classList.add('show')
+        if (toastTimer) clearTimeout(toastTimer)
+        toastTimer = setTimeout(function () {
+          toast.classList.remove('show')
+          toastTimer = null
+        }, 1800)
+      }
+
+      /* ============================================================
+       * Keyboard + reset + init
+       * ============================================================ */
+
+      function isTypingTarget(target) {
+        if (!target) return false
+        const tag = target.tagName
+        return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable
+      }
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+          if (state.panelOpen) {
+            setPanelOpen(false)
+            if (document.activeElement === filterInput) filterInput.blur()
+          }
+          return
+        }
+        if (event.key === '/' && state.panelOpen && !isTypingTarget(event.target)) {
+          event.preventDefault()
+          filterInput.focus()
+          filterInput.select()
+        }
+      })
+
+      resetBtn.addEventListener('click', function () {
+        state.contentState = 'normal'
+        state.query = ''
+        filterInput.value = ''
+        filterInput.disabled = false
+        state.activeId = null
+        resetExpanded()
+        indexes.md = indexes.code = indexes.json = undefined
+        applyWidth(300)
+        if (state.mobile) setMobile(false)
+        setMode('md')
+        setContentState('normal')
+        previewScroll.scrollTop = 0
+        setPanelOpen(true)
+        state.suppressSpyUntil = performance.now() + 320
+        renderOutline()
+        syncActiveRow(false)
+      })
+
+      mdView.innerHTML = MD_CONTENT
+      renderSourceViews()
+      applyWidth(300)
+      setMode('md')
+      setContentState('normal')
+      setPanelOpen(true)
+      syncActiveRow(false)
+      updateStatusPos()
+      window.requestAnimationFrame(function () {
+        state.suppressSpyUntil = performance.now() + 180
+      })
+    </script>
+  </body>
+</html>

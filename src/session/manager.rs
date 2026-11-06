@@ -4,7 +4,7 @@ use super::layout::{
 };
 #[cfg(test)]
 use super::types::SessionStatus;
-use super::types::{CloseReason, SyncClient, SyncMsg, TabInfo};
+use super::types::{CloseReason, SyncClient, SyncClientRole, SyncMsg, TabInfo};
 use super::Session;
 use crate::events::{BusEvent, EventBus};
 use dashmap::DashMap;
@@ -88,12 +88,17 @@ pub struct SessionManager {
     pub sync_clients: Arc<Mutex<Vec<SyncClient>>>,
     pub active_pane_id: Arc<Mutex<Option<String>>>,
     pub tab_layouts: DashMap<String, serde_json::Value>,
+    /// Explicit tab→workspace assignments. A tab absent from this map has no
+    /// explicit assignment and falls back to SSH params / cwd attribution.
+    /// Kept out of `tab_layouts` because layout JSON is rewritten wholesale by
+    /// `update_layout` and its siblings, which would erase the assignment.
+    pub tab_workspaces: DashMap<String, Option<String>>,
     pub pending_ssh_auth: DashMap<String, crate::session::backend::PendingSshAuth>,
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
     /// Guards membership and all composite mutations of `sessions`,
-    /// `tab_layouts`, `tab_order`, `active_pane_id`, spawn reservations, and
-    /// `unowned_since`.
+    /// `tab_layouts`, `tab_workspaces`, `tab_order`, `active_pane_id`, spawn
+    /// reservations, and `unowned_since`.
     ///
     /// Lock order rule: this lock and per-session locks (`exited`, `status`,
     /// and `backend`) are never held together in either order. Signals,
@@ -179,6 +184,7 @@ impl SessionManager {
             sync_clients: Arc::new(Mutex::new(Vec::new())),
             active_pane_id: Arc::new(Mutex::new(None)),
             tab_layouts: DashMap::new(),
+            tab_workspaces: DashMap::new(),
             tab_order: Mutex::new(Vec::new()),
             pending_ssh_auth: DashMap::new(),
             event_bus: EventBus::new(),
@@ -340,6 +346,7 @@ impl SessionManager {
 
     fn remove_tab_locked(&self, tab_id: &str) -> bool {
         let removed = self.tab_layouts.remove(tab_id).is_some();
+        self.tab_workspaces.remove(tab_id);
         let mut order = self.tab_order.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         order.retain(|id| id != tab_id);
         if removed {
@@ -352,6 +359,59 @@ impl SessionManager {
     pub fn remove_tab(&self, tab_id: &str) -> bool {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.remove_tab_locked(tab_id)
+    }
+
+    /// The explicit workspace assignment for a tab, if any. Callers that fall
+    /// back to SSH params or cwd must treat `None` as "derive it".
+    #[must_use]
+    pub fn explicit_tab_workspace(&self, tab_id: &str) -> Option<String> {
+        self.tab_workspaces.get(tab_id).and_then(|entry| entry.value().clone())
+    }
+
+    /// Set (`Some`) or clear (`None`) a tab's explicit workspace assignment.
+    ///
+    /// Returns `false` when the tab does not exist. Clearing removes the map
+    /// entry so the tab falls back to derived attribution again.
+    pub fn set_tab_workspace(&self, tab_id: &str, workspace_id: Option<String>) -> bool {
+        let _lifecycle = self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.tab_layouts.contains_key(tab_id) {
+            return false;
+        }
+        match workspace_id {
+            Some(id) => {
+                self.tab_workspaces.insert(tab_id.to_string(), Some(id));
+            }
+            None => {
+                self.tab_workspaces.remove(tab_id);
+            }
+        }
+        self.schedule_snapshot();
+        true
+    }
+
+    /// Drop every explicit workspace assignment pointing at `workspace_id`,
+    /// so tabs previously assigned to a deleted workspace fall back to derived
+    /// attribution. Returns the cleared tab ids in sorted order so the caller
+    /// can broadcast them after the lifecycle lock is released.
+    pub fn clear_tab_workspace_assignments(&self, workspace_id: &str) -> Vec<String> {
+        let mut cleared = Vec::new();
+        {
+            let _lifecycle =
+                self.lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.tab_workspaces.retain(|tab_id, assigned| {
+                if assigned.as_deref() == Some(workspace_id) {
+                    cleared.push(tab_id.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        cleared.sort();
+        if !cleared.is_empty() {
+            self.schedule_snapshot();
+        }
+        cleared
     }
 
     fn update_layout_locked(
@@ -542,12 +602,42 @@ impl SessionManager {
     /// Panics if `SyncMsg` serialization fails (should be infallible).
     #[allow(clippy::expect_used)]
     pub fn broadcast_sync(&self, msg: &SyncMsg) {
+        self.broadcast_sync_counted_filter(msg, None);
+    }
+
+    /// Broadcast to clients with the given role only, returning how many
+    /// received the message. Used to distinguish "a UI actually saw this"
+    /// from "some client is connected" - detached terminal windows are sync
+    /// clients but cannot present UI.
+    ///
+    /// # Panics
+    /// Panics if `SyncMsg` serialization fails (should be infallible).
+    #[allow(clippy::expect_used)]
+    pub fn broadcast_sync_counted_role(&self, msg: &SyncMsg, role: SyncClientRole) -> usize {
+        self.broadcast_sync_counted_filter(msg, Some(role))
+    }
+
+    #[allow(clippy::expect_used)]
+    fn broadcast_sync_counted_filter(&self, msg: &SyncMsg, role: Option<SyncClientRole>) -> usize {
         let json = serde_json::to_string(msg).expect("serialization is infallible");
-        let mut clients =
-            self.sync_clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        clients.retain(|c| c.tx.send(json.clone()).is_ok());
-        drop(clients);
+        let mut delivered = 0;
+        {
+            let mut clients =
+                self.sync_clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            clients.retain(|c| {
+                if role.is_some_and(|role| c.role != role) {
+                    return true;
+                }
+                if c.tx.send(json.clone()).is_ok() {
+                    delivered += 1;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
         self.publish_bus_event_for_sync_msg(msg);
+        delivered
     }
 
     /// Mirror select `SyncMsg` variants onto the event bus so plugins (which
@@ -616,12 +706,19 @@ impl SessionManager {
     }
 
     pub fn add_sync_client(&self) -> (String, mpsc::UnboundedReceiver<String>) {
+        self.add_sync_client_with_role(SyncClientRole::Main)
+    }
+
+    pub fn add_sync_client_with_role(
+        &self,
+        role: SyncClientRole,
+    ) -> (String, mpsc::UnboundedReceiver<String>) {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::unbounded_channel();
         self.sync_clients
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(SyncClient { id: id.clone(), tx });
+            .push(SyncClient { id: id.clone(), tx, role });
         (id, rx)
     }
 
@@ -746,10 +843,13 @@ impl SessionManager {
                     .sessions
                     .get(&pane_id)
                     .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.profile_id.clone()));
-                let workspace_id = self
-                    .sessions
-                    .get(&pane_id)
-                    .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()));
+                // Explicit assignment wins over SSH params so a tab moved out
+                // of its connection's workspace stays there.
+                let workspace_id = self.explicit_tab_workspace(&tab_id).or_else(|| {
+                    self.sessions
+                        .get(&pane_id)
+                        .and_then(|s| s.ssh_params.as_ref().and_then(|p| p.workspace_id.clone()))
+                });
                 let title = v.get("title").and_then(|v| v.as_str()).map(String::from);
                 TabInfo {
                     tab_id,

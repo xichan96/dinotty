@@ -9,22 +9,32 @@ import {
 describe('resolvePreviewOpenMode', () => {
   it('falls back to the per-kind preference when no explicit mode is given', () => {
     const cases: Array<[PreviewOpenMode | undefined, PreviewOpenMode, boolean, PreviewOpenMode]> = [
-      [undefined, 'split', false, 'split'],
-      [undefined, 'floating', false, 'floating'],
+      [undefined, 'split', true, 'split'],
+      [undefined, 'floating', true, 'floating'],
+      [undefined, 'window', true, 'window'],
     ]
-    for (const [explicit, pref, touch, want] of cases) {
-      expect(resolvePreviewOpenMode(explicit, pref, touch)).toBe(want)
+    for (const [explicit, pref, desktop, want] of cases) {
+      expect(resolvePreviewOpenMode(explicit, pref, desktop)).toBe(want)
     }
   })
 
   it('lets an explicit mode override the preference', () => {
-    expect(resolvePreviewOpenMode('floating', 'split', false)).toBe('floating')
-    expect(resolvePreviewOpenMode('split', 'floating', false)).toBe('split')
+    expect(resolvePreviewOpenMode('floating', 'split', true)).toBe('floating')
+    expect(resolvePreviewOpenMode('split', 'floating', true)).toBe('split')
+    expect(resolvePreviewOpenMode('window', 'split', true)).toBe('window')
   })
 
-  it('always opens as a split pane on touch devices', () => {
-    expect(resolvePreviewOpenMode(undefined, 'floating', true)).toBe('split')
-    expect(resolvePreviewOpenMode('floating', 'floating', true)).toBe('split')
+  it('downgrades the native-window mode to a float outside the desktop shell', () => {
+    expect(resolvePreviewOpenMode(undefined, 'window', false)).toBe('floating')
+    expect(resolvePreviewOpenMode('window', 'split', false)).toBe('floating')
+  })
+
+  /// Touch clients used to be forced into a split pane. The float is
+  /// pointer-drag based and `PluginFloatWindow` clamps to the viewport, so a
+  /// phone can honor the preference now.
+  it('honors floating mode on touch clients', () => {
+    expect(resolvePreviewOpenMode(undefined, 'floating', false)).toBe('floating')
+    expect(resolvePreviewOpenMode('floating', 'split', false)).toBe('floating')
   })
 })
 

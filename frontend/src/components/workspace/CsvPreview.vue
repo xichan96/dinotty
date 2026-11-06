@@ -51,7 +51,7 @@
         <span>{{ t('csvPreview.firstRowHeader') }}</span>
       </label>
 
-      <label class="csv-preview-encoding">
+      <label v-if="encodingAvailable" class="csv-preview-encoding">
         <span class="sr-only">{{ t('csvPreview.encoding') }}</span>
         <select
           v-model="selectedEncoding"
@@ -243,7 +243,7 @@
     </div>
 
     <div v-if="displayedContentIsTruncated" class="csv-preview-notice" role="status">
-      {{ t('csvPreview.truncated') }}
+      {{ truncatedMessage || t('csvPreview.truncated') }}
     </div>
 
     <div v-if="encodingLoading" class="csv-preview-notice" role="status">
@@ -332,26 +332,33 @@ import {
   X,
 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
-import { detectCsvDelimiter, parseCsvText, type CsvRow } from '../../utils/csvPreview'
+import { detectCsvDelimiter, parseCsvText } from '../../utils/csvPreview'
 import { useCsvFilter, type VisibleCsvRow } from '../../composables/useCsvFilter'
 import { useCsvEncoding } from '../../composables/useCsvEncoding'
 import CsvColumnDialog from './CsvColumnDialog.vue'
 
-interface PaginatedRow extends VisibleCsvRow {}
+type PaginatedRow = VisibleCsvRow
 
 const props = withDefaults(
   defineProps<{
-    content: string
+    content?: string
     filePath: string
     rawUrl?: string
     sourceAvailable?: boolean
     truncated: boolean
     pageSize?: number
+    rows?: string[][]
+    encodingAvailable?: boolean
+    truncatedMessage?: string
   }>(),
   {
+    content: '',
     pageSize: 200,
     rawUrl: '',
     sourceAvailable: true,
+    rows: undefined,
+    encodingAvailable: true,
+    truncatedMessage: '',
   }
 )
 
@@ -364,10 +371,16 @@ const firstRowIsHeader = ref(true)
 const currentPage = ref(1)
 const hiddenColumnIndexes = ref<number[]>([])
 
+// Spreadsheet cells arrive as `rows`; without raw-file access the encoding
+// selector must not fetch the binary (xlsx) source.
+const encodingRawUrl = computed(function computeEncodingRawUrl() {
+  return props.encodingAvailable ? props.rawUrl : ''
+})
+
 const encoding = useCsvEncoding({
   content: toRef(props, 'content'),
   filePath: toRef(props, 'filePath'),
-  rawUrl: toRef(props, 'rawUrl'),
+  rawUrl: encodingRawUrl,
   truncated: toRef(props, 'truncated'),
   t,
   onFileChanged: () => {
@@ -386,6 +399,8 @@ const {
 } = encoding
 
 const parsedRows = computed(function computeParsedRows() {
+  // Spreadsheet previews hand over dense rows directly; CSV/TSV parse content.
+  if (props.rows !== undefined) return props.rows
   const delimiter = detectCsvDelimiter(displayedContent.value, props.filePath)
   return parseCsvText(displayedContent.value, delimiter)
 })

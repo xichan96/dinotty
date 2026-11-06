@@ -4,7 +4,10 @@ import type * as monaco from 'monaco-editor'
 /** Live state a mounted EditorPane exposes to its workspace. */
 export interface EditorPaneState {
   filePath: () => string | null
+  /** Whether the active tab has unsaved changes. */
   isDirty: () => boolean
+  /** Dirty state of any tab in this group, including inactive ones. */
+  isTabDirty?: (tabId: string) => boolean
   meta: Ref<any | null>
   editorText: Ref<string>
   editorBaseline: Ref<string>

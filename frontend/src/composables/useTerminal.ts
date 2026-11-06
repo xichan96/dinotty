@@ -4,7 +4,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
-import { isTauri, createTransport, type Transport } from './useTransport'
+import { isTauri, createTransport, type Transport, type TransportOptions } from './useTransport'
 import { onThemeChange, settings, type MobileInputMode } from './useSettings'
 import {
   FONT_SIZE_MAX,
@@ -37,7 +37,9 @@ import {
 } from '../utils/terminalInput'
 import { createTerminalWheel, type TerminalWheel } from './useTerminalWheel'
 import { attachImeHeuristic } from '../utils/imeAnchor'
+import { recordImeInput } from '../utils/imeDiagnostics'
 import { setupTerminalDrop } from './useTerminalDrop'
+import { findTerminalFileLinks, type TerminalFileTarget } from '../utils/terminalFileLink'
 import { createTerminalOverlay } from './useTerminalOverlay'
 import { t } from './useI18n'
 import { hasOpenGuard } from '../utils/keyboardGuardMode'
@@ -192,7 +194,7 @@ export interface FilePathLinkProviderCallbacks {
   /** Terminal text of the 1-based buffer line, or undefined when absent. */
   readLine: (bufferLineNumber: number) => string | undefined
   /** Any activation (left click) on a detected path. */
-  onOpen: (path: string, x: number, y: number) => void
+  onOpen: (target: TerminalFileTarget, x: number, y: number) => void
   /** Pointer hover tracking; null on leave. */
   onHover: (path: string | null) => void
 }
@@ -210,23 +212,23 @@ export function createFilePathLinkProvider(callbacks: FilePathLinkProviderCallba
         callback(undefined)
         return
       }
-      const regex = /(?:^|\s)((?:\/|\.\/|~\/)[^\s:]+)/g
       const links: any[] = []
-      let match
-      while ((match = regex.exec(text)) !== null) {
-        const path = match[1]
-        const startX = match.index + (match[0].length - path.length)
+      for (const match of findTerminalFileLinks(text)) {
         links.push({
           range: {
-            start: { x: startX + 1, y: bufferLineNumber },
-            end: { x: startX + path.length + 1, y: bufferLineNumber },
+            start: { x: match.start + 1, y: bufferLineNumber },
+            end: { x: match.end + 1, y: bufferLineNumber },
           },
-          text: path,
+          text: match.raw,
           activate: (event: MouseEvent) => {
-            callbacks.onOpen(path, event.clientX, event.clientY)
+            callbacks.onOpen(
+              { path: match.path, line: match.line, column: match.column },
+              event.clientX,
+              event.clientY
+            )
           },
           hover: () => {
-            callbacks.onHover(path)
+            callbacks.onHover(match.path)
           },
           leave: () => {
             callbacks.onHover(null)
@@ -348,6 +350,7 @@ export class TerminalInstance {
   private static readonly ZERO_SIZE_RETRY_MS = 250
   private static readonly ZERO_SIZE_MAX_RETRIES = 120
   private _transportConnected = false
+  private _forceWebSocket = false
   private _lastSentCols = 0
   private _lastSentRows = 0
   private _resizeCooldownUntil = 0
@@ -366,7 +369,7 @@ export class TerminalInstance {
   onShellInfo: ((shell: string) => void) | null = null
   onConnect: (() => void) | null = null
   onDisconnect: (() => void) | null = null
-  onFileClick: ((path: string, x?: number, y?: number) => void) | null = null
+  onFileClick: ((target: TerminalFileTarget, x?: number, y?: number) => void) | null = null
   onFileLinkHover: ((path: string | null) => void) | null = null
   onPreviewLink: ((url: string, x?: number, y?: number) => void) | null = null
   onPreviewLinkOpen: ((url: string) => void) | null = null
@@ -376,8 +379,9 @@ export class TerminalInstance {
   onSessionExit: (() => void) | null = null
   onReconnect: (() => void) | null = null
 
-  constructor(paneId: string) {
+  constructor(paneId: string, opts?: TransportOptions) {
     this.paneId = paneId
+    this._forceWebSocket = opts?.forceWebSocket ?? false
   }
 
   attach(wrapper: HTMLElement) {
@@ -756,8 +760,8 @@ export class TerminalInstance {
           const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
           return line?.translateToString()
         },
-        onOpen: (path, x, y) => {
-          this.onFileClick?.(path, x, y)
+        onOpen: (target, x, y) => {
+          this.onFileClick?.(target, x, y)
         },
         onHover: (path) => {
           this.onFileLinkHover?.(path)
@@ -1027,6 +1031,7 @@ export class TerminalInstance {
   }
 
   private _handleXtermData(rawData: string, fromIme229 = false) {
+    recordImeInput(fromIme229 ? 'ime229' : 'onData', rawData)
     // Mouse reports produced synchronously by our synthetic wheel dispatches
     // (wheel.sendWheelEvent) are legitimate identical repeats; the WKWebView
     // key-replay dedup below must not eat them.
@@ -1083,6 +1088,7 @@ export class TerminalInstance {
   private _emitInput(data: string): boolean {
     if (this._sessionExited) return false
     if (_activePaneId !== null && _activePaneId !== this.paneId) return false
+    recordImeInput('emit', data)
     this.onInput?.(data)
     this.sendData(data)
     return true
@@ -1175,7 +1181,9 @@ export class TerminalInstance {
 
   private _connectViaTransport() {
     this._transportConnected = false
-    this._transport = createTransport(this.paneId)
+    this._transport = createTransport(this.paneId, undefined, {
+      forceWebSocket: this._forceWebSocket,
+    })
 
     this._transport.onConnect(() => {
       this._transportConnected = true

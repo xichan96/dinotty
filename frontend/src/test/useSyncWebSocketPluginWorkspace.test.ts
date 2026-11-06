@@ -226,6 +226,55 @@ describe('useSyncWebSocket plugin workspace attribution', () => {
     expect(existing.workspaceId).toBe('workspace-b')
   })
 
+  it('clears a stale workspace when a full resync sends workspace_id: null', async () => {
+    const existing = terminal('ssh-tab', { workspaceId: 'deleted-workspace' })
+    const { persist, emit } = await setup([existing])
+
+    emit({
+      type: 'tab_list',
+      tabs: [
+        {
+          tab_id: existing.paneId,
+          pane_id: existing.activePaneId,
+          workspace_id: null,
+        },
+      ],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBeUndefined()
+    await vi.waitFor(() => expect(persist).toHaveBeenCalled())
+  })
+
+  it('ignores a stale saved workspaceId when tab_list sends null for a new tab', async () => {
+    localStorage.setItem(
+      'dinotty_tabs',
+      JSON.stringify({ tabs: [terminal('saved-tab', { workspaceId: 'workspace-a' })] })
+    )
+    const { session, emit } = await setup()
+
+    emit({
+      type: 'tab_list',
+      tabs: [{ tab_id: 'saved-tab', pane_id: 'saved-tab-leaf', workspace_id: null }],
+      active_pane_id: null,
+    })
+
+    expect((session.tabs[0] as TerminalTab).workspaceId).toBeUndefined()
+  })
+
+  it('keeps the local workspace when tab_list omits workspace_id (older payloads)', async () => {
+    const existing = terminal('ssh-tab', { workspaceId: 'workspace-b' })
+    const { emit } = await setup([existing])
+
+    emit({
+      type: 'tab_list',
+      tabs: [{ tab_id: existing.paneId, pane_id: existing.activePaneId }],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBe('workspace-b')
+  })
+
   it('scenario 6: close-time read fallback attributes a missing field to a live workspace', async () => {
     const pluginTab = terminal('plugin:session-browser:workspace-b')
     const successor = terminal('workspace-b-successor', { workspaceId: 'workspace-b' })
@@ -341,5 +390,67 @@ describe('useSyncWebSocket plugin workspace attribution', () => {
     expect(session.activePaneId).toBe(active.paneId)
     expect(workspaceState.activeWorkspaceId.value).toBe('workspace-a')
     expect(mocks.apiActivateWorkspace).not.toHaveBeenCalled()
+  })
+})
+
+describe('useSyncWebSocket tab workspace updates', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    mocks.apiActivateWorkspace.mockResolvedValue(undefined)
+    mocks.apiDeactivateWorkspace.mockResolvedValue(undefined)
+  })
+
+  it('applies and clears an explicit workspace assignment', async () => {
+    const tab = terminal('tab-1', { workspaceId: 'workspace-a' })
+    const { session, persist, emit } = await setup([tab])
+
+    emit({ type: 'tab_workspace_updated', tab_id: 'tab-1', workspace_id: 'workspace-b' })
+    expect((session.tabs[0] as TerminalTab).workspaceId).toBe('workspace-b')
+
+    emit({ type: 'tab_workspace_updated', tab_id: 'tab-1', workspace_id: null })
+    expect((session.tabs[0] as TerminalTab).workspaceId).toBeUndefined()
+    expect(persist).toHaveBeenCalledTimes(2)
+  })
+
+  it('carries workspace_id from tab_list onto an existing tab', async () => {
+    const existing = terminal('tab-1', { workspaceId: 'workspace-a' })
+    const { emit } = await setup([existing])
+
+    emit({
+      type: 'tab_list',
+      tabs: [
+        {
+          tab_id: existing.paneId,
+          pane_id: existing.activePaneId,
+          workspace_id: 'workspace-b',
+        },
+      ],
+      active_pane_id: existing.activePaneId,
+    })
+
+    expect(existing.workspaceId).toBe('workspace-b')
+  })
+
+  it('ignores updates for unknown tabs', async () => {
+    const { persist, emit } = await setup([terminal('tab-1')])
+
+    emit({ type: 'tab_workspace_updated', tab_id: 'missing', workspace_id: 'workspace-b' })
+
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('clears terminal tab assignments when their workspace is deleted', async () => {
+    const cleared = terminal('tab-a', { workspaceId: 'workspace-a' })
+    const untouched = terminal('tab-b', { workspaceId: 'workspace-b' })
+    const { workspaceState, persist, emit } = await setup([cleared, untouched])
+
+    emit({ type: 'workspace_deleted', id: 'workspace-a' })
+
+    expect(cleared.workspaceId).toBeUndefined()
+    expect(untouched.workspaceId).toBe('workspace-b')
+    expect(workspaceState.workspaces.value.map((w) => w.id)).toEqual(['workspace-b'])
+    expect(workspaceState.activeWorkspaceId.value).toBeNull()
+    expect(persist).toHaveBeenCalledOnce()
   })
 })

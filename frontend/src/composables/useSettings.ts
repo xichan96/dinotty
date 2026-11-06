@@ -625,7 +625,7 @@ export const settings = reactive<SettingsData>({
     login_method: 'token',
   },
   preview: {
-    allow_external: false,
+    allow_external: true,
     toolbar_items: [
       { id: 'broadcast', visible: true },
       { id: 'new_tab', visible: true },

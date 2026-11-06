@@ -4,18 +4,23 @@ export function esc(s: string) {
 }
 
 /**
- * Render one fenced code block.
+ * Render one fenced code block as an inert placeholder.
  *
- * ```mermaid fences become inert placeholders: mermaid's SVG is generated after
- * DOMPurify has sanitized the document (see `mermaidPreview.ts`), and the source
- * is kept inside the placeholder so a broken diagram can still show its code.
+ * Mermaid diagrams and ```math blocks are enhanced after DOMPurify has
+ * sanitized the document (see `markdownEnhance.ts`), so the renderer only
+ * emits empty canvases plus the escaped source. Regular code blocks keep their
+ * escaped source in `<code>` until the enhancer swaps in highlighted markup.
  */
 export function renderMarkdownCode({ text, lang }: { text: string; lang?: string }) {
   const info = (lang || '').trim()
   const language = info.split(/\s+/)[0] || 'plaintext'
-  if (language.toLowerCase() === 'mermaid') {
+  const lower = language.toLowerCase()
+  if (lower === 'mermaid') {
     return `<div class="md-mermaid" data-mermaid><pre class="md-mermaid-src">${esc(text)}</pre><div class="md-mermaid-canvas"></div></div>`
   }
-  const safeLang = language.replace(/[^a-z0-9_-]/gi, '') || 'plaintext'
-  return `<pre><code class="language-${safeLang}">${esc(text)}</code></pre>`
+  if (lower === 'math') {
+    return `<div class="md-math" data-md-math><pre class="md-math-src">${esc(text)}</pre><div class="md-math-canvas"></div></div>`
+  }
+  const safeLang = language.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'plaintext'
+  return `<div class="md-code-block" data-md-code data-md-lang="${safeLang}"><pre><code class="language-${safeLang}">${esc(text)}</code></pre></div>`
 }

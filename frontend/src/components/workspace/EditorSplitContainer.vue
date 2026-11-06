@@ -1,16 +1,24 @@
 <template>
-  <!-- Leaf node: render EditorPane -->
+  <!-- Leaf node: render one editor group -->
   <EditorPane
     v-if="leaf"
-    :leaf-id="leaf.id"
+    :leaf="leaf"
     :pane-id="paneId"
-    :file-path="leaf.filePath"
-    :is-dir="leaf.isDir"
     :is-active="leaf.id === activeLeafId"
     :show-header="showHeader"
+    :reveal="reveal"
     :style="{ flex: `${leaf.ratio} 1 0%` }"
     @focus="(id: string) => emit('focus', id)"
-    @close="(id: string) => emit('close', id)"
+    @activate-tab="(leafId, tabId) => emit('activate-tab', leafId, tabId)"
+    @close-tab="(leafId, tabId) => emit('close-tab', leafId, tabId)"
+    @close-tabs="(leafId, tabIds) => emit('close-tabs', leafId, tabIds)"
+    @set-tab-preview="(leafId, tabId, preview) => emit('set-tab-preview', leafId, tabId, preview)"
+    @split="(leafId: string) => emit('split', leafId)"
+    @close-group="(leafId: string) => emit('close-group', leafId)"
+    @copy-tab-path="(leafId, tabId) => emit('copy-tab-path', leafId, tabId)"
+    @reorder-tab="(leafId, tabId, targetId, after) => emit('reorder-tab', leafId, tabId, targetId, after)"
+    @move-tab="(sourceLeafId, tabId, targetLeafId) => emit('move-tab', sourceLeafId, tabId, targetLeafId)"
+    @split-tab="(sourceLeafId, tabId, targetLeafId, position) => emit('split-tab', sourceLeafId, tabId, targetLeafId, position)"
     @file-drop="
       (leafId: string, rel: string, pos: DropPosition) => emit('file-drop', leafId, rel, pos)
     "
@@ -18,18 +26,36 @@
 
   <!-- Split node: flex container with children and dividers -->
   <div v-else-if="split" ref="containerRef" :class="['editor-split-container', split.direction]">
-    <template
-      v-for="(child, idx) in split.children"
-      :key="child.type === 'editor-leaf' ? child.id : child.id"
-    >
+    <template v-for="(child, idx) in split.children" :key="child.id">
       <EditorSplitContainer
         :layout="child"
         :active-leaf-id="activeLeafId"
         :pane-id="paneId"
         :show-header="showHeader"
+        :reveal="reveal"
         :style="getChildStyle(idx)"
         @focus="(id: string) => emit('focus', id)"
-        @close="(id: string) => emit('close', id)"
+        @activate-tab="(leafId, tabId) => emit('activate-tab', leafId, tabId)"
+        @close-tab="(leafId, tabId) => emit('close-tab', leafId, tabId)"
+        @close-tabs="(leafId, tabIds) => emit('close-tabs', leafId, tabIds)"
+        @set-tab-preview="
+          (leafId, tabId, preview) => emit('set-tab-preview', leafId, tabId, preview)
+        "
+        @split="(leafId: string) => emit('split', leafId)"
+        @close-group="(leafId: string) => emit('close-group', leafId)"
+        @copy-tab-path="(leafId, tabId) => emit('copy-tab-path', leafId, tabId)"
+        @reorder-tab="
+          (leafId, tabId, targetId, after) =>
+            emit('reorder-tab', leafId, tabId, targetId, after)
+        "
+        @move-tab="
+          (sourceLeafId, tabId, targetLeafId) =>
+            emit('move-tab', sourceLeafId, tabId, targetLeafId)
+        "
+        @split-tab="
+          (sourceLeafId, tabId, targetLeafId, position) =>
+            emit('split-tab', sourceLeafId, tabId, targetLeafId, position)
+        "
         @file-drop="
           (leafId: string, rel: string, pos: DropPosition) => emit('file-drop', leafId, rel, pos)
         "
@@ -50,7 +76,8 @@
 import { ref, computed } from 'vue'
 import type { EditorPaneLayout, EditorLeafPane, EditorSplitPane } from '../../types/editorPane'
 import type { DropPosition } from '../../types/pane'
-import EditorPane from './EditorPane.vue'
+import type { EditorDropPosition } from '../../composables/useEditorSplit'
+import EditorPane, { type EditorRevealTarget } from './EditorPane.vue'
 import SplitDivider from '../split/SplitDivider.vue'
 
 const props = defineProps<{
@@ -58,11 +85,26 @@ const props = defineProps<{
   activeLeafId: string | null
   paneId: string
   showHeader: boolean
+  reveal?: EditorRevealTarget | null
 }>()
 
 const emit = defineEmits<{
   focus: [leafId: string]
-  close: [leafId: string]
+  'activate-tab': [leafId: string, tabId: string]
+  'close-tab': [leafId: string, tabId: string]
+  'close-tabs': [leafId: string, tabIds: string[]]
+  'set-tab-preview': [leafId: string, tabId: string, preview: boolean]
+  split: [leafId: string]
+  'close-group': [leafId: string]
+  'copy-tab-path': [leafId: string, tabId: string]
+  'reorder-tab': [leafId: string, tabId: string, targetTabId: string, after: boolean]
+  'move-tab': [sourceLeafId: string, tabId: string, targetLeafId: string]
+  'split-tab': [
+    sourceLeafId: string,
+    tabId: string,
+    targetLeafId: string,
+    position: Exclude<EditorDropPosition, 'center'>,
+  ]
   'file-drop': [leafId: string, rel: string, position: DropPosition]
 }>()
 

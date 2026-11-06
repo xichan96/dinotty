@@ -120,9 +120,10 @@ pub(crate) fn default_preview_toolbar_items() -> Vec<PreviewToolbarItem> {
 impl Default for PreviewConfig {
     fn default() -> Self {
         Self {
-            // Preserves the historical `derive(Default)` behaviour. The serde
-            // default above only applies to configs that omit the field.
-            allow_external: false,
+            // External callers still need a valid session or Bearer token;
+            // this flag only decides whether the route is reachable at all
+            // from another device.
+            allow_external: default_preview_allow_external(),
             toolbar_items: default_preview_toolbar_items(),
         }
     }
@@ -151,10 +152,10 @@ mod tests {
     }
 
     #[test]
-    fn default_preview_config_has_the_full_toolbar_and_disables_external() {
+    fn default_preview_config_has_the_full_toolbar_and_allows_external() {
         let config = PreviewConfig::default();
 
-        assert!(!config.allow_external);
+        assert!(config.allow_external);
         assert_eq!(config.toolbar_items.len(), 8);
     }
 }

@@ -21,7 +21,7 @@ Dinotty ships with a built-in MCP (Model Context Protocol) JSON-RPC 2.0 server, 
 
 The MCP server implements protocol version `2024-11-05` and supports:
 
-- **9 tools**: terminal operations, file read/write, Git queries
+- **12 tools**: terminal operations, tab/pane management, file read/write, Git queries, standalone file viewer
 - **3 resources**: session list, screen contents, history
 - **2 transports**: HTTP (Streamable HTTP compatible), stdio (the legacy HTTP+SSE stream is kept for compatibility only)
 
@@ -119,6 +119,7 @@ Agent Tokens require the matching capability:
 | `terminal_*` tools | `terminal:read` / `terminal:write` |
 | `tab_create` / `pane_split` | `terminal:create` |
 | `file_*` tools | `workspace:read` / `workspace:write` |
+| `file_viewer_open` | `workspace:read` |
 | `git_*` tools | `workspace:read` |
 
 Agent Token scopes are also enforced (see the [Token System](/en/internals/token-system) doc): `terminal:read` / `terminal:write` scopes restrict the accessible panes (`terminal_list` filters out panes outside the scope), and `workspace:read` / `workspace:write` scopes restrict the accessible directories (directory-prefix matching). `git_status` operates on the process working directory and is not restricted by workspace scopes.
@@ -272,6 +273,28 @@ List directory contents.
   }
 }
 ```
+
+### file_viewer_open
+
+Open a file in a standalone read-only viewer: a native window on the desktop, a full-screen overlay on web and mobile. The viewer has no directory tree, no editor tabs, and no save/edit entry point.
+
+```json
+{
+  "name": "file_viewer_open",
+  "arguments": {
+    "path": "docs/design.md",
+    "pane_id": "pane-123"
+  }
+}
+```
+
+`path` is required and is resolved against the pane's workspace root (the pane's current working directory). Relative paths are joined to the root; absolute paths (and `~`-prefixed ones) are accepted only when they stay inside it after canonicalization. `pane_id` is optional and defaults to `active`; agents should pass `DINOTTY_PANE_ID` so the path resolves against their own terminal's workspace.
+
+**Returns:** JSON string containing `ok`, `request_id`, `pane_id`, `path` (workspace-relative), `title`, and `delivered_clients`.
+
+**Hints:** `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`
+
+The viewer is always available — it is not gated by `open_api.enabled`. A successful result means the delivery was queued to at least one connected main-window client (`delivered_clients > 0`); it does not wait for the window to render. Repeated calls from the same pane focus the existing window and navigate it to the new file. Errors are returned as MCP tool errors; see [Standalone File Viewer API](./file-viewer.md#error-codes) for the underlying error codes.
 
 ### git_status
 

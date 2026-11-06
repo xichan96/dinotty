@@ -108,7 +108,7 @@ export interface SyncTabList {
     active_pane_id?: string
     cwd?: string
     connection_id?: string
-    workspace_id?: string
+    workspace_id?: string | null
     title?: string
   }[]
   active_pane_id: string | null
@@ -138,6 +138,14 @@ export interface SyncTabRenamed {
   type: 'tab_renamed'
   tab_id: string
   title: string
+}
+
+/// Explicit tab→workspace assignment changed. `workspace_id` is `null` when
+/// the assignment was cleared (the tab falls back to derived attribution).
+export interface SyncTabWorkspaceUpdated {
+  type: 'tab_workspace_updated'
+  tab_id: string
+  workspace_id: string | null
 }
 
 export interface SyncTabReordered {
@@ -173,6 +181,16 @@ export interface SyncMcSnapshot {
   open: boolean
   selected_workspace_id?: string
   selected_tab_id?: string
+}
+
+/// Server -> client: open a file in the standalone read-only viewer. Only
+/// main windows receive this; `path` is relative to the pane's workspace root.
+export interface SyncOpenFileViewer {
+  type: 'open_file_viewer'
+  request_id: string
+  pane_id: string
+  path: string
+  title?: string
 }
 
 export interface SyncPluginChanged {
@@ -276,6 +294,8 @@ export interface SyncUpdateLayout {
   pane_id: string
   layout: any
   active_pane_id: string
+  /** `false` updates the layout without moving the server-global active pane. */
+  activate?: boolean
 }
 
 export interface SyncRenameTab {
@@ -410,6 +430,7 @@ export type SyncServerMsg =
   | SyncTabClosed
   | SyncTabActivated
   | SyncTabRenamed
+  | SyncTabWorkspaceUpdated
   | SyncTabReordered
   | SyncPluginChanged
   | SyncLayoutUpdated
@@ -423,6 +444,7 @@ export type SyncServerMsg =
   | SyncMissionControlToggled
   | SyncSelectionChanged
   | SyncMcSnapshot
+  | SyncOpenFileViewer
   | SyncEvent
   | SyncHello
   | SyncBell

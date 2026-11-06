@@ -1,8 +1,14 @@
 /** Editor split pane layout types — independent from terminal PaneLayout */
 
+import { createEditorTab, syncLeafActive, type EditorTab } from './editorTabs'
+
 export interface EditorLeafPane {
   type: 'editor-leaf'
   id: string
+  /** Tabs open in this editor group. */
+  tabs: EditorTab[]
+  activeTabId: string | null
+  /** Mirror of the active tab, kept for persistence and watchers. */
   filePath: string | null
   isDir: boolean
   ratio: number
@@ -32,9 +38,64 @@ export function genEditorSplitId(): string {
   return genId('es')
 }
 
-/** Create a single leaf layout */
+/** Create a split node with equal ratios. */
+export function createEditorSplit(
+  direction: 'horizontal' | 'vertical',
+  children: EditorPaneLayout[]
+): EditorSplitPane {
+  const ratio = children.length ? 1 / children.length : 1
+  for (const child of children) {
+    if (child.type === 'editor-leaf') child.ratio = ratio
+  }
+  return {
+    type: 'editor-split',
+    id: genEditorSplitId(),
+    direction,
+    children,
+    ratios: children.map(() => ratio),
+  }
+}
+
+/**
+ * Migrate layouts persisted before tabs existed (a leaf had one filePath) and
+ * repair an activeTabId that no longer points at an open tab. Mutates in place.
+ */
+export function normalizeEditorLayout(layout: EditorPaneLayout): EditorPaneLayout {
+  if (layout.type === 'editor-leaf') {
+    const leaf = layout as EditorLeafPane & {
+      tabs?: EditorTab[]
+      activeTabId?: string | null
+    }
+    if (!Array.isArray(leaf.tabs)) leaf.tabs = []
+    if (leaf.filePath && !leaf.tabs.some((tab) => tab.filePath === leaf.filePath)) {
+      leaf.tabs.push(createEditorTab(leaf.filePath, leaf.isDir))
+    }
+    if (!leaf.activeTabId || !leaf.tabs.some((tab) => tab.id === leaf.activeTabId)) {
+      const remembered = leaf.filePath
+        ? leaf.tabs.find((tab) => tab.filePath === leaf.filePath)
+        : null
+      leaf.activeTabId = remembered?.id ?? leaf.tabs[leaf.tabs.length - 1]?.id ?? null
+    }
+    syncLeafActive(leaf)
+    return leaf
+  }
+  layout.children = layout.children.map(normalizeEditorLayout)
+  return layout
+}
+
+/** Create a single leaf layout, optionally with one open tab. */
 export function createEditorLeaf(filePath: string | null = null, isDir = false): EditorLeafPane {
-  return { type: 'editor-leaf', id: genEditorLeafId(), filePath, isDir, ratio: 1, zoomed: false }
+  const tab = filePath ? createEditorTab(filePath, isDir) : null
+  return {
+    type: 'editor-leaf',
+    id: genEditorLeafId(),
+    tabs: tab ? [tab] : [],
+    activeTabId: tab?.id ?? null,
+    filePath,
+    isDir,
+    ratio: 1,
+    zoomed: false,
+  }
 }
 
 /** Find a leaf by id */

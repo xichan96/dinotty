@@ -1,9 +1,18 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { getApiBase, apiUrl, authFetch, getAuthToken } from './apiBase'
 import { isTauri } from './useTransport'
+import { loadKatex } from './markdownEnhance'
 import { esc, renderMarkdownCode } from '../utils/markdownCode'
+import { outlineFromMarkedTokens } from '../utils/markdownOutline'
+import type { OutlineItem } from '../types/outline'
 
 export { esc }
+
+/** File kinds that Monaco edits as text (HTML included: it has a source view
+ *  and can be saved back, unlike media/office/pdf). */
+export function isEditableTextKind(kind: string | null | undefined): boolean {
+  return kind === 'text' || kind === 'markdown' || kind === 'html'
+}
 
 interface Meta {
   kind: string
@@ -19,7 +28,13 @@ let _domPurifyPromise: Promise<typeof import('dompurify')> | null = null
 
 export function getMarked() {
   if (!_markedPromise) {
-    _markedPromise = import('marked').then((m) => {
+    // KaTeX rides along with marked so inline `$…$` / `$$…$$` is parsed in
+    // the same lazy chunk; ```math fences are rendered after sanitizing.
+    _markedPromise = Promise.all([
+      import('marked'),
+      loadKatex(),
+      import('marked-katex-extension'),
+    ]).then(([m, , katexExtension]) => {
       m.use({
         gfm: true,
         breaks: true,
@@ -27,6 +42,7 @@ export function getMarked() {
           code: renderMarkdownCode,
         },
       })
+      m.use(katexExtension.default({ throwOnError: false }))
       return m
     })
   }
@@ -48,7 +64,7 @@ function resolveImagePath(relPath: string, filePath: string): string {
 }
 
 /** Rewrite relative <img src> in rendered HTML to /api/workspace/raw URLs */
-function rewriteImageSrcs(html: string, filePath: string, paneId: string): string {
+export function rewriteImageSrcs(html: string, filePath: string, paneId: string): string {
   return html.replace(/<img\b([^>]*?)\ssrc=(["'])(.+?)\2/gi, (_match, prefix, quote, src) => {
     if (/^(https?:\/\/|\/api\/workspace\/raw)/.test(src))
       return `<img${prefix} src=${quote}${src}${quote}`
@@ -67,6 +83,23 @@ export function getDOMPurify() {
   return _domPurifyPromise
 }
 
+/**
+ * Render markdown source to sanitized HTML. The editor watcher and the
+ * standalone file viewer both go through this function, so there is exactly
+ * one place where rendered markdown is sanitized.
+ */
+export async function renderMarkdownPreview(
+  src: string,
+  filePath: string,
+  paneId: string
+): Promise<string> {
+  if (!src) return ''
+  const [m, dp] = await Promise.all([getMarked(), getDOMPurify()])
+  let html = m.parser(m.lexer(src)) as string
+  if (filePath) html = rewriteImageSrcs(html, filePath, paneId)
+  return dp.default.sanitize(html)
+}
+
 export function useFileEditor(opts: {
   paneId: () => string
   selectedRel: Ref<string | null>
@@ -78,6 +111,10 @@ export function useFileEditor(opts: {
   const mdShowPreview = ref(false)
   const htmlShowPreview = ref(false)
   const markdownEditorHtml = ref('')
+  /** Heading tree from the same lexer pass; `null` until the first scan lands. */
+  const markdownOutline = ref<OutlineItem[] | null>(null)
+  /** Buffer text the heading tree was produced from. */
+  const markdownOutlineSource = ref('')
   const editorSelection = ref<{ text: string; rect: DOMRect | null } | null>(null)
 
   const editorDirty = computed(() => editorText.value !== editorBaseline.value)
@@ -87,7 +124,7 @@ export function useFileEditor(opts: {
       !!opts.selectedRel.value &&
       !opts.selectedIsDir.value &&
       !opts.meta.value?.truncated &&
-      (opts.meta.value?.kind === 'text' || opts.meta.value?.kind === 'markdown')
+      isEditableTextKind(opts.meta.value?.kind)
   )
 
   const canSaveEditor = computed(() => canSaveEditorContext.value && editorDirty.value)
@@ -102,43 +139,62 @@ export function useFileEditor(opts: {
     }
     if (!src) {
       markdownEditorHtml.value = ''
+      markdownOutline.value = []
+      markdownOutlineSource.value = ''
       return
     }
     mdDebounceTimer = setTimeout(async () => {
       try {
-        const [m, dp] = await Promise.all([getMarked(), getDOMPurify()])
-        let html = m.parse(src, { async: false }) as string
         const filePath = opts.selectedRel.value
-        if (filePath) html = rewriteImageSrcs(html, filePath, opts.paneId())
-        markdownEditorHtml.value = dp.default.sanitize(html)
+        // The preview HTML goes through the shared sanitization entry point;
+        // the outline still needs the lexer tokens, so keep the marked module
+        // around for that second, small pass.
+        const [html, m] = await Promise.all([
+          renderMarkdownPreview(src, filePath ?? '', opts.paneId()),
+          getMarked(),
+        ])
+        const outline = outlineFromMarkedTokens(m.lexer(src))
+        markdownEditorHtml.value = html
+        // The buffer may have changed while the async imports were resolving.
+        if (editorText.value === src) {
+          markdownOutline.value = outline
+          markdownOutlineSource.value = src
+        }
       } catch {
         markdownEditorHtml.value = ''
+        if (editorText.value === src) {
+          markdownOutline.value = []
+          markdownOutlineSource.value = src
+        }
       }
     }, 300)
   })
 
-  async function saveEditor() {
-    if (!canSaveEditor.value || !opts.selectedRel.value) return
+  /**
+   * PUT the active buffer. Returns the snapshot that was saved so the caller
+   * can commit the baseline to the right tab — the active tab may change while
+   * the request is in flight, and writing the response into whatever tab is
+   * active by then would clear another tab's dirty flag.
+   */
+  async function saveEditor(): Promise<{ filePath: string; content: string } | null> {
+    if (!canSaveEditor.value || !opts.selectedRel.value) return null
+    const filePath = opts.selectedRel.value
+    const content = editorText.value
     await getApiBase()
-    const q = new URLSearchParams({ pane_id: opts.paneId(), path: opts.selectedRel.value })
+    const q = new URLSearchParams({ pane_id: opts.paneId(), path: filePath })
     const res = await authFetch(apiUrl(`/api/workspace/file?${q}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: editorText.value }),
+      body: JSON.stringify({ content }),
     })
-    if (!res.ok) return
-    editorBaseline.value = editorText.value
-    if (
-      opts.meta.value &&
-      (opts.meta.value.kind === 'text' || opts.meta.value.kind === 'markdown')
-    ) {
-      opts.meta.value = {
-        ...opts.meta.value,
-        content: editorText.value,
-        truncated: false,
-        message: undefined,
-      }
-    }
+    if (!res.ok) return null
+    return { filePath, content }
+  }
+
+  /** Drop the heading tree when switching tabs, before the new lexer pass lands. */
+  function clearMarkdownOutline() {
+    markdownOutline.value = null
+    markdownOutlineSource.value = ''
   }
 
   function resetEditor() {
@@ -147,6 +203,7 @@ export function useFileEditor(opts: {
     mdShowPreview.value = false
     htmlShowPreview.value = false
     editorSelection.value = null
+    clearMarkdownOutline()
   }
 
   function onEditorSelectionChange(payload: { text: string; rect: DOMRect | null }) {
@@ -167,12 +224,15 @@ export function useFileEditor(opts: {
     mdShowPreview,
     htmlShowPreview,
     markdownEditorHtml,
+    markdownOutline,
+    markdownOutlineSource,
     editorSelection,
     editorDirty,
     canSaveEditorContext,
     canSaveEditor,
     saveEditor,
     resetEditor,
+    clearMarkdownOutline,
     onEditorSelectionChange,
     onSelectionDismiss,
   }

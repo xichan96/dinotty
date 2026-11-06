@@ -27,6 +27,7 @@
               autocorrect="off"
               spellcheck="false"
               :placeholder="t('previewPanel.placeholder')"
+              :title="currentUrl"
               @focus="onAddressFocus"
               @blur="onAddressBlur"
             />
@@ -72,6 +73,7 @@
           ref="iframeRef"
           :src="resolvedSrc"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"
+          @load="onIframeLoad"
         ></iframe>
       </div>
       <DevToolsPanel
@@ -91,8 +93,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import DevToolsPanel from './DevToolsPanel.vue'
 import AddressDropdown from './AddressDropdown.vue'
-import { urlToPreviewSrc } from '../../utils/previewRouting'
-import { getApiBase } from '../../composables/apiBase'
+import { targetFromPreviewPath, urlToPreviewSrc } from '../../utils/previewRouting'
+import { apiUrl, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { useWebBookmarks } from '../../composables/useWebBookmarks'
 import { useDevTools } from '../../composables/useDevTools'
@@ -127,7 +129,10 @@ const { t } = useI18n()
 const iframeRef = ref<HTMLIFrameElement>()
 const addressInput = ref<HTMLInputElement>()
 const addressValue = ref('')
+/** What the address bar shows: follows in-page navigation. */
 const currentUrl = ref('')
+/** What the iframe is actually loading: only changes on explicit navigation. */
+const iframeUrl = ref('')
 const navCounter = ref(0)
 const previewHttpBase = ref('')
 const addressDropdownVisible = ref(false)
@@ -169,13 +174,23 @@ function pushHistory(url: string) {
   navIndex.value = navHistory.value.length - 1
 }
 
+/**
+ * What the address box shows: the real upstream URL, so it can be read and
+ * edited as typed. The opaque `/preview/<base64>` route is an implementation
+ * detail of the iframe and stays out of the box.
+ */
+function displayAddress(url: string): string {
+  return url || ''
+}
+
 function goBack() {
   if (!canGoBack.value) return
   navFromHistory.value = true
   navIndex.value--
   const url = navHistory.value[navIndex.value]
   currentUrl.value = url
-  addressValue.value = url
+  addressValue.value = displayAddress(url)
+  iframeUrl.value = url
   navCounter.value++
 }
 
@@ -185,13 +200,21 @@ function goForward() {
   navIndex.value++
   const url = navHistory.value[navIndex.value]
   currentUrl.value = url
-  addressValue.value = url
+  addressValue.value = displayAddress(url)
+  iframeUrl.value = url
   navCounter.value++
 }
 
 const resolvedSrc = computed(() => {
-  if (!currentUrl.value) return 'about:blank'
-  const base = urlToPreviewSrc(currentUrl.value, previewHttpBase.value || undefined)
+  // `apiUrl` reads a module-level cache that `getApiBase()` fills; tracking
+  // this ref makes the iframe reload with the absolute origin in Tauri.
+  void previewHttpBase.value
+  if (!iframeUrl.value) return 'about:blank'
+  const path = urlToPreviewSrc(iframeUrl.value)
+  if (path === 'about:blank') return path
+  // `apiUrl` carries the active server's relay prefix, so a preview driven
+  // from a remote server goes through the hub like every other request.
+  const base = apiUrl(path)
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}_t=${navCounter.value}`
 })
@@ -207,7 +230,8 @@ watch(
   () => {
     if (props.visible && props.url) {
       currentUrl.value = props.url
-      addressValue.value = props.url
+      addressValue.value = displayAddress(props.url)
+      iframeUrl.value = props.url
       pushHistory(props.url)
       navCounter.value++
       recentUrlsComposable.recordUrl(props.url)
@@ -221,7 +245,10 @@ function navigateFromInput() {
   if (!val) return
 
   let next: string
-  if (val.startsWith('http://') || val.startsWith('https://')) {
+  const fromRoute = targetFromPreviewPath(val)
+  if (fromRoute) {
+    next = fromRoute
+  } else if (val.startsWith('http://') || val.startsWith('https://')) {
     next = val
   } else if (val.match(/^:?(\d+)(\/.*)?$/)) {
     const m = val.match(/^:?(\d+)(\/.*)?$/)!
@@ -239,7 +266,8 @@ function navigateFromInput() {
   }
 
   currentUrl.value = next
-  addressValue.value = next
+  addressValue.value = displayAddress(next)
+  iframeUrl.value = next
   pushHistory(next)
   navCounter.value++
   recentUrlsComposable.recordUrl(next)
@@ -310,13 +338,21 @@ function evalInIframe(code: string) {
 
 function openFromWebUrl(url: string) {
   currentUrl.value = url
-  addressValue.value = url
+  addressValue.value = displayAddress(url)
+  iframeUrl.value = url
   pushHistory(url)
   navCounter.value++
   recentUrlsComposable.recordUrl(url)
 }
 
-defineExpose({ openFromWebUrl })
+/** Live URL, including address-bar and in-page navigation. Used by the native
+ *  window shell to carry its location when it is docked back into the main
+ *  window. */
+function getCurrentUrl(): string {
+  return currentUrl.value
+}
+
+defineExpose({ openFromWebUrl, getCurrentUrl })
 
 function stripCacheBuster(url: string): string {
   try {
@@ -332,10 +368,61 @@ function onProxyMessage(e: MessageEvent) {
   if (!isAllowedOrigin(e.origin)) return
   if (e.data?.type === 'proxy-navigate' && e.data.url) {
     const url = stripCacheBuster(e.data.url)
+    // Address bar only: changing `resolvedSrc` here would reload the iframe
+    // on every in-page route change.
     currentUrl.value = url
-    addressValue.value = url
+    addressValue.value = displayAddress(url)
     pushHistory(url)
   }
+}
+
+/**
+ * A previewed app can leave the proxy on its own: `location.reload()` and
+ * `location.replace('/login')` (auth redirects, error recovery) are native
+ * navigations, and the injected script cannot intercept them. The document
+ * URL at that point is the real app path, which Dinotty serves as its own
+ * page. Detect that and re-enter the proxy for the same upstream origin and
+ * path.
+ */
+function onIframeLoad() {
+  const win = iframeRef.value?.contentWindow
+  if (!win) return
+  let href = ''
+  try {
+    href = win.location.href
+  } catch {
+    return // cross-origin: nothing we can inspect
+  }
+  if (!href || href === 'about:blank' || href.startsWith('chrome-error:')) return
+  try {
+    // Proxied documents set this marker; Dinotty's own pages never do.
+    if ((win as unknown as Record<string, unknown>).__dinotty_proxy_port) return
+  } catch {
+    return
+  }
+  let escaped: URL
+  try {
+    escaped = new URL(href)
+  } catch {
+    return
+  }
+  // The proxy's own error page and canonical preview URLs are not escapes.
+  if (escaped.pathname.includes('/preview/')) return
+  let target: URL
+  try {
+    target = new URL(currentUrl.value)
+  } catch {
+    return
+  }
+  target.pathname = escaped.pathname
+  target.search = escaped.search
+  target.hash = escaped.hash
+  const next = target.toString()
+  currentUrl.value = next
+  addressValue.value = displayAddress(next)
+  iframeUrl.value = next
+  pushHistory(next)
+  navCounter.value++
 }
 
 function startDrag(e: MouseEvent) {

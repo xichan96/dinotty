@@ -3,7 +3,7 @@ import { ref, computed, nextTick } from 'vue'
 import type { Tab, TerminalTab, PluginTab } from '../types/pane'
 import type { Workspace } from '../types/workspace'
 import type { TabInfo } from '../components/terminal/TabBar.vue'
-import { findLeaf, findFirstLeaf, getAllLeaves } from '../types/pane'
+import { findLeaf, findFirstLeaf, getAllLeaves, paneKind } from '../types/pane'
 import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../composables/useWorkspaces'
 import { resolveAbbr, resolveColor } from '../utils/workspaceIcon'
 
@@ -54,6 +54,7 @@ export const useSessionStore = defineStore('session', () => {
         const leaves = getAllLeaves(t.layout)
         info.singlePane = leaves.length === 1
         info.singlePaneId = leaves.length === 1 ? leaves[0].paneId : undefined
+        info.hasTerminalLeaf = leaves.some((leaf) => paneKind(leaf) === 'terminal')
         const ws =
           matchWorkspace(t.cwd ?? '', t.connectionId, t.workspaceId) ?? defaultWorkspace.value
         info.workspace = visibleWorkspaceBadge(ws)

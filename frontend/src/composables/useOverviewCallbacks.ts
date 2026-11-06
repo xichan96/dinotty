@@ -6,6 +6,8 @@ import type { TerminalTab, Tab } from '../types/pane'
 import type { SyncClientMsg } from '../types/protocol'
 import { sendMcOp, useMissionControlState } from './useMissionControlState'
 import { toActiveWorkspaceId } from './useWorkspaces'
+import { useDetachedWindowsStore } from '../stores/detachedWindowsStore'
+import { useI18n } from './useI18n'
 
 export interface OverviewCallbacksOptions {
   tabs: Ref<Tab[]>
@@ -29,6 +31,8 @@ export interface OverviewCallbacksOptions {
   commitLocalActivePane: (paneId: string) => void
   focusActive: () => void
   sendSync: (msg: SyncClientMsg) => void
+  /** Used to report a detached window that could not be focused. */
+  toast?: { error: (message: string) => void }
 }
 
 export interface OverviewCallbacks {
@@ -37,6 +41,8 @@ export interface OverviewCallbacks {
   closeOverview: () => void
   onOverviewActivate: (paneId: string) => void
   onOverviewCloseTab: (tabId: string) => void
+  /** Close the terminal for real (kill the PTY), no further confirmation. */
+  onOverviewCloseTerminal: (tabId: string) => void
   onCloseTabsBulk: (paneIds: string[]) => Promise<void>
   onOverviewNewTab: (cwd?: string, workspaceId?: string | null) => Promise<void>
   onOverviewNewTabSsh: (
@@ -62,10 +68,37 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
     commitLocalActivePane,
     focusActive,
     sendSync,
+    toast,
   } = opts
 
   const mcState = useMissionControlState()
+  const detachedStore = useDetachedWindowsStore()
+  const { t } = useI18n()
   const overviewOpen = computed(() => mcState.open)
+
+  function activateInMainWindow(paneId: string): void {
+    void activateTab(paneId)
+    nextTick(() => {
+      termRefs[paneId]?.focus()
+    })
+  }
+
+  /**
+   * Bring a detached tab's native window forward.
+   *
+   * When the registry no longer knows the window (it crashed or was destroyed
+   * while the event was missed) the tab is already back in this window's render
+   * tree, so fall back to a normal activation and tell the user why nothing
+   * came forward.
+   */
+  async function focusDetachedTab(paneId: string): Promise<void> {
+    if (await detachedStore.focusDetached(paneId)) return
+
+    await detachedStore.refreshFromRust()
+    toast?.error(t('detached.focusFailed'))
+    if (detachedStore.isDetached(paneId)) return
+    activateInMainWindow(paneId)
+  }
 
   function openOverview(): void {
     // `set` rather than `toggle`: the local `open` bit is only a mirror of the
@@ -88,16 +121,28 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
   }
 
   function onOverviewActivate(paneId: string): void {
-    void activateTab(paneId)
+    // A detached tab has no TerminalPane in this window to activate. Bringing
+    // its native window forward is the whole action: activating the tab here
+    // would move the server-side focus for every client while the pane the
+    // user asked for stays in another window.
+    if (detachedStore.isDetached(paneId)) {
+      closeOverview()
+      void focusDetachedTab(paneId)
+      return
+    }
+    activateInMainWindow(paneId)
     closeOverview()
-    nextTick(() => {
-      const ref = termRefs[paneId]
-      ref?.focus()
-    })
   }
 
   function onOverviewCloseTab(tabId: string): void {
     void requestCloseTab(tabId)
+  }
+
+  function onOverviewCloseTerminal(tabId: string): void {
+    // The confirmation lives in the card's context menu (detached.closeTerminal-
+    // Confirm); by the time this runs the user has already agreed to kill the
+    // PTY, so skip the generic requestCloseTab prompt.
+    void closeTab(tabId)
   }
 
   async function onCloseTabsBulk(paneIds: string[]): Promise<void> {
@@ -178,6 +223,7 @@ export function useOverviewCallbacks(opts: OverviewCallbacksOptions): OverviewCa
     closeOverview,
     onOverviewActivate,
     onOverviewCloseTab,
+    onOverviewCloseTerminal,
     onCloseTabsBulk,
     onOverviewNewTab,
     onOverviewNewTabSsh,

@@ -299,8 +299,21 @@ export class TauriIpcTransport implements Transport {
  * `getApiBase()` (or `checkTokenConfigured()`) before the authenticated tree
  * mounts, and `createTransport` is only reached from a mounted `TerminalPane`.
  */
-export function createTransport(paneId: string, host?: string): Transport {
-  if (isTauri() && isLocalActive()) {
+export interface TransportOptions {
+  /**
+   * Always use `WebSocketTransport`, even when Tauri IPC is available.
+   *
+   * Detached terminal windows must set this. `TauriIpcTransport` is
+   * single-owner per pane — `pty_spawn` replaces any existing Tauri forwarder —
+   * so a detached window sharing a pane with the main window over IPC would
+   * kick the main window off its own session. The WebSocket path is already the
+   * multi-client design (independent endpoints, output fan-out).
+   */
+  forceWebSocket?: boolean
+}
+
+export function createTransport(paneId: string, host?: string, opts?: TransportOptions): Transport {
+  if (!opts?.forceWebSocket && isTauri() && isLocalActive()) {
     return new TauriIpcTransport(paneId)
   }
   return new WebSocketTransport(paneId, host)

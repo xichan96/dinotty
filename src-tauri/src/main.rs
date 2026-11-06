@@ -14,11 +14,15 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 mod autostart;
+mod detached_windows;
 mod embedded_server;
+mod pointer_state;
+mod preview_windows;
 mod shutdown;
 mod tray;
 mod update_download;
 mod window_actions;
+mod window_host;
 
 static EMBEDDED_HTTP_PORT: OnceLock<u16> = OnceLock::new();
 const BUILT_IN_DEFAULT_PORT: u16 = 8999;
@@ -387,7 +391,10 @@ fn pty_kill(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<()
 fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<(), String> {
     if let Some(entry) = state.sessions.get(&pane_id) {
         let session = Arc::clone(entry.value());
-        if !session.has_clients() {
+        // The main window is unmounting, possibly before a detached window
+        // attaches over WebSocket. Release only the Tauri IPC forwarder; the
+        // PTY and any remaining WebSocket clients keep running.
+        if session.release_tauri_client() {
             session.set_status(SessionStatus::Detached { since: std::time::Instant::now() });
         }
     }
@@ -743,6 +750,8 @@ fn main() {
         .manage(tray::state::TrayCapabilityState::default())
         .manage(tray::state::TrayMenuState::default())
         .manage(window_actions::MainWindowState::default())
+        .manage(detached_windows::DetachedTabWindows::default())
+        .manage(preview_windows::PreviewWindows::default())
         .manage(update_download::UpdateDownloadState::default())
         .manage(StartupExitState::default())
         .manage(shutdown::ShutdownCoordinator::new(manager.clone()))
@@ -819,6 +828,17 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Detached tab windows have their own lifecycle: closing one
+            // returns the tab to the main window and never triggers the quit
+            // dialog. Main-window behavior below stays untouched.
+            if detached_windows::handle_detached_window_event(window, event) {
+                return;
+            }
+            // Preview windows close like detached ones: no server state to
+            // prompt about, so keep the main window's quit dialog out of it.
+            if preview_windows::handle_preview_window_event(window, event) {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.app_handle().state::<shutdown::ShutdownCoordinator>().is_finalizing() {
                     return;
@@ -851,6 +871,13 @@ fn main() {
             shutdown::desktop_quit_ack,
             window_actions::desktop_capabilities,
             window_actions::hide_main_window,
+            detached_windows::open_tab_window,
+            detached_windows::focus_tab_window,
+            detached_windows::list_detached_tab_windows,
+            detached_windows::close_tab_window,
+            preview_windows::open_preview_window,
+            preview_windows::close_preview_window,
+            pointer_state::pointer_buttons_down,
             window_actions::open_system_tray_settings,
             autostart::autostart_status,
             autostart::set_autostart,

@@ -21,7 +21,7 @@ Dinotty 内置 MCP (Model Context Protocol) JSON-RPC 2.0 服务器，允许 AI �
 
 MCP Server 实现了 MCP 协议版本 `2024-11-05`，支持：
 
-- **9 个工具**：终端操作、文件读写、Git 查询
+- **12 个工具**：终端操作、Tab / Pane 管理、文件读写、Git 查询、独立文件查看器
 - **3 个资源**：会话列表、屏幕内容、历史记录
 - **2 种传输**：HTTP（Streamable HTTP 兼容）、stdio（legacy HTTP+SSE 流仅作兼容保留）
 
@@ -119,6 +119,7 @@ Agent Token 需要相应 capability：
 | `terminal_*` 工具 | `terminal:read` / `terminal:write` |
 | `tab_create` / `pane_split` | `terminal:create` |
 | `file_*` 工具 | `workspace:read` / `workspace:write` |
+| `file_viewer_open` | `workspace:read` |
 | `git_*` 工具 | `workspace:read` |
 
 Agent Token 的 scope 同样生效（详见 [Token 系统](/zh/internals/token-system)）：`terminal:read` / `terminal:write` 的 scope 限制可访问的 pane（`terminal_list` 会过滤 scope 外的 pane），`workspace:read` / `workspace:write` 的 scope 限制可访问的目录（按目录前缀匹配）。`git_status` 作用于进程工作目录，不受 workspace scope 限制。
@@ -272,6 +273,28 @@ Agent Token 的 scope 同样生效（详见 [Token 系统](/zh/internals/token-s
   }
 }
 ```
+
+### file_viewer_open
+
+在独立只读查看器中打开文件：桌面端为原生窗口，Web / 移动端为全屏浮层。查看器没有目录树、没有编辑器标签页，也没有保存 / 编辑入口。
+
+```json
+{
+  "name": "file_viewer_open",
+  "arguments": {
+    "path": "docs/design.md",
+    "pane_id": "pane-123"
+  }
+}
+```
+
+`path` 必填，相对于 Pane 的工作区根（即 Pane 当前工作目录）解析。相对路径会拼接到根目录；绝对路径（以及 `~` 开头的路径）只有在 canonicalize 后仍位于工作区内时才被接受。`pane_id` 可选，默认 `active`；Agent 应传 `DINOTTY_PANE_ID`，使路径相对于自己的终端工作区解析。
+
+**返回：** JSON 字符串，包含 `ok`、`request_id`、`pane_id`、`path`（工作区相对路径）、`title`、`delivered_clients`。
+
+**注解：** `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`
+
+查看器始终可用，不受 `open_api.enabled` 门控。成功结果表示消息已入队到至少一个已连接的主界面客户端（`delivered_clients > 0`），不等待窗口渲染完成。同一 Pane 重复调用会聚焦已有窗口并导航到新文件。错误以 MCP 工具错误返回；底层错误码见[独立文件查看器 API](./file-viewer.md#错误码)。
 
 ### git_status
 

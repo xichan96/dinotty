@@ -440,6 +440,7 @@ async fn main() {
             .route("/api/tabs/ssh", post(tabs::create_ssh_tab))
             .route("/api/tabs/:tab_id", delete(tabs::close_tab))
             .route("/api/tabs/:tab_id/rename", post(tabs::rename_tab))
+            .route("/api/tabs/:tab_id/workspace", put(tabs::set_tab_workspace))
             .route("/api/tabs/:tab_id/pane", post(tabs::split_pane))
             .route("/api/tabs/:tab_id/pane/plugin", post(tabs::create_plugin_pane))
             .route("/api/tabs/:tab_id/pane/files", post(tabs::create_files_pane))
@@ -516,6 +517,8 @@ async fn main() {
             .route("/api/workspace/move", post(workspace::workspace_move))
             .route("/api/workspace/git-status", get(workspace::workspace_git_status))
             .route("/api/workspace/git-diff", get(workspace::workspace_git_diff))
+            .route("/api/workspace/git-changes", get(workspace::workspace_git_changes))
+            .route("/api/workspace/git-file-diff", get(workspace::workspace_git_file_diff))
             .route("/api/workspace/reveal", get(workspace::workspace_reveal))
             .route("/api/workspace/cwd", get(workspace::workspace_cwd))
             .route("/api/workspace/git-stage-lines", post(workspace::workspace_git_stage_lines))
@@ -591,6 +594,7 @@ async fn main() {
                     .route("/api/sessions/:pane_id/run", post(agent::sessions_run))
                     .route("/api/sessions/:pane_id/send", post(agent::sessions_send))
                     .route("/api/sessions/:pane_id/read", get(agent::sessions_read))
+                    .route("/api/sessions/:pane_id/viewer", post(workspace::open_viewer_handler))
                     .route("/ws/events", get(agent::events_ws_handler))
                     .route("/api/tokens", post(token::create_token).get(token::list_tokens))
                     .route(
@@ -610,9 +614,12 @@ async fn main() {
                         token::sessions_token_middleware,
                     )),
             )
-            .route("/preview/:port", any(proxy::proxy_handler_root))
-            .route("/preview/:port/", any(proxy::proxy_handler_root))
-            .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))
+            // One wildcard handler: the canonical form puts the upstream
+            // origin in a single opaque segment, so the old `:port` pattern
+            // would capture it and reject the URL before parsing.
+            .route("/preview", any(proxy::proxy_handler_wildcard))
+            .route("/preview/", any(proxy::proxy_handler_wildcard))
+            .route("/preview/*path", any(proxy::proxy_handler_wildcard))
             // Hub relay to a roster server. One dispatcher serves all three
             // shapes and splits HTTP from WebSocket on the Upgrade header; the
             // gate lives inside the relay, not in auth_middleware (see the

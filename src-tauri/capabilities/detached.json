@@ -1,0 +1,15 @@
+{
+  "identifier": "detached-window",
+  "description": "Permissions for detached terminal tab windows",
+  "windows": ["tab-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "core:window:allow-hide",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "shell:allow-open"
+  ]
+}

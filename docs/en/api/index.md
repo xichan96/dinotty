@@ -1,6 +1,6 @@
 # API Overview
 
-Dinotty's external interfaces fall into three layers. This page helps you find the right API quickly.
+Dinotty's external interfaces fall into four layers. This page helps you find the right API quickly.
 
 ## Layers
 
@@ -9,6 +9,7 @@ Dinotty's external interfaces fall into three layers. This page helps you find t
 | **Tabs & Panes API** | HTTP REST | Create / close / rename tabs, split panes, move panes across tabs | [tabs-panes-api.md](./tabs-panes-api.md) |
 | **Open API** | HTTP + WebSocket | Read and write existing terminals: byte streams (screen/scrollback/input/resize) + command-level semantics (run/send/read) + event subscription | [open-api.md](./open-api.md) |
 | **Mission Control API** | WebSocket (`/ws/sync`) | Programmatically open / navigate / close the MC overview | [mission-control-api.md](./mission-control-api.md) |
+| **File Viewer API** | HTTP + MCP | Open a single file in a read-only native window (desktop) or full-screen overlay (web/mobile) | [file-viewer.md](./file-viewer.md) |
 
 Plus two standalone subsystem docs:
 
@@ -27,6 +28,8 @@ Plus two standalone subsystem docs:
 - **Inject characters into a terminal** -> [POST /api/sessions/:pane_id/input](./open-api.md#post-apisessionspane_idinput)
 - **Run a command and get the exit code** -> [POST /api/sessions/:pane_id/run](./open-api.md#post-apisessionspane_idrun)
 - **Subscribe to command-finished events** -> [WS /ws/events](./open-api.md#websocket)
+- **Open a file in a read-only viewer** -> [POST /api/sessions/:pane_id/viewer](./file-viewer.md#post-apisessionspane_idviewer)
+- **Let an agent show a file over MCP** -> [file_viewer_open](./file-viewer.md#mcp-tool-file_viewer_open)
 - **Open Mission Control remotely** -> [mission_control_op / toggle](./mission-control-api.md#toggle)
 - **Jump to a specific workspace from MC** -> [mission_control_op / jump](./mission-control-api.md#jump)
 - **Read the host clipboard** -> [GET /api/clipboard](./clipboard-api.md)
@@ -51,7 +54,7 @@ Dinotty's auth has two layers. Open API's `run`/`send`/`read`/`WS /ws/events` ac
 │  Agent Token (dnt_*)                                            │
 │  - Fine-grained token created via /api/tokens                   │
 │  - Carries capabilities: terminal:read / terminal:write / etc.  │
-│  - Covers: /api/sessions/{run,send,read}, /ws/events,           │
+│  - Covers: /api/sessions/{run,send,read,viewer}, /ws/events,    │
 │    /api/tokens/*, /mcp/*                                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -65,6 +68,7 @@ Mission Control flows through `/ws/sync` and uses the global token (query string
 | Tabs & Panes API | Always enabled (auth only) |
 | Open API | Requires `open_api.enabled = true` in settings; `run`/`send`/`read` also accept Agent Token (capability check) |
 | Mission Control API | Always enabled (over `/ws/sync`) |
+| File Viewer API | Always enabled (auth only); accepts session cookie, global token, or agent token (`workspace:read`); **not** gated by `open_api.enabled` |
 | Clipboard | Always enabled; requires token or session + same-origin proof |
 | MCP Server | Requires `open_api.enabled = true` and an Agent Token |
 

@@ -1,17 +1,24 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::result_large_err)]
 
 mod git;
+mod git_changes;
 mod handlers;
 mod remote;
+mod search;
 mod syntax;
 mod types;
 mod upload;
 mod util;
+mod viewer;
 
 pub use git::{
     workspace_git_diff, workspace_git_revert_lines, workspace_git_stage_lines,
     workspace_git_status, GitChange, GitDiffResponse, GitFileStatus, GitRevertBody, GitStageBody,
     GitStatusResponse,
+};
+pub use git_changes::{
+    workspace_git_changes, workspace_git_file_diff, GitFileDiffQuery, WorkspaceChangeFile,
+    WorkspaceChangesResponse, WorkspaceChangesSummary, WorkspaceGitFileDiffResponse,
 };
 pub use syntax::{workspace_syntax_check, SyntaxCheckBody, SyntaxCheckResponse, SyntaxDiagnostic};
 
@@ -30,6 +37,10 @@ pub use upload::{
     uploads_adopt, uploads_clear, uploads_default_dir, uploads_status, workspace_upload,
     workspace_uploads,
 };
+pub use viewer::{
+    check_viewer_access, open_viewer_handler, present_file_viewer, resolve_viewer_target,
+    ViewerDelivery, ViewerError, ViewerTarget,
+};
 
 // Re-export helpers that `remote.rs` consumes via `crate::workspace::{...}`
 // and that `git.rs` consumes via `super::{...}`. Visibility is `pub(crate)`
@@ -37,8 +48,8 @@ pub use upload::{
 // matching the original `pub(super)` semantics of the un-split module.
 pub(crate) use util::{
     detect_language, get_root, json_err, media_kind, normalize_join, office_kind,
-    resolve_user_path, skip_text_preview, try_res, validate_entry_name, MAX_DOWNLOAD,
-    MAX_TEXT_PREVIEW,
+    resolve_user_path, skip_text_preview, truncate_utf8_prefix, try_res, validate_entry_name,
+    MAX_DOWNLOAD, MAX_TEXT_PREVIEW,
 };
 
 // Re-export helpers that `tests.rs` consumes via `use super::*`. Gated on
@@ -50,7 +61,10 @@ pub(crate) use upload::{
     INSUFFICIENT_STORAGE,
 };
 #[cfg(test)]
-pub(crate) use util::{byte_offset_to_column, parse_rg_json, path_must_be_under};
+pub(crate) use util::{byte_offset_to_column, is_user_path, parse_rg_json, path_must_be_under};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod viewer_tests;

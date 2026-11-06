@@ -5,6 +5,25 @@ export const isWindowsClient: boolean =
       navigator.platform
   )
 
+export const isMacClient: boolean =
+  typeof navigator !== 'undefined' &&
+  /Mac/i.test(
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ||
+      navigator.platform
+  )
+
+/**
+ * i18n key for "reveal in the OS file manager", named after the file manager
+ * the platform actually ships: Finder on macOS, File Explorer on Windows, the
+ * generic File Manager elsewhere. Shared by the file-tree and terminal context
+ * menus so both stay in sync.
+ */
+export function revealInFileManagerKey(): string {
+  if (isMacClient) return 'fileManager.revealInFinder'
+  if (isWindowsClient) return 'fileManager.revealInExplorer'
+  return 'fileManager.revealInFileManager'
+}
+
 export function isIPhoneClient(): boolean {
   return typeof navigator !== 'undefined' && /iPhone|iPod/i.test(navigator.userAgent)
 }

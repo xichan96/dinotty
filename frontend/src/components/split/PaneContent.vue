@@ -4,10 +4,14 @@
     :ref="(el: any) => emit('register', leaf.paneId, el)"
     :pane-id="leaf.paneId"
     :ssh-host="leaf.shell_type === 'ssh' ? leaf.title : undefined"
+    :force-web-socket="forceWebSocket"
     @title-change="(title: string) => emit('titleChange', leaf.paneId, title)"
     @shell-info="(shell: string) => emit('shellInfo', leaf.paneId, shell)"
     @input="(data: string) => emit('input', leaf.paneId, data)"
-    @file-click="(path: string) => emit('fileClick', path)"
+    @file-click="
+      (path: string, line?: number, column?: number) =>
+        emit('fileClick', path, line, column, leaf.paneId)
+    "
     @preview-link="(url: string) => emit('previewLink', leaf.paneId, url)"
     @link-activate="emit('linkActivate')"
     @reconnect="emit('reconnect', leaf.paneId)"
@@ -68,6 +72,8 @@ const props = defineProps<{
   /** Workspace of the owning terminal tab; overrides pane-id derivation for
    *  split panes whose uuid pane ids do not encode a workspace. */
   workspaceId?: string
+  /** Detached windows force WebSocket for every terminal (see TerminalPane). */
+  forceWebSocket?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -75,7 +81,7 @@ const emit = defineEmits<{
   titleChange: [paneId: string, title: string]
   shellInfo: [paneId: string, shell: string]
   input: [paneId: string, data: string]
-  fileClick: [path: string]
+  fileClick: [path: string, line?: number, column?: number, paneId?: string]
   previewLink: [paneId: string, url: string]
   linkActivate: []
   close: [paneId: string]

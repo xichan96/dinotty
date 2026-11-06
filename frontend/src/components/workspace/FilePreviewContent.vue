@@ -1,5 +1,5 @@
 <template>
-  <div class="file-workspace-preview">
+  <div ref="rootEl" class="file-workspace-preview">
     <div v-if="previewLoading" class="file-workspace-placeholder">
       {{ t('filePreview.loading') }}
     </div>
@@ -8,7 +8,12 @@
       {{ t('filePreview.pickFile') }}
     </div>
     <template v-else>
-      <img v-if="meta?.kind === 'image'" class="file-media" :src="rawUrl" alt="" />
+      <ImagePreview
+        v-if="meta?.kind === 'image'"
+        :src="rawUrl"
+        :alt="csvFilePath"
+        :file-key="csvFilePath"
+      />
       <video
         v-else-if="meta?.kind === 'video'"
         class="file-media"
@@ -98,6 +103,7 @@
             >
               {{ t('filePreview.preview') }}
             </button>
+            <span class="file-editor-spacer"></span>
             <button
               v-if="showSave"
               type="button"
@@ -108,12 +114,18 @@
               {{ t('filePreview.save') }}
             </button>
           </div>
-          <iframe v-if="htmlShowPreview" class="file-pdf" :srcdoc="editorText"></iframe>
+          <iframe
+            v-if="htmlShowPreview"
+            class="file-pdf"
+            :title="t('filePreview.preview')"
+            :sandbox="htmlSandbox"
+            :srcdoc="htmlPreviewSrcdoc"
+          ></iframe>
           <MonacoEditor
             v-else
             :model-value="editorText"
             :language="language"
-            :readonly="!!meta?.truncated"
+            :readonly="readOnly || !!meta?.truncated"
             :file-path="filePath"
             :pane-id="paneId"
             :leaf-id="leafId"
@@ -123,6 +135,78 @@
           />
         </div>
       </template>
+      <LogPreview
+        v-else-if="isLogFile && meta?.kind === 'text'"
+        :meta="meta"
+        :raw-url="rawUrl"
+        :file-path="filePath"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :editor-text="editorText"
+        :editor-dirty="editorDirty"
+        :show-save="showSave"
+        :can-save-editor="canSaveEditor"
+        :read-only="readOnly"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(p) => $emit('selection-change', p)"
+      />
+      <IpynbPreview
+        v-else-if="isIpynb && meta?.kind === 'text'"
+        :content="meta?.content ?? editorText"
+        :file-path="ipynbFilePath"
+        :raw-url="rawUrl"
+        :truncated="!!meta?.truncated"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :show-save="showSave"
+        :editor-text="editorText"
+        :editor-dirty="editorDirty"
+        :can-save-editor="canSaveEditor"
+        :read-only="readOnly"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(payload) => $emit('selection-change', payload)"
+      />
+      <StructuredPreview
+        v-else-if="structuredFormat !== null && meta?.kind === 'text'"
+        :content="meta?.content ?? editorText"
+        :file-path="structuredFilePath"
+        :format="structuredFormat"
+        :raw-url="rawUrl"
+        :truncated="!!meta?.truncated"
+        :editor-text="editorText"
+        :editor-dirty="editorDirty"
+        :show-save="showSave"
+        :can-save-editor="canSaveEditor"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :outline-open="outlineOpen"
+        :outline-available="outlineAvailable"
+        :outline-panel-id="outlinePanelId"
+        :read-only="readOnly"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(payload) => $emit('selection-change', payload)"
+        @toggle-outline="$emit('toggle-outline')"
+      />
+      <SvgPreview
+        v-else-if="isSvgFile && meta?.kind === 'text'"
+        :content="meta?.content ?? editorText"
+        :editor-text="editorText"
+        :file-path="csvFilePath"
+        :raw-url="rawUrl"
+        :truncated="!!meta?.truncated"
+        :editor-dirty="editorDirty"
+        :show-save="showSave"
+        :can-save-editor="canSaveEditor"
+        :pane-id="paneId"
+        :leaf-id="leafId"
+        :read-only="readOnly"
+        @update:editor-text="$emit('update:editorText', $event)"
+        @save-editor="$emit('saveEditor')"
+        @selection-change="(payload) => $emit('selection-change', payload)"
+      />
       <template v-else-if="meta?.kind === 'text' || meta?.kind === 'markdown'">
         <div class="file-editor-root">
           <div class="file-editor-chrome">
@@ -158,6 +242,30 @@
                 {{ t('filePreview.preview') }}
               </button>
             </template>
+            <span class="file-editor-spacer"></span>
+            <button
+              v-if="outlineAvailable"
+              type="button"
+              class="file-editor-outline"
+              :class="{ active: outlineOpen }"
+              :aria-pressed="outlineOpen ? 'true' : 'false'"
+              :aria-controls="outlinePanelId"
+              :title="t('outline.toggle')"
+              :aria-label="t('outline.toggle')"
+              @click="$emit('toggle-outline')"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M8 6h13M8 12h13M8 18h13" />
+                <path d="M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
+            </button>
             <button
               v-if="showSave"
               type="button"
@@ -172,13 +280,14 @@
             v-if="meta?.kind === 'markdown' && mdShowPreview"
             ref="mdPreviewEl"
             class="file-md file-md-body file-editor-preview"
+            @click="onMarkdownPreviewClick"
             v-html="markdownEditorHtml"
           ></div>
           <MonacoEditor
             v-else
             :model-value="editorText"
             :language="language"
-            :readonly="!!meta?.truncated"
+            :readonly="readOnly || !!meta?.truncated"
             :file-path="filePath"
             :pane-id="paneId"
             :leaf-id="leafId"
@@ -188,6 +297,12 @@
           />
         </div>
       </template>
+      <SpreadsheetPreview
+        v-else-if="meta?.kind === 'spreadsheet'"
+        :raw-url="rawUrl"
+        :file-path="csvFilePath"
+        :pane-id="paneId"
+      />
       <div v-else-if="meta?.kind === 'office'" class="file-office">
         <div v-if="officeLoading" class="file-workspace-placeholder">
           {{ t('filePreview.loading') }}
@@ -205,16 +320,31 @@
 <script setup lang="ts">
 import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
+import { apiUrl, getAuthToken } from '../../composables/apiBase'
+import { isTauri } from '../../composables/useTransport'
 import { isCsvPreviewFile } from '../../utils/csvPreview'
+import { rewriteHtmlPreview } from '../../utils/htmlPreview'
 import { renderMermaidBlocks } from '../../composables/mermaidPreview'
+import {
+  enhanceMarkdownBlocks,
+  handleMarkdownPreviewClick,
+} from '../../composables/markdownEnhance'
 import CsvPreview from './CsvPreview.vue'
+import ImagePreview from './ImagePreview.vue'
+import { isIpynbFile as isIpynbPath } from '../../utils/ipynb'
+import { structuredFormatForPath } from '../../utils/structuredOutline'
 const MonacoEditor = defineAsyncComponent(() => import('./MonacoEditor.vue'))
+const LogPreview = defineAsyncComponent(() => import('./LogPreview.vue'))
+const IpynbPreview = defineAsyncComponent(() => import('./IpynbPreview.vue'))
+const StructuredPreview = defineAsyncComponent(() => import('./StructuredPreview.vue'))
+const SvgPreview = defineAsyncComponent(() => import('./SvgPreview.vue'))
+const SpreadsheetPreview = defineAsyncComponent(() => import('./SpreadsheetPreview.vue'))
 
 const { t } = useI18n()
 
 const audioRef = ref<HTMLAudioElement | null>(null)
+const rootEl = ref<HTMLElement | null>(null)
 const csvShowTable = ref(true)
-defineExpose({ audioRef })
 
 const props = defineProps<{
   previewLoading: boolean
@@ -249,6 +379,11 @@ const props = defineProps<{
   paneId?: string
   filePath?: string
   leafId?: string
+  /** Standalone viewer mode: no editing, and workspace HTML loses same-origin. */
+  readOnly?: boolean
+  outlineOpen?: boolean
+  outlineAvailable?: boolean
+  outlinePanelId?: string
 }>()
 
 const language = computed(() => props.meta?.language || 'plaintext')
@@ -259,6 +394,58 @@ const csvFilePath = computed(function computeCsvFilePath() {
 const isCsvFile = computed(function computeIsCsvFile() {
   // 步骤1：按当前文件路径判断是否启用 CSV 预览。
   return isCsvPreviewFile(csvFilePath.value)
+})
+const isSvgFile = computed(function computeIsSvgFile() {
+  // SVG arrives as editable text; the extension alone picks the SVG viewer.
+  return csvFilePath.value.toLowerCase().endsWith('.svg')
+})
+const isLogFile = computed(function computeIsLogFile() {
+  // Only the explicit `.log` extension gets the ANSI log viewer; every other
+  // text file keeps the generic editor branch.
+  return csvFilePath.value.toLowerCase().endsWith('.log')
+})
+
+const ipynbFilePath = computed(function computeIpynbFilePath() {
+  return props.filePath || props.selectedRel || ''
+})
+const isIpynb = computed(function computeIsIpynb() {
+  // Jupyter notebooks arrive as kind 'text'; their extension picks the viewer.
+  return isIpynbPath(ipynbFilePath.value)
+})
+
+const structuredFilePath = computed(function computeStructuredFilePath() {
+  return props.filePath || props.selectedRel || ''
+})
+const structuredFormat = computed(function computeStructuredFormat() {
+  // JSON/YAML/TOML arrive as generic text; the extension picks the tree view.
+  // Notebooks, logs and CSV keep their dedicated viewers.
+  if (props.meta?.kind !== 'text') return null
+  if (isIpynb.value || isLogFile.value || isCsvFile.value) return null
+  return structuredFormatForPath(structuredFilePath.value)
+})
+
+const htmlSandbox = computed(function computeHtmlSandbox() {
+  // allow-same-origin would give workspace HTML the Dinotty origin, and with it
+  // the user's authenticated API access. The read-only viewer keeps scripts so
+  // chart-style documents still work, but drops same-origin, forms, popups and
+  // modals.
+  return props.readOnly
+    ? 'allow-scripts'
+    : 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
+})
+
+const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {
+  if (props.meta?.kind !== 'html') return ''
+  // Relative refs in the document resolve against the Dinotty page, not the
+  // HTML file's directory, so point them at the workspace raw endpoint.
+  return rewriteHtmlPreview(props.editorText, csvFilePath.value, function toRawUrl(rel) {
+    const q = new URLSearchParams({ pane_id: props.paneId ?? '', path: rel })
+    if (isTauri()) {
+      const token = getAuthToken()
+      if (token) q.set('token', token)
+    }
+    return apiUrl(`/api/workspace/raw?${q}`)
+  })
 })
 
 watch(csvFilePath, function resetCsvViewForFile() {
@@ -276,23 +463,37 @@ function showCsvTable() {
   csvShowTable.value = true
 }
 
-// Mermaid placeholders are inert until the DOM exists, so render them after
-// v-html has committed (and again whenever the preview is toggled back on).
+// Mermaid/code/math placeholders are inert until the DOM exists, so enhance
+// them after v-html has committed (and again whenever the preview toggles on).
 const mdPreviewEl = ref<HTMLElement | null>(null)
 
-function renderDiagrams() {
+// The outline overlay lives in EditorPane, outside this scroll container.
+defineExpose({ audioRef, scrollEl: rootEl, mdPreviewEl })
+
+function renderPreviewEnhancements() {
   const container = mdPreviewEl.value
   if (!container || props.meta?.kind !== 'markdown' || !props.mdShowPreview) return
   void renderMermaidBlocks(container, { errorLabel: t('filePreview.mermaidError') })
+  void enhanceMarkdownBlocks(container, {
+    copyLabel: t('filePreview.copyCode'),
+    copiedLabel: t('filePreview.copied'),
+  })
+}
+
+function onMarkdownPreviewClick(event: MouseEvent) {
+  handleMarkdownPreviewClick(event, {
+    copyLabel: t('filePreview.copyCode'),
+    copiedLabel: t('filePreview.copied'),
+  })
 }
 
 watch(
   () => [props.markdownEditorHtml, props.mdShowPreview, props.meta?.kind] as const,
-  renderDiagrams,
+  renderPreviewEnhancements,
   { flush: 'post' }
 )
 
-onMounted(renderDiagrams)
+onMounted(renderPreviewEnhancements)
 
 defineEmits<{
   audioTimeUpdate: [e: Event]
@@ -306,6 +507,7 @@ defineEmits<{
   'update:htmlShowPreview': [value: boolean]
   saveEditor: []
   'update:editorText': [value: string]
+  'toggle-outline': []
   'selection-change': [payload: { text: string; rect: DOMRect | null }]
 }>()
 </script>
@@ -561,8 +763,44 @@ video.file-media {
   color: var(--fg-bright, #eee);
 }
 
+.file-editor-spacer {
+  flex: 1 1 auto;
+}
+
+.file-editor-outline {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-muted, #888);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.file-editor-outline:hover {
+  background: var(--bg-hover, #333);
+  color: var(--fg-bright, #eee);
+}
+
+.file-editor-outline.active {
+  background: var(--bg-hover, #333);
+  color: var(--fg-bright, #eee);
+}
+
+.file-editor-outline:focus-visible {
+  outline: 1px solid var(--border-focus, #8a8a8a);
+  outline-offset: -1px;
+}
+
+.file-editor-outline svg {
+  width: 14px;
+  height: 14px;
+}
+
 .file-editor-save {
-  margin-left: auto;
   border: none;
   background: var(--accent, #0e639c);
   color: #fff;
@@ -749,6 +987,152 @@ video.file-media {
   font-size: 0.92em;
   text-align: left;
 }
+/* Code blocks: header with language label + copy button, highlighted body. */
+.file-md-body :deep(.md-code-block) {
+  margin: 0.65em 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, #1a1a1a);
+  overflow: hidden;
+}
+
+.file-md-body :deep(.md-code-block pre) {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.file-md-body :deep(.md-code-head) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--tab-bg);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  line-height: 1.6;
+}
+
+.file-md-body :deep(.md-code-lang) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-md-body :deep(.md-code-copy) {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.file-md-body :deep(.md-code-copy:hover) {
+  border-color: var(--border);
+  color: var(--fg-bright);
+}
+
+/* highlight.js tokens mapped onto the app's theme colours. */
+.file-md-body :deep(.hljs-comment),
+.file-md-body :deep(.hljs-quote) {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.file-md-body :deep(.hljs-keyword),
+.file-md-body :deep(.hljs-selector-tag),
+.file-md-body :deep(.hljs-literal),
+.file-md-body :deep(.hljs-doctag),
+.file-md-body :deep(.hljs-name) {
+  color: var(--color-magenta);
+}
+
+.file-md-body :deep(.hljs-string),
+.file-md-body :deep(.hljs-regexp),
+.file-md-body :deep(.hljs-addition),
+.file-md-body :deep(.hljs-attribute) {
+  color: var(--color-green);
+}
+
+.file-md-body :deep(.hljs-number),
+.file-md-body :deep(.hljs-symbol),
+.file-md-body :deep(.hljs-bullet),
+.file-md-body :deep(.hljs-variable),
+.file-md-body :deep(.hljs-template-variable),
+.file-md-body :deep(.hljs-link),
+.file-md-body :deep(.hljs-selector-attr),
+.file-md-body :deep(.hljs-selector-pseudo) {
+  color: var(--color-yellow);
+}
+
+.file-md-body :deep(.hljs-title),
+.file-md-body :deep(.hljs-section),
+.file-md-body :deep(.hljs-selector-id),
+.file-md-body :deep(.hljs-built_in),
+.file-md-body :deep(.hljs-type) {
+  color: var(--color-blue);
+}
+
+.file-md-body :deep(.hljs-attr),
+.file-md-body :deep(.hljs-params),
+.file-md-body :deep(.hljs-property),
+.file-md-body :deep(.hljs-tag) {
+  color: var(--color-cyan);
+}
+
+.file-md-body :deep(.hljs-meta),
+.file-md-body :deep(.hljs-deletion) {
+  color: var(--color-red);
+}
+
+.file-md-body :deep(.hljs-emphasis) {
+  font-style: italic;
+}
+
+.file-md-body :deep(.hljs-strong) {
+  font-weight: 600;
+}
+
+/* ```math fences */
+.file-md-body :deep(.md-math) {
+  margin: 0.75em 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.file-md-body :deep(.md-math-src) {
+  margin: 0;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.file-md-body :deep(.md-math[data-md-state='done'] .md-math-src) {
+  display: none;
+}
+
+.file-md-body :deep(.md-math-canvas .katex-display) {
+  margin: 0;
+}
+
+/* Inline KaTeX inherits the prose size; display math may overflow horizontally. */
+.file-md-body :deep(.katex) {
+  font-size: 1.05em;
+}
+
+.file-md-body :deep(.katex-display) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2em 0;
+}
+
 .file-md-body :deep(input[type='checkbox']) {
   margin-right: 0.35em;
   vertical-align: middle;

@@ -2,6 +2,8 @@ import { ref, computed, type ComputedRef } from 'vue'
 import { apiUrl, authFetch, getApiBase } from './apiBase'
 import { unescapeData } from './useKeySequenceUtils'
 
+// Reserved as an options bag for future inputs.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface OpenApiTestOptions {
   // no inputs currently needed
 }

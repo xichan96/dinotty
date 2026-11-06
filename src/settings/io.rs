@@ -187,6 +187,13 @@ pub(crate) fn migrate_settings(settings: &mut Settings) -> bool {
     // v15 adds the remote-server roster for the Mission Control server switcher. Its
     // serde default is an empty list, so an upgraded config keeps relaying to nothing
     // until the user adds a server - no data transform.
+    // v16 flips the preview default to allow non-localhost clients. Older configs
+    // persisted the old default (`false`) explicitly, so without this every existing
+    // install would keep 403-ing phones. The setting remains a user-controlled opt-out;
+    // external callers still need a valid session or token either way.
+    if settings.settings_version < 16 {
+        settings.preview.allow_external = true;
+    }
     settings.settings_version = CURRENT_SETTINGS_VERSION;
     true
 }

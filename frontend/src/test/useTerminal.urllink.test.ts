@@ -1,12 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createUrlLinkProvider } from '../composables/useTerminal'
+import type { LogicalTerminalLine } from '../utils/terminalLogicalLine'
+
+/** Lay `text` out over `cols`-wide rows, like xterm's soft wrap. */
+function laidOutLine(text: string, cols: number, startY = 1): LogicalTerminalLine {
+  return {
+    text,
+    cells: Array.from(text, (_, i) => ({
+      x: (i % cols) + 1,
+      y: startY + Math.floor(i / cols),
+      width: 1,
+    })),
+  }
+}
+
+function plainLine(text: string): LogicalTerminalLine {
+  return laidOutLine(text, Math.max(text.length, 1))
+}
 
 function makeProvider(lineText: string | undefined) {
   const onOpen = vi.fn()
   const onMenu = vi.fn()
   const onHover = vi.fn()
   const provider = createUrlLinkProvider({
-    readLine: () => lineText,
+    readLine: () => (lineText === undefined ? undefined : plainLine(lineText)),
     onOpen,
     onMenu,
     onHover,
@@ -62,6 +79,28 @@ describe('createUrlLinkProvider click routing (#306)', () => {
     expect(onHover).toHaveBeenCalledWith('https://example.com/docs')
     links[0].leave()
     expect(onHover).toHaveBeenCalledWith(null)
+  })
+
+  it('keeps a URL that spans soft-wrapped rows intact', () => {
+    const url = 'https://example.com/a/very/long/path?q=1'
+    const onOpen = vi.fn()
+    const provider = createUrlLinkProvider({
+      readLine: () => laidOutLine(url, 12),
+      onOpen,
+      onMenu: vi.fn(),
+      onHover: vi.fn(),
+    }) as {
+      provideLinks: (n: number, cb: (links: any[] | undefined) => void) => void
+    }
+    let links: any[] | undefined
+    provider.provideLinks(1, (found) => {
+      links = found
+    })
+
+    expect(links).toHaveLength(1)
+    expect(links![0].text).toBe(url)
+    links![0].activate(primaryClick)
+    expect(onOpen).toHaveBeenCalledWith(url)
   })
 
   it('yields no links for plain text or missing lines', () => {

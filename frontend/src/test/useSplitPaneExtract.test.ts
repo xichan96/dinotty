@@ -94,6 +94,22 @@ describe('useSplitPane promotePaneToTab workspace attribution', () => {
     expect(activePaneId.value).toBe('tab-2')
   })
 
+  it('returns the new tab id and can leave the source tab selected', async () => {
+    const { tab, subject, activePaneId } = setup()
+    api.extract.mockResolvedValue({
+      new_tab_id: 'tab-2',
+      pane_id: 'a',
+      source_layout: layout('b'),
+    })
+
+    const newTabId = await subject.promotePaneToTab('tab-1', 'a', { activate: false })
+
+    expect(newTabId).toBe('tab-2')
+    // The source tab keeps focus; its active pane moves to the surviving leaf.
+    expect(activePaneId.value).toBe('tab-1')
+    expect(tab.activePaneId).toBe('b')
+  })
+
   it('prefers result workspace_id over the source tab for SSH attribution', async () => {
     const { tabs, subject } = setup()
     ;(tabs.value.find((t) => t.paneId === 'tab-1') as TerminalTab).workspaceId = 'ws-source'

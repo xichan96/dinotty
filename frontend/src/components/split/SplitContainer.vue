@@ -22,7 +22,9 @@
       :is-active="leaf.paneId === activePaneId"
       :direction="parentDirection"
       :allow-close="allowClose"
+      :can-detach="detachEnabled"
       @close="emit('close', leaf.paneId)"
+      @detach="emit('detachPane', leaf.paneId)"
       @reorder="(src, tgt, pos) => emit('reorder', src, tgt, pos)"
       @drop-on-tab="
         (srcTab, srcPane, dstTab, pos) => emit('dropOnTab', srcTab, srcPane, dstTab, pos)
@@ -109,6 +111,7 @@
         :tab-id="tabId"
         :workspace-id="workspaceId"
         :force-web-socket="forceWebSocket"
+        :detach-enabled="detachEnabled"
         :is-visible="isChildVisible(child)"
         :style="getChildStyle(idx)"
         @register="(id: string, el: any) => emit('register', id, el)"
@@ -138,6 +141,7 @@
         @new-local-terminal="emit('newLocalTerminal')"
         @divider-drag-end="emit('dividerDragEnd')"
         @reconnect="(id: string) => emit('reconnect', id)"
+        @detach-pane="(id: string) => emit('detachPane', id)"
       />
       <SplitDivider
         v-if="idx < split.children.length - 1"
@@ -175,6 +179,10 @@ const props = withDefaults(
     workspaceId?: string
     /** Detached windows force WebSocket for every terminal (see TerminalPane). */
     forceWebSocket?: boolean
+    /** Main window only: dragging a split pane header out of the window opens
+     *  that pane in its own native window. Detached windows cannot spawn more
+     *  windows, so they leave this off. */
+    detachEnabled?: boolean
     isVisible?: boolean
   }>(),
   {
@@ -188,6 +196,7 @@ const emit = defineEmits<{
   shellInfo: [paneId: string, shell: string]
   focus: [paneId: string]
   close: [paneId: string]
+  detachPane: [paneId: string]
   input: [paneId: string, data: string]
   fileClick: [path: string, line?: number, column?: number, paneId?: string]
   previewLink: [paneId: string, url: string]

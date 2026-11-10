@@ -74,7 +74,9 @@ onMounted(() => window.addEventListener('resize', onResize))
 onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 const hint = computed<'detach' | 'dock' | null>(() => {
-  if (drag.state.isDragging && drag.state.wholeTab && drag.state.outsideWindow) return 'detach'
+  // `outsideWindow` is only armed by drags that can actually detach (whole tab
+  // or split pane on desktop), so no extra kind check is needed here.
+  if (drag.state.isDragging && drag.state.outsideWindow) return 'detach'
   if (feedback.state.dockHintTabId && tabBarBox.value) return 'dock'
   return null
 })

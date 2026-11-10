@@ -296,7 +296,7 @@ WebSocket 路径本来就是多客户端设计：
 
 ### 7.1 游离
 
-1. 用户在 tab 右键菜单或 MC 中选择“在新窗口打开”，或把 tab 拖出主窗口后松开。
+1. 用户在 tab 右键菜单或 MC 中选择“在新窗口打开”，或把 tab 拖出主窗口后松开；分屏时也可以把某个 pane 的 header 拖出主窗口——该 pane 会先被 extract 成新 tab，再在新窗口中打开（源 tab 保留其余 pane）。
 2. 主窗口调用 `open_tab_window(tab_id, title)`。
 3. Rust 创建或聚焦 `tab-<id>` 窗口。
 4. 主窗口把 tab 加入 `detachedTabIds`，并从渲染树卸载对应 `TerminalPane`。
@@ -333,6 +333,7 @@ WebSocket 路径本来就是多客户端设计：
 | 手势 | 主窗口 | 游离窗口 |
 | --- | --- | --- |
 | tab 拖出主窗口 | 指针离开窗口后显示整窗虚线框 + “松开即在新窗口打开” | — |
+| 分屏 pane header 拖出主窗口 | 同上；松开后 pane 先 extract 成新 tab，再打开为新窗口 | — |
 | 游离窗口标题栏拖到主窗口 tab 栏 | tab 栏本身高亮 + “松开即在此收回标签页” | 顶部标题栏区高亮 + “松开即收回主窗口” |
 | 收回完成 | tab 回到 tab 栏时高亮闪烁一次 | 窗口关闭 |
 
@@ -340,7 +341,7 @@ WebSocket 路径本来就是多客户端设计：
 - tab 栏矩形由主窗口按需测量：游离窗口发 `detached-dock-target-request { tab_id, request_id }`，主窗口回 `detached-dock-target { tab_id, request_id, rect }`；矩形用物理屏幕像素返回，兼容 tab 栏在上/下/左/右以及移动端布局；
 - 命中后停稳 400ms 才执行收回，避免拖拽路径经过 tab 栏时误触；
 - 游离窗口通过 Tauri 事件 `detached-dock-hint { tab_id, active }` 把命中状态告诉主窗口（`core:event:default` 已包含 `emit-to`）；
-- 手势只在桌面壳启用：拖出要求 `isTauri() && !isMobile` 且为 terminal tab（`useTabDrag.canDetachTab`），收回只存在于原生游离窗口；移动端浏览器 / Web 不会显示提示，也不会误开窗口；
+- 手势只在桌面壳启用：拖出要求 `isTauri() && !isMobile` 且为 terminal tab（`useTabDrag.canDetachTab`）；pane 拖出要求同样的平台条件且只挂在 `PaneHeader` 上（单 pane 没有 header，整 tab 拖出仍走 tab 栏）；收回只存在于原生游离窗口；移动端浏览器 / Web 不会显示提示，也不会误开窗口；
 - 尊重 `prefers-reduced-motion`，关闭脉冲/弹出动画。
 
 ---
@@ -364,6 +365,7 @@ WebSocket 路径本来就是多客户端设计：
 | 关闭 pane | 支持 |
 | 在游离窗口里继续分屏 | 支持（复用 `useSplitPane`） |
 | pane 拖到 tab 栏 / extract 成新 tab / merge 到其他 tab | 不支持（主窗口手势） |
+| pane header 拖出窗口 → 新窗口 | 不支持（主窗口手势；在游离窗口内再拆窗口没有意义） |
 | files / web / plugin pane | 支持（渲染同一 layout；plugin 由游离窗口加载插件运行时） |
 
 单 pane 的 tab 仍然不显示任何 header；terminal leaf 就是纯终端，只有分屏时才出现 per-pane header。`PaneHeader` 是 pane 的一部分，不是全局工具栏。
@@ -505,7 +507,7 @@ v1 约定：
 - 现有 tab/pane 拖拽是 DOM pointer 逻辑，无法跨原生窗口；
 - 原生拖拽需要 macOS NSPasteboard / Windows OLE / Linux XDND，每平台单独实现；
 - 开关 `dragDropEnabled` 会影响现有 HTML5 拖拽（当前保持 false）；
-- v1 已支持**窗口级**命中：把游离窗口的标题栏拖到主窗口 tab 栏上停住即收回（比较标题栏矩形与按需测量的 tab 栏矩形，不传输内容）；反向的“把 tab 拖出主窗口即开新窗口”也已支持（鼠标离开窗口/在窗口外松开判定）。内容级跨 webview payload DnD 仍暂缓。
+- v1 已支持**窗口级**命中：把游离窗口的标题栏拖到主窗口 tab 栏上停住即收回（比较标题栏矩形与按需测量的 tab 栏矩形，不传输内容）；反向的“把 tab 拖出主窗口即开新窗口”“把分屏 pane header 拖出主窗口即 extract 后开新窗口”也已支持（鼠标离开窗口/在窗口外松开判定）。内容级跨 webview payload DnD 仍暂缓。
 
 ### 13.2 桌面宠物
 
@@ -652,7 +654,7 @@ v1 约定：
 ### 已实现（Waves 1–3）
 
 - **多窗口底座**：`tab-<tab_id>` 窗口 registry、去重/聚焦/关闭、`detached.html` 独立入口、`detached-window` capability。
-- **游离/收回**：主窗口游离入口（右键菜单、把 tab 拖出主窗口）与过滤、Mission Control 聚焦游离窗口（Waves 1–2）；收回走 MC 或把窗口标题栏拖到主窗口 tab 栏上。
+- **游离/收回**：主窗口游离入口（右键菜单、把 tab 拖出主窗口、把分屏 pane header 拖出主窗口）与过滤、Mission Control 聚焦游离窗口（Waves 1–2）；收回走 MC 或把窗口标题栏拖到主窗口 tab 栏上。pane 拖出会先 `extract` 成新 tab 再开窗，源 tab 保留其余 pane。
 - **单 tab 视图**：单 tab、终端强制 WebSocket、忽略 `tab_activated` / `workspace_activated`、不写 `dinotty_tabs`。
 - **非终端 tab**：插件 / 文件浏览 / 网页 leaf 也能在新窗口打开；游离窗口会加载插件运行时与宿主 bridge，纯非终端 tab 不建立终端 WebSocket。
 - **分屏**：新建水平/垂直终端分屏、点击聚焦、分隔条 resize、关闭 pane；单 pane 不显示 `PaneHeader`；跨 tab 拖拽/extract/merge 不提供（游离窗口没有 TabBar 落点，相关事件有意不绑定），同 tab 内 pane reorder 保留。
@@ -673,7 +675,7 @@ v1 约定：
 
 ### 手工 E2E 清单（桌面端）
 
-1. **游离**：右键“在新窗口打开”，或把 tab 拖出主窗口后松开；新窗口打开且主窗口 tab 栏隐藏该项。
+1. **游离**：右键“在新窗口打开”，或把 tab 拖出主窗口后松开；新窗口打开且主窗口 tab 栏隐藏该项。分屏时把某个 pane header 拖出主窗口：该 pane 变成一个新 tab 的独立窗口，源 tab 保留其余 pane 且不中断。
 2. **输入/resize/搜索**：游离窗口输入正常、拖动边框改变尺寸后终端重新 fit、Ctrl/Cmd+F 搜索可用，内容通过 snapshot 恢复。
 3. **关闭窗口 = 关闭终端**：点击原生关闭按钮后会话结束，主窗口对应 tab 消失，无确认弹窗。
 4. **拖到 tab 栏收回**：把游离窗口的标题栏拖到主窗口 tab 栏上，主窗口 tab 栏与游离窗口标题栏出现落点提示；停住后窗口关闭、tab 回主窗口并高亮一次，PTY 未中断。只把窗口主体压在主窗口上不应触发收回。

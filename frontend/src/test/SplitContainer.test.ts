@@ -1,8 +1,9 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { describe, expect, it } from 'vitest'
-import type { LeafPane } from '../types/pane'
+import type { LeafPane, PaneLayout } from '../types/pane'
 import SplitContainer from '../components/split/SplitContainer.vue'
+import PaneHeader from '../components/split/PaneHeader.vue'
 
 const TerminalPaneStub = defineComponent({
   name: 'TerminalPane',
@@ -117,6 +118,53 @@ describe('SplitContainer shell info', function splitContainerShellInfoSuite() {
 
     // 步骤3：容器应补充 pane id 后向上转发。
     expect(wrapper.emitted('shellInfo')).toEqual([['pane-1', 'powershell']])
+    wrapper.unmount()
+  })
+})
+
+describe('SplitContainer pane tear-off', () => {
+  const splitLayout: PaneLayout = {
+    type: 'split',
+    id: 'split-1',
+    direction: 'horizontal',
+    ratios: [0.5, 0.5],
+    children: [
+      { type: 'leaf', paneId: 'pane-1', title: 'Terminal 1', ratio: 0.5, zoomed: false },
+      { type: 'leaf', paneId: 'pane-2', title: 'Terminal 2', ratio: 0.5, zoomed: false },
+    ],
+  }
+
+  function mountSplit(detachEnabled: boolean) {
+    return mount(SplitContainer, {
+      props: {
+        layout: splitLayout,
+        activePaneId: 'pane-1',
+        broadcastMode: false,
+        broadcastActivity: 0,
+        showHeader: true,
+        allowClose: true,
+        tabId: 'tab-1',
+        detachEnabled,
+      },
+      global: { stubs: { TerminalPane: TerminalPaneStub } },
+    })
+  }
+
+  it('forwards a pane header detach request with the leaf pane id', () => {
+    const wrapper = mountSplit(true)
+    const header = wrapper.findAllComponents(PaneHeader)[1]
+    expect(header.props('canDetach')).toBe(true)
+
+    header.vm.$emit('detach')
+    expect(wrapper.emitted('detachPane')).toEqual([['pane-2']])
+    wrapper.unmount()
+  })
+
+  it('leaves the tear-off gesture off when detach is disabled', () => {
+    const wrapper = mountSplit(false)
+    for (const header of wrapper.findAllComponents(PaneHeader)) {
+      expect(header.props('canDetach')).toBe(false)
+    }
     wrapper.unmount()
   })
 })

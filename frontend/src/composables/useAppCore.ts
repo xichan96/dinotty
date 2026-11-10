@@ -655,6 +655,30 @@ export function useAppCore(options: AppCoreOptions) {
     void splitPane.promotePaneToTab(srcTabId, srcPaneId)
   }
 
+  /**
+   * Drag a split pane header out of the main window: promote the pane to a tab
+   * of its own, then open that tab in a native window. The new tab is not
+   * activated locally — it is about to unmount, and flashing it in the main
+   * window first would fight the detached window's attach. A single-pane tab
+   * has no header, so the fallback only guards stale layouts.
+   */
+  async function detachPaneToWindow(srcTabId: string, paneId: string): Promise<void> {
+    const tab = tabs.value.find(
+      (candidate): candidate is TerminalTab =>
+        candidate.type === 'terminal' && candidate.paneId === srcTabId
+    )
+    if (!tab) return
+    if (getAllLeaves(tab.layout).length <= 1) {
+      await detachedWindows.detachTab(srcTabId)
+      return
+    }
+    const newTabId = await splitPane.promotePaneToTab(srcTabId, paneId, { activate: false })
+    if (!newTabId) return
+    const opened = await detachedWindows.detachTab(newTabId)
+    // Keep the extracted pane reachable when the native window could not open.
+    if (!opened) commitLocalActivePane(newTabId)
+  }
+
   function onMergeTabIntoPane(
     srcTabId: string,
     targetPaneId: string,
@@ -1489,6 +1513,7 @@ export function useAppCore(options: AppCoreOptions) {
     onDividerDragEnd,
     onDropOnTab,
     onDropExtract,
+    detachPaneToWindow,
     onMergeTabIntoPane,
     onPaneDragHoverSwitch,
     showShellApiError,

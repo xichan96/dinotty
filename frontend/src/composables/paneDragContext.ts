@@ -22,7 +22,8 @@ export interface PaneDragSnapshot {
   hoverTabId: string | null
   /** For Mode A: when set, the whole source tab is dragged as a subtree. */
   wholeTab: boolean
-  /** Whole-tab drag has left the main window; releasing there detaches it. */
+  /** A detach-eligible drag (whole tab or split pane) has left the main
+   *  window; releasing there opens it in its own native window. */
   outsideWindow: boolean
 }
 

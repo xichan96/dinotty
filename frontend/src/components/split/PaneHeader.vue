@@ -37,10 +37,13 @@ const props = defineProps<{
   isActive: boolean
   direction?: 'horizontal' | 'vertical'
   allowClose?: boolean
+  /** Release outside the window tears this pane off into its own window. */
+  canDetach?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
+  detach: []
   reorder: [sourcePaneId: string, targetPaneId: string, position: DropPosition]
   'drop-on-tab': [
     sourceTabId: string,
@@ -65,8 +68,13 @@ let dragStarted = false
 let startX = 0
 let startY = 0
 let isTouchDrag = false
+let detachEligible = false
+let outsideTimer: number | null = null
 const DRAG_THRESHOLD = 5
 const HOVER_SWITCH_DELAY = 300
+/** Some webviews drop the mouseup that lands outside the window; mirror
+ *  `useTabDrag`'s fallback so the tear-off still completes. */
+const OUTSIDE_RELEASE_MS = 600
 
 let hoverTimer: number | null = null
 let hoverTabId: string | null = null
@@ -95,6 +103,8 @@ function startDrag(e: MouseEvent | TouchEvent, isTouch: boolean) {
   startY = pos.clientY
   dragStarted = false
   isTouchDrag = isTouch
+  detachEligible = !isTouch && props.canDetach === true
+  clearOutsideTimer()
 
   const moveEvent = isTouch ? 'touchmove' : 'mousemove'
   const endEvent = isTouch ? 'touchend' : 'mouseup'
@@ -123,10 +133,38 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 function onMouseLeave(_e: MouseEvent) {
-  // When pointer leaves the document during drag, cancel without emit
-  if (dragStarted) {
+  if (!dragStarted) return
+  if (isTouchDrag || !detachEligible) {
+    // When pointer leaves the document during drag, cancel without emit
     cancelDrag()
+    return
   }
+  // Leaving the window with a pane that can detach arms the tear-off instead
+  // of cancelling: the mouseup is often lost out there, so settle on a timer.
+  drag.setOutsideWindow(true)
+  clearOutsideTimer()
+  outsideTimer = window.setTimeout(() => {
+    outsideTimer = null
+    if (!dragStarted) return
+    emit('detach')
+    cleanup()
+  }, OUTSIDE_RELEASE_MS)
+}
+
+function clearOutsideTimer() {
+  if (outsideTimer !== null) {
+    window.clearTimeout(outsideTimer)
+    outsideTimer = null
+  }
+}
+
+function isOutsideViewport(pos: { clientX: number; clientY: number }): boolean {
+  return (
+    pos.clientX < 0 ||
+    pos.clientY < 0 ||
+    pos.clientX > window.innerWidth ||
+    pos.clientY > window.innerHeight
+  )
 }
 
 function onBlur() {
@@ -195,6 +233,14 @@ function onPointerMove(e: MouseEvent | TouchEvent) {
     return
   }
   const pos = getPointerPos(e)
+  if (!isTouchDrag) {
+    if (detachEligible && isOutsideViewport(pos)) {
+      drag.setOutsideWindow(true)
+    } else {
+      clearOutsideTimer()
+      drag.setOutsideWindow(false)
+    }
+  }
   if (!dragStarted) {
     if (
       Math.abs(pos.clientX - startX) < DRAG_THRESHOLD &&
@@ -311,7 +357,15 @@ function onPointerMove(e: MouseEvent | TouchEvent) {
   }
 }
 
-function onPointerEnd() {
+function onPointerEnd(e: MouseEvent | TouchEvent) {
+  // Released outside the window: tear the pane off instead of reordering or
+  // extracting it inside the main window.
+  if (dragStarted && detachEligible && !isTouchDrag && isOutsideViewport(getPointerPos(e))) {
+    emit('detach')
+    cleanup()
+    return
+  }
+
   if (dragStarted) {
     if (currentTargetId && currentZone && currentTargetKind) {
       if (currentTargetKind === 'pane') {
@@ -330,8 +384,10 @@ function onPointerEnd() {
 
 function cleanup() {
   clearHoverTimer()
+  clearOutsideTimer()
   isDragging.value = false
   dragStarted = false
+  detachEligible = false
   currentTargetId = null
   currentZone = null
   currentTargetKind = null

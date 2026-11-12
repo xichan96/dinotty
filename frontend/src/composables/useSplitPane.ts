@@ -306,8 +306,20 @@ export function useSplitPane(opts: {
     }
   }
 
-  /** Promote a single pane to a new tab. */
-  async function promotePaneToTab(srcTabId: string, paneId: string) {
+  /**
+   * Promote a single pane to a new tab.
+   *
+   * Returns the new tab id, or null when extraction failed. Pass
+   * `activate: false` when the caller is about to detach the new tab into its
+   * own window: the source tab must keep focus here, and selecting the new tab
+   * locally would flash a pane that is one tick away from unmounting.
+   */
+  async function promotePaneToTab(
+    srcTabId: string,
+    paneId: string,
+    opts: { activate?: boolean } = {}
+  ): Promise<string | null> {
+    const activate = opts.activate !== false
     // Capture the source leaf BEFORE extraction. After `apiExtractPane`
     // returns, `result.source_layout` no longer contains this paneId, so the
     // non-terminal metadata (kind/pluginId/path/url/title) can only be
@@ -333,6 +345,14 @@ export function useSplitPane(opts: {
       if (src) {
         src.layout = ensureSplitRoot(result.source_layout)
         src.paneMru = removePaneFromMru(src.paneMru, paneId).paneMru
+        // The window keeps showing the source tab, so its active pane must not
+        // point at the leaf that just left it.
+        if (!activate && !findLeaf(src.layout, src.activePaneId)) {
+          const survivor = getAllLeaves(src.layout)[0]?.paneId ?? result.pane_id
+          src.activePaneId = survivor
+          src.paneMru = touchPaneMru(src.paneMru, survivor)
+          if (activePaneId.value === srcTabId) setActivePaneId(survivor)
+        }
       }
       // Prefer the extracted pane's real metadata from the REST response over
       // the source tab's fields. The source tab's cwd can be empty or stale
@@ -388,11 +408,15 @@ export function useSplitPane(opts: {
           workspaceId: inheritedWorkspaceId,
         })
       }
-      setActivePaneId(result.pane_id)
-      activePaneId.value = result.new_tab_id
+      if (activate) {
+        setActivePaneId(result.pane_id)
+        activePaneId.value = result.new_tab_id
+      }
       persist()
+      return result.new_tab_id
     } catch (e) {
       console.error('Failed to promote pane to tab:', e)
+      return null
     }
   }
 

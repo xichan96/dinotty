@@ -1,53 +1,126 @@
 <template>
   <div class="mc-ws-list">
-    <div class="mc-ws-list-scroll">
-      <button
-        class="mc-ws-list-item"
-        :class="{ selected: selectedId === DEFAULT_WORKSPACE_ID }"
-        @click="$emit('select', DEFAULT_WORKSPACE_ID)"
-        @contextmenu.prevent="openCtx($event, defaultWorkspace)"
-      >
-        <WorkspaceBadge
-          :abbr="resolveAbbr(defaultWorkspace)"
-          :color="resolveColor(defaultWorkspace)"
-          :size="18"
+    <div class="mc-ws-search-wrap">
+      <div class="mc-ws-search">
+        <Search :size="14" class="mc-ws-search-icon" />
+        <input
+          ref="searchInputRef"
+          v-model="query"
+          class="mc-ws-search-input"
+          type="text"
+          :placeholder="t('workspace.searchPlaceholder')"
+          :aria-label="t('workspace.searchPlaceholder')"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          @keydown.esc="onSearchEscape"
         />
-        <span class="mc-ws-name">{{ defaultWorkspace.name }}</span>
-        <span v-if="defaultCount" class="mc-ws-count">{{ defaultCount }}</span>
-      </button>
-
-      <button
-        v-for="ws in workspaces"
-        :key="ws.id"
-        class="mc-ws-list-item"
-        :class="{
-          selected: ws.id === selectedId,
-          dragging: ws.id === draggingId,
-          'drag-over-top': ws.id === dragOverId && dragOverPosition === 'before',
-          'drag-over-bottom': ws.id === dragOverId && dragOverPosition === 'after',
-        }"
-        :data-workspace-id="ws.id"
-        @mousedown="onItemMouseDown($event, ws.id)"
-        @touchstart="onItemTouchStart($event, ws.id)"
-        @click="onItemClick($event, ws.id)"
-        @contextmenu.prevent="openCtx($event, ws)"
-      >
-        <span
-          class="mc-ws-drag-handle"
-          @mousedown.stop="onHandleMouseDown($event, ws.id)"
-          @touchstart.stop="onHandleTouchStart($event, ws.id)"
+        <kbd v-if="!isSearching" class="mc-ws-search-key" aria-hidden="true">/</kbd>
+        <button
+          v-else
+          class="mc-ws-search-clear"
+          type="button"
+          :aria-label="t('workspace.clearSearch')"
+          @click="clearSearchAndFocus"
         >
-          <GripVertical :size="14" />
-        </span>
-        <WorkspaceBadge
-          :remote="!!ws.connection_id"
-          :abbr="resolveAbbr(ws)"
-          :color="resolveColor(ws)"
-          :size="18"
-        />
-        <span class="mc-ws-name">{{ ws.name }}</span>
-        <span v-if="tabCounts[ws.id]" class="mc-ws-count">{{ tabCounts[ws.id] }}</span>
+          <X :size="13" />
+        </button>
+      </div>
+    </div>
+    <div class="mc-ws-search-meta">
+      <span>
+        {{
+          isSearching
+            ? t('workspace.resultCount', { count: resultCount })
+            : t('workspace.workspaceCount', { count: totalCount })
+        }}
+      </span>
+      <button
+        v-if="isSearching"
+        class="mc-ws-search-clear-link"
+        type="button"
+        @click="clearSearchAndFocus"
+      >
+        {{ t('workspace.clearSearch') }}
       </button>
+    </div>
+
+    <div class="mc-ws-list-scroll">
+      <div v-if="isSearching && resultCount === 0" class="mc-ws-empty mc-ws-empty--search">
+        <Search :size="22" class="mc-ws-empty-icon" />
+        <p class="mc-ws-empty-title">{{ t('workspace.noResults') }}</p>
+        <p class="mc-ws-empty-hint">{{ t('workspace.noResultsHint') }}</p>
+        <button class="mc-ws-empty-clear" type="button" @click="clearSearchAndFocus">
+          {{ t('workspace.clearSearch') }}
+        </button>
+      </div>
+      <template v-else>
+        <button
+          v-if="showDefaultWorkspace"
+          class="mc-ws-list-item"
+          :class="{ selected: selectedId === DEFAULT_WORKSPACE_ID, searching: isSearching }"
+          :data-workspace-id="DEFAULT_WORKSPACE_ID"
+          @click="$emit('select', DEFAULT_WORKSPACE_ID)"
+          @contextmenu.prevent="openCtx($event, defaultWorkspace)"
+        >
+          <WorkspaceBadge
+            :abbr="resolveAbbr(defaultWorkspace)"
+            :color="resolveColor(defaultWorkspace)"
+            :size="isSearching ? 22 : 18"
+          />
+          <span v-if="isSearching" class="mc-ws-row-main">
+            <span class="mc-ws-name">
+              <HighlightText :text="defaultWorkspace.name" :query="query" />
+            </span>
+            <span class="mc-ws-path">
+              <HighlightText :text="workspacePath(defaultWorkspace)" :query="query" />
+            </span>
+          </span>
+          <span v-else class="mc-ws-name">{{ defaultWorkspace.name }}</span>
+          <span v-if="defaultCount" class="mc-ws-count">{{ defaultCount }}</span>
+        </button>
+
+        <button
+          v-for="ws in filteredWorkspaces"
+          :key="ws.id"
+          class="mc-ws-list-item"
+          :class="{
+            selected: ws.id === selectedId,
+            searching: isSearching,
+            dragging: ws.id === draggingId,
+            'drag-over-top': ws.id === dragOverId && dragOverPosition === 'before',
+            'drag-over-bottom': ws.id === dragOverId && dragOverPosition === 'after',
+          }"
+          :data-workspace-id="ws.id"
+          @mousedown="onItemMouseDown($event, ws.id)"
+          @touchstart="onItemTouchStart($event, ws.id)"
+          @click="onItemClick($event, ws.id)"
+          @contextmenu.prevent="openCtx($event, ws)"
+        >
+          <span
+            v-if="!isSearching"
+            class="mc-ws-drag-handle"
+            @mousedown.stop="onHandleMouseDown($event, ws.id)"
+            @touchstart.stop="onHandleTouchStart($event, ws.id)"
+          >
+            <GripVertical :size="14" />
+          </span>
+          <WorkspaceBadge
+            :remote="!!ws.connection_id"
+            :abbr="resolveAbbr(ws)"
+            :color="resolveColor(ws)"
+            :size="isSearching ? 22 : 18"
+          />
+          <span v-if="isSearching" class="mc-ws-row-main">
+            <span class="mc-ws-name"><HighlightText :text="ws.name" :query="query" /></span>
+            <span class="mc-ws-path"
+              ><HighlightText :text="workspacePath(ws)" :query="query"
+            /></span>
+          </span>
+          <span v-else class="mc-ws-name">{{ ws.name }}</span>
+          <span v-if="tabCounts[ws.id]" class="mc-ws-count">{{ tabCounts[ws.id] }}</span>
+        </button>
+      </template>
     </div>
 
     <div class="mc-ws-footer">
@@ -68,14 +141,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
-import { Plus, Pencil, Trash2, GripVertical } from 'lucide-vue-next'
+import { computed, nextTick, ref, onUnmounted } from 'vue'
+import { Plus, Pencil, Trash2, GripVertical, Search, X } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
 import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../../composables/useWorkspaces'
 import type { Workspace } from '../../types/workspace'
 import { resolveAbbr, resolveColor } from '../../utils/workspaceIcon'
 import WorkspaceBadge from '../WorkspaceBadge.vue'
+import HighlightText from './HighlightText.vue'
 import ContextMenu from '../ui/ContextMenu.vue'
 import type { ContextMenuItem } from '../ui/ContextMenu.vue'
 
@@ -102,6 +176,69 @@ const emit = defineEmits<{
   add: []
   rename: [id: string]
 }>()
+
+// ---------------------------------------------------------------------------
+// Workspace search
+// ---------------------------------------------------------------------------
+
+const searchInputRef = ref<HTMLInputElement | null>(null)
+const query = ref('')
+const isSearching = computed(() => query.value.trim().length > 0)
+
+function matchesSearch(ws: Workspace, needle: string): boolean {
+  return `${ws.name} ${ws.path}`.toLowerCase().includes(needle)
+}
+
+const filteredWorkspaces = computed(() => {
+  const needle = query.value.trim().toLowerCase()
+  if (!needle) return props.workspaces
+  return props.workspaces.filter((ws) => matchesSearch(ws, needle))
+})
+
+const showDefaultWorkspace = computed(() => {
+  const needle = query.value.trim().toLowerCase()
+  if (!needle) return true
+  return matchesSearch(defaultWorkspace.value, needle)
+})
+
+const resultCount = computed(
+  () => filteredWorkspaces.value.length + (showDefaultWorkspace.value ? 1 : 0)
+)
+const totalCount = computed(() => props.workspaces.length + 1)
+
+function workspacePath(ws: Workspace): string {
+  return ws.path || t('workspace.connectionNone')
+}
+
+function onSearchEscape(e: KeyboardEvent): void {
+  if (!isSearching.value) return
+  // First Escape clears the query and stays in MC. Without stopPropagation it
+  // would reach WorkspaceOverview's document handler and send the Cancel op,
+  // closing MC for every client.
+  e.preventDefault()
+  e.stopPropagation()
+  query.value = ''
+}
+
+function focusSearch(): void {
+  void nextTick(() => {
+    searchInputRef.value?.focus()
+    searchInputRef.value?.select()
+  })
+}
+
+function clearSearchAndFocus(): void {
+  query.value = ''
+  focusSearch()
+}
+
+function clearSearch(): boolean {
+  if (!isSearching.value) return false
+  query.value = ''
+  return true
+}
+
+defineExpose({ focusSearch, clearSearch })
 
 // Context menu
 const ctxVisible = ref(false)
@@ -158,7 +295,9 @@ let isTouchDrag = false
 let suppressNextClick = false
 
 function canDrag(): boolean {
-  return props.workspaces.length > 1
+  // Search results are a filtered view; reordering them would write a partial
+  // order (or the wrong one) back to the server.
+  return props.workspaces.length > 1 && !isSearching.value
 }
 
 function getPointerPos(e: MouseEvent | TouchEvent): { clientX: number; clientY: number } {

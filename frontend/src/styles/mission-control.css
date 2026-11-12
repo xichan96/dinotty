@@ -339,6 +339,96 @@
   background: var(--accent);
 }
 
+/* ── Workspace search (desktop sidebar) ───────────────────── */
+.mc-ws-search-wrap {
+  flex: 0 0 auto;
+  padding: 8px 8px 3px;
+}
+.mc-ws-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-muted, #888);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+.mc-ws-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(138, 138, 138, 0.25);
+}
+.mc-ws-search-icon {
+  flex: 0 0 auto;
+}
+.mc-ws-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+.mc-ws-search-input::placeholder {
+  color: var(--text-muted, #888);
+}
+.mc-ws-search-key {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid #47474d;
+  border-radius: 4px;
+  color: var(--text-muted, #888);
+  font-size: 9px;
+  line-height: 15px;
+}
+.mc-ws-search-clear {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+}
+.mc-ws-search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.mc-ws-search-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  padding: 3px 12px 2px;
+  color: var(--text-muted, #888);
+  font-size: 10px;
+}
+.mc-ws-search-clear-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted, #888);
+  font: inherit;
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.mc-ws-search-clear-link:hover {
+  color: var(--fg);
+}
+
 .mc-ws-list-scroll {
   flex: 1;
   overflow-y: auto;
@@ -460,6 +550,65 @@
   border-radius: 8px;
   min-width: 18px;
   text-align: center;
+}
+
+/* Search results open up to a second line with the workspace path. */
+.mc-ws-list-item.searching {
+  height: 52px;
+}
+.mc-ws-row-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.mc-ws-row-main .mc-ws-name {
+  flex: 0 0 auto;
+}
+.mc-ws-path {
+  overflow: hidden;
+  color: var(--text-muted, #888);
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mc-ws-empty--search {
+  box-sizing: border-box;
+  min-height: 100%;
+}
+.mc-ws-empty-icon {
+  color: var(--text-muted, #888);
+  opacity: 0.7;
+}
+.mc-ws-empty-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.mc-ws-empty-hint {
+  margin: 0;
+  color: var(--text-muted, #888);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+.mc-ws-empty-clear {
+  margin-top: 2px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.mc-ws-empty-clear:hover {
+  border-color: var(--accent);
 }
 
 .mc-ws-footer {
@@ -744,84 +893,143 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── Mobile: horizontal workspace chip row above the tab grid ── */
+/* ── Mobile: current-workspace button + recent chips ────────── */
+/* Hidden on desktop; the vertical list stays there. */
+.mc-mobile-ws-head {
+  display: none;
+}
+
 @media (max-width: 600px) {
   .mc-ws-dual {
     flex-direction: column;
     width: calc(100% - 16px);
     height: calc(100% - 16px);
   }
+  /* The full-width chip row is gone: a long horizontal strip hides both the
+     target and the current selection. One current-workspace button plus a
+     searchable sheet scales to any number of workspaces. */
   .mc-ws-list {
-    width: 100%;
-    min-width: 100%;
-    height: auto;
-    max-height: none;
+    display: none;
+  }
+  /* Reserve the 44px close-button hit area (right: 8px + 44px + 4px) */
+  .mc-mobile-ws-head {
+    display: flex;
     flex: 0 0 auto;
-    flex-direction: row;
-    align-items: stretch;
-    /* Reserve the 44px close-button hit area (right: 8px + 44px + 4px) */
-    padding-right: 56px;
-    border-right: none;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 56px 8px 12px;
     border-bottom: 1px solid var(--border);
+  }
+  .mc-mobile-ws-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mc-mobile-ws-current {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-hover);
+    color: var(--fg-bright);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mc-mobile-ws-current:active {
+    background: var(--bg-surface-hover);
+  }
+  .mc-mobile-ws-search {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-hover);
+    color: var(--fg);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mc-mobile-ws-search:active {
+    background: var(--bg-surface-hover);
+  }
+  .mc-mobile-ws-name {
+    overflow: hidden;
+    min-width: 0;
+    max-width: 180px;
+    color: var(--fg-bright);
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .mc-mobile-ws-count {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text-muted, #888);
+    font-size: 10.5px;
+  }
+  .mc-mobile-ws-caret {
+    flex: 0 0 auto;
+    color: var(--text-muted, #888);
+  }
+  .mc-mobile-ws-recents {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mc-mobile-ws-recents::-webkit-scrollbar {
+    display: none;
+  }
+  .mc-mobile-ws-recent-label {
+    flex: 0 0 auto;
+    color: var(--text-muted, #888);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+  }
+  .mc-mobile-ws-recent {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mc-mobile-ws-recent:active {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+  }
+  .mc-mobile-ws-recent-name {
+    overflow: hidden;
+    max-width: 120px;
+    text-overflow: ellipsis;
   }
   /* The panel stacks vertically here; a column resizer makes no sense. */
   .mc-ws-resizer {
-    display: none;
-  }
-  .mc-ws-list-scroll {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 0 4px 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
-    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 16px), transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 16px), transparent 100%);
-  }
-  .mc-ws-list-scroll::-webkit-scrollbar {
-    display: none;
-  }
-  .mc-ws-list-item {
-    flex-shrink: 0;
-    width: auto;
-    height: 40px;
-    padding: 0 12px;
-    gap: 6px;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    touch-action: pan-x;
-  }
-  .mc-ws-list-item.selected {
-    background: var(--bg-surface-hover);
-    border-color: var(--accent);
-  }
-  .mc-ws-drag-handle {
-    display: none;
-  }
-  .mc-ws-name {
-    flex: 0 1 auto;
-    max-width: 120px;
-  }
-  .mc-ws-footer {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    padding: 4px 8px 4px 6px;
-  }
-  .mc-ws-add-btn {
-    width: auto;
-    height: 40px;
-    padding: 0 16px;
-    border-radius: 999px;
-  }
-  .mc-ws-add-label {
     display: none;
   }
   .mc-close-btn {
@@ -835,6 +1043,21 @@
   .mc-right-panel .mc-grid {
     max-height: none;
   }
+}
+
+/* ── Workspace picker bottom sheet ─────────────────────────── */
+/* BaseDialog's bottom-sheet default is 60vh; the picker needs room for the
+   search field plus a useful number of rows. Making the dialog body a
+   non-scrolling flex host lets the workspace list own the scroll instead. */
+/* Three classes so these beat BaseDialog's scoped `.dialog--bottom-sheet`
+   max-height and `.dialog-body` overflow, which load after this global file. */
+.dialog.dialog--bottom-sheet.ws-picker-sheet {
+  height: min(86vh, 760px);
+  max-height: 86vh;
+}
+.dialog.ws-picker-sheet .dialog-body {
+  overflow: hidden;
+  padding: 0;
 }
 
 /* ── Disconnected server panel (replaces the tab grid) ─────── */

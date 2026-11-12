@@ -178,6 +178,7 @@
               :tab-id="tab.paneId"
               :workspace-id="tab.workspaceId"
               :is-visible="tab.paneId === activePaneId"
+              :detach-enabled="detachPanesEnabled"
               @register="registerTermRef"
               @title-change="onTitleChange"
               @shell-info="onShellInfo"
@@ -201,6 +202,7 @@
                 (srcTab: string, srcPane: string, dstTab: string, pos: DropPosition) =>
                   onDropOnTab(srcTab, srcPane, dstTab, pos)
               "
+              @detach-pane="(paneId: string) => detachPaneToWindow(tab.paneId, paneId)"
               @drop-extract="
                 (srcTab: string, srcPane: string, idx: number) =>
                   onDropExtract(srcTab, srcPane, idx)
@@ -482,6 +484,7 @@ import { useTabPersistence } from './composables/useTabPersistence'
 import { useDesktopLifecycle } from './composables/useDesktopLifecycle'
 import { useDockTargetReporter } from './composables/useDockTargetReporter'
 import { useAppCore } from './composables/useAppCore'
+import { isTauri } from './composables/useTransport'
 import { useSettingsSync } from './composables/useSettingsSync'
 import { useAppActions } from './composables/useAppActions'
 import { useAppKeyboard } from './composables/useAppKeyboard'
@@ -667,6 +670,7 @@ const {
   onDividerDragEnd,
   onDropOnTab,
   onDropExtract,
+  detachPaneToWindow,
   onMergeTabIntoPane,
   onPaneDragHoverSwitch,
   onTerminalInsertPath,
@@ -710,6 +714,10 @@ const {
   clearActiveReadContext,
   stopForegroundGainSubscription,
 } = core
+
+/** Tearing a split pane off by dragging its header out of the window is
+ *  desktop-only: mobile/web have no native window to open. */
+const detachPanesEnabled = computed(() => isTauri() && !isMobile.value)
 
 const previewToolbarItems = computed(() =>
   normalizePreviewToolbarItems(appSettings.preview.toolbar_items)

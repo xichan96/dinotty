@@ -30,8 +30,57 @@
         >
           <X :size="18" />
         </button>
+        <div v-if="syncConnected" class="mc-mobile-ws-head">
+          <div class="mc-mobile-ws-top">
+            <button
+              class="mc-mobile-ws-current"
+              type="button"
+              :aria-label="`${t('workspace.switch')}: ${selectedWorkspace.name}`"
+              @click="openWorkspacePicker(false)"
+            >
+              <WorkspaceBadge
+                :remote="!!selectedWorkspace.connection_id"
+                :abbr="resolveAbbr(selectedWorkspace)"
+                :color="resolveColor(selectedWorkspace)"
+                :size="18"
+              />
+              <span class="mc-mobile-ws-name">{{ selectedWorkspace.name }}</span>
+              <span v-if="selectedWorkspaceCount" class="mc-mobile-ws-count">
+                {{ selectedWorkspaceCount }}
+              </span>
+              <ChevronDown :size="14" class="mc-mobile-ws-caret" />
+            </button>
+            <button
+              class="mc-mobile-ws-search"
+              type="button"
+              :aria-label="t('workspace.search')"
+              @click="openWorkspacePicker(true)"
+            >
+              <Search :size="16" />
+            </button>
+          </div>
+          <div v-if="recentWorkspaceChips.length" class="mc-mobile-ws-recents">
+            <span class="mc-mobile-ws-recent-label">{{ t('workspace.recent') }}</span>
+            <button
+              v-for="ws in recentWorkspaceChips"
+              :key="ws.id"
+              class="mc-mobile-ws-recent"
+              type="button"
+              @click="onSelectWorkspace(ws.id)"
+            >
+              <WorkspaceBadge
+                :remote="!!ws.connection_id"
+                :abbr="resolveAbbr(ws)"
+                :color="resolveColor(ws)"
+                :size="14"
+              />
+              <span class="mc-mobile-ws-recent-name">{{ ws.name }}</span>
+            </button>
+          </div>
+        </div>
         <WorkspaceList
           v-if="syncConnected"
+          ref="workspaceListRef"
           :workspaces="workspaces"
           :selected-id="selectedWorkspaceId"
           :active-id="activeWorkspaceId"
@@ -94,6 +143,17 @@
       </Motion>
     </Motion>
   </AnimatePresence>
+  <WorkspacePickerSheet
+    :visible="workspacePickerOpen"
+    :workspaces="allWorkspaces"
+    :selected-id="selectedWorkspaceId"
+    :tab-counts="tabCounts"
+    :recent-ids="recentWorkspaceIdList"
+    :focus-search="workspacePickerFocusSearch"
+    @close="workspacePickerOpen = false"
+    @select="onWorkspacePickerSelect"
+    @add="onWorkspacePickerAdd"
+  />
   <CreateWorkspaceDialog
     :visible="showCreateDialog || !!renamingWorkspace"
     :workspace="renamingWorkspace"
@@ -105,7 +165,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Motion, AnimatePresence } from 'motion-v'
-import { Server, Unplug, X } from 'lucide-vue-next'
+import { ChevronDown, Search, Server, Unplug, X } from 'lucide-vue-next'
 import { DEFAULT_WORKSPACE_ID, useWorkspaces } from '../../composables/useWorkspaces'
 import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
@@ -113,6 +173,7 @@ import { useSessionStore } from '../../stores/sessionStore'
 import { useUiStore } from '../../stores/uiStore'
 import { useDetachedWindowsStore } from '../../stores/detachedWindowsStore'
 import { useTabPreview, type TabCard } from '../../composables/useTabPreview'
+import { resolveAbbr, resolveColor } from '../../utils/workspaceIcon'
 import { useMissionControlState, sendMcOp } from '../../composables/useMissionControlState'
 import {
   closeServerPicker,
@@ -122,7 +183,9 @@ import {
 import { getAllLeaves } from '../../types/pane'
 import type { Workspace } from '../../types/workspace'
 import WorkspaceList from './WorkspaceList.vue'
+import WorkspacePickerSheet from './WorkspacePickerSheet.vue'
 import TabOverview from './TabOverview.vue'
+import WorkspaceBadge from '../WorkspaceBadge.vue'
 import CreateWorkspaceDialog from '../ui/CreateWorkspaceDialog.vue'
 import { shallowReactive } from 'vue'
 import TerminalPane from '../terminal/TerminalPane.vue'
@@ -164,6 +227,7 @@ const closing = ref(false)
 const backdropRef = ref<any>(null)
 const dualRef = ref<any>(null)
 const tabOverviewRef = ref<InstanceType<typeof TabOverview> | null>(null)
+const workspaceListRef = ref<InstanceType<typeof WorkspaceList> | null>(null)
 const showCreateDialog = ref(false)
 const renamingWorkspace = ref<Workspace | null>(null)
 const switchDirection = ref<'left' | 'right'>('right')
@@ -183,6 +247,9 @@ const WS_RESIZER_WIDTH = 8
 /** Used for clamping until the overlay has been laid out (clientWidth = 0). */
 const WS_PANE_MAX_FALLBACK = 1200
 const WS_PANE_WIDTH_STORAGE_KEY = 'dinotty_mc_ws_width_v1'
+/** Device-local MRU for the mobile header chips / picker sheet. */
+const RECENT_WORKSPACES_STORAGE_KEY = 'dinotty_mc_recent_workspaces_v1'
+const MAX_RECENT_WORKSPACES = 5
 
 const wsPaneWidth = ref(WS_PANE_DEFAULT_WIDTH)
 const dualWidth = ref(0)
@@ -304,10 +371,59 @@ function resetWsPaneWidth() {
   persistWsPaneWidth()
 }
 
+function loadRecentWorkspaceIds(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(RECENT_WORKSPACES_STORAGE_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((id): id is string => typeof id === 'string')
+  } catch {
+    // localStorage may be unavailable (private mode); start empty.
+    return []
+  }
+}
+
+function rememberRecentWorkspace(id: string | null) {
+  const key = id ?? DEFAULT_WORKSPACE_ID
+  const next = [key, ...recentWorkspaceIds.value.filter((existing) => existing !== key)].slice(
+    0,
+    MAX_RECENT_WORKSPACES
+  )
+  recentWorkspaceIds.value = next
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(RECENT_WORKSPACES_STORAGE_KEY, JSON.stringify(next))
+  } catch {
+    // Persistence is best-effort.
+  }
+}
+
 // Selected workspace derives from the global MC state. `null` selected_workspace_id
 // means the default workspace (`__default__`). Local mutation is intentionally
 // forbidden - all changes come from `selection_changed` broadcasts.
 const selectedWorkspaceId = computed(() => mcState.selectedWorkspaceId ?? DEFAULT_WORKSPACE_ID)
+
+// Mobile workspace switcher (≤600px). The desktop split still renders the full
+// vertical WorkspaceList; on phones the chip row is replaced by a single
+// current-workspace button plus a searchable bottom sheet, because a long
+// horizontal strip hides the target and the current selection off-screen.
+const allWorkspaces = computed<Workspace[]>(() => [defaultWorkspace.value, ...workspaces.value])
+const selectedWorkspace = computed<Workspace>(
+  () =>
+    allWorkspaces.value.find((ws) => ws.id === selectedWorkspaceId.value) ?? defaultWorkspace.value
+)
+const workspacePickerOpen = ref(false)
+/** The header's magnifier opens the same sheet in search mode. */
+const workspacePickerFocusSearch = ref(false)
+const recentWorkspaceIds = ref<string[]>(loadRecentWorkspaceIds())
+
+// Backend selection is broadcast-driven, so this also captures switches made
+// from another device or the keyboard. `onSelectWorkspace` records the tap
+// immediately as well, so the MRU order reacts without waiting for the round
+// trip.
+watch(selectedWorkspaceId, (id) => rememberRecentWorkspace(id))
 
 // The overlay is the only keyboard surface while MC is open.
 //
@@ -368,6 +484,9 @@ watch(
       }, 0)
     } else {
       closing.value = true
+      // The picker sits above the overlay (teleported dialog); closing MC from
+      // another client or a shortcut must not leave it floating on its own.
+      workspacePickerOpen.value = false
     }
   },
   // immediate: the component lazy-mounts with visible already true on the
@@ -434,6 +553,20 @@ const tabCounts = computed(() => {
 
 const defaultCount = computed(() => tabCounts.value[DEFAULT_WORKSPACE_ID] ?? 0)
 
+const selectedWorkspaceCount = computed(() => tabCounts.value[selectedWorkspaceId.value] ?? 0)
+
+const recentWorkspaces = computed<Workspace[]>(() => {
+  const byId = new Map(allWorkspaces.value.map((ws) => [ws.id, ws]))
+  return recentWorkspaceIds.value.map((id) => byId.get(id)).filter((ws): ws is Workspace => !!ws)
+})
+
+// One tap switches to the last two workspaces; the selected one is already the
+// header button, so it is skipped here rather than repeated.
+const recentWorkspaceChips = computed(() =>
+  recentWorkspaces.value.filter((ws) => ws.id !== selectedWorkspaceId.value).slice(0, 2)
+)
+const recentWorkspaceIdList = computed(() => recentWorkspaces.value.map((ws) => ws.id))
+
 function getCardWorkspace(card: TabCard): string | null {
   const tab = session.tabs.find((t) => t.paneId === card.paneId)
   if (!tab || tab.type !== 'terminal') return null
@@ -473,12 +606,31 @@ function onSelectWorkspace(id: string | null) {
   const newIdx = ids.indexOf(id ?? DEFAULT_WORKSPACE_ID)
   switchDirection.value = newIdx >= oldIdx ? 'right' : 'left'
 
+  // Device-local MRU: update on the user's tap instead of waiting for the
+  // broadcast, so the chips reorder immediately.
+  rememberRecentWorkspace(id)
+
   // Send a Jump op - the backend updates selected_workspace_id, resets
   // selected_tab_id, and broadcasts `selection_changed` to all clients
   // (including us). We do NOT mutate selectedWorkspaceId locally - the
   // computed reflects mcState, which is updated by the broadcast.
   const targetWsId = id === DEFAULT_WORKSPACE_ID ? null : id
   sendMcOp({ kind: 'jump', workspace_id: targetWsId })
+}
+
+function openWorkspacePicker(focusSearch: boolean) {
+  workspacePickerFocusSearch.value = focusSearch
+  workspacePickerOpen.value = true
+}
+
+function onWorkspacePickerSelect(id: string) {
+  workspacePickerOpen.value = false
+  onSelectWorkspace(id)
+}
+
+function onWorkspacePickerAdd() {
+  workspacePickerOpen.value = false
+  onAddWorkspace()
 }
 
 function onAddWorkspace() {
@@ -553,7 +705,27 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
 
+  // The workspace search field lives inside the backdrop, so every unhandled
+  // key would otherwise drive an MC shortcut (`s` server picker, `n` new tab,
+  // arrows, Delete). Let the field own its keystrokes. Escape is the exception:
+  // the field stops propagation while it has a query to clear, and lets the
+  // event through when empty so the next Escape closes MC.
+  const target = e.target as HTMLElement | null
+  if (
+    target &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) &&
+    e.key !== 'Escape'
+  ) {
+    return
+  }
+
   switch (e.key) {
+    case '/':
+      if (!e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        workspaceListRef.value?.focusSearch()
+      }
+      break
     case 'ArrowUp':
       // Workspace nav: previous workspace. Backend cycles through
       // [None (=default), ...ws_ids] and resets selected_tab_id.

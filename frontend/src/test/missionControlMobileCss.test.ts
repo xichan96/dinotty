@@ -9,35 +9,30 @@ const mobileEnd = css.indexOf('/* ── "Add tab" card', mobileStart)
 const mobileCss = css.slice(mobileStart, mobileEnd)
 
 describe('mission control mobile layout', () => {
-  it('turns the workspace list into a horizontally scrollable chip row', () => {
-    expect(mobileCss).toMatch(/\.mc-ws-list-scroll\s*{[^}]*flex-direction:\s*row;/s)
-    expect(mobileCss).toMatch(/\.mc-ws-list-scroll\s*{[^}]*overflow-x:\s*auto;/s)
-    expect(mobileCss).toMatch(/\.mc-ws-list-scroll\s*{[^}]*touch-action:\s*pan-x;/s)
+  it('replaces the horizontal chip row with a current-workspace button', () => {
+    expect(mobileCss).toMatch(/\.mc-ws-list\s*{[^}]*display:\s*none;/s)
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-head\s*{[^}]*display:\s*flex;/s)
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-current\s*{[^}]*height:\s*42px;/s)
   })
 
-  it('renders workspaces as non-shrinking pill chips', () => {
-    expect(mobileCss).toMatch(/\.mc-ws-list-item\s*{[^}]*flex-shrink:\s*0;/s)
-    expect(mobileCss).toMatch(/\.mc-ws-list-item\s*{[^}]*border-radius:\s*999px;/s)
+  it('renders recent workspaces as compact pill chips', () => {
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-recent\s*{[^}]*border-radius:\s*999px;/s)
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-recent\s*{[^}]*flex:\s*0 0 auto;/s)
   })
 
-  it('hides the drag handle in the chip row', () => {
-    expect(mobileCss).toMatch(/\.mc-ws-drag-handle\s*{[^}]*display:\s*none;/s)
+  it('caps recent chip label width so long names cannot fill the row', () => {
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-recent-name\s*{[^}]*max-width:/s)
   })
 
-  it('caps chip label width so long names cannot fill the row', () => {
-    expect(mobileCss).toMatch(/\.mc-ws-name\s*{[^}]*max-width:/s)
+  it('adds a dedicated search button beside the current workspace', () => {
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-search\s*{[^}]*width:\s*38px;/s)
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-search\s*{[^}]*height:\s*38px;/s)
   })
 
-  it('reserves the close-button area outside the chip scroll region', () => {
-    expect(mobileCss).toMatch(/\.mc-ws-list\s*{[^}]*padding-right:\s*56px;/s)
+  it('reserves the close-button area outside the header content', () => {
+    expect(mobileCss).toMatch(/\.mc-mobile-ws-head\s*{[^}]*padding:\s*8px 56px 8px 12px;/s)
     expect(mobileCss).not.toMatch(/padding-right:\s*60px/)
     expect(mobileCss).not.toMatch(/max-height:\s*40%/)
-  })
-
-  it('keeps add-workspace as a pill chip with a 40px target', () => {
-    expect(mobileCss).toMatch(/\.mc-ws-add-btn\s*{[^}]*height:\s*40px;/s)
-    expect(mobileCss).toMatch(/\.mc-ws-add-btn\s*{[^}]*border-radius:\s*999px;/s)
-    expect(mobileCss).toMatch(/\.mc-ws-add-label\s*{[^}]*display:\s*none;/s)
   })
 
   it('provides a 44px close-button touch target inside the mobile override', () => {
@@ -45,10 +40,36 @@ describe('mission control mobile layout', () => {
   })
 
   // The server switcher used to be a row of this overlay, with its own mobile
-  // sheet. It is the status bar's picker now, so those rules are gone; the
-  // `.mc-ws-list` override above must still not be keyed off it.
+  // sheet. It is the status bar's picker now, so those rules are gone.
   it('leaves nothing of the old in-overlay server bar behind', () => {
     expect(css).not.toMatch(/\.mc-srv-/)
+  })
+})
+
+describe('desktop workspace search', () => {
+  it('pins a search field above the workspace list', () => {
+    expect(css).toMatch(/\.mc-ws-search-wrap\s*{[^}]*flex:\s*0 0 auto;/s)
+    expect(css).toMatch(/\.mc-ws-search\s*{[^}]*height:\s*32px;/s)
+  })
+
+  it('expands result rows to show the workspace path', () => {
+    expect(css).toMatch(/\.mc-ws-list-item\.searching\s*{[^}]*height:\s*52px;/s)
+    expect(css).toMatch(/\.mc-ws-path\s*{[^}]*text-overflow:\s*ellipsis;/s)
+  })
+})
+
+describe('workspace picker sheet', () => {
+  it('gives the bottom sheet room for search plus a useful number of rows', () => {
+    expect(css).toMatch(
+      /\.dialog\.dialog--bottom-sheet\.ws-picker-sheet\s*{[^}]*height:\s*min\(86vh, 760px\);/s
+    )
+    expect(css).toMatch(
+      /\.dialog\.dialog--bottom-sheet\.ws-picker-sheet\s*{[^}]*max-height:\s*86vh;/s
+    )
+  })
+
+  it('lets the workspace list own the scroll instead of the whole sheet', () => {
+    expect(css).toMatch(/\.dialog\.ws-picker-sheet \.dialog-body\s*{[^}]*overflow:\s*hidden;/s)
   })
 })
 

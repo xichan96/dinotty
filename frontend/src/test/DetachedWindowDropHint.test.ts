@@ -48,12 +48,16 @@ describe('DetachedWindowDropHint', () => {
     expect(wrapper.find('.dw-hint--detach').exists()).toBe(true)
   })
 
-  it('ignores pane drags, which never detach', async () => {
+  it('shows the detach hint for a pane drag that was armed for detach', async () => {
+    // PaneHeader only sets `outsideWindow` when the pane can be torn off, so
+    // the hint follows the same flag as whole-tab drags.
     drag.startDrag({ sourcePaneId: 'a', sourceTabId: 'a' })
     drag.setOutsideWindow(true)
     const wrapper = mount(DetachedWindowDropHint)
 
-    expect(wrapper.find('.dw-hint').exists()).toBe(false)
+    // Let the mount pick up the already-armed state.
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.dw-hint--detach').exists()).toBe(true)
   })
 
   it('highlights the actual tab bar when a detached window is about to dock', async () => {

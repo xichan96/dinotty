@@ -40,6 +40,7 @@ import { attachImeHeuristic } from '../utils/imeAnchor'
 import { recordImeInput } from '../utils/imeDiagnostics'
 import { setupTerminalDrop } from './useTerminalDrop'
 import { findTerminalFileLinks, type TerminalFileTarget } from '../utils/terminalFileLink'
+import { readLogicalTerminalLine, type LogicalTerminalLine } from '../utils/terminalLogicalLine'
 import { createTerminalOverlay } from './useTerminalOverlay'
 import { t } from './useI18n'
 import { hasOpenGuard } from '../utils/keyboardGuardMode'
@@ -130,9 +131,25 @@ export function configureAllMobileInputTextareas(mode: MobileInputMode | null | 
   })
 }
 
+/**
+ * Convert a match's string offsets to an xterm buffer range. Wrapped rows and
+ * wide glyphs mean offsets are not cell columns, so both ends come from the
+ * logical line's per-character cell map. The end is the cell after the last
+ * character, matching the previous single-line behavior.
+ */
+function matchRange(line: LogicalTerminalLine, start: number, end: number) {
+  const first = line.cells[start]
+  const lastCell = line.cells[end - 1]
+  if (!first || !lastCell) return null
+  return {
+    start: { x: first.x, y: first.y },
+    end: { x: lastCell.x + lastCell.width, y: lastCell.y },
+  }
+}
+
 export interface UrlLinkProviderCallbacks {
-  /** Terminal text of the 1-based buffer line, or undefined when absent. */
-  readLine: (bufferLineNumber: number) => string | undefined
+  /** Logical (soft-wrap aware) line, or undefined when the row is absent. */
+  readLine: (bufferLineNumber: number) => LogicalTerminalLine | undefined
   /** Primary activation opens the URL directly. */
   onOpen: (url: string) => void
   /** Non-primary activation keeps the previous context-menu path. */
@@ -149,11 +166,12 @@ export interface UrlLinkProviderCallbacks {
 export function createUrlLinkProvider(callbacks: UrlLinkProviderCallbacks) {
   return {
     provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void) => {
-      const text = callbacks.readLine(bufferLineNumber)
-      if (text === undefined) {
+      const line = callbacks.readLine(bufferLineNumber)
+      if (!line) {
         callback(undefined)
         return
       }
+      const text = line.text
       const regex =
         /(?:https?:\/\/[^\s"'<>]+|(?:www\.)[a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z]{2,})+(?:\/[^\s"'<>]*)?)/g
       const links: any[] = []
@@ -161,12 +179,10 @@ export function createUrlLinkProvider(callbacks: UrlLinkProviderCallbacks) {
       while ((match = regex.exec(text)) !== null) {
         const raw = match[0]
         const uri = raw.startsWith('http') ? raw : `http://${raw}`
-        const startX = match.index
+        const range = matchRange(line, match.index, match.index + raw.length)
+        if (!range) continue
         links.push({
-          range: {
-            start: { x: startX + 1, y: bufferLineNumber },
-            end: { x: startX + raw.length + 1, y: bufferLineNumber },
-          },
+          range,
           text: uri,
           activate: (event: MouseEvent) => {
             // Primary click opens the link directly. Any other button
@@ -191,8 +207,8 @@ export function createUrlLinkProvider(callbacks: UrlLinkProviderCallbacks) {
 }
 
 export interface FilePathLinkProviderCallbacks {
-  /** Terminal text of the 1-based buffer line, or undefined when absent. */
-  readLine: (bufferLineNumber: number) => string | undefined
+  /** Logical (soft-wrap aware) line, or undefined when the row is absent. */
+  readLine: (bufferLineNumber: number) => LogicalTerminalLine | undefined
   /** Any activation (left click) on a detected path. */
   onOpen: (target: TerminalFileTarget, x: number, y: number) => void
   /** Pointer hover tracking; null on leave. */
@@ -207,18 +223,17 @@ export interface FilePathLinkProviderCallbacks {
 export function createFilePathLinkProvider(callbacks: FilePathLinkProviderCallbacks) {
   return {
     provideLinks: (bufferLineNumber: number, callback: (links: any[] | undefined) => void) => {
-      const text = callbacks.readLine(bufferLineNumber)
-      if (text === undefined) {
+      const line = callbacks.readLine(bufferLineNumber)
+      if (!line) {
         callback(undefined)
         return
       }
       const links: any[] = []
-      for (const match of findTerminalFileLinks(text)) {
+      for (const match of findTerminalFileLinks(line.text)) {
+        const range = matchRange(line, match.start, match.end)
+        if (!range) continue
         links.push({
-          range: {
-            start: { x: match.start + 1, y: bufferLineNumber },
-            end: { x: match.end + 1, y: bufferLineNumber },
-          },
+          range,
           text: match.raw,
           activate: (event: MouseEvent) => {
             callbacks.onOpen(
@@ -756,10 +771,8 @@ export class TerminalInstance {
     // Register file path link provider
     this.xterm.registerLinkProvider(
       createFilePathLinkProvider({
-        readLine: (bufferLineNumber) => {
-          const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
-          return line?.translateToString()
-        },
+        readLine: (bufferLineNumber) =>
+          readLogicalTerminalLine(this.xterm!.buffer.active, bufferLineNumber, this.xterm!.cols),
         onOpen: (target, x, y) => {
           this.onFileClick?.(target, x, y)
         },
@@ -772,10 +785,8 @@ export class TerminalInstance {
     // Register URL link provider (localhost → preview, others → new tab)
     this.xterm.registerLinkProvider(
       createUrlLinkProvider({
-        readLine: (bufferLineNumber) => {
-          const line = this.xterm!.buffer.active.getLine(bufferLineNumber - 1)
-          return line?.translateToString()
-        },
+        readLine: (bufferLineNumber) =>
+          readLogicalTerminalLine(this.xterm!.buffer.active, bufferLineNumber, this.xterm!.cols),
         onOpen: (uri) => {
           if (this.onPreviewLinkOpen) {
             this.onPreviewLinkOpen(uri)

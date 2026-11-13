@@ -89,7 +89,7 @@ beforeEach(() => {
 })
 
 describe('TerminalPane link click behavior (#306)', () => {
-  it('opens a primary-activated link in a new browser tab on web', () => {
+  it('opens a primary-activated link in the in-app preview on web', () => {
     transportMocks.isTauri.mockReturnValue(false)
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const wrapper = mountPane()
@@ -97,7 +97,8 @@ describe('TerminalPane link click behavior (#306)', () => {
 
     terminal.onPreviewLinkOpen('https://example.com/docs')
 
-    expect(open).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
+    expect(wrapper.emitted('previewLink')).toEqual([['https://example.com/docs']])
+    expect(open).not.toHaveBeenCalled()
     expect(externalUrlMocks.openUrlInSystemBrowser).not.toHaveBeenCalled()
     expect(wrapper.emitted('linkActivate')).toHaveLength(1)
     expect(menuProps(wrapper).visible).toBe(false)
@@ -105,7 +106,7 @@ describe('TerminalPane link click behavior (#306)', () => {
     wrapper.unmount()
   })
 
-  it('uses the system-browser helper for a primary-activated link in Tauri', () => {
+  it('opens a primary-activated link in the in-app preview in Tauri', () => {
     transportMocks.isTauri.mockReturnValue(true)
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const wrapper = mountPane()
@@ -113,7 +114,8 @@ describe('TerminalPane link click behavior (#306)', () => {
 
     terminal.onPreviewLinkOpen('https://example.com/docs')
 
-    expect(externalUrlMocks.openUrlInSystemBrowser).toHaveBeenCalledWith('https://example.com/docs')
+    expect(wrapper.emitted('previewLink')).toEqual([['https://example.com/docs']])
+    expect(externalUrlMocks.openUrlInSystemBrowser).not.toHaveBeenCalled()
     expect(open).not.toHaveBeenCalled()
     open.mockRestore()
     wrapper.unmount()
@@ -127,6 +129,7 @@ describe('TerminalPane link click behavior (#306)', () => {
 
     terminal.onPreviewLinkOpen('javascript:alert(1)')
 
+    expect(wrapper.emitted('previewLink')).toBeUndefined()
     expect(open).not.toHaveBeenCalled()
     expect(externalUrlMocks.openUrlInSystemBrowser).not.toHaveBeenCalled()
     open.mockRestore()

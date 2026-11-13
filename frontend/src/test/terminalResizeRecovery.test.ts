@@ -85,8 +85,8 @@ function makeTerm(localCols = 120, localRows = 40, visible = true): FakeTerm {
   }
   term._lastCols = localCols
   term._lastRows = localRows
-  term._knownPtyCols = localCols
-  term._knownPtyRows = localRows
+  term._knownPtyCols = 80
+  term._knownPtyRows = 24
   term._isOwner = true
   term._sendResize = vi.fn(() => true)
   term._scheduleSettleResize = vi.fn()

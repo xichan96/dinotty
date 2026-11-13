@@ -264,6 +264,21 @@ export function recordEvent(name: string, data?: EventData): void {
   record(name, data, true)
 }
 
+const throttledAt = new Map<string, number>()
+
+/**
+ * Deferred, per-name rate-limited event. For hot paths (resize/claim) where
+ * `recordEvent`'s immediate full-buffer localStorage write would be too
+ * expensive, but the event sequence still matters for a later freeze.
+ */
+export function recordThrottled(name: string, data?: EventData, minMs = 500): void {
+  if (!recording) return
+  const now = Date.now()
+  if (now - (throttledAt.get(name) ?? 0) < minMs) return
+  throttledAt.set(name, now)
+  record(name, data)
+}
+
 function installSocketRecorder(): void {
   if (socketRecorderInstalled) return
   socketRecorderInstalled = true

@@ -5,7 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg, SizeClaim } from '../types/protocol'
 import { isTauri, createTransport, type Transport, type TransportOptions } from './useTransport'
-import { isWebglDisabled, markOp, recordEvent } from './useDebugRecorder'
+import { isWebglDisabled, markOp, recordEvent, recordThrottled } from './useDebugRecorder'
 import { onThemeChange, settings, type MobileInputMode } from './useSettings'
 import {
   FONT_SIZE_MAX,
@@ -404,6 +404,8 @@ export class TerminalInstance {
   private _claimQueued = false
   private _claimTimer: ReturnType<typeof setTimeout> | null = null
   private _claimCleanup: (() => void) | null = null
+  private _lastClaim: { cols: number; rows: number; at: number } | null = null
+  private static readonly CLAIM_DEDUP_MS = 2000
   // Resize reentrancy guard. xterm's WebGL renderer must not be resized
   // re-entrantly; queue the latest request and apply it after the current one
   // returns. Also used to keep hidden (display:none) panes untouched.
@@ -1033,15 +1035,37 @@ export class TerminalInstance {
         this._markClaimNeeded()
       }
     }
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    const onResize = () => {
+      if (typeof document === 'undefined') return
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      // A user resizing the window while this device is focused is a strong
+      // "I'm using this device" signal. Debounce so a drag claims once, and
+      // skip if the native grid already matches the PTY.
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null
+        const dims = this._claimDims()
+        if (!dims) return
+        if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) return
+        this._markClaimNeeded()
+      }, 300)
+    }
     wrapper.addEventListener('pointerdown', mark, true)
     wrapper.addEventListener('touchstart', mark, true)
     wrapper.addEventListener('keydown', mark, true)
     window.addEventListener('focus', onFocus)
+    // Window resize is a clear intent on desktop, but on touch devices Safari
+    // fires it for address-bar/visual-viewport churn; those must not steal the
+    // PTY. Touch devices use pointer/key/focus claims instead.
+    if (!isTouchDevice()) window.addEventListener('resize', onResize)
     this._claimCleanup = () => {
       wrapper.removeEventListener('pointerdown', mark, true)
       wrapper.removeEventListener('touchstart', mark, true)
       wrapper.removeEventListener('keydown', mark, true)
       window.removeEventListener('focus', onFocus)
+      if (!isTouchDevice()) window.removeEventListener('resize', onResize)
+      if (resizeTimer) clearTimeout(resizeTimer)
     }
   }
 
@@ -1095,6 +1119,7 @@ export class TerminalInstance {
     this._claimQueued = false
     this._knownPtyCols = 0
     this._knownPtyRows = 0
+    this._lastClaim = null
     if (this._claimTimer) {
       clearTimeout(this._claimTimer)
       this._claimTimer = null
@@ -1117,12 +1142,21 @@ export class TerminalInstance {
     this._claimQueued = false
     this._knownPtyCols = dims.cols
     this._knownPtyRows = dims.rows
+    this._lastClaim = { cols: dims.cols, rows: dims.rows, at: Date.now() }
     if (this._claimTimer) {
       clearTimeout(this._claimTimer)
       this._claimTimer = null
     }
     // Fit to the claimed native size now that we own the PTY.
     this._scheduleSettleResize()
+  }
+
+  /** True when this exact size was already claimed inside the dedup window. */
+  private _isDuplicateClaim(dims: SizeClaim): boolean {
+    const last = this._lastClaim
+    if (!last) return false
+    if (last.cols !== dims.cols || last.rows !== dims.rows) return false
+    return Date.now() - last.at < TerminalInstance.CLAIM_DEDUP_MS
   }
 
   private _maybeSendClaim() {
@@ -1137,12 +1171,20 @@ export class TerminalInstance {
     }
     const dims = this._claimDims()
     if (!dims) return
-    if (this._isOwner && dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) {
+    // If the PTY already has this device's native size, a claim would only
+    // generate a no-op Resize broadcast and risk a feedback loop.
+    if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) {
+      this._claimNeeded = false
+      this._claimQueued = false
+      return
+    }
+    if (this._isDuplicateClaim(dims)) {
       this._claimNeeded = false
       this._claimQueued = false
       return
     }
     const msg: ClientMsg = { type: 'claim', cols: dims.cols, rows: dims.rows }
+    recordThrottled('term.claim.send', { cols: dims.cols, rows: dims.rows }, 250)
     let sent = false
     if (this.ws) {
       try {
@@ -1176,11 +1218,17 @@ export class TerminalInstance {
     }
     const dims = this._claimDims()
     if (!dims) return undefined
-    if (this._isOwner && dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) {
+    if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) {
       this._claimNeeded = false
       this._claimQueued = false
       return undefined
     }
+    if (this._isDuplicateClaim(dims)) {
+      this._claimNeeded = false
+      this._claimQueued = false
+      return undefined
+    }
+    recordThrottled('term.claim.input', { cols: dims.cols, rows: dims.rows }, 250)
     this._takeOwnership(dims)
     return dims
   }
@@ -2117,6 +2165,7 @@ export class TerminalInstance {
     }
     this._knownPtyCols = cols
     this._knownPtyRows = rows
+    recordThrottled('term.resize.send', { cols, rows }, 250)
     return true
   }
 
@@ -2124,11 +2173,23 @@ export class TerminalInstance {
     if (this._destroyed || !this.xterm || !this.fitAddon) return
     if (cols < 2 || rows < 2) return
     // The peer claimed ownership. Follow its grid; the next trusted input on
-    // this device reclaims.
+    // this device reclaims. Cancel any pending claim from a previous gesture so
+    // it cannot fire after the peer's claim and start a reclaim race.
     this._isOwner = false
     this._claimNeeded = true
+    this._claimQueued = false
+    this._lastClaim = null
+    if (this._claimTimer) {
+      clearTimeout(this._claimTimer)
+      this._claimTimer = null
+    }
     this._knownPtyCols = cols
     this._knownPtyRows = rows
+    recordThrottled(
+      'term.resize.peer',
+      { cols, rows, visible: this._paneVisible(), owner: this._isOwner },
+      250
+    )
     // Do not resize a display:none xterm. The grid is applied when the pane
     // becomes visible (settle ladder / focus / first input).
     if (!this._paneVisible()) {

@@ -99,6 +99,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useWebBookmarks } from '../../composables/useWebBookmarks'
 import { useDevTools } from '../../composables/useDevTools'
 import { useRecentUrls } from '../../composables/useRecentAccess'
+import { markOp } from '../../composables/useDebugRecorder'
 import { settings } from '../../composables/useSettings'
 import {
   ChevronLeft,
@@ -385,6 +386,15 @@ function onProxyMessage(e: MessageEvent) {
  * path.
  */
 function onIframeLoad() {
+  markOp('preview.load')
+  try {
+    handleIframeLoad()
+  } finally {
+    markOp('preview.load.done')
+  }
+}
+
+function handleIframeLoad() {
   const win = iframeRef.value?.contentWindow
   if (!win) return
   let href = ''

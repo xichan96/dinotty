@@ -138,6 +138,14 @@ async fn handle_socket(
             );
             (cols, rows, client_id, rx)
         };
+        // Liveness net: if the client never completes the fit-then-snapshot
+        // handshake (lost SnapshotRequest, zero-size layout), replay at the
+        // current size instead of dropping all live Output forever.
+        crate::session::Session::spawn_snapshot_watchdog(
+            Arc::clone(&session),
+            client_id,
+            pane_id.clone(),
+        );
 
         // Send reconnected message - client should reset xterm, converge
         // layout, fit once, then send SnapshotRequest{cols, rows}.
@@ -219,7 +227,17 @@ async fn handle_socket(
         while let Some(Ok(msg)) = ws_rx.next().await {
             match msg {
                 Message::Text(text) => match serde_json::from_str::<ClientMsg>(&text) {
-                    Ok(ClientMsg::Input { data }) => {
+                    Ok(ClientMsg::Input { data, claim }) => {
+                        // Apply a size claim before writing the keystroke that
+                        // triggered it, so the shell receives it at the native
+                        // grid (resize-then-write ordering).
+                        if let Some(claim) = claim {
+                            if let Err(e) =
+                                session.claim_and_resize(client_id, claim.cols, claim.rows).await
+                            {
+                                warn!("input claim failed: {e}, pane={}", pane_id);
+                            }
+                        }
                         for ch in data.chars() {
                             if ch == '\r' || ch == '\n' {
                                 let cmd = input_buffer.trim().to_string();
@@ -249,9 +267,14 @@ async fn handle_socket(
                     Ok(ClientMsg::Resize { cols, rows }) => {
                         session.resize_debounced(client_id, cols, rows);
                     }
-                    Ok(ClientMsg::SnapshotRequest { cols, rows }) => {
+                    Ok(ClientMsg::Claim { cols, rows }) => {
+                        if let Err(e) = session.claim_and_resize(client_id, cols, rows).await {
+                            warn!("claim failed: {e}, pane={}", pane_id);
+                        }
+                    }
+                    Ok(ClientMsg::SnapshotRequest { cols, rows, claim }) => {
                         if let Err(e) = session
-                            .atomic_resize_and_snapshot_for_client(client_id, cols, rows)
+                            .atomic_resize_and_snapshot_for_client(client_id, cols, rows, claim)
                             .await
                         {
                             warn!("snapshot_request failed: {e}, pane={}", pane_id);
@@ -331,6 +354,14 @@ async fn handle_socket(
     manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     let (client_id, mut rx) = session.add_client();
+    // This path never sends Reconnected, so the client has no handshake to
+    // trigger a SnapshotRequest. Arm the watchdog so it still receives a
+    // replay instead of dropping every Output forever.
+    crate::session::Session::spawn_snapshot_watchdog(
+        Arc::clone(&session),
+        client_id,
+        pane_id.clone(),
+    );
 
     // Send shell info
     let shell_info = serde_json::to_string(&ServerMsg::ShellInfo { shell_type: &shell_type })
@@ -407,7 +438,14 @@ async fn handle_socket(
     while let Some(Ok(msg)) = ws_rx.next().await {
         match msg {
             Message::Text(text) => match serde_json::from_str::<ClientMsg>(&text) {
-                Ok(ClientMsg::Input { data }) => {
+                Ok(ClientMsg::Input { data, claim }) => {
+                    if let Some(claim) = claim {
+                        if let Err(e) =
+                            session.claim_and_resize(client_id, claim.cols, claim.rows).await
+                        {
+                            warn!("input claim failed: {e}, pane={}", pane_id);
+                        }
+                    }
                     for ch in data.chars() {
                         if ch == '\r' || ch == '\n' {
                             let cmd = input_buffer.trim().to_string();
@@ -435,9 +473,15 @@ async fn handle_socket(
                 Ok(ClientMsg::Resize { cols, rows }) => {
                     session.resize_debounced(client_id, cols, rows);
                 }
-                Ok(ClientMsg::SnapshotRequest { cols, rows }) => {
-                    if let Err(e) =
-                        session.atomic_resize_and_snapshot_for_client(client_id, cols, rows).await
+                Ok(ClientMsg::Claim { cols, rows }) => {
+                    if let Err(e) = session.claim_and_resize(client_id, cols, rows).await {
+                        warn!("claim failed: {e}, pane={}", pane_id);
+                    }
+                }
+                Ok(ClientMsg::SnapshotRequest { cols, rows, claim }) => {
+                    if let Err(e) = session
+                        .atomic_resize_and_snapshot_for_client(client_id, cols, rows, claim)
+                        .await
                     {
                         warn!("snapshot_request failed: {e}, pane={}", pane_id);
                     }

@@ -80,16 +80,26 @@
           >
             <RefreshCw :size="16" />
           </button>
-          <button
-            v-else-if="itemId === 'settings'"
-            type="button"
-            class="tab-bar-icon-btn"
-            :title="t('app.settings')"
-            @click="settingsOpen = true"
-            @touchend.prevent="settingsOpen = true"
-          >
-            <Settings :size="16" />
-          </button>
+          <template v-else-if="itemId === 'settings'">
+            <button
+              type="button"
+              class="tab-bar-icon-btn"
+              :title="t('app.debugPanel')"
+              @click="toggleDebugPanel()"
+              @touchend.prevent="toggleDebugPanel()"
+            >
+              <Bug :size="16" />
+            </button>
+            <button
+              type="button"
+              class="tab-bar-icon-btn"
+              :title="t('app.settings')"
+              @click="settingsOpen = true"
+              @touchend.prevent="settingsOpen = true"
+            >
+              <Settings :size="16" />
+            </button>
+          </template>
           <button
             v-else-if="
               itemId === 'notifications' &&
@@ -493,8 +503,9 @@ import { useAppTauri } from './composables/useAppTauri'
 import { usePluginBridge } from './composables/usePluginBridge'
 import { loadLocalePacks } from './composables/useLocalePacks'
 import { loadThemePacks } from './composables/useThemePacks'
-import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe } from 'lucide-vue-next'
+import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe, Bug } from 'lucide-vue-next'
 import { normalizePreviewToolbarItems, type PreviewToolbarId } from './utils/previewToolbar'
+import { toggleDebugPanel } from './composables/useDebugRecorder'
 
 // ── Stores & shared app services ────────────────────────────────
 const session = useSessionStore()

@@ -2,6 +2,7 @@ type MessageTable = Record<string, string>
 
 export default {
   'app.settings': '设置',
+  'app.debugPanel': '调试面板',
   'app.reload': '重新加载',
   'app.preview': '网页预览',
   'app.fileWorkspace': '文件',
@@ -865,6 +866,11 @@ export default {
   'settings.log.loading': '加载中...',
   'settings.log.refresh': '刷新',
   'settings.log.close': '关闭',
+  'settings.diagnostics': '诊断',
+  'settings.diagnostics.panel': '调试面板',
+  'settings.diagnostics.show': '显示面板',
+  'settings.diagnostics.hint':
+    '显示常驻的卡顿记录面板（调整窗口大小、卡顿、WebSocket、可见性与长任务事件）。面板隐藏时仍会继续记录，崩溃后会自动打开。桌面快捷键：Ctrl+Shift+Alt+D。',
   'login.subtitle': '请输入访问令牌以继续',
   'login.placeholder': '访问令牌',
   'login.submit': '登录',

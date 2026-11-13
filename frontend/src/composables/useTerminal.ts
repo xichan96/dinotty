@@ -3,8 +3,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
-import type { ClientMsg, ServerMsg } from '../types/protocol'
+import type { ClientMsg, ServerMsg, SizeClaim } from '../types/protocol'
 import { isTauri, createTransport, type Transport, type TransportOptions } from './useTransport'
+import { isWebglDisabled, markOp, recordEvent, recordThrottled } from './useDebugRecorder'
 import { onThemeChange, settings, type MobileInputMode } from './useSettings'
 import {
   FONT_SIZE_MAX,
@@ -67,6 +68,26 @@ export {
 let _activePaneId: string | null = null
 export function setActivePaneId(paneId: string | null) {
   _activePaneId = paneId
+}
+
+// Last trusted local gesture. Programmatic `terminal.focus()` calls (tab sync,
+// layout sync, remote activation) must not claim PTY ownership; only a local
+// user action should. `focus()` consults this window instead of claiming
+// unconditionally, which is what stopped an idle iPad from stealing the size
+// whenever the PC activated a tab.
+let _lastTrustedActivityAt = 0
+let _activityTrackerInstalled = false
+const CLAIM_ACTIVITY_WINDOW_MS = 1500
+
+function installTrustedActivityTracker() {
+  if (_activityTrackerInstalled || typeof document === 'undefined') return
+  _activityTrackerInstalled = true
+  const mark = (event: Event) => {
+    if (event.isTrusted) _lastTrustedActivityAt = Date.now()
+  }
+  document.addEventListener('pointerdown', mark, true)
+  document.addEventListener('keydown', mark, true)
+  document.addEventListener('touchstart', mark, true)
 }
 
 function resolveTerminalFontFamily(configuredFamily: string, cssFallback: string): string {
@@ -255,6 +276,13 @@ export function createFilePathLinkProvider(callbacks: FilePathLinkProviderCallba
   }
 }
 
+interface TerminalFit {
+  cols: number
+  rows: number
+  /** The grid actually moved from the previous cols/rows. */
+  changed: boolean
+}
+
 export class TerminalInstance {
   paneId: string
   xterm: XTerm | null = null
@@ -325,6 +353,19 @@ export class TerminalInstance {
   // changed mid-replay — if so, the snapshot is encoded at the wrong size and
   // we should re-request. Null before the first SnapshotRequest is sent.
   private _snapshotRequestedSize: { cols: number; rows: number } | null = null
+  // Bounded retry for a SnapshotRequest that never produces a replay (lost
+  // request, server-side failure). Without it, the server stays
+  // snapshot_pending and drops every Output chunk, leaving a blank pane until a
+  // hard reload.
+  private _snapshotAttempts = 0
+  private _snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
+  private static readonly SNAPSHOT_RETRY_MS = 3000
+  private static readonly MAX_SNAPSHOT_ATTEMPTS = 3
+  // Watchdog for a replay/sync transaction that never closes (e.g. ReplayEnd
+  // dropped by a full client channel). While _transactionDepth > 0 every
+  // Output is buffered and never written, so a lost end event wedges the pane.
+  private _transactionWatchdog: ReturnType<typeof setTimeout> | null = null
+  private static readonly TRANSACTION_WATCHDOG_MS = 5000
   // True between Reconnected and replay_end. While set, _sendResize is
   // suppressed: the server's atomic_resize_and_snapshot does the PTY resize
   // in the same critical section as the snapshot, so a client-sent resize
@@ -366,15 +407,37 @@ export class TerminalInstance {
   private static readonly ZERO_SIZE_MAX_RETRIES = 120
   private _transportConnected = false
   private _forceWebSocket = false
-  private _lastSentCols = 0
-  private _lastSentRows = 0
-  private _resizeCooldownUntil = 0
+  // Size we currently believe the PTY has. Updated on every successful send
+  // and on every peer `Resize`/`Reconnected`. It is intentionally the PTY's
+  // known size, not "what this client last sent": a follower that adopts a
+  // peer size must still be able to re-assert its local size later.
+  private _knownPtyCols = 0
+  private _knownPtyRows = 0
+  // True while this device owns the PTY size. Set optimistically after a claim
+  // (standalone or attached to input) and cleared by any peer `Resize`.
+  private _isOwner = false
+  // A trusted user gesture/focus occurred after ownership was lost; the next
+  // input carries a claim, or the timer sends a standalone one.
+  private _claimNeeded = false
+  // A claim arrived while a replay/sync transaction was open; send it once the
+  // transaction closes instead of racing the snapshot.
+  private _claimQueued = false
+  private _claimTimer: ReturnType<typeof setTimeout> | null = null
+  private _claimCleanup: (() => void) | null = null
+  private _lastClaim: { cols: number; rows: number; at: number } | null = null
+  private static readonly CLAIM_DEDUP_MS = 2000
+  // Resize reentrancy guard. xterm's WebGL renderer must not be resized
+  // re-entrantly; queue the latest request and apply it after the current one
+  // returns. Also used to keep hidden (display:none) panes untouched.
+  private _applyingGrid = false
+  private _queuedGrid: { cols: number; rows: number; reason: string } | null = null
+  private _fitQueued = false
+  private _hiddenReplay = false
+  private static readonly MAX_GRID_COLS = 1000
+  private static readonly MAX_GRID_ROWS = 300
   private _followingPeer = false
   private _peerFollowGen = 0
   private _peerFollowTimer: ReturnType<typeof setTimeout> | null = null
-  private _pendingLocalRefit = false
-  private _authWrapperW = 0
-  private _authWrapperH = 0
   private _wheel: TerminalWheel | null = null
   private _dropCleanup: (() => void) | null = null
   private _overlayCtl: ReturnType<typeof createTerminalOverlay> | null = null
@@ -459,6 +522,8 @@ export class TerminalInstance {
     this.xterm.loadAddon(this.fitAddon)
 
     this.xterm.open(wrapper)
+    installTrustedActivityTracker()
+    this._installClaimTriggers(wrapper)
 
     // Anchor the IME preedit/candidate window to Ink's fake caret (a lone
     // inverse cell) instead of the hardware cursor, which Claude Code on
@@ -611,19 +676,24 @@ export class TerminalInstance {
     this.xterm.loadAddon(unicode11)
     this.xterm.unicode.activeVersion = '11'
 
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => {
-        webgl.dispose()
-        // Disposing restores the canvas renderer but doesn't trigger a
-        // redraw. Without refresh, the terminal appears frozen until the
-        // next resize (e.g. dragging the window) kicks the render service.
-        const rows = this.xterm?.rows ?? 1
-        this.xterm?.refresh(0, Math.max(0, rows - 1))
-      })
-      this.xterm.loadAddon(webgl)
-    } catch {
-      /* DOM renderer fallback */
+    if (!isWebglDisabled()) {
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => {
+          recordEvent('gl-lost')
+          webgl.dispose()
+          // Disposing restores the canvas renderer but doesn't trigger a
+          // redraw. Without refresh, the terminal appears frozen until the
+          // next resize (e.g. dragging the window) kicks the render service.
+          const rows = this.xterm?.rows ?? 1
+          this.xterm?.refresh(0, Math.max(0, rows - 1))
+        })
+        this.xterm.loadAddon(webgl)
+        recordEvent('gl-ok')
+      } catch {
+        /* DOM renderer fallback */
+        recordEvent('gl-fail')
+      }
     }
 
     this.searchAddon = new SearchAddon()
@@ -782,7 +852,7 @@ export class TerminalInstance {
       })
     )
 
-    // Register URL link provider (localhost → preview, others → new tab)
+    // Register URL link provider (all URL links open in the in-app preview)
     this.xterm.registerLinkProvider(
       createUrlLinkProvider({
         readLine: (bufferLineNumber) =>
@@ -913,6 +983,18 @@ export class TerminalInstance {
   focus() {
     if (!this.xterm) return
     this.xterm.focus()
+    // Programmatic focus from tab/layout sync is not a user action. Only claim
+    // when a trusted local gesture happened recently, or the window itself just
+    // gained focus (handled by the window focus listener).
+    if (
+      typeof document !== 'undefined' &&
+      Date.now() - _lastTrustedActivityAt <= CLAIM_ACTIVITY_WINDOW_MS &&
+      document.visibilityState === 'visible' &&
+      document.hasFocus() &&
+      this._paneVisible()
+    ) {
+      this._markClaimNeeded()
+    }
   }
 
   blur() {
@@ -958,11 +1040,221 @@ export class TerminalInstance {
     if (this._sessionExited) return
     // Guard: only the active pane sends input (prevents WKWebView multi-focus duplication)
     if (!force && _activePaneId !== null && _activePaneId !== this.paneId) return
+    const claim = force ? undefined : this._consumeClaimForInput()
+    const msg: ClientMsg = claim ? { type: 'input', data, claim } : { type: 'input', data }
     if (this._transport) {
-      return this._transport.send({ type: 'input', data })
+      return this._transport.send(msg)
     } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'input', data } as ClientMsg))
+      this.ws.send(JSON.stringify(msg))
     }
+  }
+
+  /** Install the user-gesture triggers that claim PTY-size ownership. */
+  private _installClaimTriggers(wrapper: HTMLElement) {
+    const mark = (event: Event) => {
+      if (!event.isTrusted) return
+      this._markClaimNeeded()
+    }
+    const onFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        this._markClaimNeeded()
+      }
+    }
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    const onResize = () => {
+      if (typeof document === 'undefined') return
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      // A user resizing the window while this device is focused is a strong
+      // "I'm using this device" signal. Debounce so a drag claims once, and
+      // skip if the native grid already matches the PTY.
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null
+        if (this._isOwner) return
+        const dims = this._claimDims()
+        if (!dims) return
+        if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) return
+        this._markClaimNeeded()
+      }, 300)
+    }
+    wrapper.addEventListener('pointerdown', mark, true)
+    wrapper.addEventListener('touchstart', mark, true)
+    wrapper.addEventListener('keydown', mark, true)
+    window.addEventListener('focus', onFocus)
+    // Window resize is a clear intent on desktop, but on touch devices Safari
+    // fires it for address-bar/visual-viewport churn; those must not steal the
+    // PTY. Touch devices use pointer/key/focus claims instead.
+    if (!isTouchDevice()) window.addEventListener('resize', onResize)
+    this._claimCleanup = () => {
+      wrapper.removeEventListener('pointerdown', mark, true)
+      wrapper.removeEventListener('touchstart', mark, true)
+      wrapper.removeEventListener('keydown', mark, true)
+      window.removeEventListener('focus', onFocus)
+      if (!isTouchDevice()) window.removeEventListener('resize', onResize)
+      if (resizeTimer) clearTimeout(resizeTimer)
+    }
+  }
+
+  /**
+   * A trusted gesture happened. Give the input path ~200ms to carry the claim
+   * on its `input` message (which guarantees resize-before-write ordering on
+   * both transports); if no input follows, send a standalone claim so a tap or
+   * focus still converges the PTY to this device.
+   */
+  private _markClaimNeeded() {
+    if (this._destroyed || this._sessionExited) return
+    // Already the owner: local layout changes are handled by
+    // _fitLocal/_sendResize, and a peer claim arrives as Resize ->
+    // _followPeerResize. Do not run a forced layout read on every keystroke.
+    if (this._isOwner) return
+    if (!this._paneVisible()) return
+    this._claimNeeded = true
+    if (this._claimTimer) clearTimeout(this._claimTimer)
+    this._claimTimer = setTimeout(() => {
+      this._claimTimer = null
+      this._maybeSendClaim()
+    }, 200)
+  }
+
+  /** False for panes in an inactive tab (`display: none`) or a collapsed flex. */
+  private _paneVisible(): boolean {
+    if (!this._wrapper) return false
+    const rect = this._wrapper.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }
+
+  /** True when this device should claim on attach (visible AND focused). */
+  private _shouldClaimOnAttach(): boolean {
+    if (typeof document === 'undefined') return false
+    if (document.visibilityState !== 'visible' || !document.hasFocus()) return false
+    // A visible wrapper means this pane belongs to the active DinoTTY tab.
+    // The active-pane fallback covers the transient 0×0 window before layout
+    // settles; an inactive tab's display:none panes match neither.
+    return this._paneVisible() || _activePaneId === this.paneId
+  }
+
+  /**
+   * Ownership is re-resolved on every reconnect; do not let a stale `_isOwner`
+   * send a resize before the server's `Reconnected` tells us the current size.
+   */
+  private _resetOwnershipForConnect() {
+    this._isOwner = false
+    this._claimNeeded = false
+    this._claimQueued = false
+    this._knownPtyCols = 0
+    this._knownPtyRows = 0
+    this._lastClaim = null
+    if (this._claimTimer) {
+      clearTimeout(this._claimTimer)
+      this._claimTimer = null
+    }
+  }
+
+  /** Native dimensions of this device, independent of the current xterm grid. */
+  private _claimDims(): SizeClaim | null {
+    if (!this.xterm || !this._paneVisible()) return null
+    const proposed = this.fitAddon?.proposeDimensions?.()
+    const cols = proposed?.cols ?? this.xterm.cols
+    const rows = proposed?.rows ?? this.xterm.rows
+    if (cols < 2 || rows < 2) return null
+    return { cols, rows }
+  }
+
+  private _takeOwnership(dims: SizeClaim) {
+    this._isOwner = true
+    this._claimNeeded = false
+    this._claimQueued = false
+    this._knownPtyCols = dims.cols
+    this._knownPtyRows = dims.rows
+    this._lastClaim = { cols: dims.cols, rows: dims.rows, at: Date.now() }
+    if (this._claimTimer) {
+      clearTimeout(this._claimTimer)
+      this._claimTimer = null
+    }
+    // Fit to the claimed native size now that we own the PTY.
+    this._scheduleSettleResize()
+  }
+
+  /** True when this exact size was already claimed inside the dedup window. */
+  private _isDuplicateClaim(dims: SizeClaim): boolean {
+    const last = this._lastClaim
+    if (!last) return false
+    if (last.cols !== dims.cols || last.rows !== dims.rows) return false
+    return Date.now() - last.at < TerminalInstance.CLAIM_DEDUP_MS
+  }
+
+  private _maybeSendClaim() {
+    if (this._destroyed || !this.xterm || this._sessionExited) return
+    if (!this._claimNeeded) {
+      this._claimQueued = false
+      return
+    }
+    if (this._snapshotPending || this._transactionDepth > 0) {
+      this._claimQueued = true
+      return
+    }
+    const dims = this._claimDims()
+    if (!dims) return
+    // If the PTY already has this device's native size, a claim would only
+    // generate a no-op Resize broadcast and risk a feedback loop.
+    if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) {
+      this._claimNeeded = false
+      this._claimQueued = false
+      return
+    }
+    if (this._isDuplicateClaim(dims)) {
+      this._claimNeeded = false
+      this._claimQueued = false
+      return
+    }
+    const msg: ClientMsg = { type: 'claim', cols: dims.cols, rows: dims.rows }
+    recordThrottled('term.claim.send', { cols: dims.cols, rows: dims.rows }, 250)
+    let sent = false
+    if (this.ws) {
+      try {
+        this.ws.send(JSON.stringify(msg))
+        sent = true
+      } catch {
+        sent = false
+      }
+    } else if (this._transport) {
+      try {
+        this._transport.send(msg)
+        sent = true
+      } catch {
+        sent = false
+      }
+    }
+    if (sent) this._takeOwnership(dims)
+    else this._claimQueued = true
+  }
+
+  /**
+   * Return a claim for the input message about to be sent. Attaching it to the
+   * same message is what guarantees the server resizes before processing the
+   * keystroke on the Tauri IPC path as well as over WebSocket.
+   */
+  private _consumeClaimForInput(): SizeClaim | undefined {
+    if (!this._claimNeeded && !this._claimQueued) return undefined
+    if (this._snapshotPending || this._transactionDepth > 0) {
+      this._claimQueued = true
+      return undefined
+    }
+    const dims = this._claimDims()
+    if (!dims) return undefined
+    if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) {
+      this._claimNeeded = false
+      this._claimQueued = false
+      return undefined
+    }
+    if (this._isDuplicateClaim(dims)) {
+      this._claimNeeded = false
+      this._claimQueued = false
+      return undefined
+    }
+    recordThrottled('term.claim.input', { cols: dims.cols, rows: dims.rows }, 250)
+    this._takeOwnership(dims)
+    return dims
   }
 
   private _startIme229(owner: 'key' | 'tail-replacement' = 'key') {
@@ -1136,6 +1428,8 @@ export class TerminalInstance {
     for (const h of this._settleTimeouts) clearTimeout(h)
     this._settleTimeouts = []
     this._clearZeroSizeRetry()
+    this._clearSnapshotRetry()
+    this._clearTransactionWatchdog()
     if (this._settleRaf) cancelAnimationFrame(this._settleRaf)
     if (this._peerFollowTimer) {
       clearTimeout(this._peerFollowTimer)
@@ -1144,6 +1438,12 @@ export class TerminalInstance {
     this._settleGeneration++
     this._peerFollowGen++
     this._followingPeer = false
+    this._claimCleanup?.()
+    this._claimCleanup = null
+    if (this._claimTimer) {
+      clearTimeout(this._claimTimer)
+      this._claimTimer = null
+    }
     if (this._refitRaf) cancelAnimationFrame(this._refitRaf)
     this._resizeObserver?.disconnect()
     if (this._visibilityHandler) {
@@ -1199,6 +1499,7 @@ export class TerminalInstance {
     this._transport.onConnect(() => {
       this._transportConnected = true
       this.onConnect?.()
+      this._resetOwnershipForConnect()
       this._doFitAndResize(true)
       this._scheduleSettleResize()
     })
@@ -1231,12 +1532,20 @@ export class TerminalInstance {
         // until replay_end lands — the server's atomic_resize_and_snapshot
         // owns the PTY resize during this window.
         this._snapshotPending = true
+        // Re-resolve ownership on every reconnect: only a visible AND focused
+        // attach claims. A hidden background reconnect follows the owner.
+        this._isOwner = this._shouldClaimOnAttach()
+        this._claimNeeded = !this._isOwner
+        this._claimQueued = false
+        this._knownPtyCols = msg.cols
+        this._knownPtyRows = msg.rows
         if (this._writeWatchdog) {
           clearTimeout(this._writeWatchdog)
           this._writeWatchdog = null
         }
         this._writePinnedToBottom = true
-        this._doFitAndResize(true)
+        if (this._isOwner) this._doFitAndResize(true)
+        else this._applyOwnerGrid()
         // Kick off the fit-then-snapshot handshake: the zero-size retry
         // path or settle-ladder will call _maybeSendSnapshotRequest once the
         // wrapper converges to a stable non-zero size.
@@ -1290,6 +1599,7 @@ export class TerminalInstance {
       this._reconnectAttempts = 0
       this._overlayCtl?.hide()
       this.onConnect?.()
+      this._resetOwnershipForConnect()
       this._doFitAndResize(true)
       this._scheduleSettleResize()
     }
@@ -1321,12 +1631,20 @@ export class TerminalInstance {
         // Owe the server a snapshot_request; suppress _sendResize until
         // replay_end (see _snapshotPending doc comment).
         this._snapshotPending = true
+        // Re-resolve ownership on every reconnect: only a visible AND focused
+        // attach claims. A hidden background reconnect follows the owner.
+        this._isOwner = this._shouldClaimOnAttach()
+        this._claimNeeded = !this._isOwner
+        this._claimQueued = false
+        this._knownPtyCols = msg.cols
+        this._knownPtyRows = msg.rows
         if (this._writeWatchdog) {
           clearTimeout(this._writeWatchdog)
           this._writeWatchdog = null
         }
         this._writePinnedToBottom = true
-        this._doFitAndResize(true)
+        if (this._isOwner) this._doFitAndResize(true)
+        else this._applyOwnerGrid()
         // Kick off fit-then-snapshot handshake — settle-ladder / zero-size
         // retry will fire _maybeSendSnapshotRequest when the wrapper converges.
         this._maybeSendSnapshotRequest()
@@ -1446,45 +1764,112 @@ export class TerminalInstance {
     // Record the size the server claims the snapshot was encoded at — used
     // at replay_end to detect whether our wrapper changed mid-replay and we
     // need to re-request.
+    this._clearSnapshotRetry()
     this._snapshotRequestedSize = { cols, rows }
+    // Do not overwrite `_knownPtyCols/Rows` here: for a non-owner they track the
+    // current owner's grid, which may have changed after this replay was
+    // encoded. Applying the encoded size to xterm keeps the snapshot coherent;
+    // replay_end will re-request at the owner size if they diverged.
+    this._hiddenReplay = !this._paneVisible()
+    markOp(`term.replay ${cols}x${rows}${this._hiddenReplay ? ' hidden' : ''}`)
+    if (!this._hiddenReplay) {
+      // Never resize a display:none xterm (WebGL renderer freeze suspect).
+      this._applyGrid(cols, rows, 'replay')
+      this._lastCols = cols
+      this._lastRows = rows
+    }
     this._beginTransaction()
   }
 
   private _handleReplayEnd() {
+    const hiddenReplay = this._hiddenReplay
+    this._hiddenReplay = false
+    const encoded = this._snapshotRequestedSize
+    if (hiddenReplay) {
+      // A display:none pane must not resize or repaint its WebGL xterm. Drop
+      // the buffered snapshot (a fresh request is made when it becomes
+      // visible) and consume the transaction without writing it.
+      this._transactionBuffer = []
+      this._transactionBytes = 0
+    }
     this._endTransaction()
-    // Optional correctness check (MV: just log mismatch; a follow-up can
-    // re-request automatically). If the wrapper size changed during the
-    // replay, the snapshot was encoded at a stale size and may misalign.
-    if (this._snapshotRequestedSize && this.xterm && this.fitAddon && this._wrapper) {
+    let mismatch = false
+    // Compare the wrapper's proposed dimensions (what the next fit would use)
+    // to what the snapshot was encoded at. A mismatch means the wrapper changed
+    // mid-replay, so the snapshot's absolute addressing may be clipped or
+    // wrapped.
+    if (
+      this._isOwner &&
+      this._snapshotRequestedSize &&
+      this.xterm &&
+      this.fitAddon &&
+      this._wrapper
+    ) {
       const rect = this._wrapper.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) {
-        // Compare xterm's current cols/rows (already fit) to what the
-        // snapshot was encoded at. If they differ, the wrapper changed
-        // during replay.
+        const proposed = this.fitAddon.proposeDimensions?.()
+        const actualCols = proposed?.cols ?? this.xterm.cols
+        const actualRows = proposed?.rows ?? this.xterm.rows
         if (
-          this.xterm.cols !== this._snapshotRequestedSize.cols ||
-          this.xterm.rows !== this._snapshotRequestedSize.rows
+          actualCols !== this._snapshotRequestedSize.cols ||
+          actualRows !== this._snapshotRequestedSize.rows
         ) {
+          mismatch = true
           console.warn(
             `[dinotty] replay_end size mismatch: snapshot ` +
               `${this._snapshotRequestedSize.cols}x${this._snapshotRequestedSize.rows}, ` +
-              `xterm now ${this.xterm.cols}x${this.xterm.rows} — snapshot may misalign`
+              `wrapper now ${actualCols}x${actualRows} — re-requesting`
           )
         }
       }
+    } else if (
+      !this._isOwner &&
+      this._snapshotRequestedSize &&
+      this._knownPtyCols >= 2 &&
+      (this._snapshotRequestedSize.cols !== this._knownPtyCols ||
+        this._snapshotRequestedSize.rows !== this._knownPtyRows)
+    ) {
+      // A peer claimed after our non-owner replay was encoded. Re-request at
+      // the current owner grid instead of keeping a misaligned snapshot.
+      mismatch = true
+      console.warn(
+        `[dinotty] replay_end owner-grid mismatch: snapshot ` +
+          `${this._snapshotRequestedSize.cols}x${this._snapshotRequestedSize.rows}, ` +
+          `owner now ${this._knownPtyCols}x${this._knownPtyRows} — re-requesting`
+      )
+    }
+    if (hiddenReplay) {
+      // The hidden snapshot was discarded rather than painted. Keep a request
+      // owed so the visible pane gets a coherent replay at its own grid.
+      this._snapshotRequestedSize = null
+      this._snapshotPending = true
+      this._snapshotAttempts = 0
+      markOp(`term.replay.dropped hidden ${encoded?.cols}x${encoded?.rows}`)
+      this._scheduleSettleResize()
+      return
     }
     this._snapshotRequestedSize = null
-    // End of the snapshot window: _sendResize is no longer suppressed. The
-    // next settle-ladder tick will reclaim the PTY size if our wrapper has
-    // drifted from the snapshot's cols/rows.
     this._snapshotPending = false
+    if (mismatch && this._snapshotAttempts < TerminalInstance.MAX_SNAPSHOT_ATTEMPTS) {
+      this._snapshotAttempts++
+      this._snapshotPending = true
+      console.warn(
+        `[dinotty] snapshot re-request ${this._snapshotAttempts}/${TerminalInstance.MAX_SNAPSHOT_ATTEMPTS}`
+      )
+    } else {
+      this._snapshotAttempts = 0
+    }
+    // A claim that arrived during the replay can run now.
+    if (this._claimQueued) this._maybeSendClaim()
     // Re-arm the ladder: the transaction guard suppressed fitting during
-    // the replay, so any wrapper change during it is now applied.
+    // the replay, so any wrapper change during it is now applied (and a
+    // pending re-request is sent at the new geometry).
     this._scheduleSettleResize()
   }
 
   private _beginTransaction() {
     this._transactionDepth++
+    if (this._transactionDepth === 1) this._armTransactionWatchdog()
   }
 
   private _endTransaction() {
@@ -1494,6 +1879,7 @@ export class TerminalInstance {
     }
     this._transactionDepth--
     if (this._transactionDepth === 0) {
+      this._clearTransactionWatchdog()
       this._flushTransaction()
     }
   }
@@ -1519,11 +1905,78 @@ export class TerminalInstance {
   }
 
   private _resetTransaction() {
+    this._clearTransactionWatchdog()
+    this._clearSnapshotRetry()
     this._transactionDepth = 0
     this._transactionBuffer = []
     this._transactionBytes = 0
     this._snapshotRequestedSize = null
     this._snapshotPending = false
+    this._snapshotAttempts = 0
+  }
+
+  /// Force-advance a transaction that never received its end event. A dropped
+  /// ReplayEnd/SyncEnd (full client channel, buggy app) leaves depth > 0 and
+  /// every subsequent Output buffered forever — the pane looks frozen until a
+  /// reload. Flush what we have and resume live output.
+  private _armTransactionWatchdog() {
+    if (this._transactionWatchdog) return
+    this._transactionWatchdog = setTimeout(() => {
+      this._transactionWatchdog = null
+      if (this._destroyed || this._transactionDepth === 0) return
+      console.warn(
+        `[dinotty] transaction watchdog fired at depth ${this._transactionDepth}; flushing partial buffer`
+      )
+      this._transactionDepth = 0
+      this._flushTransaction()
+      this._snapshotRequestedSize = null
+      this._snapshotPending = false
+      this._scheduleSettleResize()
+    }, TerminalInstance.TRANSACTION_WATCHDOG_MS)
+  }
+
+  private _clearTransactionWatchdog() {
+    if (this._transactionWatchdog) {
+      clearTimeout(this._transactionWatchdog)
+      this._transactionWatchdog = null
+    }
+  }
+
+  private _clearSnapshotRetry() {
+    if (this._snapshotRetryTimer) {
+      clearTimeout(this._snapshotRetryTimer)
+      this._snapshotRetryTimer = null
+    }
+  }
+
+  /// Retry a SnapshotRequest that produced no replay. The server drops every
+  /// Output chunk for a pending client, so a lost request is a permanently
+  /// blank pane without this. Bounded attempts; after that, give up on the
+  /// snapshot window and let normal resize/output resume.
+  private _armSnapshotRetry() {
+    this._clearSnapshotRetry()
+    this._snapshotRetryTimer = setTimeout(() => {
+      this._snapshotRetryTimer = null
+      if (this._destroyed || !this._snapshotPending) return
+      if (this._snapshotAttempts >= TerminalInstance.MAX_SNAPSHOT_ATTEMPTS) {
+        console.warn(
+          `[dinotty] snapshot_request timed out after ${TerminalInstance.MAX_SNAPSHOT_ATTEMPTS} attempts; resuming live output`
+        )
+        this._snapshotRequestedSize = null
+        this._snapshotPending = false
+        this._scheduleSettleResize()
+        return
+      }
+      this._snapshotAttempts++
+      // Clear the in-flight guard so _maybeSendSnapshotRequest can fire again.
+      this._snapshotRequestedSize = null
+      this._maybeSendSnapshotRequest()
+      if (!this._snapshotRequestedSize) {
+        // Wrapper is still collapsed or xterm is not ready; keep the zero-size
+        // retry alive so the next recovery attempts the request again.
+        this._scheduleZeroSizeRetry()
+      }
+    }, TerminalInstance.SNAPSHOT_RETRY_MS)
   }
 
   /// Send a snapshot_request to the server after the wrapper has converged to
@@ -1551,21 +2004,44 @@ export class TerminalInstance {
     let rows = this.xterm.rows
     if (cols < 2 || rows < 2) {
       // xterm hasn't been fit yet — do one fit now to read cols/rows.
+      markOp('term.fit')
       try {
         this.fitAddon.fit()
         cols = this.xterm.cols
         rows = this.xterm.rows
       } catch {
         return
+      } finally {
+        markOp('term.fit.done')
       }
     }
     if (cols < 2 || rows < 2) return
     this._snapshotRequestedSize = { cols, rows }
-    const msg: ClientMsg = { type: 'snapshot_request', cols, rows }
+    const msg: ClientMsg = { type: 'snapshot_request', cols, rows, claim: this._isOwner }
+    if (this._isOwner) {
+      this._knownPtyCols = cols
+      this._knownPtyRows = rows
+    }
+    let sent = false
     if (this.ws) {
-      this.ws.send(JSON.stringify(msg))
+      try {
+        this.ws.send(JSON.stringify(msg))
+        sent = true
+      } catch {
+        sent = false
+      }
     } else if (this._transport) {
-      this._transport.send(msg)
+      try {
+        this._transport.send(msg)
+        sent = true
+      } catch {
+        sent = false
+      }
+    }
+    if (sent) {
+      this._armSnapshotRetry()
+    } else {
+      this._snapshotRequestedSize = null
     }
   }
 
@@ -1626,6 +2102,7 @@ export class TerminalInstance {
           clearTimeout(this._writeWatchdog)
           this._writeWatchdog = null
         }
+        markOp('term.write.done')
         processNext()
       }
       // Watchdog: xterm.write() can silently drop the callback (no throw,
@@ -1642,6 +2119,7 @@ export class TerminalInstance {
         advance()
       }, 1000)
       try {
+        markOp('term.write')
         if (chunk.length > MAX_CHUNK) {
           this._writeQueue.unshift(chunk.slice(MAX_CHUNK))
           this.xterm.write(chunk.slice(0, MAX_CHUNK), advance)
@@ -1683,10 +2161,6 @@ export class TerminalInstance {
   }
 
   _refit() {
-    if (this._followingPeer) {
-      if (this._wrapperChanged()) this._pendingLocalRefit = true
-      return
-    }
     if (!this.fitAddon || !this._wrapper) return
     if (this._refitRaf) return
     this._refitRaf = requestAnimationFrame(() => {
@@ -1696,6 +2170,9 @@ export class TerminalInstance {
   }
 
   private _sendResize(cols: number, rows: number): boolean {
+    // Only the size owner may resize the PTY. A non-owner's job is to follow
+    // the owner's grid; its claim path sends `type: 'claim'` instead.
+    if (!this._isOwner) return false
     // Suppress during the snapshot window: the server's
     // atomic_resize_and_snapshot does the PTY resize in lockstep with the
     // snapshot encode. A client resize here would race it and re-introduce
@@ -1710,26 +2187,44 @@ export class TerminalInstance {
     } else {
       return false
     }
-    this._lastSentCols = cols
-    this._lastSentRows = rows
-    // Cooldown: suppress the post-peer-follow reclaim send for a few
-    // seconds so two clients with different stable sizes don't ping-pong
-    // the PTY size back and forth. Only the follower (who didn't recently
-    // initiate) reclaims; the initiator stays quiet and keeps the peer's
-    // size until the user actively resizes.
-    this._resizeCooldownUntil = Date.now() + 3000
+    this._knownPtyCols = cols
+    this._knownPtyRows = rows
+    recordThrottled('term.resize.send', { cols, rows }, 250)
     return true
-  }
-
-  private _wrapperChanged(): boolean {
-    if (!this._wrapper) return false
-    const r = this._wrapper.getBoundingClientRect()
-    return Math.round(r.width) !== this._authWrapperW || Math.round(r.height) !== this._authWrapperH
   }
 
   private _followPeerResize(cols: number, rows: number) {
     if (this._destroyed || !this.xterm || !this.fitAddon) return
     if (cols < 2 || rows < 2) return
+    // The peer claimed ownership. Follow its grid; the next trusted input on
+    // this device reclaims. Cancel any pending claim from a previous gesture so
+    // it cannot fire after the peer's claim and start a reclaim race.
+    this._isOwner = false
+    this._claimNeeded = true
+    this._claimQueued = false
+    this._lastClaim = null
+    if (this._claimTimer) {
+      clearTimeout(this._claimTimer)
+      this._claimTimer = null
+    }
+    this._knownPtyCols = cols
+    this._knownPtyRows = rows
+    recordThrottled(
+      'term.resize.peer',
+      { cols, rows, visible: this._paneVisible(), owner: this._isOwner },
+      250
+    )
+    // Do not resize a display:none xterm. The grid is applied when the pane
+    // becomes visible (settle ladder / focus / first input).
+    if (!this._paneVisible()) {
+      this._followingPeer = false
+      this._peerFollowGen++
+      if (this._peerFollowTimer) {
+        clearTimeout(this._peerFollowTimer)
+        this._peerFollowTimer = null
+      }
+      return
+    }
     if (this._refitRaf) {
       cancelAnimationFrame(this._refitRaf)
       this._refitRaf = 0
@@ -1741,24 +2236,18 @@ export class TerminalInstance {
       this._settleRaf = 0
     }
     this._settleGeneration++
-    try {
-      this.xterm.resize(cols, rows)
-    } catch {
-      return
-    }
+    this._applyGrid(cols, rows, 'peer')
     const heightChanged = rows !== this._lastRows
     this._lastCols = cols
     this._lastRows = rows
     if (heightChanged && !this.isMouseModeEnabled()) {
+      markOp('term.scroll')
       this.xterm.scrollToBottom()
+      markOp('term.scroll.done')
       this._writePinnedToBottom = true
     }
     const gen = ++this._peerFollowGen
     this._followingPeer = true
-    this._pendingLocalRefit = false
-    const rect = this._wrapper?.getBoundingClientRect()
-    this._authWrapperW = rect ? Math.round(rect.width) : 0
-    this._authWrapperH = rect ? Math.round(rect.height) : 0
     if (this._peerFollowTimer) {
       clearTimeout(this._peerFollowTimer)
       this._peerFollowTimer = null
@@ -1767,28 +2256,39 @@ export class TerminalInstance {
       this._peerFollowTimer = null
       if (this._destroyed || gen !== this._peerFollowGen) return
       this._followingPeer = false
-      this._pendingLocalRefit = false
-      // Refit to local wrapper and reclaim the PTY size - unless we
-      // recently initiated a resize ourselves (cooldown). Without the
-      // cooldown, two clients with different stable sizes ping-pong the
-      // PTY every 500ms: A sends -> B follows -> B reclaims -> A follows
-      // -> A reclaims -> repeat. The initiator (who just sent) stays
-      // quiet; the follower reclaims so its display matches the PTY.
-      if (Date.now() < this._resizeCooldownUntil) return
+      // Refit to this device's local wrapper. Ownership is unchanged: a
+      // follower cannot reclaim by settling alone.
       this._settleRefit()
     }, 500) as unknown as ReturnType<typeof setTimeout>
   }
 
-  private _settleRefit(): { cols: number; rows: number } | null {
-    if (this._followingPeer) {
-      if (this._wrapperChanged()) this._pendingLocalRefit = true
-      return null
-    }
+  private _settleRefit(): TerminalFit | null {
+    if (this._followingPeer) return null
     if (this._destroyed || !this.fitAddon || !this.xterm || !this._wrapper) return null
     // Skip settling during a sync/replay transaction — buffered Output is
     // encoded at the current xterm geometry and a mid-transaction fit would
     // shift geometry under it. sync_end / replay_end re-arms the ladder.
     if (this._transactionDepth > 0) return null
+    // A non-owner with a known owner grid must never fall back to fitting the
+    // local wrapper (that flickers between local and owner size).
+    const hasOwnerGrid = this._knownPtyCols >= 2 && this._knownPtyRows >= 2
+    const dims = this._isOwner
+      ? this._fitLocal()
+      : hasOwnerGrid
+        ? this._applyOwnerGrid()
+        : this._fitLocal()
+    if (!dims) return null
+    if (this._snapshotPending) this._maybeSendSnapshotRequest()
+    if (this._claimQueued) this._maybeSendClaim()
+    if (this._isOwner && (dims.cols !== this._knownPtyCols || dims.rows !== this._knownPtyRows)) {
+      this._sendResize(dims.cols, dims.rows)
+    }
+    return dims
+  }
+
+  /** Fit to this device's wrapper. Returns whether the grid actually moved. */
+  private _fitLocal(): TerminalFit | null {
+    if (!this.fitAddon || !this.xterm || !this._wrapper) return null
     const rect = this._wrapper.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) {
       // Flex chain collapsed (cold reload, hidden tab, mobile keyboard).
@@ -1798,26 +2298,117 @@ export class TerminalInstance {
       this._scheduleZeroSizeRetry()
       return null
     }
+    // Refuse a pathological layout before fit() resizes xterm: an unbounded
+    // wrapper feedback loop would otherwise allocate an enormous WebGL canvas.
+    const proposed = this.fitAddon.proposeDimensions?.()
+    if (
+      proposed &&
+      (proposed.cols > TerminalInstance.MAX_GRID_COLS ||
+        proposed.rows > TerminalInstance.MAX_GRID_ROWS)
+    ) {
+      console.warn(
+        `[dinotty] refusing oversized fit ${proposed.cols}x${proposed.rows}; wrapper may be unbounded`
+      )
+      return null
+    }
+    if (this._applyingGrid) {
+      this._fitQueued = true
+      return null
+    }
     this._clearZeroSizeRetry()
+    this._applyingGrid = true
+    markOp(`term.fit ${this.xterm.cols}x${this.xterm.rows}`)
     try {
       this.fitAddon.fit()
     } catch {
       return null
+    } finally {
+      this._applyingGrid = false
+      markOp(`term.fit.done ${this.xterm?.cols}x${this.xterm?.rows}`)
     }
     const cols = this.xterm.cols
     const rows = this.xterm.rows
     if (cols < 2 || rows < 2) return null
+    const changed = cols !== this._lastCols || rows !== this._lastRows
     const heightChanged = rows !== this._lastRows
+    this._lastCols = cols
+    this._lastRows = rows
+    if (heightChanged && !this.isMouseModeEnabled()) {
+      markOp('term.scroll')
+      this.xterm.scrollToBottom()
+      markOp('term.scroll.done')
+      this._writePinnedToBottom = true
+    }
+    if (this._fitQueued) {
+      this._fitQueued = false
+      this._refit()
+    }
+    return { cols, rows, changed }
+  }
+
+  /**
+   * Single entry point for direct `xterm.resize` calls. Serializes re-entrant
+   * requests and leaves hidden panes alone: resizing a display:none xterm (the
+   * WebGL renderer in particular) is the suspected freeze trigger.
+   */
+  private _applyGrid(cols: number, rows: number, reason: string): boolean {
+    if (!this.xterm) return false
+    if (cols < 2 || rows < 2) return false
+    if (cols > TerminalInstance.MAX_GRID_COLS || rows > TerminalInstance.MAX_GRID_ROWS) {
+      console.warn(
+        `[dinotty] refusing oversized terminal grid ${cols}x${rows} (${reason}); wrapper may be unbounded`
+      )
+      return false
+    }
+    if (!this._paneVisible()) return false
+    if (this._applyingGrid) {
+      this._queuedGrid = { cols, rows, reason }
+      return false
+    }
+    this._applyingGrid = true
+    let changed = false
+    markOp(`term.resize ${cols}x${rows} ${reason}`)
+    try {
+      if (this.xterm.cols !== cols || this.xterm.rows !== rows) {
+        this.xterm.resize(cols, rows)
+        changed = true
+      }
+    } catch {
+      changed = false
+    } finally {
+      this._applyingGrid = false
+      markOp(`term.resize.done ${cols}x${rows} ${reason}`)
+    }
+    const queued = this._queuedGrid
+    this._queuedGrid = null
+    if (queued) this._applyGrid(queued.cols, queued.rows, queued.reason)
+    return changed
+  }
+
+  /** Apply the owner's grid to a non-owner pane (letterbox / follow). */
+  private _applyOwnerGrid(): TerminalFit | null {
+    if (!this.xterm) return null
+    if (this._knownPtyCols < 2 || this._knownPtyRows < 2) return null
+    // Never resize a display:none pane. The hidden WebGL canvas is the
+    // suspected freeze trigger; apply the grid when the pane becomes visible.
+    if (!this._paneVisible()) return null
+    const cols = this._knownPtyCols
+    const rows = this._knownPtyRows
+    const changed = cols !== this._lastCols || rows !== this._lastRows
+    if (this.xterm.cols === cols && this.xterm.rows === rows) {
+      this._lastCols = cols
+      this._lastRows = rows
+      return { cols, rows, changed }
+    }
+    const heightChanged = rows !== this._lastRows
+    if (!this._applyGrid(cols, rows, 'owner')) return null
     this._lastCols = cols
     this._lastRows = rows
     if (heightChanged && !this.isMouseModeEnabled()) {
       this.xterm.scrollToBottom()
       this._writePinnedToBottom = true
     }
-    if (cols !== this._lastSentCols || rows !== this._lastSentRows) {
-      this._sendResize(cols, rows)
-    }
-    return { cols, rows }
+    return { cols, rows, changed }
   }
 
   private _scheduleSettleResize() {
@@ -1869,10 +2460,7 @@ export class TerminalInstance {
   }
 
   private _doFitAndResize(force = false) {
-    if (this._followingPeer) {
-      if (this._wrapperChanged()) this._pendingLocalRefit = true
-      return
-    }
+    if (this._followingPeer) return
     if (!this.fitAddon || !this.xterm || !this._wrapper) return
     // Skip fitting during a sync/replay transaction: the buffered Output
     // was encoded at the current xterm geometry, and a mid-transaction fit
@@ -1880,44 +2468,28 @@ export class TerminalInstance {
     // re-arm the settle-ladder so the wrapper's post-transaction size is
     // applied as soon as the transaction closes.
     if (this._transactionDepth > 0) return
-    const rect = this._wrapper.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) {
-      this._scheduleZeroSizeRetry()
-      return
-    }
-    this._clearZeroSizeRetry()
-    try {
-      this.fitAddon.fit()
-    } catch {
-      return
-    }
-
-    const cols = this.xterm.cols
-    const rows = this.xterm.rows
-    if (cols < 2 || rows < 2) return
-    if (!force && cols === this._lastCols && rows === this._lastRows) return
-    const heightChanged = rows !== this._lastRows
-    this._lastCols = cols
-    this._lastRows = rows
-    if (heightChanged && !this.isMouseModeEnabled()) {
-      this.xterm.scrollToBottom()
-      this._writePinnedToBottom = true
-    }
-    if (force) {
-      this._sendResize(cols, rows)
-    } else {
-      // No frontend debounce: rAF coalesces frame-rate (in _refit), the
-      // _lastSentCols/Rows dedup guards no-op frames, and the server's 25ms
-      // debounce is the single wire-rate throttle. Stacking a frontend
-      // debounce on top added latency without further compression.
-      this._sendResize(cols, rows)
-    }
+    const hasOwnerGrid = this._knownPtyCols >= 2 && this._knownPtyRows >= 2
+    const dims = this._isOwner
+      ? this._fitLocal()
+      : hasOwnerGrid
+        ? this._applyOwnerGrid()
+        : this._fitLocal()
+    if (!dims) return
     // If we owe the server a snapshot_request (Reconnected arrived while the
     // wrapper was 0×0), fire it now that the wrapper has recovered. Idempotent
-    // — bails if already sent or if we're between replay_begin and replay_end.
-    if (this._snapshotPending) {
-      this._maybeSendSnapshotRequest()
-    }
+    // — bails if a request is already in flight. This must run even when the
+    // geometry did not change: a recovered 0×0 wrapper often lands back on the
+    // previous size, and the old early return here stranded the pane blank.
+    if (this._snapshotPending) this._maybeSendSnapshotRequest()
+    if (this._claimQueued) this._maybeSendClaim()
+    // A non-owner only follows; it never resizes the PTY.
+    if (!this._isOwner) return
+    if (!force && !dims.changed) return
+    // No frontend debounce: rAF coalesces frame-rate (in _refit), the
+    // geometry guard above skips no-op frames, and the server's 25ms debounce
+    // is the single wire-rate throttle. Stacking a frontend debounce on top
+    // added latency without further compression.
+    this._sendResize(dims.cols, dims.rows)
   }
 
   isMouseModeEnabled(): boolean {

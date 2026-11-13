@@ -1,10 +1,24 @@
+export interface SizeClaim {
+  cols: number
+  rows: number
+}
+
 export interface InputMsg {
   type: 'input'
   data: string
+  /** Present on the first trusted user input after this device lost size ownership. */
+  claim?: SizeClaim
 }
 
 export interface ResizeMsg {
   type: 'resize'
+  cols: number
+  rows: number
+}
+
+/** Explicit ownership claim without input (focus/tap that produced no keystroke). */
+export interface ClaimMsg {
+  type: 'claim'
   cols: number
   rows: number
 }
@@ -16,13 +30,17 @@ export interface ResizeMsg {
 /// flow where the server pushed a snapshot at stale session.size immediately
 /// on connect, which the client's fit-ladder could interrupt mid-write and
 /// cause absolute-row addressing to clamp/wrap to wrong dimensions.
+///
+/// `claim` marks the requesting device as the PTY-size owner. Non-claim
+/// requests snapshot at the current owner size and do not resize the PTY.
 export interface SnapshotRequestMsg {
   type: 'snapshot_request'
   cols: number
   rows: number
+  claim?: boolean
 }
 
-export type ClientMsg = InputMsg | ResizeMsg | SnapshotRequestMsg
+export type ClientMsg = InputMsg | ResizeMsg | ClaimMsg | SnapshotRequestMsg
 
 export interface OutputMsg {
   type: 'output'

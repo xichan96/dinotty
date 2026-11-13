@@ -18,6 +18,17 @@ static VITE_DEP_DOUBLE_RE: LazyLock<regex::Regex> =
 static VITE_DEP_SINGLE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"'assets/([^'"{}\s]+)'"#).unwrap());
 
+// Inline module scripts are part of the HTML document, so the response-level
+// JS rewriter never sees them. Vite's dev React refresh preamble, for example,
+// is an inline module with a root-absolute `import "/@react-refresh"`; without
+// the preview prefix that request hits Dinotty's origin and the preamble dies.
+static INLINE_SCRIPT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?is)<script([^>]*)>(.*?)</script>").unwrap());
+static SCRIPT_TYPE_MODULE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\btype\s*=\s*["']?module["']?(?:\s|$)"#).unwrap());
+static SCRIPT_SRC_ATTR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)(?:^|\s)src\s*=").unwrap());
+
 /// The upstream a proxied page came from.
 #[derive(Clone)]
 pub struct InternalTarget {
@@ -233,7 +244,8 @@ pub fn rewrite_html_urls(html: &str, base_url: &str, mode: &RewriteMode) -> Stri
         rewriter.end().unwrap_or(());
 
         let result = String::from_utf8(output).unwrap_or_else(|_| html.to_string());
-        rewrite_style_blocks(&result, &base_url_s, &mode_s)
+        let result = rewrite_style_blocks(&result, &base_url_s, &mode_s);
+        rewrite_inline_module_scripts(&result, &mode_s)
     }
 }
 
@@ -246,6 +258,33 @@ fn rewrite_style_blocks(html: &str, base_url: &str, mode: &RewriteMode) -> Strin
             let inner = &caps[1];
             let rewritten = rewrite_css_urls(inner, base_url, mode);
             full.replace(inner, &rewritten)
+        })
+        .into_owned()
+}
+
+/// Rewrite root-absolute imports inside inline `<script type="module">` blocks.
+///
+/// Only module scripts without a `src` are touched: classic inline scripts
+/// cannot import statically, and rewriting arbitrary script text would risk
+/// corrupting strings or JSON payloads. `</script>` cannot appear inside a
+/// script body, so the non-greedy match cannot overrun the block.
+fn rewrite_inline_module_scripts(html: &str, mode: &RewriteMode) -> String {
+    if matches!(mode, RewriteMode::External) {
+        return html.to_string();
+    }
+    INLINE_SCRIPT_RE
+        .replace_all(html, |caps: &regex::Captures| {
+            let attrs = &caps[1];
+            let body = &caps[2];
+            if SCRIPT_SRC_ATTR_RE.is_match(attrs) || !SCRIPT_TYPE_MODULE_RE.is_match(attrs) {
+                return caps[0].to_string();
+            }
+            let rewritten = rewrite_js_imports(body, mode);
+            if rewritten == body {
+                caps[0].to_string()
+            } else {
+                format!("<script{attrs}>{rewritten}</script>")
+            }
         })
         .into_owned()
 }
@@ -400,5 +439,42 @@ mod tests {
         let out = rewrite_url("http://10.0.0.5/plain.js", "https://10.0.0.5:443/", &mode).unwrap();
         let http_segment = crate::proxy::encode_preview_target("http", "10.0.0.5", 80);
         assert_eq!(out, format!("/__srv/abc/preview/{http_segment}/plain.js"));
+    }
+
+    /// Vite injects its dev React refresh preamble as an inline module script.
+    /// The response-level JS rewriter never sees inline document scripts, so
+    /// its root-absolute import must be prefixed here. Otherwise the preamble
+    /// 401s at the Dinotty origin and every JSX module throws "can't detect
+    /// preamble".
+    #[test]
+    fn inline_module_imports_carry_the_prefix() {
+        let html = r#"<html><head><script type="module">import { injectIntoGlobalHook } from "/@react-refresh";
+injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};</script></head><body></body></html>"#;
+        let mode = https_mode();
+        let out = rewrite_html_urls(html, "http://127.0.0.1:5173/", &mode);
+        assert!(out.contains(&format!("from \"{}/@react-refresh\"", prefix(&mode))), "{out}");
+    }
+
+    /// Classic inline scripts cannot import statically and JSON payloads must
+    /// not be touched; external module scripts are already covered by the
+    /// attribute rewriter and must not be processed twice.
+    #[test]
+    fn only_inline_module_scripts_are_rewritten() {
+        let mode = https_mode();
+        let html = concat!(
+            r#"<script>var s = 'import("/keep.js")';</script>"#,
+            r#"<script type="application/json">{"url":"/keep.json"}</script>"#,
+            r#"<script type="module" src="/main.tsx"></script>"#,
+            r#"<script type="module">import "/go.js";</script>"#,
+            r#"<script type=module>import "/unquoted.js";</script>"#,
+        );
+        let out = rewrite_html_urls(html, "https://10.0.0.5:443/", &mode);
+        let p = prefix(&mode);
+        assert!(out.contains(r#"import("/keep.js")"#), "{out}");
+        assert!(out.contains(r#""/keep.json""#), "{out}");
+        assert!(out.contains(&format!(r#"src="{p}/main.tsx""#)), "{out}");
+        assert!(out.contains(&format!(r#"import "{p}/go.js""#)), "{out}");
+        assert!(out.contains(&format!(r#"import "{p}/unquoted.js""#)), "{out}");
     }
 }

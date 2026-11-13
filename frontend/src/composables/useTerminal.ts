@@ -2245,7 +2245,14 @@ export class TerminalInstance {
     // encoded at the current xterm geometry and a mid-transaction fit would
     // shift geometry under it. sync_end / replay_end re-arms the ladder.
     if (this._transactionDepth > 0) return null
-    const dims = this._isOwner ? this._fitLocal() : (this._applyOwnerGrid() ?? this._fitLocal())
+    // A non-owner with a known owner grid must never fall back to fitting the
+    // local wrapper (that flickers between local and owner size).
+    const hasOwnerGrid = this._knownPtyCols >= 2 && this._knownPtyRows >= 2
+    const dims = this._isOwner
+      ? this._fitLocal()
+      : hasOwnerGrid
+        ? this._applyOwnerGrid()
+        : this._fitLocal()
     if (!dims) return null
     if (this._snapshotPending) this._maybeSendSnapshotRequest()
     if (this._claimQueued) this._maybeSendClaim()
@@ -2437,7 +2444,12 @@ export class TerminalInstance {
     // re-arm the settle-ladder so the wrapper's post-transaction size is
     // applied as soon as the transaction closes.
     if (this._transactionDepth > 0) return
-    const dims = this._isOwner ? this._fitLocal() : (this._applyOwnerGrid() ?? this._fitLocal())
+    const hasOwnerGrid = this._knownPtyCols >= 2 && this._knownPtyRows >= 2
+    const dims = this._isOwner
+      ? this._fitLocal()
+      : hasOwnerGrid
+        ? this._applyOwnerGrid()
+        : this._fitLocal()
     if (!dims) return
     // If we owe the server a snapshot_request (Reconnected arrived while the
     // wrapper was 0×0), fire it now that the wrapper has recovered. Idempotent

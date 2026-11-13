@@ -132,6 +132,10 @@ pub struct Session {
     /// Conservative lock-free mirror used only by lifecycle-locked reap claims.
     pub(crate) is_connected: AtomicBool,
     pub size: Mutex<(u16, u16)>,
+    /// Client that currently owns the PTY size. Claims (input/focus/tap) replace
+    /// the owner; ordinary resizes from non-owners are ignored. Cleared when the
+    /// owner disconnects.
+    pub size_owner: Mutex<Option<u64>>,
     pub exited: Mutex<bool>,
     #[allow(dead_code)]
     pub shell_type: String,
@@ -158,6 +162,10 @@ pub struct Session {
     /// CWD sniffing and workspace path resolution.
     /// `None` for local sessions.
     pub remote_home: Mutex<Option<PathBuf>>,
+    /// Serializes PTY resizes with size claims and snapshot handshakes so a
+    /// debounced resize cannot overwrite a claim that landed while it was
+    /// waiting for the backend lock.
+    pub resize_gate: tokio::sync::Mutex<()>,
     /// Current PTY user for SSH sessions. Detects user switches (e.g. `su root`).
     /// When the PTY user differs from the SSH auth user, SFTP operations may
     /// fail due to permission issues, and SSH exec fallback with sudo is needed.
@@ -429,6 +437,65 @@ impl Session {
         Ok(ResizeOutcome::Applied)
     }
 
+    /// Current PTY-size owner, if any.
+    #[must_use]
+    pub fn size_owner_id(&self) -> Option<u64> {
+        *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Tell every client except `origin_id` that the PTY size is now (cols, rows).
+    fn broadcast_resize_to_peers(&self, origin_id: u64, cols: u16, rows: u16) {
+        let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        clients.retain(|client| !client.tx.is_closed());
+        for client in clients.iter().filter(|client| client.id != origin_id) {
+            if client.tx.try_send(SessionClientEvent::Resize { cols, rows }).is_err() {
+                tracing::debug!("broadcast: client channel full, dropping resize {cols}x{rows}");
+            }
+        }
+    }
+
+    /// Explicit ownership claim from user input/focus/tap. The claim always
+    /// wins (that is the product rule: the device being used gets its native
+    /// size), then the PTY is resized and the old owner is told to follow.
+    ///
+    /// # Errors
+    /// Returns an error if the PTY/SSH resize fails. Ownership is reverted to
+    /// the previous client in that case.
+    pub async fn claim_and_resize(
+        &self,
+        client_id: u64,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), String> {
+        if self.is_exited() {
+            return Ok(());
+        }
+        if cols < 2 || rows < 2 {
+            return Err("invalid resize dimensions".into());
+        }
+        // Serialize with debounced resizes and snapshot handshakes so a stale
+        // resize cannot overwrite this claim after it was accepted.
+        let _resize_gate = self.resize_gate.lock().await;
+        let previous = {
+            let mut owner =
+                self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            owner.replace(client_id)
+        };
+        if self.is_sync_active() {
+            self.set_sync_mode(false);
+        }
+        if let Err(e) = self.resize_async(cols, rows).await {
+            let mut owner =
+                self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *owner == Some(client_id) {
+                *owner = previous;
+            }
+            return Err(e);
+        }
+        self.broadcast_resize_to_peers(client_id, cols, rows);
+        Ok(())
+    }
+
     /// 异步 resize，支持 SSH channel
     ///
     /// # Errors
@@ -492,22 +559,49 @@ impl Session {
         client_id: u64,
         cols: u16,
         rows: u16,
+        claim: bool,
     ) -> Result<(), String> {
-        // PTY + size + screen resize (async - uses backend lock). Resize also
-        // breaks sync mode if active (apply_and_broadcast_resize / Step 1b),
-        // but resize_async does not break sync itself - handle that here.
-        if self.is_sync_active() {
-            self.set_sync_mode(false);
-        }
-        if let Err(e) = self.resize_async(cols, rows).await {
-            tracing::warn!(
-                "atomic resize+snapshot: resize {cols}x{rows} failed, client={client_id}: {e}"
-            );
-            // Liveness over geometry: never leave this client pending forever.
-            // Fall back to a replay at the current size.
+        if self.is_exited() {
             let _ = self.recover_snapshot_if_pending(client_id);
-            return Err(e);
+            return Ok(());
         }
+
+        // Hold the resize gate through snapshot encoding and replay enqueue so
+        // no claim/resize can move the PTY between resize and snapshot.
+        let _resize_gate = self.resize_gate.lock().await;
+        let previous_owner =
+            *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Allowed to resize when the client explicitly claims, when it already
+        // owns the PTY, or when nobody owns it yet (first client on a pane).
+        let should_resize = claim || previous_owner.is_none() || previous_owner == Some(client_id);
+        let (snap_cols, snap_rows) = if should_resize {
+            {
+                let mut owner =
+                    self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                *owner = Some(client_id);
+            }
+            if self.is_sync_active() {
+                self.set_sync_mode(false);
+            }
+            if let Err(e) = self.resize_async(cols, rows).await {
+                tracing::warn!(
+                    "atomic resize+snapshot: resize {cols}x{rows} failed, client={client_id}: {e}"
+                );
+                let mut owner =
+                    self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if *owner == Some(client_id) {
+                    *owner = previous_owner;
+                }
+                // Liveness over geometry: never leave this client pending forever.
+                // Fall back to a replay at the current size.
+                let _ = self.recover_snapshot_if_pending(client_id);
+                return Err(e);
+            }
+            (cols, rows)
+        } else {
+            // Non-owner: replay at the current owner size without touching the PTY.
+            *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
 
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clients.retain(|c| !c.tx.is_closed());
@@ -520,7 +614,8 @@ impl Session {
         // Enqueue replay sequence directly to the client's mpsc::Sender.
         // Bypasses send_chunk_to_clients' snapshot_pending check - control
         // events and snapshot chunks must reach the client even while pending.
-        let complete = Self::enqueue_snapshot_replay(&tx, cols, rows, scrollback_chunks, snapshot);
+        let complete =
+            Self::enqueue_snapshot_replay(&tx, snap_cols, snap_rows, scrollback_chunks, snapshot);
 
         // Clear snapshot_pending AFTER ReplayEnd is enqueued. broadcast() that
         // runs after we release the clients lock will see snapshot_pending=false
@@ -531,8 +626,12 @@ impl Session {
         }
         if !complete {
             tracing::warn!(
-                "atomic resize+snapshot: replay enqueue incomplete for client={client_id} ({cols}x{rows}); pending cleared, live output resumes"
+                "atomic resize+snapshot: replay enqueue incomplete for client={client_id} ({snap_cols}x{snap_rows}); pending cleared, live output resumes"
             );
+        }
+        drop(clients);
+        if should_resize {
+            self.broadcast_resize_to_peers(client_id, snap_cols, snap_rows);
         }
 
         Ok(())
@@ -651,6 +750,40 @@ impl Session {
     }
 
     pub fn apply_and_broadcast_resize(&self, origin_id: u64, cols: u16, rows: u16) {
+        // Called from the PTY/SSH debounce task's blocking thread. Serialize
+        // with explicit claims and snapshot handshakes so a stale debounced
+        // resize cannot overwrite a claim that landed in the meantime.
+        let _resize_gate = self.resize_gate.blocking_lock();
+        {
+            let mut clients =
+                self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            clients.retain(|client| !client.tx.is_closed());
+            if !clients.iter().any(|client| client.id == origin_id) {
+                return;
+            }
+        }
+        // A non-owner may not change the PTY size. Tell it the owner's size so
+        // it can follow instead of drifting.
+        let owner = *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(owner_id) = owner {
+            if owner_id != origin_id {
+                let (current_cols, current_rows) =
+                    *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut clients =
+                    self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                clients.retain(|client| !client.tx.is_closed());
+                if let Some(client) = clients.iter().find(|client| client.id == origin_id) {
+                    let _ = client.tx.try_send(SessionClientEvent::Resize {
+                        cols: current_cols,
+                        rows: current_rows,
+                    });
+                }
+                tracing::debug!(
+                    "apply_and_broadcast_resize: rejected non-owner resize {cols}x{rows}, origin={origin_id}, owner={owner_id}"
+                );
+                return;
+            }
+        }
         // ghostty pattern (src/terminal/c/terminal.zig:483-485): resize breaks
         // synchronized output mode. The DEC 2026 spec explicitly allows the
         // terminal to end sync mode on resize, and doing so prevents the
@@ -664,15 +797,6 @@ impl Session {
         if self.is_sync_active() {
             tracing::debug!("apply_and_broadcast_resize: breaking sync mode for resize, pane=?");
             self.set_sync_mode(false);
-        }
-
-        {
-            let mut clients =
-                self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            clients.retain(|client| !client.tx.is_closed());
-            if !clients.iter().any(|client| client.id == origin_id) {
-                return;
-            }
         }
         match self.resize_blocking(cols, rows) {
             Ok(ResizeOutcome::Applied) => {}
@@ -689,13 +813,12 @@ impl Session {
                 return;
             }
         }
-        let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        clients.retain(|client| !client.tx.is_closed());
-        for client in clients.iter().filter(|client| client.id != origin_id) {
-            if client.tx.try_send(SessionClientEvent::Resize { cols, rows }).is_err() {
-                tracing::debug!("broadcast: client channel full, dropping resize {cols}x{rows}");
-            }
+        // The first client to resize a fresh pane becomes its size owner.
+        if owner.is_none() {
+            *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(origin_id);
         }
+        self.broadcast_resize_to_peers(origin_id, cols, rows);
     }
 
     pub fn clear_tauri_client_if(&self, id: u64) {
@@ -777,6 +900,11 @@ impl Session {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .retain(|client| client.id != id);
+        // The device that owned the PTY size is gone; the next claim wins.
+        let mut owner = self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *owner == Some(id) {
+            *owner = None;
+        }
     }
 
     /// Send a chunk to all clients via non-blocking `try_send`.

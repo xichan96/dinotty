@@ -330,11 +330,26 @@ fn pty_spawn(
 async fn pty_write(
     pane_id: String,
     data: String,
+    claim_cols: Option<u16>,
+    claim_rows: Option<u16>,
     state: State<'_, Arc<SessionManager>>,
 ) -> Result<(), String> {
     let session = state.sessions.get(&pane_id).ok_or("session not found")?.value().clone();
     if session.is_exited() {
         return Err("session exited".into());
+    }
+    // Apply the ownership claim before enqueueing the keystroke, so Tauri IPC
+    // gets the same resize-then-write ordering as the WebSocket path.
+    if let (Some(cols), Some(rows)) = (claim_cols, claim_rows) {
+        let origin_id = session
+            .tauri_client_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .ok_or("tauri client not connected")?;
+        session
+            .claim_and_resize(origin_id, cols, rows)
+            .await
+            .map_err(|e| format!("claim failed: {e}"))?;
     }
     // Send through the input channel — the dedicated write task handles the actual
     // PTY write. This avoids the old pattern of spawn_blocking + timeout which leaked
@@ -346,6 +361,22 @@ async fn pty_write(
     } else {
         Err("input channel not initialized".to_string())
     }
+}
+
+#[tauri::command]
+async fn pty_claim(
+    pane_id: String,
+    cols: u16,
+    rows: u16,
+    state: State<'_, Arc<SessionManager>>,
+) -> Result<(), String> {
+    let session = state.sessions.get(&pane_id).ok_or("session not found")?.value().clone();
+    let origin_id = session
+        .tauri_client_id
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .ok_or("tauri client not connected")?;
+    session.claim_and_resize(origin_id, cols, rows).await
 }
 
 #[tauri::command]
@@ -380,6 +411,7 @@ async fn pty_snapshot_request(
     pane_id: String,
     cols: u16,
     rows: u16,
+    claim: Option<bool>,
     app: AppHandle,
     state: State<'_, Arc<SessionManager>>,
 ) -> Result<(), String> {
@@ -394,10 +426,13 @@ async fn pty_snapshot_request(
     // (spawn_tauri_output_forwarder) consumes the channel and emits the
     // corresponding pty-* events. So we just call it and let the forwarder
     // handle the wire events.
-    session.atomic_resize_and_snapshot_for_client(origin_id, cols, rows).await.map_err(|e| {
-        tracing::warn!("pty_snapshot_request failed: {e}, pane={pane_id}");
-        e
-    })?;
+    session
+        .atomic_resize_and_snapshot_for_client(origin_id, cols, rows, claim.unwrap_or(false))
+        .await
+        .map_err(|e| {
+            tracing::warn!("pty_snapshot_request failed: {e}, pane={pane_id}");
+            e
+        })?;
     let _ = app; // app not needed — forwarder emits events
     Ok(())
 }
@@ -872,6 +907,7 @@ fn main() {
             pty_spawn,
             pty_write,
             pty_resize,
+            pty_claim,
             pty_snapshot_request,
             pty_kill,
             pty_detach,

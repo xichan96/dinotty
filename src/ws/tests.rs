@@ -4,8 +4,50 @@ use super::*;
 fn client_msg_input_deserializes() {
     let msg: ClientMsg = serde_json::from_str(r#"{"type":"input","data":"ls\n"}"#).unwrap();
     match msg {
-        ClientMsg::Input { data } => assert_eq!(data, "ls\n"),
+        ClientMsg::Input { data, claim } => {
+            assert_eq!(data, "ls\n");
+            assert!(claim.is_none());
+        }
         _ => panic!("expected Input"),
+    }
+}
+
+#[test]
+fn client_msg_input_with_claim_deserializes() {
+    let msg: ClientMsg =
+        serde_json::from_str(r#"{"type":"input","data":"a","claim":{"cols":100,"rows":30}}"#)
+            .unwrap();
+    match msg {
+        ClientMsg::Input { data, claim } => {
+            assert_eq!(data, "a");
+            assert_eq!(claim, Some(super::types::SizeClaim { cols: 100, rows: 30 }));
+        }
+        _ => panic!("expected Input"),
+    }
+}
+
+#[test]
+fn client_msg_claim_deserializes() {
+    let msg: ClientMsg = serde_json::from_str(r#"{"type":"claim","cols":100,"rows":30}"#).unwrap();
+    match msg {
+        ClientMsg::Claim { cols, rows } => {
+            assert_eq!(cols, 100);
+            assert_eq!(rows, 30);
+        }
+        _ => panic!("expected Claim"),
+    }
+}
+
+#[test]
+fn client_msg_snapshot_request_defaults_claim_to_false() {
+    let msg: ClientMsg =
+        serde_json::from_str(r#"{"type":"snapshot_request","cols":100,"rows":30}"#).unwrap();
+    match msg {
+        ClientMsg::SnapshotRequest { cols, rows, claim } => {
+            assert_eq!((cols, rows), (100, 30));
+            assert!(!claim);
+        }
+        _ => panic!("expected SnapshotRequest"),
     }
 }
 

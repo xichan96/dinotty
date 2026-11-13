@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
 import { isTauri, createTransport, type Transport, type TransportOptions } from './useTransport'
+import { isWebglDisabled, markOp, recordEvent } from './useDebugRecorder'
 import { onThemeChange, settings, type MobileInputMode } from './useSettings'
 import {
   FONT_SIZE_MAX,
@@ -611,19 +612,24 @@ export class TerminalInstance {
     this.xterm.loadAddon(unicode11)
     this.xterm.unicode.activeVersion = '11'
 
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => {
-        webgl.dispose()
-        // Disposing restores the canvas renderer but doesn't trigger a
-        // redraw. Without refresh, the terminal appears frozen until the
-        // next resize (e.g. dragging the window) kicks the render service.
-        const rows = this.xterm?.rows ?? 1
-        this.xterm?.refresh(0, Math.max(0, rows - 1))
-      })
-      this.xterm.loadAddon(webgl)
-    } catch {
-      /* DOM renderer fallback */
+    if (!isWebglDisabled()) {
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => {
+          recordEvent('gl-lost')
+          webgl.dispose()
+          // Disposing restores the canvas renderer but doesn't trigger a
+          // redraw. Without refresh, the terminal appears frozen until the
+          // next resize (e.g. dragging the window) kicks the render service.
+          const rows = this.xterm?.rows ?? 1
+          this.xterm?.refresh(0, Math.max(0, rows - 1))
+        })
+        this.xterm.loadAddon(webgl)
+        recordEvent('gl-ok')
+      } catch {
+        /* DOM renderer fallback */
+        recordEvent('gl-fail')
+      }
     }
 
     this.searchAddon = new SearchAddon()
@@ -782,7 +788,7 @@ export class TerminalInstance {
       })
     )
 
-    // Register URL link provider (localhost → preview, others → new tab)
+    // Register URL link provider (all URL links open in the in-app preview)
     this.xterm.registerLinkProvider(
       createUrlLinkProvider({
         readLine: (bufferLineNumber) =>
@@ -1551,12 +1557,15 @@ export class TerminalInstance {
     let rows = this.xterm.rows
     if (cols < 2 || rows < 2) {
       // xterm hasn't been fit yet — do one fit now to read cols/rows.
+      markOp('term.fit')
       try {
         this.fitAddon.fit()
         cols = this.xterm.cols
         rows = this.xterm.rows
       } catch {
         return
+      } finally {
+        markOp('term.fit.done')
       }
     }
     if (cols < 2 || rows < 2) return
@@ -1626,6 +1635,7 @@ export class TerminalInstance {
           clearTimeout(this._writeWatchdog)
           this._writeWatchdog = null
         }
+        markOp('term.write.done')
         processNext()
       }
       // Watchdog: xterm.write() can silently drop the callback (no throw,
@@ -1642,6 +1652,7 @@ export class TerminalInstance {
         advance()
       }, 1000)
       try {
+        markOp('term.write')
         if (chunk.length > MAX_CHUNK) {
           this._writeQueue.unshift(chunk.slice(MAX_CHUNK))
           this.xterm.write(chunk.slice(0, MAX_CHUNK), advance)
@@ -1799,10 +1810,13 @@ export class TerminalInstance {
       return null
     }
     this._clearZeroSizeRetry()
+    markOp('term.fit')
     try {
       this.fitAddon.fit()
     } catch {
       return null
+    } finally {
+      markOp('term.fit.done')
     }
     const cols = this.xterm.cols
     const rows = this.xterm.rows
@@ -1886,10 +1900,13 @@ export class TerminalInstance {
       return
     }
     this._clearZeroSizeRetry()
+    markOp('term.fit')
     try {
       this.fitAddon.fit()
     } catch {
       return
+    } finally {
+      markOp('term.fit.done')
     }
 
     const cols = this.xterm.cols

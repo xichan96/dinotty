@@ -476,6 +476,16 @@ impl Session {
         // Serialize with debounced resizes and snapshot handshakes so a stale
         // resize cannot overwrite this claim after it was accepted.
         let _resize_gate = self.resize_gate.lock().await;
+        let current = *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        tracing::debug!("claim: client={client_id} requested={cols}x{rows} current={current:?}");
+        if current == (cols, rows) {
+            // The PTY already has this size. Take ownership without resizing or
+            // broadcasting: an identical Resize would only make the peer follow
+            // and risk a claim/reclaim loop.
+            *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(client_id);
+            return Ok(());
+        }
         let previous = {
             let mut owner =
                 self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -493,6 +503,7 @@ impl Session {
             return Err(e);
         }
         self.broadcast_resize_to_peers(client_id, cols, rows);
+        tracing::debug!("claim applied: client={client_id} {cols}x{rows}");
         Ok(())
     }
 
@@ -574,7 +585,14 @@ impl Session {
         // Allowed to resize when the client explicitly claims, when it already
         // owns the PTY, or when nobody owns it yet (first client on a pane).
         let should_resize = claim || previous_owner.is_none() || previous_owner == Some(client_id);
-        let (snap_cols, snap_rows) = if should_resize {
+        let current = *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // An identical size needs no PTY work and no peer broadcast; only the
+        // ownership transfer matters.
+        let needs_resize = should_resize && current != (cols, rows);
+        tracing::debug!(
+            "snapshot request: client={client_id} requested={cols}x{rows} claim={claim} current={current:?} should_resize={should_resize} needs_resize={needs_resize}"
+        );
+        let (snap_cols, snap_rows) = if needs_resize {
             {
                 let mut owner =
                     self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -598,9 +616,14 @@ impl Session {
                 return Err(e);
             }
             (cols, rows)
+        } else if should_resize {
+            // Same size, but the claim transfers ownership.
+            *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(client_id);
+            (cols, rows)
         } else {
             // Non-owner: replay at the current owner size without touching the PTY.
-            *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            current
         };
 
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -630,7 +653,7 @@ impl Session {
             );
         }
         drop(clients);
-        if should_resize {
+        if needs_resize {
             self.broadcast_resize_to_peers(client_id, snap_cols, snap_rows);
         }
 
@@ -784,6 +807,17 @@ impl Session {
                 return;
             }
         }
+        // Identical size: no PTY work and no broadcast. Re-broadcasting the
+        // same size makes a peer follow and can trigger a claim/reclaim loop.
+        let current = *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current == (cols, rows) {
+            if owner.is_none() {
+                *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(origin_id);
+            }
+            tracing::debug!("apply_and_broadcast_resize: no-op {cols}x{rows}, origin={origin_id}");
+            return;
+        }
         // ghostty pattern (src/terminal/c/terminal.zig:483-485): resize breaks
         // synchronized output mode. The DEC 2026 spec explicitly allows the
         // terminal to end sync mode on resize, and doing so prevents the
@@ -818,6 +852,7 @@ impl Session {
             *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
                 Some(origin_id);
         }
+        tracing::debug!("resize applied: origin={origin_id} {cols}x{rows}");
         self.broadcast_resize_to_peers(origin_id, cols, rows);
     }
 

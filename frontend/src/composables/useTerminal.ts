@@ -404,6 +404,15 @@ export class TerminalInstance {
   private _claimQueued = false
   private _claimTimer: ReturnType<typeof setTimeout> | null = null
   private _claimCleanup: (() => void) | null = null
+  // Resize reentrancy guard. xterm's WebGL renderer must not be resized
+  // re-entrantly; queue the latest request and apply it after the current one
+  // returns. Also used to keep hidden (display:none) panes untouched.
+  private _applyingGrid = false
+  private _queuedGrid: { cols: number; rows: number; reason: string } | null = null
+  private _fitQueued = false
+  private _hiddenReplay = false
+  private static readonly MAX_GRID_COLS = 1000
+  private static readonly MAX_GRID_ROWS = 300
   private _followingPeer = false
   private _peerFollowGen = 0
   private _peerFollowTimer: ReturnType<typeof setTimeout> | null = null
@@ -1689,19 +1698,28 @@ export class TerminalInstance {
     // current owner's grid, which may have changed after this replay was
     // encoded. Applying the encoded size to xterm keeps the snapshot coherent;
     // replay_end will re-request at the owner size if they diverged.
-    if (this.xterm && (this.xterm.cols !== cols || this.xterm.rows !== rows)) {
-      try {
-        this.xterm.resize(cols, rows)
-        this._lastCols = cols
-        this._lastRows = rows
-      } catch {
-        /* xterm closed mid-reconnect; live output will follow */
-      }
+    this._hiddenReplay = !this._paneVisible()
+    markOp(`term.replay ${cols}x${rows}${this._hiddenReplay ? ' hidden' : ''}`)
+    if (!this._hiddenReplay) {
+      // Never resize a display:none xterm (WebGL renderer freeze suspect).
+      this._applyGrid(cols, rows, 'replay')
+      this._lastCols = cols
+      this._lastRows = rows
     }
     this._beginTransaction()
   }
 
   private _handleReplayEnd() {
+    const hiddenReplay = this._hiddenReplay
+    this._hiddenReplay = false
+    const encoded = this._snapshotRequestedSize
+    if (hiddenReplay) {
+      // A display:none pane must not resize or repaint its WebGL xterm. Drop
+      // the buffered snapshot (a fresh request is made when it becomes
+      // visible) and consume the transaction without writing it.
+      this._transactionBuffer = []
+      this._transactionBytes = 0
+    }
     this._endTransaction()
     let mismatch = false
     // Compare the wrapper's proposed dimensions (what the next fit would use)
@@ -1747,6 +1765,16 @@ export class TerminalInstance {
           `${this._snapshotRequestedSize.cols}x${this._snapshotRequestedSize.rows}, ` +
           `owner now ${this._knownPtyCols}x${this._knownPtyRows} — re-requesting`
       )
+    }
+    if (hiddenReplay) {
+      // The hidden snapshot was discarded rather than painted. Keep a request
+      // owed so the visible pane gets a coherent replay at its own grid.
+      this._snapshotRequestedSize = null
+      this._snapshotPending = true
+      this._snapshotAttempts = 0
+      markOp(`term.replay.dropped hidden ${encoded?.cols}x${encoded?.rows}`)
+      this._scheduleSettleResize()
+      return
     }
     this._snapshotRequestedSize = null
     this._snapshotPending = false
@@ -2099,6 +2127,19 @@ export class TerminalInstance {
     // this device reclaims.
     this._isOwner = false
     this._claimNeeded = true
+    this._knownPtyCols = cols
+    this._knownPtyRows = rows
+    // Do not resize a display:none xterm. The grid is applied when the pane
+    // becomes visible (settle ladder / focus / first input).
+    if (!this._paneVisible()) {
+      this._followingPeer = false
+      this._peerFollowGen++
+      if (this._peerFollowTimer) {
+        clearTimeout(this._peerFollowTimer)
+        this._peerFollowTimer = null
+      }
+      return
+    }
     if (this._refitRaf) {
       cancelAnimationFrame(this._refitRaf)
       this._refitRaf = 0
@@ -2110,21 +2151,14 @@ export class TerminalInstance {
       this._settleRaf = 0
     }
     this._settleGeneration++
-    try {
-      this.xterm.resize(cols, rows)
-    } catch {
-      return
-    }
+    this._applyGrid(cols, rows, 'peer')
     const heightChanged = rows !== this._lastRows
     this._lastCols = cols
     this._lastRows = rows
-    // These track the PTY size we know about, not strictly "last sent": the
-    // peer just told us the PTY is now this size. Without updating them a later
-    // settle would dedup against our old size and could never re-assert.
-    this._knownPtyCols = cols
-    this._knownPtyRows = rows
     if (heightChanged && !this.isMouseModeEnabled()) {
+      markOp('term.scroll')
       this.xterm.scrollToBottom()
+      markOp('term.scroll.done')
       this._writePinnedToBottom = true
     }
     const gen = ++this._peerFollowGen
@@ -2172,14 +2206,33 @@ export class TerminalInstance {
       this._scheduleZeroSizeRetry()
       return null
     }
+    // Refuse a pathological layout before fit() resizes xterm: an unbounded
+    // wrapper feedback loop would otherwise allocate an enormous WebGL canvas.
+    const proposed = this.fitAddon.proposeDimensions?.()
+    if (
+      proposed &&
+      (proposed.cols > TerminalInstance.MAX_GRID_COLS ||
+        proposed.rows > TerminalInstance.MAX_GRID_ROWS)
+    ) {
+      console.warn(
+        `[dinotty] refusing oversized fit ${proposed.cols}x${proposed.rows}; wrapper may be unbounded`
+      )
+      return null
+    }
+    if (this._applyingGrid) {
+      this._fitQueued = true
+      return null
+    }
     this._clearZeroSizeRetry()
-    markOp('term.fit')
+    this._applyingGrid = true
+    markOp(`term.fit ${this.xterm.cols}x${this.xterm.rows}`)
     try {
       this.fitAddon.fit()
     } catch {
       return null
     } finally {
-      markOp('term.fit.done')
+      this._applyingGrid = false
+      markOp(`term.fit.done ${this.xterm?.cols}x${this.xterm?.rows}`)
     }
     const cols = this.xterm.cols
     const rows = this.xterm.rows
@@ -2189,16 +2242,64 @@ export class TerminalInstance {
     this._lastCols = cols
     this._lastRows = rows
     if (heightChanged && !this.isMouseModeEnabled()) {
+      markOp('term.scroll')
       this.xterm.scrollToBottom()
+      markOp('term.scroll.done')
       this._writePinnedToBottom = true
     }
+    if (this._fitQueued) {
+      this._fitQueued = false
+      this._refit()
+    }
     return { cols, rows, changed }
+  }
+
+  /**
+   * Single entry point for direct `xterm.resize` calls. Serializes re-entrant
+   * requests and leaves hidden panes alone: resizing a display:none xterm (the
+   * WebGL renderer in particular) is the suspected freeze trigger.
+   */
+  private _applyGrid(cols: number, rows: number, reason: string): boolean {
+    if (!this.xterm) return false
+    if (cols < 2 || rows < 2) return false
+    if (cols > TerminalInstance.MAX_GRID_COLS || rows > TerminalInstance.MAX_GRID_ROWS) {
+      console.warn(
+        `[dinotty] refusing oversized terminal grid ${cols}x${rows} (${reason}); wrapper may be unbounded`
+      )
+      return false
+    }
+    if (!this._paneVisible()) return false
+    if (this._applyingGrid) {
+      this._queuedGrid = { cols, rows, reason }
+      return false
+    }
+    this._applyingGrid = true
+    let changed = false
+    markOp(`term.resize ${cols}x${rows} ${reason}`)
+    try {
+      if (this.xterm.cols !== cols || this.xterm.rows !== rows) {
+        this.xterm.resize(cols, rows)
+        changed = true
+      }
+    } catch {
+      changed = false
+    } finally {
+      this._applyingGrid = false
+      markOp(`term.resize.done ${cols}x${rows} ${reason}`)
+    }
+    const queued = this._queuedGrid
+    this._queuedGrid = null
+    if (queued) this._applyGrid(queued.cols, queued.rows, queued.reason)
+    return changed
   }
 
   /** Apply the owner's grid to a non-owner pane (letterbox / follow). */
   private _applyOwnerGrid(): TerminalFit | null {
     if (!this.xterm) return null
     if (this._knownPtyCols < 2 || this._knownPtyRows < 2) return null
+    // Never resize a display:none pane. The hidden WebGL canvas is the
+    // suspected freeze trigger; apply the grid when the pane becomes visible.
+    if (!this._paneVisible()) return null
     const cols = this._knownPtyCols
     const rows = this._knownPtyRows
     const changed = cols !== this._lastCols || rows !== this._lastRows
@@ -2208,11 +2309,7 @@ export class TerminalInstance {
       return { cols, rows, changed }
     }
     const heightChanged = rows !== this._lastRows
-    try {
-      this.xterm.resize(cols, rows)
-    } catch {
-      return null
-    }
+    if (!this._applyGrid(cols, rows, 'owner')) return null
     this._lastCols = cols
     this._lastRows = rows
     if (heightChanged && !this.isMouseModeEnabled()) {

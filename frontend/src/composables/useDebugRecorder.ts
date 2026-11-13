@@ -204,7 +204,7 @@ function persist(): void {
         opAgeMs: lastOp ? Date.now() - lastOp.t : null,
         vis: document.visibilityState,
         crash: recoveredFromCrash,
-      }),
+      })
     )
   } catch {
     /* quota */
@@ -273,7 +273,7 @@ function installSocketRecorder(): void {
   const Wrapped = function (
     this: unknown,
     url: string | URL,
-    protocols?: string | string[],
+    protocols?: string | string[]
   ): WebSocket {
     const socket =
       protocols === undefined ? new RealWebSocket(url) : new RealWebSocket(url, protocols)
@@ -356,7 +356,7 @@ function installLifecycleRecorder(): void {
         h: window.innerHeight,
         dpr: window.devicePixelRatio,
       },
-      true,
+      true
     )
   })
 }
@@ -432,7 +432,7 @@ function startMonitors(): void {
         msgs: totalMessages,
         op: lastOp?.n ?? null,
       },
-      true,
+      true
     )
   }, HEARTBEAT_MS)
 }
@@ -651,7 +651,7 @@ function buildPanel(): void {
           escapeHtml(event.e) +
           ' ' +
           escapeHtml(describe(event)) +
-          '</span></div>',
+          '</span></div>'
       )
     }
     log.innerHTML = rows.join('')
@@ -727,7 +727,7 @@ export function startRecording(): void {
       cores: navigator.hardwareConcurrency,
       webgl: !isWebglDisabled(),
     },
-    true,
+    true
   )
 }
 
@@ -751,7 +751,11 @@ function isCleanEnding(last: DebugEvent): boolean {
   return last.e === 'vis' && (last.d as { v?: unknown } | undefined)?.v === 'hidden'
 }
 
-function detectAbnormalPreviousSession(): { last: DebugEvent; ageMs: number; op: string | null } | null {
+function detectAbnormalPreviousSession(): {
+  last: DebugEvent
+  ageMs: number
+  op: string | null
+} | null {
   loadEvents()
   const last = events[events.length - 1]
   if (!last || isCleanEnding(last)) return null
@@ -764,6 +768,12 @@ function detectAbnormalPreviousSession(): { last: DebugEvent; ageMs: number; op:
     if (raw) op = (JSON.parse(raw) as { n?: string } | null)?.n ?? null
   } catch {
     /* ignore malformed breadcrumb */
+  }
+  // Fallback: every event carries the in-flight op in `d.op`. If the OP_KEY
+  // write was lost (or cleared), the last event still names the operation.
+  if (!op) {
+    const fallback = (last.d as { op?: unknown } | undefined)?.op
+    if (typeof fallback === 'string') op = fallback
   }
   return { last, ageMs, op }
 }
@@ -830,12 +840,8 @@ function boot(): void {
   startRecording()
   if (previous) {
     recoveredFromCrash = true
-    recoveredLastEvent = previous.last.e
-    record(
-      'recovered',
-      { last: previous.last.e, ageMs: previous.ageMs, op: previous.op },
-      true,
-    )
+    recoveredLastEvent = previous.op ? `${previous.last.e}@${previous.op}` : previous.last.e
+    record('recovered', { last: previous.last.e, ageMs: previous.ageMs, op: previous.op }, true)
     // The previous page never got to say goodbye (no `pagehide`): this is the
     // freeze that killed the renderer. Surface its log instead of hiding it.
     setPanelVisible(true)

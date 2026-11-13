@@ -58,7 +58,7 @@ interface FakeTerm {
  * ownership, snapshot, and transaction state machines are exercised; attach()
  * (WebSocket, DOM, addons) is deliberately skipped.
  */
-function makeTerm(localCols = 120, localRows = 40): FakeTerm {
+function makeTerm(localCols = 120, localRows = 40, visible = true): FakeTerm {
   const term = new TerminalInstance('resize-test') as any
   const xterm: any = {
     cols: localCols,
@@ -80,7 +80,9 @@ function makeTerm(localCols = 120, localRows = 40): FakeTerm {
   const send = vi.fn()
   term.xterm = xterm
   term.fitAddon = fit
-  term._wrapper = { getBoundingClientRect: () => ({ width: 1000, height: 600 }) }
+  term._wrapper = {
+    getBoundingClientRect: () => (visible ? { width: 1000, height: 600 } : { width: 0, height: 0 }),
+  }
   term._lastCols = localCols
   term._lastRows = localRows
   term._knownPtyCols = localCols
@@ -230,6 +232,52 @@ describe('peer-follow refit', () => {
     term._doFitAndResize(true)
 
     expect(term._sendResize).not.toHaveBeenCalled()
+  })
+})
+
+describe('hidden panes', () => {
+  it('does not resize a hidden xterm when following a peer', () => {
+    const { term, xterm } = makeTerm(120, 40, false)
+    term._isOwner = true
+
+    term._followPeerResize(80, 24)
+
+    expect(xterm.resize).not.toHaveBeenCalled()
+    expect(term._knownPtyCols).toBe(80)
+    expect(term._knownPtyRows).toBe(24)
+    expect(term._claimNeeded).toBe(true)
+  })
+
+  it('does not apply the owner grid to a hidden xterm', () => {
+    const { term, xterm } = makeTerm(120, 40, false)
+    term._isOwner = false
+    term._knownPtyCols = 80
+    term._knownPtyRows = 24
+
+    expect(term._applyOwnerGrid()).toBeNull()
+    expect(xterm.resize).not.toHaveBeenCalled()
+  })
+
+  it('drops a replay received while hidden and keeps a snapshot owed', () => {
+    const { term, xterm } = makeTerm(120, 40, false)
+    term._snapshotPending = true
+
+    term._handleReplayBegin(80, 24)
+    term._appendToTransaction('snapshot-bytes')
+    term._handleReplayEnd()
+
+    expect(xterm.resize).not.toHaveBeenCalled()
+    expect(term._transactionBuffer).toEqual([])
+    expect(term._snapshotPending).toBe(true)
+  })
+
+  it('refuses a pathological grid before touching xterm', () => {
+    const { term, xterm } = makeTerm(120, 40)
+    term.fitAddon.proposeDimensions = vi.fn(() => ({ cols: 5000, rows: 900 }))
+
+    expect(term._fitLocal()).toBeNull()
+    expect(xterm.resize).not.toHaveBeenCalled()
+    expect(term.fitAddon.fit).not.toHaveBeenCalled()
   })
 })
 

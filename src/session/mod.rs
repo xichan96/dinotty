@@ -703,6 +703,19 @@ impl Session {
     /// size without resizing the PTY, then clears the flag so `broadcast()`
     /// stops dropping live output. Returns true when a recovery was emitted.
     pub fn recover_snapshot_if_pending(&self, client_id: u64) -> bool {
+        // Cheap pre-check before touching synchronized output: the watchdog
+        // calls this for every attached client, and ending an active DEC 2026
+        // block on a client that already completed its handshake cuts a frame
+        // mid-draw for no reason. `set_sync_mode(false)` also takes the sync
+        // lock, so it must not run while the clients lock is held (broadcast
+        // order is sync -> clients); check pending first, then release.
+        let pending =
+            self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(
+                |client| client.id == client_id && client.snapshot_pending.load(Ordering::Relaxed),
+            );
+        if !pending {
+            return false;
+        }
         if self.is_sync_active() {
             self.set_sync_mode(false);
         }

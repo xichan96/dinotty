@@ -182,6 +182,7 @@ async function main() {
   await mkdir(join(appdata, 'local'), { recursive: true })
   await mkdir(join(appdata, 'profile'), { recursive: true })
   const userDataDir = await mkdtemp(join(tmpdir(), 'dinotty-repro-chrome-'))
+  const menuLog = join(appdata, 'menu-input.log')
 
   const server = spawn(serverBin, ['--port', String(SERVER_PORT)], {
     cwd: appdata,
@@ -197,6 +198,7 @@ async function main() {
       XDG_CONFIG_HOME: join(appdata, 'xdg-config'),
       XDG_DATA_HOME: join(appdata, 'xdg-data'),
       DINOTTY_TOKEN: TOKEN,
+      DINOTTY_MENU_LOG: menuLog,
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   })
@@ -351,6 +353,14 @@ async function main() {
       const screen = await api(`/api/sessions/${paneId}/screen?format=plain`)
       return screen.content ?? ''
     }
+    const readMenuInputLog = async () => {
+      try {
+        const text = await readFile(menuLog, 'utf8')
+        return text.trim().split('\n').slice(-6)
+      } catch (error) {
+        return `(no log: ${error.message})`
+      }
+    }
     await evaluate(
       `window.__dinotty_terminal_api.send(${JSON.stringify(paneId)}, "echo REPRO-OK\\r")`
     )
@@ -369,16 +379,26 @@ async function main() {
     )
     await sleep(2500)
 
+    let menuMode = false
     for (let attempt = 0; attempt < 10; attempt += 1) {
       await sleep(2000)
       const lines = (await readScreen()).split('\n').filter((line) => line.trim())
       const text = lines.join('\n')
+      if (text.includes('DINOTTY-MENU')) {
+        menuMode = true
+        console.log('[repro] menu TUI ready')
+        break
+      }
       if (/OpenCode|opencode/.test(text) && /[▀╹┃│]/.test(text)) {
         console.log('[repro] opencode TUI ready')
         break
       }
-      if (attempt === 9) console.log('[repro] opencode did not render:', JSON.stringify(lines.slice(-4)))
+      if (attempt === 9) console.log('[repro] TUI did not render:', JSON.stringify(lines.slice(-4)))
     }
+    console.log(
+      '[repro] xterm mouse mode:',
+      await evaluate(`document.querySelector('.xterm')?.classList.contains('enable-mouse-events') ?? null`)
+    )
 
     // Responsiveness probe: rAF counter + max gap.
     await evaluate(`(() => {
@@ -402,15 +422,86 @@ async function main() {
     console.log('[repro] terminal rect:', JSON.stringify(rect))
     if (!rect) throw new Error('no terminal pane')
 
+    if (menuMode) {
+      // Direct PTY probe (bypasses the browser): confirms the fixture reads
+      // stdin and that our log path matches.
+      await api(`/api/sessions/${paneId}/input`, {
+        method: 'POST',
+        body: JSON.stringify({ data: 'a' }),
+      })
+      await sleep(400)
+      console.log('[repro] after API input:', JSON.stringify(await readMenuInputLog()))
+      await evaluate(`(() => {
+        document.querySelector('.xterm-helper-textarea')?.focus()
+      })()`)
+      await evaluate(`(() => {
+        window.__mouseProbe = { downs: 0, ups: 0 }
+        const el = document.querySelector('.xterm')
+        el?.addEventListener('mousedown', () => { window.__mouseProbe.downs += 1 }, true)
+        el?.addEventListener('mouseup', () => { window.__mouseProbe.ups += 1 }, true)
+      })()`)
+      // Mouse-only click before any touch: validates that the fixture receives
+      // reports at all (no keyboard, no hover fix involved).
+      const cx = rect.left + rect.width / 2
+      const cy = rect.top + rect.height / 2
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await send('Input.dispatchMouseEvent', {
+          type,
+          x: cx,
+          y: cy,
+          button: 'left',
+          buttons: type === 'mousePressed' ? 1 : 0,
+          clickCount: 1,
+        })
+      }
+      await sleep(600)
+      const screen = await readScreen()
+      console.log('[repro] mouse-only pre-click selections:', (screen.match(/SELECTED \d+/g) ?? []).length)
+      console.log(
+        '[repro] mouse events reaching xterm:',
+        JSON.stringify(await evaluate('window.__mouseProbe'))
+      )
+      // Key probe: confirms stdin reaches the fixture at all.
+      await send('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'a',
+        text: 'a',
+        unmodifiedText: 'a',
+      })
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a' })
+      await sleep(400)
+      console.log('[repro] fixture input log:', JSON.stringify(await readMenuInputLog()))
+    }
+
     const tap = async (x, y) => {
+      // A real phone tap produces touch events followed by compatibility mouse
+      // events; CDP's touch dispatch does not synthesize the mouse pair, so
+      // send both. The fixture's mouse report depends on the second half.
       await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
       await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      })
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      })
     }
 
     // First tap opens the keyboard; later taps must stay inside the shrunken
     // terminal (the keyboard overlays the bottom of the viewport).
-    const tapFractions = [0.5, 0.35, 0.55, 0.25, 0.45, 0.3, 0.6, 0.4, 0.2, 0.5, 0.33, 0.48]
+    const tapFractions = [
+      0.5, 0.88, 0.35, 0.8, 0.55, 0.92, 0.25, 0.75, 0.6, 0.45, 0.85, 0.3,
+    ]
     const samples = []
+    let selected = 0
     let stalled = false
     for (let i = 0; i < TAPS; i += 1) {
       try {
@@ -437,6 +528,12 @@ async function main() {
           }
         })()`)
         samples.push(sample)
+        if (menuMode) {
+          const screen = await readScreen()
+          const match = screen.match(/DINOTTY-MENU[^\n]*selections=(\d+)/)
+          selected = match ? Number(match[1]) : (screen.match(/SELECTED \d+/g) ?? []).length
+          sample.selected = selected
+        }
         console.log(`[repro] tap ${i + 1}:`, JSON.stringify(sample))
         if (sample.gap > 3000) {
           stalled = true
@@ -516,6 +613,17 @@ async function main() {
       process.exitCode = 1
     } else {
       console.log('[repro] PASS: no stall across the taps')
+      if (menuMode && selected < 1) {
+        console.log('[repro] FAIL: taps reached the terminal but no option was selected')
+        process.exitCode = 1
+      } else if (menuMode) {
+        console.log(`[repro] PASS: ${selected} option selection(s) registered`)
+      }
+    }
+    if (menuMode) {
+      const screen = await readScreen()
+      const line = screen.split('\n').find((entry) => entry.includes('DINOTTY-MENU'))
+      console.log('[repro] menu line:', line ?? '(not visible)')
     }
     if (errors.length) console.log('[repro] page errors:', JSON.stringify(errors.slice(-5), null, 2))
 

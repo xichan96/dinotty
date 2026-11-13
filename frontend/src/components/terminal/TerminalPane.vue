@@ -1061,16 +1061,15 @@ onMounted(() => {
   }
   // Primary link activation opens directly instead of showing the menu,
   // so left-click and right-click no longer produce two menu variants (#306).
+  // It opens in the in-app web preview (server-side proxy), not the device's
+  // browser: that is the only way `localhost` links mean the server's machine,
+  // which matters when the client is a phone or tablet (#306).
   self.onPreviewLinkOpen = (url) => {
     emit('linkActivate')
     try {
       const parsed = new URL(url)
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
-      if (isTauri()) {
-        void openUrlInSystemBrowser(url)
-      } else {
-        window.open(url, '_blank', 'noopener,noreferrer')
-      }
+      emit('previewLink', url)
     } catch {
       // Ignore malformed terminal links.
     }

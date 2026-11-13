@@ -479,11 +479,21 @@ impl Session {
         let current = *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         tracing::debug!("claim: client={client_id} requested={cols}x{rows} current={current:?}");
         if current == (cols, rows) {
-            // The PTY already has this size. Take ownership without resizing or
-            // broadcasting: an identical Resize would only make the peer follow
-            // and risk a claim/reclaim loop.
-            *self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some(client_id);
+            // The PTY already has this size. Do not resize. If ownership moved,
+            // still tell the peers: a stale owner must drop `_isOwner` and claim
+            // again on its next gesture. Repeated claims by the same owner stay
+            // silent, so this cannot become a claim/reclaim loop.
+            let previous = {
+                let mut owner =
+                    self.size_owner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                owner.replace(client_id)
+            };
+            if previous != Some(client_id) {
+                self.broadcast_resize_to_peers(client_id, cols, rows);
+                tracing::debug!(
+                    "claim same-size ownership transfer: client={client_id} {cols}x{rows} previous={previous:?}"
+                );
+            }
             return Ok(());
         }
         let previous = {
@@ -585,6 +595,7 @@ impl Session {
         // Allowed to resize when the client explicitly claims, when it already
         // owns the PTY, or when nobody owns it yet (first client on a pane).
         let should_resize = claim || previous_owner.is_none() || previous_owner == Some(client_id);
+        let ownership_changed = should_resize && previous_owner != Some(client_id);
         let current = *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // An identical size needs no PTY work and no peer broadcast; only the
         // ownership transfer matters.
@@ -653,7 +664,7 @@ impl Session {
             );
         }
         drop(clients);
-        if needs_resize {
+        if needs_resize || ownership_changed {
             self.broadcast_resize_to_peers(client_id, snap_cols, snap_rows);
         }
 

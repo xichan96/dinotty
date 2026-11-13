@@ -337,6 +337,62 @@ async fn claim_wins_and_notifies_the_previous_owner() {
     ));
 }
 
+/// A same-size claim moves ownership without touching the PTY, but the previous
+/// owner must still be told so it drops local ownership and can claim again.
+#[tokio::test]
+async fn same_size_claim_transfers_ownership_and_notifies_previous_owner() {
+    let session = stub_session();
+    let (owner, mut owner_rx) = add_ready_client(&session);
+    let (claimer, mut claimer_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut owner_rx);
+    let _ = drain(&mut claimer_rx);
+
+    session.claim_and_resize(claimer, 100, 30).await.expect("same-size claim must apply");
+
+    assert_eq!(*session.size.lock().unwrap(), (100, 30), "PTY must not move");
+    assert_eq!(session.size_owner_id(), Some(claimer));
+    assert!(
+        matches!(
+            drain(&mut owner_rx).first(),
+            Some(SessionClientEvent::Resize { cols: 100, rows: 30 })
+        ),
+        "previous owner must receive the ownership notice"
+    );
+
+    // Repeated same-owner claims stay silent (no claim/reclaim loop).
+    session.claim_and_resize(claimer, 100, 30).await.expect("repeat claim must apply");
+    assert!(drain(&mut owner_rx).is_empty());
+}
+
+/// The same ownership notice applies when the claim arrives as a snapshot
+/// request, which is how a reconnecting device claims.
+#[tokio::test]
+async fn same_size_claiming_snapshot_notifies_previous_owner() {
+    let session = stub_session();
+    let (owner, mut owner_rx) = add_ready_client(&session);
+    let (claimer, mut claimer_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut owner_rx);
+    let _ = drain(&mut claimer_rx);
+
+    session
+        .atomic_resize_and_snapshot_for_client(claimer, 100, 30, true)
+        .await
+        .expect("same-size claiming snapshot must succeed");
+
+    assert_eq!(*session.size.lock().unwrap(), (100, 30));
+    assert_eq!(session.size_owner_id(), Some(claimer));
+    assert!(matches!(
+        drain(&mut owner_rx).first(),
+        Some(SessionClientEvent::Resize { cols: 100, rows: 30 })
+    ));
+    assert!(matches!(
+        drain(&mut claimer_rx).first(),
+        Some(SessionClientEvent::ReplayBegin { cols: 100, rows: 30 })
+    ));
+}
+
 /// A non-owner's ordinary resize is ignored and answered with the owner size,
 /// so the follower can adopt the real PTY grid instead of drifting.
 #[tokio::test]

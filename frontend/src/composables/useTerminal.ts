@@ -326,6 +326,19 @@ export class TerminalInstance {
   // changed mid-replay — if so, the snapshot is encoded at the wrong size and
   // we should re-request. Null before the first SnapshotRequest is sent.
   private _snapshotRequestedSize: { cols: number; rows: number } | null = null
+  // Bounded retry for a SnapshotRequest that never produces a replay (lost
+  // request, server-side failure). Without it, the server stays
+  // snapshot_pending and drops every Output chunk, leaving a blank pane until a
+  // hard reload.
+  private _snapshotAttempts = 0
+  private _snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
+  private static readonly SNAPSHOT_RETRY_MS = 3000
+  private static readonly MAX_SNAPSHOT_ATTEMPTS = 3
+  // Watchdog for a replay/sync transaction that never closes (e.g. ReplayEnd
+  // dropped by a full client channel). While _transactionDepth > 0 every
+  // Output is buffered and never written, so a lost end event wedges the pane.
+  private _transactionWatchdog: ReturnType<typeof setTimeout> | null = null
+  private static readonly TRANSACTION_WATCHDOG_MS = 5000
   // True between Reconnected and replay_end. While set, _sendResize is
   // suppressed: the server's atomic_resize_and_snapshot does the PTY resize
   // in the same critical section as the snapshot, so a client-sent resize
@@ -367,15 +380,16 @@ export class TerminalInstance {
   private static readonly ZERO_SIZE_MAX_RETRIES = 120
   private _transportConnected = false
   private _forceWebSocket = false
-  private _lastSentCols = 0
-  private _lastSentRows = 0
+  // Size we currently believe the PTY has. Updated on every successful send
+  // and on every peer `Resize`/`Reconnected`. It is intentionally the PTY's
+  // known size, not "what this client last sent": a follower that adopts a
+  // peer size must still be able to re-assert its local size later.
+  private _knownPtyCols = 0
+  private _knownPtyRows = 0
   private _resizeCooldownUntil = 0
   private _followingPeer = false
   private _peerFollowGen = 0
   private _peerFollowTimer: ReturnType<typeof setTimeout> | null = null
-  private _pendingLocalRefit = false
-  private _authWrapperW = 0
-  private _authWrapperH = 0
   private _wheel: TerminalWheel | null = null
   private _dropCleanup: (() => void) | null = null
   private _overlayCtl: ReturnType<typeof createTerminalOverlay> | null = null
@@ -1142,6 +1156,8 @@ export class TerminalInstance {
     for (const h of this._settleTimeouts) clearTimeout(h)
     this._settleTimeouts = []
     this._clearZeroSizeRetry()
+    this._clearSnapshotRetry()
+    this._clearTransactionWatchdog()
     if (this._settleRaf) cancelAnimationFrame(this._settleRaf)
     if (this._peerFollowTimer) {
       clearTimeout(this._peerFollowTimer)
@@ -1452,45 +1468,58 @@ export class TerminalInstance {
     // Record the size the server claims the snapshot was encoded at — used
     // at replay_end to detect whether our wrapper changed mid-replay and we
     // need to re-request.
+    this._clearSnapshotRetry()
     this._snapshotRequestedSize = { cols, rows }
     this._beginTransaction()
   }
 
   private _handleReplayEnd() {
     this._endTransaction()
-    // Optional correctness check (MV: just log mismatch; a follow-up can
-    // re-request automatically). If the wrapper size changed during the
-    // replay, the snapshot was encoded at a stale size and may misalign.
+    let mismatch = false
+    // Compare the wrapper's proposed dimensions (what the next fit would use)
+    // to what the snapshot was encoded at. A mismatch means the wrapper (or a
+    // peer follow) changed mid-replay, so the snapshot's absolute addressing
+    // may be clipped or wrapped. The protocol promises a re-request here; a
+    // warn-only path left the pane permanently misaligned until a hard reload.
     if (this._snapshotRequestedSize && this.xterm && this.fitAddon && this._wrapper) {
       const rect = this._wrapper.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) {
-        // Compare xterm's current cols/rows (already fit) to what the
-        // snapshot was encoded at. If they differ, the wrapper changed
-        // during replay.
+        const proposed = this.fitAddon.proposeDimensions?.()
+        const actualCols = proposed?.cols ?? this.xterm.cols
+        const actualRows = proposed?.rows ?? this.xterm.rows
         if (
-          this.xterm.cols !== this._snapshotRequestedSize.cols ||
-          this.xterm.rows !== this._snapshotRequestedSize.rows
+          actualCols !== this._snapshotRequestedSize.cols ||
+          actualRows !== this._snapshotRequestedSize.rows
         ) {
+          mismatch = true
           console.warn(
             `[dinotty] replay_end size mismatch: snapshot ` +
               `${this._snapshotRequestedSize.cols}x${this._snapshotRequestedSize.rows}, ` +
-              `xterm now ${this.xterm.cols}x${this.xterm.rows} — snapshot may misalign`
+              `wrapper now ${actualCols}x${actualRows} — re-requesting`
           )
         }
       }
     }
     this._snapshotRequestedSize = null
-    // End of the snapshot window: _sendResize is no longer suppressed. The
-    // next settle-ladder tick will reclaim the PTY size if our wrapper has
-    // drifted from the snapshot's cols/rows.
     this._snapshotPending = false
+    if (mismatch && this._snapshotAttempts < TerminalInstance.MAX_SNAPSHOT_ATTEMPTS) {
+      this._snapshotAttempts++
+      this._snapshotPending = true
+      console.warn(
+        `[dinotty] snapshot re-request ${this._snapshotAttempts}/${TerminalInstance.MAX_SNAPSHOT_ATTEMPTS}`
+      )
+    } else {
+      this._snapshotAttempts = 0
+    }
     // Re-arm the ladder: the transaction guard suppressed fitting during
-    // the replay, so any wrapper change during it is now applied.
+    // the replay, so any wrapper change during it is now applied (and a
+    // pending re-request is sent at the new geometry).
     this._scheduleSettleResize()
   }
 
   private _beginTransaction() {
     this._transactionDepth++
+    if (this._transactionDepth === 1) this._armTransactionWatchdog()
   }
 
   private _endTransaction() {
@@ -1500,6 +1529,7 @@ export class TerminalInstance {
     }
     this._transactionDepth--
     if (this._transactionDepth === 0) {
+      this._clearTransactionWatchdog()
       this._flushTransaction()
     }
   }
@@ -1525,11 +1555,78 @@ export class TerminalInstance {
   }
 
   private _resetTransaction() {
+    this._clearTransactionWatchdog()
+    this._clearSnapshotRetry()
     this._transactionDepth = 0
     this._transactionBuffer = []
     this._transactionBytes = 0
     this._snapshotRequestedSize = null
     this._snapshotPending = false
+    this._snapshotAttempts = 0
+  }
+
+  /// Force-advance a transaction that never received its end event. A dropped
+  /// ReplayEnd/SyncEnd (full client channel, buggy app) leaves depth > 0 and
+  /// every subsequent Output buffered forever — the pane looks frozen until a
+  /// reload. Flush what we have and resume live output.
+  private _armTransactionWatchdog() {
+    if (this._transactionWatchdog) return
+    this._transactionWatchdog = setTimeout(() => {
+      this._transactionWatchdog = null
+      if (this._destroyed || this._transactionDepth === 0) return
+      console.warn(
+        `[dinotty] transaction watchdog fired at depth ${this._transactionDepth}; flushing partial buffer`
+      )
+      this._transactionDepth = 0
+      this._flushTransaction()
+      this._snapshotRequestedSize = null
+      this._snapshotPending = false
+      this._scheduleSettleResize()
+    }, TerminalInstance.TRANSACTION_WATCHDOG_MS)
+  }
+
+  private _clearTransactionWatchdog() {
+    if (this._transactionWatchdog) {
+      clearTimeout(this._transactionWatchdog)
+      this._transactionWatchdog = null
+    }
+  }
+
+  private _clearSnapshotRetry() {
+    if (this._snapshotRetryTimer) {
+      clearTimeout(this._snapshotRetryTimer)
+      this._snapshotRetryTimer = null
+    }
+  }
+
+  /// Retry a SnapshotRequest that produced no replay. The server drops every
+  /// Output chunk for a pending client, so a lost request is a permanently
+  /// blank pane without this. Bounded attempts; after that, give up on the
+  /// snapshot window and let normal resize/output resume.
+  private _armSnapshotRetry() {
+    this._clearSnapshotRetry()
+    this._snapshotRetryTimer = setTimeout(() => {
+      this._snapshotRetryTimer = null
+      if (this._destroyed || !this._snapshotPending) return
+      if (this._snapshotAttempts >= TerminalInstance.MAX_SNAPSHOT_ATTEMPTS) {
+        console.warn(
+          `[dinotty] snapshot_request timed out after ${TerminalInstance.MAX_SNAPSHOT_ATTEMPTS} attempts; resuming live output`
+        )
+        this._snapshotRequestedSize = null
+        this._snapshotPending = false
+        this._scheduleSettleResize()
+        return
+      }
+      this._snapshotAttempts++
+      // Clear the in-flight guard so _maybeSendSnapshotRequest can fire again.
+      this._snapshotRequestedSize = null
+      this._maybeSendSnapshotRequest()
+      if (!this._snapshotRequestedSize) {
+        // Wrapper is still collapsed or xterm is not ready; keep the zero-size
+        // retry alive so the next recovery attempts the request again.
+        this._scheduleZeroSizeRetry()
+      }
+    }, TerminalInstance.SNAPSHOT_RETRY_MS)
   }
 
   /// Send a snapshot_request to the server after the wrapper has converged to
@@ -1571,10 +1668,26 @@ export class TerminalInstance {
     if (cols < 2 || rows < 2) return
     this._snapshotRequestedSize = { cols, rows }
     const msg: ClientMsg = { type: 'snapshot_request', cols, rows }
+    let sent = false
     if (this.ws) {
-      this.ws.send(JSON.stringify(msg))
+      try {
+        this.ws.send(JSON.stringify(msg))
+        sent = true
+      } catch {
+        sent = false
+      }
     } else if (this._transport) {
-      this._transport.send(msg)
+      try {
+        this._transport.send(msg)
+        sent = true
+      } catch {
+        sent = false
+      }
+    }
+    if (sent) {
+      this._armSnapshotRetry()
+    } else {
+      this._snapshotRequestedSize = null
     }
   }
 
@@ -1694,10 +1807,6 @@ export class TerminalInstance {
   }
 
   _refit() {
-    if (this._followingPeer) {
-      if (this._wrapperChanged()) this._pendingLocalRefit = true
-      return
-    }
     if (!this.fitAddon || !this._wrapper) return
     if (this._refitRaf) return
     this._refitRaf = requestAnimationFrame(() => {
@@ -1721,21 +1830,14 @@ export class TerminalInstance {
     } else {
       return false
     }
-    this._lastSentCols = cols
-    this._lastSentRows = rows
-    // Cooldown: suppress the post-peer-follow reclaim send for a few
-    // seconds so two clients with different stable sizes don't ping-pong
-    // the PTY size back and forth. Only the follower (who didn't recently
-    // initiate) reclaims; the initiator stays quiet and keeps the peer's
-    // size until the user actively resizes.
+    this._knownPtyCols = cols
+    this._knownPtyRows = rows
+    // Interim anti-ping-pong heuristic (replaced by explicit ownership in the
+    // next step): suppress the post-peer-follow reclaim *send* for a few
+    // seconds so two clients with different stable sizes don't oscillate. The
+    // follower still refits its display; only the wire message is delayed.
     this._resizeCooldownUntil = Date.now() + 3000
     return true
-  }
-
-  private _wrapperChanged(): boolean {
-    if (!this._wrapper) return false
-    const r = this._wrapper.getBoundingClientRect()
-    return Math.round(r.width) !== this._authWrapperW || Math.round(r.height) !== this._authWrapperH
   }
 
   private _followPeerResize(cols: number, rows: number) {
@@ -1760,16 +1862,17 @@ export class TerminalInstance {
     const heightChanged = rows !== this._lastRows
     this._lastCols = cols
     this._lastRows = rows
+    // These track the PTY size we know about, not strictly "last sent": the
+    // peer just told us the PTY is now this size. Without updating them a later
+    // settle would dedup against our old size and could never re-assert.
+    this._knownPtyCols = cols
+    this._knownPtyRows = rows
     if (heightChanged && !this.isMouseModeEnabled()) {
       this.xterm.scrollToBottom()
       this._writePinnedToBottom = true
     }
     const gen = ++this._peerFollowGen
     this._followingPeer = true
-    this._pendingLocalRefit = false
-    const rect = this._wrapper?.getBoundingClientRect()
-    this._authWrapperW = rect ? Math.round(rect.width) : 0
-    this._authWrapperH = rect ? Math.round(rect.height) : 0
     if (this._peerFollowTimer) {
       clearTimeout(this._peerFollowTimer)
       this._peerFollowTimer = null
@@ -1778,23 +1881,16 @@ export class TerminalInstance {
       this._peerFollowTimer = null
       if (this._destroyed || gen !== this._peerFollowGen) return
       this._followingPeer = false
-      this._pendingLocalRefit = false
-      // Refit to local wrapper and reclaim the PTY size - unless we
-      // recently initiated a resize ourselves (cooldown). Without the
-      // cooldown, two clients with different stable sizes ping-pong the
-      // PTY every 500ms: A sends -> B follows -> B reclaims -> A follows
-      // -> A reclaims -> repeat. The initiator (who just sent) stays
-      // quiet; the follower reclaims so its display matches the PTY.
-      if (Date.now() < this._resizeCooldownUntil) return
-      this._settleRefit()
+      // Always refit the display to this device's wrapper. The cooldown only
+      // suppresses the outgoing reclaim message, never the local fit — otherwise
+      // a follower can stay letterboxed on the peer's grid indefinitely.
+      const allowSend = Date.now() >= this._resizeCooldownUntil
+      this._settleRefit(allowSend)
     }, 500) as unknown as ReturnType<typeof setTimeout>
   }
 
-  private _settleRefit(): { cols: number; rows: number } | null {
-    if (this._followingPeer) {
-      if (this._wrapperChanged()) this._pendingLocalRefit = true
-      return null
-    }
+  private _settleRefit(allowSend = true): { cols: number; rows: number } | null {
+    if (this._followingPeer) return null
     if (this._destroyed || !this.fitAddon || !this.xterm || !this._wrapper) return null
     // Skip settling during a sync/replay transaction — buffered Output is
     // encoded at the current xterm geometry and a mid-transaction fit would
@@ -1828,7 +1924,8 @@ export class TerminalInstance {
       this.xterm.scrollToBottom()
       this._writePinnedToBottom = true
     }
-    if (cols !== this._lastSentCols || rows !== this._lastSentRows) {
+    if (this._snapshotPending) this._maybeSendSnapshotRequest()
+    if (allowSend && (cols !== this._knownPtyCols || rows !== this._knownPtyRows)) {
       this._sendResize(cols, rows)
     }
     return { cols, rows }
@@ -1883,10 +1980,7 @@ export class TerminalInstance {
   }
 
   private _doFitAndResize(force = false) {
-    if (this._followingPeer) {
-      if (this._wrapperChanged()) this._pendingLocalRefit = true
-      return
-    }
+    if (this._followingPeer) return
     if (!this.fitAddon || !this.xterm || !this._wrapper) return
     // Skip fitting during a sync/replay transaction: the buffered Output
     // was encoded at the current xterm geometry, and a mid-transaction fit
@@ -1912,6 +2006,12 @@ export class TerminalInstance {
     const cols = this.xterm.cols
     const rows = this.xterm.rows
     if (cols < 2 || rows < 2) return
+    // If we owe the server a snapshot_request (Reconnected arrived while the
+    // wrapper was 0×0), fire it now that the wrapper has recovered. Idempotent
+    // — bails if a request is already in flight. This must run even when the
+    // geometry did not change: a recovered 0×0 wrapper often lands back on the
+    // previous size, and the old early return here stranded the pane blank.
+    if (this._snapshotPending) this._maybeSendSnapshotRequest()
     if (!force && cols === this._lastCols && rows === this._lastRows) return
     const heightChanged = rows !== this._lastRows
     this._lastCols = cols
@@ -1920,21 +2020,11 @@ export class TerminalInstance {
       this.xterm.scrollToBottom()
       this._writePinnedToBottom = true
     }
-    if (force) {
-      this._sendResize(cols, rows)
-    } else {
-      // No frontend debounce: rAF coalesces frame-rate (in _refit), the
-      // _lastSentCols/Rows dedup guards no-op frames, and the server's 25ms
-      // debounce is the single wire-rate throttle. Stacking a frontend
-      // debounce on top added latency without further compression.
-      this._sendResize(cols, rows)
-    }
-    // If we owe the server a snapshot_request (Reconnected arrived while the
-    // wrapper was 0×0), fire it now that the wrapper has recovered. Idempotent
-    // — bails if already sent or if we're between replay_begin and replay_end.
-    if (this._snapshotPending) {
-      this._maybeSendSnapshotRequest()
-    }
+    // No frontend debounce: rAF coalesces frame-rate (in _refit), the
+    // geometry guard above skips no-op frames, and the server's 25ms debounce
+    // is the single wire-rate throttle. Stacking a frontend debounce on top
+    // added latency without further compression.
+    this._sendResize(cols, rows)
   }
 
   isMouseModeEnabled(): boolean {

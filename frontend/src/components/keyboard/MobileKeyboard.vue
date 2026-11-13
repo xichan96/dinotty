@@ -852,7 +852,34 @@ let sysKbOpen = false
 // read as a dismissal. Cleared on every close edge and on orientation change.
 let sysKbArmed = false
 
+// Root CSS vars are shared by several writers, so compare against the live
+// value rather than a local cache: a redundant documentElement style write
+// invalidates style for the whole app, and the phone IME fires visualViewport
+// events (resize + scroll) for every frame of its show/park animation.
+function setRootVar(name: string, value: string) {
+  const root = document.documentElement
+  if (root.style.getPropertyValue(name) !== value) root.style.setProperty(name, value)
+}
+
+// Coalesce viewport events to one layout pass per frame. iOS emits resize and
+// scroll back-to-back while the caret is panned; handling each one ran the
+// textarea measure/resize and the bar move again. Only the last sample in a
+// frame matters for the resulting state.
+let viewportFrame = 0
+let pendingViewport: { height: number; offsetTop: number; baseline: number } | null = null
+
 function onViewportChange(info: { height: number; offsetTop: number; baseline: number }) {
+  pendingViewport = info
+  if (viewportFrame) return
+  viewportFrame = requestAnimationFrame(() => {
+    viewportFrame = 0
+    const next = pendingViewport
+    pendingViewport = null
+    if (next) applyViewportChange(next)
+  })
+}
+
+function applyViewportChange(info: { height: number; offsetTop: number; baseline: number }) {
   const vh = info.height
   if (vh > naturalVH) naturalVH = vh
   // Pan-compensated inset: while WebKit's caret pan (offsetTop > 0) is active,
@@ -863,19 +890,21 @@ function onViewportChange(info: { height: number; offsetTop: number; baseline: n
   const wasSysKbOpen = sysKbOpen
   sysKbOpen = naturalVH - vh > 120
   if (sysKbOpen && !wasSysKbOpen) sysKbArmed = textInputFocused.value
-  document.documentElement.style.setProperty('--kb-open', sysKbOpen || visible.value ? '1' : '0')
+  setRootVar('--kb-open', sysKbOpen || visible.value ? '1' : '0')
   if (barRef.value) {
     if (!visible.value) {
       barRef.value.style.display = 'none'
     } else if (sysKbOpen && textInputFocused.value) {
       // System keyboard open with our input focused: show bar, hide panels via v-show
       barRef.value.style.display = ''
-      barRef.value.style.bottom = `${Math.max(0, off)}px`
     } else if (sysKbOpen) {
       barRef.value.style.display = 'none'
     } else {
       barRef.value.style.display = ''
-      barRef.value.style.bottom = `${Math.max(0, off)}px`
+    }
+    if (!sysKbOpen || textInputFocused.value) {
+      const bottom = `${Math.max(0, off)}px`
+      if (barRef.value.style.bottom !== bottom) barRef.value.style.bottom = bottom
     }
   }
   if (textInputFocused.value) resizeTextInput()
@@ -907,7 +936,7 @@ function onViewportChange(info: { height: number; offsetTop: number; baseline: n
 
 watch(visible, (v) => {
   if (!v) Object.assign(modifierModes, emptyMobileTerminalModifiers())
-  document.documentElement.style.setProperty('--kb-open', v || sysKbOpen ? '1' : '0')
+  setRootVar('--kb-open', v || sysKbOpen ? '1' : '0')
   nextTick(applyHeight)
 })
 
@@ -985,12 +1014,17 @@ onBeforeUnmount(() => {
   }
   viewportSub?.dispose()
   viewportSub = null
+  if (viewportFrame) {
+    cancelAnimationFrame(viewportFrame)
+    viewportFrame = 0
+  }
+  pendingViewport = null
   window.removeEventListener('orientationchange', onOrientationChange)
   resizeObserver?.disconnect()
   unsubThemeMetrics()
   unsubTextMetrics()
   props.ctx.setDesiredHeight(0)
-  document.documentElement.style.setProperty('--kb-open', '0')
+  setRootVar('--kb-open', '0')
 })
 </script>
 

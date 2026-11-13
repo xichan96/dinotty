@@ -46,6 +46,14 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   let postOrientationOccludedVH = 0
   let disposed = false
 
+  // Shared root vars: several writers, so compare against the live value instead
+  // of a local cache. Redundant documentElement style writes invalidate style for
+  // the whole app on every visualViewport tick.
+  function setRootVar(name: string, value: string) {
+    const root = document.documentElement
+    if (root.style.getPropertyValue(name) !== value) root.style.setProperty(name, value)
+  }
+
   function sampleViewport(allowBaselineReset = false) {
     const viewport = window.visualViewport
     if (!viewport) {
@@ -90,15 +98,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     imeOccluding.value = sysKbOpen && keyboardHeight > 0
     const keyboardClosed = lastSampledKeyboardOpen && !sysKbOpen
     lastSampledKeyboardOpen = sysKbOpen
-    document.documentElement.style.setProperty('--sys-kb-height', `${keyboardHeight}px`)
-    document.documentElement.style.setProperty(
-      '--system-toolbar-bottom',
-      `${toolbarBottom.value}px`
-    )
-    document.documentElement.style.setProperty(
-      '--kb-open',
-      sysKbOpen || kbVisible.value ? '1' : '0'
-    )
+    setRootVar('--sys-kb-height', `${keyboardHeight}px`)
+    setRootVar('--system-toolbar-bottom', `${toolbarBottom.value}px`)
+    setRootVar('--kb-open', sysKbOpen || kbVisible.value ? '1' : '0')
     if (keyboardClosed) {
       opts.onSystemKeyboardClose?.()
     }
@@ -133,9 +135,9 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     imeOccluding.value = false
     systemKeyboardOpen.value = false
     systemKeyboardHeight.value = 0
-    document.documentElement.style.setProperty('--sys-kb-height', '0px')
-    document.documentElement.style.setProperty('--system-toolbar-bottom', '0px')
-    document.documentElement.style.setProperty('--kb-open', kbVisible.value ? '1' : '0')
+    setRootVar('--sys-kb-height', '0px')
+    setRootVar('--system-toolbar-bottom', '0px')
+    setRootVar('--kb-open', kbVisible.value ? '1' : '0')
   }
 
   function reset() {
@@ -175,11 +177,11 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
   }
 
   watch(kbVisible, (v) => {
-    document.documentElement.style.setProperty('--kb-open', v ? '1' : '0')
+    setRootVar('--kb-open', v ? '1' : '0')
   })
 
   watch(toolbarBottom, (value) => {
-    document.documentElement.style.setProperty('--system-toolbar-bottom', `${value}px`)
+    setRootVar('--system-toolbar-bottom', `${value}px`)
   })
 
   onMounted(() => {
@@ -220,7 +222,7 @@ export function useViewportResize(opts: ViewportResizeOptions): ViewportResizeSt
     }
     document.documentElement.style.removeProperty('--sys-kb-height')
     document.documentElement.style.removeProperty('--system-toolbar-bottom')
-    document.documentElement.style.setProperty('--kb-open', '0')
+    setRootVar('--kb-open', '0')
   }
 
   onBeforeUnmount(dispose)

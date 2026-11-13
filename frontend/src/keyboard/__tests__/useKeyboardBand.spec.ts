@@ -114,6 +114,28 @@ describe('useKeyboardBand', () => {
     expect(readBand()).toBe('0px')
   })
 
+  it('does not rewrite the band when the measured height is unchanged', async () => {
+    const { el } = elementWithHeight(200)
+    const visible = ref(true)
+    const desiredHeight = ref<number | 'auto' | undefined>('auto')
+    const host = ref<{ $el?: Element | null } | null>(null)
+    useKeyboardBand({ visible, desiredHeight, hostRef: host })
+
+    host.value = { $el: el }
+    await settle()
+    expect(readBand()).toBe('200px')
+
+    const setProperty = vi.spyOn(document.documentElement.style, 'setProperty')
+    MockResizeObserver.instances[0].fire()
+    await settle()
+
+    // A redundant documentElement style write invalidates styles for the whole
+    // app, and the provider fires its observer during the panel height transition.
+    expect(setProperty).not.toHaveBeenCalled()
+    setProperty.mockRestore()
+    el.remove()
+  })
+
   it('leaves the band alone when no desiredHeight is declared', async () => {
     const { el } = elementWithHeight(200)
     const visible = ref(true)

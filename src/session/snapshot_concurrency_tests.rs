@@ -253,7 +253,7 @@ async fn snapshot_for_unknown_or_disconnected_client_errors() {
     assert!(err.contains("not found"), "unexpected error: {err}");
 }
 
-/// Liveness net: a client that never sends SnapshotRequest is recovered at the
+/// Liveness net: a client that never sends `SnapshotRequest` is recovered at the
 /// session's current size by the watchdog path (`spawn_snapshot_watchdog` calls
 /// `recover_snapshot_if_pending`). Live Output must resume afterwards instead
 /// of being dropped forever.
@@ -659,4 +659,55 @@ async fn concurrent_resize_feed_and_snapshot_storm_completes() {
     assert_eq!(*session.size.lock().unwrap(), (80, 24));
     assert_eq!(screen_dims(&session), (80, 24));
     assert!(!client_pending(&session, target_a));
+}
+
+/// The blocking resize must not publish a `size` the backend has not accepted.
+/// With the old `try_lock` implementation a contended backend silently skipped
+/// the PTY resize while `size`/the virtual screen still moved to the requested
+/// geometry, leaving the PTY and every client's grid disagreeing.
+#[test]
+fn resize_waits_for_the_backend_before_publishing_size() {
+    let session = stub_session();
+    let holder_session = Arc::clone(&session);
+    let (acquired_tx, acquired_rx) = std_mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _guard = holder_session.backend.blocking_lock();
+        acquired_tx.send(()).expect("signal lock acquisition");
+        std::thread::sleep(Duration::from_millis(300));
+    });
+    acquired_rx.recv().expect("backend lock must be acquired");
+
+    let resize_session = Arc::clone(&session);
+    let resizer = std::thread::spawn(move || resize_session.resize_blocking(100, 30));
+    // While the backend is busy the resize must still be waiting, not published.
+    std::thread::sleep(Duration::from_millis(100));
+
+    let while_contended = *session.size.lock().unwrap();
+    holder.join().unwrap();
+    let outcome = resizer.join().unwrap().expect("resize must succeed after the lock frees");
+    let after = *session.size.lock().unwrap();
+
+    assert_eq!(while_contended, (80, 24), "size published before the backend accepted it");
+    assert_eq!(outcome, ResizeOutcome::Applied);
+    assert_eq!(after, (100, 30));
+}
+
+/// The watchdog calls `recover_snapshot_if_pending` for every attached client
+/// shortly after attach. For a client that already completed its handshake this
+/// must be a pure no-op: in particular it must not end an active synchronized
+/// output (DEC 2026) block and cut a frame mid-draw. A genuinely pending client
+/// still gets its recovery replay.
+#[test]
+fn recovery_keeps_sync_mode_when_nothing_is_pending() {
+    let session = stub_session();
+    let (ready, _ready_rx) = add_ready_client(&session);
+
+    session.set_sync_mode(true);
+    assert!(!session.recover_snapshot_if_pending(ready), "nothing pending, no replay");
+    assert!(session.is_sync_active(), "no-op recovery must not break sync mode");
+
+    let (pending, mut pending_rx) = session.add_client();
+    assert!(session.recover_snapshot_if_pending(pending), "pending client must be recovered");
+    assert!(!session.is_sync_active(), "a real recovery still ends sync mode");
+    assert!(matches!(drain(&mut pending_rx).last(), Some(SessionClientEvent::ReplayEnd)));
 }

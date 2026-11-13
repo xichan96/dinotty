@@ -104,6 +104,27 @@ fn spawn_tauri_output_forwarder(
 ) {
     let (client_id, mut rx) = session.add_client();
     *session.tauri_client_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(client_id);
+    // Same liveness net as the WebSocket path: a Tauri client that never sends
+    // pty_snapshot_request (or whose request fails) must not leave the pane
+    // blank while every Output chunk is discarded. Use Tauri's runtime handle:
+    // pty_spawn is a sync command and may not be on a Tokio runtime thread.
+    {
+        let watchdog_session = Arc::clone(&session);
+        let watchdog_pane = pane_id.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                dinotty_server::session::SNAPSHOT_WATCHDOG_MS,
+            ))
+            .await;
+            if watchdog_session.recover_snapshot_if_pending(client_id) {
+                tracing::warn!(
+                    pane = %watchdog_pane,
+                    client_id,
+                    "snapshot watchdog: Tauri client still pending; sent recovery snapshot"
+                );
+            }
+        });
+    }
     let fwd_session = Arc::clone(&session);
     // Use a dedicated OS thread instead of tokio async task.
     // app.emit() may block when the WKWebView IPC queue is full — if this

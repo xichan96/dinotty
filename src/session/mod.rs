@@ -54,6 +54,24 @@ pub struct PendingCommandResult {
     pub method: String,
 }
 
+/// How long a client may stay in `snapshot_pending` before the server stops
+/// dropping live output and sends a recovery snapshot at the current size.
+/// Covers the "client never sent `SnapshotRequest`" and "request failed server
+/// side" cases; without it, every `broadcast()` chunk is discarded forever and
+/// the pane stays blank until a hard reload.
+pub const SNAPSHOT_WATCHDOG_MS: u64 = 2500;
+
+/// Result of a synchronous resize attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResizeOutcome {
+    /// PTY (or SSH window-change) accepted the new size; `size` and the virtual
+    /// screen were updated to match.
+    Applied,
+    /// Nothing was changed (session already exited). Callers must not broadcast
+    /// the requested size as if it had been applied.
+    Skipped,
+}
+
 #[derive(Clone, Debug)]
 pub enum SessionClientEvent {
     Output(String),
@@ -369,16 +387,32 @@ impl Session {
         }
     }
 
-    /// Resize the PTY and virtual screen. Consolidates three mutex acquisitions
-    /// that were previously duplicated across Tauri and WS call sites.
+    /// Resize the PTY and virtual screen from a blocking thread.
+    ///
+    /// Unlike the old `try_lock` version, this waits for the backend lock
+    /// instead of silently skipping the PTY resize while still updating `size`
+    /// and the virtual screen. A skipped PTY resize would leave the PTY, the
+    /// server screen, and every client's grid disagreeing indefinitely.
+    ///
+    /// Callers MUST be inside `tokio::task::spawn_blocking` (or otherwise off
+    /// the async runtime), because `blocking_lock` panics on a Tokio worker.
     ///
     /// # Errors
-    /// Returns an error if the PTY resize operation fails.
-    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+    /// Returns an error if the PTY/SSH resize fails. On error, `size` and the
+    /// virtual screen are left untouched.
+    pub(crate) fn resize_blocking(&self, cols: u16, rows: u16) -> Result<ResizeOutcome, String> {
         if self.is_exited() {
-            return Ok(());
+            return Ok(ResizeOutcome::Skipped);
         }
-        if let Ok(mut backend) = self.backend.try_lock() {
+        if self.is_ssh() {
+            let tx = self.ssh_cmd_tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(tx) = tx.as_ref() else {
+                return Err("SSH cmd channel closed".into());
+            };
+            tx.send(SshCmd::Resize(cols, rows))
+                .map_err(|_| "SSH cmd channel closed".to_string())?;
+        } else {
+            let mut backend = self.backend.blocking_lock();
             if let SessionBackend::Local { master, .. } = &mut *backend {
                 use portable_pty::PtySize;
                 master
@@ -386,12 +420,13 @@ impl Session {
                     .map_err(|e| e.to_string())?;
             }
         }
+        // Only publish derived state once the backend accepted the resize.
         *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (cols, rows);
         self.screen
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .resize(cols as usize, rows as usize);
-        Ok(())
+        Ok(ResizeOutcome::Applied)
     }
 
     /// 异步 resize，支持 SSH channel
@@ -464,7 +499,15 @@ impl Session {
         if self.is_sync_active() {
             self.set_sync_mode(false);
         }
-        self.resize_async(cols, rows).await?;
+        if let Err(e) = self.resize_async(cols, rows).await {
+            tracing::warn!(
+                "atomic resize+snapshot: resize {cols}x{rows} failed, client={client_id}: {e}"
+            );
+            // Liveness over geometry: never leave this client pending forever.
+            // Fall back to a replay at the current size.
+            let _ = self.recover_snapshot_if_pending(client_id);
+            return Err(e);
+        }
 
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clients.retain(|c| !c.tx.is_closed());
@@ -472,24 +515,12 @@ impl Session {
             return Err("snapshot target client not found or disconnected".into());
         };
         let tx = client.tx.clone();
-
-        // Snapshot under screen lock (blocks PTY reader from feeding mid-snapshot).
-        let (scrollback_chunks, snapshot) = {
-            let screen = self.screen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let chunks = screen.snapshot_scrollback_chunks(200);
-            let snap = screen.snapshot_for_replay();
-            (chunks, snap)
-        };
+        let (scrollback_chunks, snapshot) = self.take_snapshot();
 
         // Enqueue replay sequence directly to the client's mpsc::Sender.
         // Bypasses send_chunk_to_clients' snapshot_pending check - control
         // events and snapshot chunks must reach the client even while pending.
-        let _ = tx.try_send(SessionClientEvent::ReplayBegin { cols, rows });
-        for chunk in scrollback_chunks {
-            let _ = tx.try_send(SessionClientEvent::Output(chunk));
-        }
-        let _ = tx.try_send(SessionClientEvent::Output(snapshot));
-        let _ = tx.try_send(SessionClientEvent::ReplayEnd);
+        let complete = Self::enqueue_snapshot_replay(&tx, cols, rows, scrollback_chunks, snapshot);
 
         // Clear snapshot_pending AFTER ReplayEnd is enqueued. broadcast() that
         // runs after we release the clients lock will see snapshot_pending=false
@@ -498,8 +529,89 @@ impl Session {
         if let Some(client) = clients.iter().find(|c| c.id == client_id) {
             client.snapshot_pending.store(false, Ordering::Relaxed);
         }
+        if !complete {
+            tracing::warn!(
+                "atomic resize+snapshot: replay enqueue incomplete for client={client_id} ({cols}x{rows}); pending cleared, live output resumes"
+            );
+        }
 
         Ok(())
+    }
+
+    /// Snapshot the virtual screen. The caller must hold the clients lock when
+    /// this is part of a replay sequence, to prevent a concurrent broadcast from
+    /// interleaving with `ReplayBegin`/`ReplayEnd`.
+    fn take_snapshot(&self) -> (Vec<String>, String) {
+        let screen = self.screen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        (screen.snapshot_scrollback_chunks(200), screen.snapshot_for_replay())
+    }
+
+    /// Enqueue a complete replay transaction. Returns false if any event could
+    /// not be queued (channel full/closed); the caller still clears the pending
+    /// flag so live output can resume instead of dropping it forever.
+    fn enqueue_snapshot_replay(
+        tx: &mpsc::Sender<SessionClientEvent>,
+        cols: u16,
+        rows: u16,
+        scrollback_chunks: Vec<String>,
+        snapshot: String,
+    ) -> bool {
+        let mut complete = tx.try_send(SessionClientEvent::ReplayBegin { cols, rows }).is_ok();
+        for chunk in scrollback_chunks {
+            complete &= tx.try_send(SessionClientEvent::Output(chunk)).is_ok();
+        }
+        complete &= tx.try_send(SessionClientEvent::Output(snapshot)).is_ok();
+        complete &= tx.try_send(SessionClientEvent::ReplayEnd).is_ok();
+        complete
+    }
+
+    /// Recover a client that is still `snapshot_pending` (its `SnapshotRequest`
+    /// never arrived, or failed server-side). Replays at the session's current
+    /// size without resizing the PTY, then clears the flag so `broadcast()`
+    /// stops dropping live output. Returns true when a recovery was emitted.
+    pub fn recover_snapshot_if_pending(&self, client_id: u64) -> bool {
+        if self.is_sync_active() {
+            self.set_sync_mode(false);
+        }
+        let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        clients.retain(|client| !client.tx.is_closed());
+        let Some(client) = clients.iter().find(|client| client.id == client_id) else {
+            return false;
+        };
+        if !client.snapshot_pending.load(Ordering::Relaxed) {
+            return false;
+        }
+        let tx = client.tx.clone();
+        let (cols, rows) = *self.size.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (scrollback_chunks, snapshot) = self.take_snapshot();
+        let complete = Self::enqueue_snapshot_replay(&tx, cols, rows, scrollback_chunks, snapshot);
+        if let Some(client) = clients.iter().find(|client| client.id == client_id) {
+            client.snapshot_pending.store(false, Ordering::Relaxed);
+        }
+        if !complete {
+            tracing::warn!(
+                "snapshot recovery: replay enqueue incomplete for client={client_id} ({cols}x{rows}); pending cleared"
+            );
+        }
+        true
+    }
+
+    /// Arm a one-shot watchdog for a freshly attached client. If the client has
+    /// not completed the fit-then-snapshot handshake within
+    /// [`SNAPSHOT_WATCHDOG_MS`], send a recovery snapshot at the current size
+    /// and clear `snapshot_pending` instead of dropping live output forever.
+    pub fn spawn_snapshot_watchdog(session: Arc<Self>, client_id: u64, pane_id: String) {
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(SNAPSHOT_WATCHDOG_MS)).await;
+            if session.recover_snapshot_if_pending(client_id) {
+                tracing::warn!(
+                    pane = %pane_id,
+                    client_id,
+                    timeout_ms = SNAPSHOT_WATCHDOG_MS,
+                    "snapshot watchdog: client still pending; sent recovery snapshot"
+                );
+            }
+        });
     }
 
     /// 异步写入输入数据到后端
@@ -562,8 +674,20 @@ impl Session {
                 return;
             }
         }
-        if self.resize(cols, rows).is_err() {
-            return;
+        match self.resize_blocking(cols, rows) {
+            Ok(ResizeOutcome::Applied) => {}
+            Ok(ResizeOutcome::Skipped) => {
+                tracing::debug!(
+                    "apply_and_broadcast_resize: skipped {cols}x{rows} (session exited), origin={origin_id}"
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "apply_and_broadcast_resize: PTY resize {cols}x{rows} failed, origin={origin_id}: {e}"
+                );
+                return;
+            }
         }
         let mut clients = self.clients.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         clients.retain(|client| !client.tx.is_closed());

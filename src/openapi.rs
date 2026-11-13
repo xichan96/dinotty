@@ -223,7 +223,7 @@ pub async fn session_resize(
             .into_response();
     }
 
-    if let Err(e) = session.resize(req.cols, req.rows) {
+    if let Err(e) = session.resize_async(req.cols, req.rows).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
             .into_response();
     }

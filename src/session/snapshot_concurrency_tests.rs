@@ -253,6 +253,64 @@ async fn snapshot_for_unknown_or_disconnected_client_errors() {
     assert!(err.contains("not found"), "unexpected error: {err}");
 }
 
+/// Liveness net: a client that never sends SnapshotRequest is recovered at the
+/// session's current size by the watchdog path (`spawn_snapshot_watchdog` calls
+/// `recover_snapshot_if_pending`). Live Output must resume afterwards instead
+/// of being dropped forever.
+#[test]
+fn snapshot_recovery_clears_pending_at_current_size() {
+    let session = stub_session();
+    feed_lines(&session, 30);
+    let (client_id, mut rx) = session.add_client();
+    assert!(client_pending(&session, client_id), "add_client must start pending");
+
+    assert!(session.recover_snapshot_if_pending(client_id));
+    assert!(!client_pending(&session, client_id), "recovery must clear pending");
+
+    let events = drain(&mut rx);
+    assert!(
+        matches!(events.first(), Some(SessionClientEvent::ReplayBegin { cols: 80, rows: 24 })),
+        "recovery must replay at the current session size: {events:?}"
+    );
+    assert!(matches!(events.last(), Some(SessionClientEvent::ReplayEnd)));
+
+    session.broadcast("LIVE");
+    assert!(
+        matches!(&drain(&mut rx)[..], [SessionClientEvent::Output(data)] if data == "LIVE"),
+        "live output must resume after recovery"
+    );
+
+    // Second call is a no-op once the flag is clear.
+    assert!(!session.recover_snapshot_if_pending(client_id));
+}
+
+/// A resize attempt on an exited session must not publish geometry or tell
+/// peers about a size the backend never accepted.
+#[test]
+fn resize_on_exited_session_does_not_change_geometry_or_broadcast() {
+    let session = stub_session();
+    let (origin, _origin_rx) = add_ready_client(&session);
+    let (_peer, mut peer_rx) = add_ready_client(&session);
+    session.mark_exited();
+
+    session.apply_and_broadcast_resize(origin, 100, 30);
+
+    assert_eq!(*session.size.lock().unwrap(), (80, 24), "size must not change");
+    assert_eq!(screen_dims(&session), (80, 24), "screen must not change");
+    assert!(drain(&mut peer_rx).is_empty(), "peers must not receive a phantom resize");
+}
+
+/// The blocking resize publishes `size` and the virtual screen only after the
+/// backend accepts it, keeping the three in lockstep.
+#[test]
+fn resize_blocking_publishes_matching_size_and_screen() {
+    let session = stub_session();
+    let outcome = session.resize_blocking(100, 30).expect("stub resize must succeed");
+    assert_eq!(outcome, ResizeOutcome::Applied);
+    assert_eq!(*session.size.lock().unwrap(), (100, 30));
+    assert_eq!(screen_dims(&session), (100, 30));
+}
+
 // ── concurrency ─────────────────────────────────────────────────
 
 /// PTY output concurrent with the handshake must not corrupt the size

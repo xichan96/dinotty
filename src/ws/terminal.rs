@@ -138,6 +138,14 @@ async fn handle_socket(
             );
             (cols, rows, client_id, rx)
         };
+        // Liveness net: if the client never completes the fit-then-snapshot
+        // handshake (lost SnapshotRequest, zero-size layout), replay at the
+        // current size instead of dropping all live Output forever.
+        crate::session::Session::spawn_snapshot_watchdog(
+            Arc::clone(&session),
+            client_id,
+            pane_id.clone(),
+        );
 
         // Send reconnected message - client should reset xterm, converge
         // layout, fit once, then send SnapshotRequest{cols, rows}.
@@ -331,6 +339,14 @@ async fn handle_socket(
     manager.register_singleton_tab(&pane_id, &session, &shell_type);
 
     let (client_id, mut rx) = session.add_client();
+    // This path never sends Reconnected, so the client has no handshake to
+    // trigger a SnapshotRequest. Arm the watchdog so it still receives a
+    // replay instead of dropping every Output forever.
+    crate::session::Session::spawn_snapshot_watchdog(
+        Arc::clone(&session),
+        client_id,
+        pane_id.clone(),
+    );
 
     // Send shell info
     let shell_info = serde_json::to_string(&ServerMsg::ShellInfo { shell_type: &shell_type })

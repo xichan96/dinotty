@@ -70,6 +70,26 @@ export function setActivePaneId(paneId: string | null) {
   _activePaneId = paneId
 }
 
+// Last trusted local gesture. Programmatic `terminal.focus()` calls (tab sync,
+// layout sync, remote activation) must not claim PTY ownership; only a local
+// user action should. `focus()` consults this window instead of claiming
+// unconditionally, which is what stopped an idle iPad from stealing the size
+// whenever the PC activated a tab.
+let _lastTrustedActivityAt = 0
+let _activityTrackerInstalled = false
+const CLAIM_ACTIVITY_WINDOW_MS = 1500
+
+function installTrustedActivityTracker() {
+  if (_activityTrackerInstalled || typeof document === 'undefined') return
+  _activityTrackerInstalled = true
+  const mark = (event: Event) => {
+    if (event.isTrusted) _lastTrustedActivityAt = Date.now()
+  }
+  document.addEventListener('pointerdown', mark, true)
+  document.addEventListener('keydown', mark, true)
+  document.addEventListener('touchstart', mark, true)
+}
+
 function resolveTerminalFontFamily(configuredFamily: string, cssFallback: string): string {
   if (configuredFamily) return configuredFamily
   if (isTauri() && hostTarget()?.startsWith('linux-')) return 'monospace'
@@ -502,6 +522,7 @@ export class TerminalInstance {
     this.xterm.loadAddon(this.fitAddon)
 
     this.xterm.open(wrapper)
+    installTrustedActivityTracker()
     this._installClaimTriggers(wrapper)
 
     // Anchor the IME preedit/candidate window to Ink's fake caret (a lone
@@ -962,8 +983,12 @@ export class TerminalInstance {
   focus() {
     if (!this.xterm) return
     this.xterm.focus()
+    // Programmatic focus from tab/layout sync is not a user action. Only claim
+    // when a trusted local gesture happened recently, or the window itself just
+    // gained focus (handled by the window focus listener).
     if (
       typeof document !== 'undefined' &&
+      Date.now() - _lastTrustedActivityAt <= CLAIM_ACTIVITY_WINDOW_MS &&
       document.visibilityState === 'visible' &&
       document.hasFocus() &&
       this._paneVisible()

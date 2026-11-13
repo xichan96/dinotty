@@ -241,10 +241,13 @@ function record(event: string, data?: EventData, flush = false): void {
 }
 
 /** Mark the operation currently running. Mirrored to storage immediately. */
+let persistedHotFamily: 'term.write' | 'term.scroll' | null = null
+
 export function markOp(name: string | null): void {
   if (!recording) return
   if (name === null) {
     lastOp = null
+    persistedHotFamily = null
     flushOpBreadcrumb()
     return
   }
@@ -253,6 +256,23 @@ export function markOp(name: string | null): void {
     return
   }
   lastOp = { n: name, t: Date.now() }
+  const hotFamily = name.startsWith('term.write')
+    ? 'term.write'
+    : name.startsWith('term.scroll')
+      ? 'term.scroll'
+      : null
+  if (hotFamily) {
+    // The write/scroll path runs many times per second. Persist once when
+    // entering the family; the 250ms ticker keeps the latest member on disk.
+    // A hard freeze still finds a useful breadcrumb without a storage write
+    // per 32 KiB chunk.
+    if (persistedHotFamily !== hotFamily) {
+      persistedHotFamily = hotFamily
+      flushOpBreadcrumb()
+    }
+    return
+  }
+  persistedHotFamily = null
   // Written synchronously, before the operation starts: if the operation never
   // returns, this is the breadcrumb the next load (or a post-crash inspection)
   // reads. The write is a few dozen bytes, so per-transition cost is noise.
@@ -415,6 +435,7 @@ function startMonitors(): void {
   // after a freeze this callback observes one tick whose gap equals the freeze
   // length. That is how a hang that recovered becomes a log entry.
   lastTickAt = performance.now()
+  persistedHotFamily = null
   tickTimer = window.setInterval(() => {
     const now = performance.now()
     const gap = now - lastTickAt
@@ -468,6 +489,7 @@ function stopMonitors(): void {
   longTaskObserver?.disconnect()
   longTaskObserver = null
   lastOp = null
+  persistedHotFamily = null
   writtenOp = '\u0000'
   safeSet(OP_KEY, null)
 }

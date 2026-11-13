@@ -1070,6 +1070,7 @@ export class TerminalInstance {
       if (resizeTimer) clearTimeout(resizeTimer)
       resizeTimer = setTimeout(() => {
         resizeTimer = null
+        if (this._isOwner) return
         const dims = this._claimDims()
         if (!dims) return
         if (dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) return
@@ -1102,13 +1103,11 @@ export class TerminalInstance {
    */
   private _markClaimNeeded() {
     if (this._destroyed || this._sessionExited) return
+    // Already the owner: local layout changes are handled by
+    // _fitLocal/_sendResize, and a peer claim arrives as Resize ->
+    // _followPeerResize. Do not run a forced layout read on every keystroke.
+    if (this._isOwner) return
     if (!this._paneVisible()) return
-    // An owner whose native size already matches the PTY does not need to
-    // claim on every click; only a lost/outdated ownership does.
-    if (this._isOwner) {
-      const dims = this._claimDims()
-      if (dims && dims.cols === this._knownPtyCols && dims.rows === this._knownPtyRows) return
-    }
     this._claimNeeded = true
     if (this._claimTimer) clearTimeout(this._claimTimer)
     this._claimTimer = setTimeout(() => {

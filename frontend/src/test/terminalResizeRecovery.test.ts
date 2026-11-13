@@ -128,6 +128,33 @@ describe('size ownership', () => {
     expect(term._sendResize).not.toHaveBeenCalled()
   })
 
+  it('does not queue a claim while the device already owns the size', async () => {
+    const { term, send } = makeTerm(120, 40)
+    term._isOwner = true
+    term._knownPtyCols = 120
+    term._knownPtyRows = 40
+
+    term._markClaimNeeded()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(term._claimNeeded).toBe(false)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('claims again after a peer takes ownership', async () => {
+    const { term, send } = makeTerm(120, 40)
+    term._isOwner = true
+    term._knownPtyCols = 120
+    term._knownPtyRows = 40
+
+    term._followPeerResize(80, 24)
+    term._markClaimNeeded()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(lastSent(send)).toEqual({ type: 'claim', cols: 120, rows: 40 })
+    expect(term._isOwner).toBe(true)
+  })
+
   it('a standalone claim uses the native wrapper size and takes ownership', () => {
     const { term, xterm, send } = makeTerm(120, 40)
     term._isOwner = false

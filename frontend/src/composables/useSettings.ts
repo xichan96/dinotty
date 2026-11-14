@@ -629,6 +629,7 @@ export const settings = reactive<SettingsData>({
     toolbar_items: [
       { id: 'broadcast', visible: true },
       { id: 'new_tab', visible: true },
+      { id: 'search', visible: true },
       { id: 'plugins', visible: true },
       { id: 'files', visible: true },
       { id: 'web', visible: true },

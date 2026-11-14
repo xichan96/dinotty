@@ -35,6 +35,11 @@
           <span class="tcm-label">{{ t('terminal.ctxPaste') }}</span>
           <span class="tcm-hint">{{ isMac ? '⌘V' : 'Ctrl+V' }}</span>
         </button>
+        <button class="tcm-item" role="menuitem" @click="onFind">
+          <Search :size="12" class="tcm-icon" />
+          <span class="tcm-label">{{ t('terminal.ctxFind') }}</span>
+          <span class="tcm-hint">{{ shortcutHint('searchTerminal') }}</span>
+        </button>
         <div class="tcm-sep" />
         <button class="tcm-item" role="menuitem" :disabled="!hasSelection" @click="onBookmark">
           <Bookmark :size="12" class="tcm-icon" />
@@ -135,6 +140,7 @@ import {
   TextSelect,
   FolderOpen,
   FolderSearch,
+  Search,
   ExternalLink,
   Globe,
   Columns2,
@@ -168,6 +174,7 @@ const emit = defineEmits<{
   close: []
   copy: []
   paste: []
+  find: []
   selectAll: []
   openFile: [path: string]
   openLink: [url: string]
@@ -230,6 +237,11 @@ function onCopy() {
   if (!text) return
   copyToClipboard(text)
   emit('copy')
+  close()
+}
+
+function onFind() {
+  emit('find')
   close()
 }
 

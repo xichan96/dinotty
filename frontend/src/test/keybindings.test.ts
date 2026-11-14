@@ -9,6 +9,7 @@ import {
   keyEventMatchesBinding,
   useKeybindings,
 } from '../composables/useKeybindings'
+import { isMacClient } from '../utils/clientPlatform'
 
 vi.mock('../composables/apiBase', () => ({
   apiUrl: (path: string) => path,
@@ -31,7 +32,7 @@ const APP_DEFAULTS = [
   ['equalizePanes', '=', false, false],
   ['focusNextPane', ']', false, false],
   ['focusPrevPane', '[', false, false],
-  ['searchTerminal', 'f', false, false],
+  ['searchTerminal', 'f', !isMacClient, false],
   ['addCursorsInFiles', 'l', true, false],
   ['switchTab', '1', false, true],
   ['missionControl', 'm', true, false],

@@ -63,6 +63,7 @@ export function useKeybindings() {
 
     for (const def of appKeyBindingDefs) {
       if (keyEventMatchesBinding(e, getBinding(def.id))) return true
+      if (def.altBinding && keyEventMatchesBinding(e, def.altBinding)) return true
     }
     return false
   }

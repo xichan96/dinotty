@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 async function loadSettingsWithClientPlatform(isWindowsClient: boolean) {
   vi.resetModules()
-  vi.doMock('../utils/clientPlatform', () => ({ isWindowsClient }))
+  vi.doMock('../utils/clientPlatform', () => ({ isWindowsClient, isMacClient: false }))
   return import('../composables/useSettings')
 }
 

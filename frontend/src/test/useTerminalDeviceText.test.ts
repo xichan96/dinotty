@@ -72,6 +72,7 @@ vi.mock('../composables/useTransport', () => ({
 vi.mock('../utils/clientPlatform', () => ({
   hostTarget: mocks.hostTarget,
   isWindowsClient: false,
+  isMacClient: false,
 }))
 vi.mock('../composables/useTerminalWheel', () => ({
   createTerminalWheel: () => ({

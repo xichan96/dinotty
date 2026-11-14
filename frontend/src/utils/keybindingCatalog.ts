@@ -27,6 +27,7 @@ import {
   LayoutTemplate,
   Server,
 } from 'lucide-vue-next'
+import { isMacClient } from './clientPlatform'
 
 export interface KeyBinding {
   key: string
@@ -39,6 +40,12 @@ export interface KeyBinding {
 export interface KeyBindingDef {
   id: string
   defaultBinding: KeyBinding
+  /**
+   * Secondary chord for the same action, not shown in the keybinding recorder.
+   * Used where the primary chord would otherwise collide with a terminal key
+   * (for example Alt+F on Windows with Alt-as-Cmd enabled).
+   */
+  altBinding?: KeyBinding
   icon: object
   titleKey: string
   readonly?: boolean
@@ -121,7 +128,13 @@ export const defs: KeyBindingDef[] = [
   },
   {
     id: 'searchTerminal',
-    defaultBinding: { key: 'f', shift: false },
+    // xterm maps Ctrl+letter to a control byte, sends it to the PTY and calls
+    // stopPropagation(), so a plain Ctrl+F never reaches the app shortcut
+    // handler on Windows/Linux. Ctrl+Shift+F produces no byte there (the event
+    // bubbles); macOS Cmd+F is never sent to the PTY, so it stays unchanged.
+    defaultBinding: { key: 'f', shift: !isMacClient },
+    // Compatibility chord for Windows users who enabled Alt-as-Cmd.
+    altBinding: isMacClient ? undefined : { key: 'f', shift: false },
     icon: Search,
     titleKey: 'keybinding.searchTerminal',
   },

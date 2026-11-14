@@ -77,6 +77,16 @@ describe('readLogicalTerminalLine', () => {
     expect(line?.cells[1]).toEqual({ x: 3, y: 1, width: 1 })
   })
 
+  it('bounds the wrap-chain walk so a hover cannot scan the whole buffer', () => {
+    // Full-width TUI repaints can flag every following row as wrapped.
+    const rows = Array.from({ length: 5000 }, (_, index) => textRow('x'.repeat(40), index > 0))
+    const line = readLogicalTerminalLine(buffer(rows), 2500, 40)
+
+    // At most 4 rows back + the hovered row + 4 rows forward.
+    expect(line?.text.length).toBeLessThanOrEqual(9 * 40)
+    expect(line?.cells.length).toBe(line?.text.length)
+  })
+
   it('keeps a path that xterm soft-wraps detectable as one link', async () => {
     const term = new Terminal({ cols: 20, rows: 6 })
     const path = '/Users/chenxi/very/long/path/that/wraps/main.rs'

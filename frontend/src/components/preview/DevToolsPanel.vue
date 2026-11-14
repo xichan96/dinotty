@@ -231,31 +231,33 @@ function statusClass(s: number): string {
   return 'status-5xx'
 }
 
+// Keep a pinned list at the bottom after a batch lands. Awaiting nextTick
+// before measuring means one layout read per update batch instead of reading a
+// stale pre-append layout and then writing again; hidden tabs (clientHeight 0)
+// are skipped entirely so a mounted-but-inactive preview never forces layout.
+async function scrollToBottomIfPinned(el: HTMLElement | undefined) {
+  if (!el) return
+  await nextTick()
+  if (el.clientHeight === 0) return
+  const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+  if (isAtBottom) el.scrollTop = el.scrollHeight
+}
+
 // Auto-scroll console
 watch(
   () => props.consoleEntries.length,
-  async () => {
-    if (tab.value !== 'console' || !bodyRef.value) return
-    const el = bodyRef.value
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    if (isAtBottom) {
-      await nextTick()
-      el.scrollTop = el.scrollHeight
-    }
+  () => {
+    if (tab.value !== 'console') return
+    void scrollToBottomIfPinned(bodyRef.value)
   }
 )
 
 // Auto-scroll network
 watch(
   () => props.networkEntries.length,
-  async () => {
-    if (tab.value !== 'network' || !netBodyRef.value) return
-    const el = netBodyRef.value
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    if (isAtBottom) {
-      await nextTick()
-      el.scrollTop = el.scrollHeight
-    }
+  () => {
+    if (tab.value !== 'network') return
+    void scrollToBottomIfPinned(netBodyRef.value)
   }
 )
 

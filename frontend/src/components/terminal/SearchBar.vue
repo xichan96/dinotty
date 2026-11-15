@@ -42,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick, computed } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-vue-next'
 import type { TerminalInstance } from '../../composables/useTerminal'
 import { useI18n } from '../../composables/useI18n'
@@ -60,6 +60,20 @@ const query = ref('')
 const inputRef = ref<HTMLInputElement>()
 const resultCount = ref(0)
 const currentIndex = ref(0)
+
+// The addon only tracks result counts and paints highlights when a
+// `decorations` option is supplied. Alpha keeps the underlying text readable
+// on both light and dark terminal themes.
+const SEARCH_DECORATIONS = {
+  matchBackground: 'rgba(255, 196, 0, 0.30)',
+  matchBorder: 'rgba(255, 196, 0, 0.65)',
+  matchOverviewRuler: '#f5c542',
+  activeMatchBackground: 'rgba(255, 138, 0, 0.55)',
+  activeMatchBorder: '#ff8a00',
+  activeMatchColorOverviewRuler: '#ff8a00',
+}
+
+let resultsDisposable: { dispose(): void } | undefined
 
 const resultText = computed(() => {
   if (!query.value) return ''
@@ -82,7 +96,12 @@ function doSearch(direction: 'next' | 'prev' = 'next') {
     return
   }
 
-  const opts = { caseSensitive: false, wholeWord: false, regex: false }
+  const opts = {
+    caseSensitive: false,
+    wholeWord: false,
+    regex: false,
+    decorations: SEARCH_DECORATIONS,
+  }
   if (direction === 'next') {
     addon.findNext(term, opts)
   } else {
@@ -117,7 +136,20 @@ watch(query, () => {
 })
 
 onMounted(() => {
+  const addon = props.terminal.searchAddon
+  if (addon && typeof addon.onDidChangeResults === 'function') {
+    resultsDisposable = addon.onDidChangeResults((event) => {
+      resultCount.value = event.resultCount
+      currentIndex.value = event.resultIndex >= 0 ? event.resultIndex + 1 : 0
+    })
+  }
   nextTick(() => inputRef.value?.focus())
+})
+
+onBeforeUnmount(() => {
+  resultsDisposable?.dispose()
+  resultsDisposable = undefined
+  props.terminal.searchAddon?.clearDecorations()
 })
 </script>
 

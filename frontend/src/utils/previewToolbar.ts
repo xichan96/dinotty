@@ -1,6 +1,7 @@
 export const PREVIEW_TOOLBAR_IDS = [
   'broadcast',
   'new_tab',
+  'search',
   'plugins',
   'files',
   'web',

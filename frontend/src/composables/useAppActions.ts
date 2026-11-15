@@ -3,6 +3,7 @@ import { getAllLeaves } from '../types/pane'
 import type { useAppCore } from './useAppCore'
 import type { Command } from '../components/command/CommandPalette.vue'
 import { useKeybindings, keyEventMatchesBinding } from './useKeybindings'
+import { defs as keyBindingDefs } from '../utils/keybindingCatalog'
 import { useSuperviseTabs } from './useSuperviseTabs'
 import { createHostClipboardPasteController } from '../utils/hostClipboardPaste'
 import { readHostClipboard } from '../utils/clipboard'
@@ -13,6 +14,11 @@ import { isWindowsClient } from '../utils/clientPlatform'
 import { getEffectiveSuperviseReload } from './useDeviceSuperviseReload'
 import type { AppActionOptions } from '../components/keyboard/mkbTypes'
 import type { useToast } from 'vue-toastification'
+
+/** Secondary chords (e.g. Alt+F when Alt-as-Cmd is on) that are not shown in the recorder. */
+const altBindings = new Map(
+  keyBindingDefs.flatMap((def) => (def.altBinding ? [[def.id, def.altBinding] as const] : []))
+)
 
 export interface AppActionsOptions {
   core: ReturnType<typeof useAppCore>
@@ -127,6 +133,17 @@ export function useAppActions(options: AppActionsOptions) {
         kbd: formatBinding(getBinding('openBookmarks')),
         action: () => bookmarksRef.value?.open(),
       },
+      ...(activeTab.value?.type === 'terminal'
+        ? [
+            {
+              icon: '⌕',
+              title: t('palette.searchTerminal'),
+              subtitle: t('palette.searchTerminalDesc'),
+              kbd: formatBinding(getBinding('searchTerminal')),
+              action: () => keyActions.searchTerminal(),
+            },
+          ]
+        : []),
       {
         icon: '⊡',
         title: t('palette.openFilePreview'),
@@ -296,7 +313,11 @@ export function useAppActions(options: AppActionsOptions) {
 
     for (const [id, action] of Object.entries(keyActions)) {
       const binding = getBinding(id)
-      if (keyEventMatchesBinding(e, binding)) {
+      const altBinding = altAsCmd && e.altKey ? altBindings.get(id) : undefined
+      if (
+        keyEventMatchesBinding(e, binding) ||
+        (altBinding !== undefined && keyEventMatchesBinding(e, altBinding))
+      ) {
         e.preventDefault()
         if (id === 'closeTab') {
           lastTabCloseShortcutAt.value = Date.now()

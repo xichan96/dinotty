@@ -368,6 +368,8 @@ function previewToolbarLabel(id: PreviewToolbarId) {
       return t('settings.previewToolbar.broadcast')
     case 'new_tab':
       return t('settings.previewToolbar.newTab')
+    case 'search':
+      return t('keybinding.searchTerminal')
     case 'plugins':
       return t('settings.previewToolbar.plugins')
     case 'files':

@@ -71,6 +71,16 @@
             <Globe v-else :size="16" />
           </button>
           <button
+            v-else-if="itemId === 'search' && activeTabType === 'terminal'"
+            type="button"
+            class="tab-bar-icon-btn"
+            :title="t('keybinding.searchTerminal')"
+            @click="onToolbarSearch"
+            @touchend.prevent="onToolbarSearch"
+          >
+            <Search :size="16" />
+          </button>
+          <button
             v-else-if="itemId === 'reload'"
             type="button"
             class="tab-bar-icon-btn"
@@ -503,7 +513,7 @@ import { useAppTauri } from './composables/useAppTauri'
 import { usePluginBridge } from './composables/usePluginBridge'
 import { loadLocalePacks } from './composables/useLocalePacks'
 import { loadThemePacks } from './composables/useThemePacks'
-import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe, Bug } from 'lucide-vue-next'
+import { Settings, Bell, Ellipsis, Radar, RefreshCw, FolderTree, Globe, Bug, Search } from 'lucide-vue-next'
 import { normalizePreviewToolbarItems, type PreviewToolbarId } from './utils/previewToolbar'
 import { toggleDebugPanel } from './composables/useDebugRecorder'
 
@@ -606,6 +616,10 @@ const actions = useAppActions({
   lastTabCloseShortcutAt,
   toast,
 })
+
+function onToolbarSearch() {
+  actions.dispatchAppAction('searchTerminal')
+}
 const keyboard = useAppKeyboard({ core, actions, settingsStore, bookmarksRef, appRootRef })
 const connectivity = useAppConnectivity({ core, sshPanelRef, persist })
 const tauri = useAppTauri({
@@ -756,6 +770,8 @@ function previewToolbarLabel(id: PreviewToolbarId) {
       return t('settings.previewToolbar.broadcast')
     case 'new_tab':
       return t('settings.previewToolbar.newTab')
+    case 'search':
+      return t('keybinding.searchTerminal')
     case 'plugins':
       return t('settings.previewToolbar.plugins')
     case 'files':

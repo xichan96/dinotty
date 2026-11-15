@@ -71,6 +71,7 @@
     @close="closeMenu"
     @copy="onMenuCopy"
     @paste="onMenuPaste"
+    @find="toggleSearch"
     @select-all="onMenuSelectAll"
     @open-file="onMenuOpenFile"
     @open-link="onMenuOpenLink"

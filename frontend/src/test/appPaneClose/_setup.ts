@@ -138,7 +138,7 @@ vi.mock('../../composables/useViewportResize', async () => {
     },
   }
 })
-vi.mock('../../utils/clientPlatform', () => ({ isWindowsClient: true }))
+vi.mock('../../utils/clientPlatform', () => ({ isWindowsClient: true, isMacClient: false }))
 // Per-binding key map so Cmd+W can be dispatched without colliding with
 // other keyActions in onGlobalKeydown (the first matching binding wins).
 const BINDING_KEYS: Record<string, string> = {

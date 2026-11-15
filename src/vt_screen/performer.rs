@@ -261,8 +261,8 @@ impl Perform for ScreenPerformer<'_> {
                         // from start to cursor
                         let row = self.screen.cursor.row;
                         let col = self.screen.cursor.col;
-                        for r in 0..row {
-                            for c in &mut self.screen.cells[r] {
+                        for cells in &mut self.screen.cells[..row] {
+                            for c in cells {
                                 *c = Cell::default();
                             }
                         }
@@ -485,13 +485,9 @@ impl ScreenPerformer<'_> {
                     .as_ref()
                     .map_or(0, |p| p.start_time.elapsed().as_millis() as u64);
 
-                let stdout = self
-                    .pending_command
-                    .as_mut()
-                    .map(|p| {
-                        String::from_utf8_lossy(&std::mem::take(&mut p.output_buf)).into_owned()
-                    })
-                    .unwrap_or_default();
+                let stdout = self.pending_command.as_mut().map_or_else(String::new, |p| {
+                    String::from_utf8_lossy(&std::mem::take(&mut p.output_buf)).into_owned()
+                });
 
                 self.command_results.push(CommandResult {
                     exit_code,

@@ -411,7 +411,7 @@ async fn proxy_internal(
             .unwrap();
     }
 
-    let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+    let query = req.uri().query().map_or_else(String::new, |q| format!("?{q}"));
     let path_part = if path.is_empty() || path == "/" {
         String::from("/")
     } else if path.starts_with('/') {

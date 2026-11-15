@@ -106,7 +106,7 @@ pub fn rewrite_url(raw: &str, base_url: &str, mode: &RewriteMode) -> Option<Stri
                 "{}{}{}",
                 prefix,
                 parsed.path(),
-                parsed.query().map(|q| format!("?{q}")).unwrap_or_default()
+                parsed.query().map_or_else(String::new, |q| format!("?{q}"))
             ))
         }
     }

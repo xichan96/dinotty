@@ -409,11 +409,9 @@ fn collect_changes(cwd: &Path) -> io::Result<WorkspaceChangesResponse> {
 
     let base = info.head.as_deref().unwrap_or(EMPTY_TREE);
     let numstat = run_git_stdout(cwd, &["diff", "--numstat", "-z", base])?
-        .map(|out| parse_numstat_z(&out))
-        .unwrap_or_default();
+        .map_or_else(HashMap::new, |out| parse_numstat_z(&out));
     let submodules = run_git_stdout(cwd, &["ls-files", "-s", "-z"])?
-        .map(|out| parse_submodule_paths(&out))
-        .unwrap_or_default();
+        .map_or_else(HashSet::new, |out| parse_submodule_paths(&out));
 
     let mut counter = UntrackedCounter::default();
     let mut files = Vec::with_capacity(entries.len());

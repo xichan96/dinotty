@@ -152,8 +152,8 @@ impl Cell {
 
     pub(crate) fn write_to(&self, out: &mut String) {
         out.push(self.ch);
-        for i in 0..self.combining_len as usize {
-            out.push(self.combining[i]);
+        for &c in &self.combining[..self.combining_len as usize] {
+            out.push(c);
         }
     }
 }

@@ -154,8 +154,7 @@ pub async fn close_tab(
         .tab_layouts
         .get(&tab_id)
         .and_then(|v| v.get("layout").cloned())
-        .map(|layout| session::collect_leaf_pane_ids(&layout))
-        .unwrap_or_default();
+        .map_or_else(Vec::new, |layout| session::collect_leaf_pane_ids(&layout));
 
     // Each session close prunes its own leaf and emits the unified close protocol.
     for leaf_id in &leaf_ids {

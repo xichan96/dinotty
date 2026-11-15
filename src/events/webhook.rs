@@ -45,7 +45,9 @@ fn load_secrets() -> HashMap<String, String> {
         return HashMap::new();
     }
     match std::fs::read_to_string(&path) {
-        Ok(data) => serde_json::from_str::<SecretsFile>(&data).map(|s| s.0).unwrap_or_default(),
+        Ok(data) => {
+            serde_json::from_str::<SecretsFile>(&data).map_or_else(|_| HashMap::new(), |s| s.0)
+        }
         Err(_) => HashMap::new(),
     }
 }

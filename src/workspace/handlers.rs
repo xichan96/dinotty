@@ -98,15 +98,20 @@ pub async fn workspace_list(
 fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Response {
     let outside_pane_jail = q.free || q.root.as_deref() == Some("/");
     let (raw_target, target, cwd_display) = if q.free {
-        let requested = Path::new(q.path.trim());
+        let trimmed = q.path.trim();
+        let requested = if trimmed == "~" {
+            dirs::home_dir().unwrap_or_default()
+        } else {
+            PathBuf::from(trimmed)
+        };
         if !requested.is_absolute() {
             return json_err(StatusCode::BAD_REQUEST, "path must be absolute");
         }
-        let raw = requested.to_path_buf();
+        let raw = requested.clone();
         let Ok(target) = requested.canonicalize() else {
             return json_err(StatusCode::NOT_FOUND, "not found");
         };
-        let cwd = target.to_string_lossy().into_owned();
+        let cwd = dunce::simplified(&target).to_string_lossy().into_owned();
         (raw, target, cwd)
     } else {
         let root = match q.root.as_deref() {
@@ -127,7 +132,7 @@ fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Respo
         } else {
             raw_target.clone()
         };
-        let cwd = root.to_string_lossy().into_owned();
+        let cwd = dunce::simplified(&root).to_string_lossy().into_owned();
         (raw_target, target, cwd)
     };
     // Sensitivity: check the raw (pre-canonicalize) path AND the canonical path.
@@ -723,5 +728,6 @@ pub async fn workspace_cwd(
     let Some(cwd) = session.cwd_for_workspace() else {
         return json_err(StatusCode::CONFLICT, "cwd_unavailable_for_backend");
     };
-    Json(serde_json::json!({ "cwd": cwd.to_string_lossy() })).into_response()
+    let cwd = dunce::simplified(&cwd).to_string_lossy().into_owned();
+    Json(serde_json::json!({ "cwd": cwd })).into_response()
 }

@@ -180,7 +180,9 @@ const showPicker = ref(false)
 const monogramPlaceholder = computed(() => autoMonogram(name.value || ''))
 const pickerRoot = computed(
   () =>
-    (isDefaultWorkspace.value ? path.value.trim() : '') || settings.default_base_dir?.trim() || '/'
+    (isDefaultWorkspace.value ? path.value.trim() : '') ||
+    settings.default_base_dir?.trim() ||
+    '~'
 )
 
 const canSubmit = computed(() => {

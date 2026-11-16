@@ -99,6 +99,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/workspace/list", get(workspace::workspace_list))
         .route("/api/workspace/meta", get(workspace::workspace_meta))
         .route("/api/workspace/raw", get(workspace::workspace_raw))
+        .route("/api/workspace/preview-token", post(workspace::workspace_preview_token))
         .route("/api/workspace/cwd", get(workspace::workspace_cwd))
         .route("/api/workspace/reveal", get(workspace::workspace_reveal))
         .merge(
@@ -234,6 +235,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/preview", any(proxy::proxy_handler_wildcard))
         .route("/preview/", any(proxy::proxy_handler_wildcard))
         .route("/preview/*path", any(proxy::proxy_handler_wildcard))
+        // Token-authenticated reader for the sandboxed HTML preview; see
+        // dinotty_server::workspace::preview_ws.
+        .route("/preview-ws/:token/*path", get(workspace::serve_preview_asset))
         // Keep in sync with `src/main.rs` - this route table is a separate copy
         // because `src-tauri` is not part of the lib.
         .route("/__srv/:id", any(proxy::relay_dispatch_handler))

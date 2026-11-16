@@ -48,6 +48,11 @@ const SHARED: &[&str] = &[
     // Explicit tab→workspace assignment. A desktop-only or server-only copy
     // would silently strand the assignment on the client that cannot reach it.
     "/api/tabs/:tab_id/workspace",
+    // The HTML preview in the desktop app and in a browser both need this: the
+    // sandboxed frame cannot authenticate, so the *host page* mints a
+    // directory-scoped token here. Missing on either side means previews there
+    // render with broken images.
+    "/api/workspace/preview-token",
 ];
 
 fn repo_root() -> PathBuf {

@@ -79,7 +79,10 @@ export function useFileOperations(opts: {
     if (opts.cwdLabel.value.startsWith('/')) {
       return rel ? `/${rel}` : opts.cwdLabel.value.replace(/\/+$/, '') || '/'
     }
-    const root = opts.cwdLabel.value.replace(/\/+$/, '')
+    const root = opts.cwdLabel.value
+      .replace(/^\\\\\?\\/, '')
+      .replace(/^\/\/\?\//, '')
+      .replace(/\/+$/, '')
     return rel ? `${root}/${rel}` : root
   }
 

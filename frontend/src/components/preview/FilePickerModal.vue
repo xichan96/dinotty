@@ -53,7 +53,7 @@ const props = withDefaults(
     free?: boolean
   }>(),
   {
-    root: '/',
+    root: '',
     free: false,
   }
 )
@@ -77,7 +77,8 @@ async function fetchList(rel: string) {
       ? absJoinWorkspaceRoot(cwdLabel.value || browseRoot.value, rel)
       : browseRoot.value
     : rel
-  const q = new URLSearchParams({ pane_id: props.paneId, path, root: props.root })
+  const q = new URLSearchParams({ pane_id: props.paneId, path })
+  if (props.root) q.set('root', props.root)
   if (props.free) q.set('free', 'true')
   try {
     const res = await authFetch(apiUrl(`/api/workspace/list?${q}`))

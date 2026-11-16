@@ -128,6 +128,28 @@ describe('useFileWatch', () => {
     fw.disconnectTreeWatchSocket()
   })
 
+  it('matches a Windows cwd case-insensitively for watcher events', async () => {
+    const onFileChanged = vi.fn()
+    const opts = makeOpts({
+      cwdLabel: ref('C:\\Users\\Wiley LAU\\Project'),
+      onFileChanged,
+    })
+    const fw = useFileWatch(opts)
+    await fw.connectTreeWatchSocket()
+
+    const ws = mockInstances[0]
+    ws.onmessage!({
+      data: JSON.stringify({
+        type: 'file_event',
+        path: 'c:/users/wiley lau/project/src/main.ts',
+        kind: 'changed',
+      }),
+    })
+
+    expect(onFileChanged).toHaveBeenCalledWith('src/main.ts')
+    fw.disconnectTreeWatchSocket()
+  })
+
   it('batch timer refreshes root directory after file event', async () => {
     const newEntries = [
       { name: 'src', is_dir: true, size: 0 },

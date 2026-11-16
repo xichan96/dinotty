@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import { apiUrl, authFetch, getApiBase } from './apiBase'
 import {
+  clearFileWorkspaceState,
   loadFileWorkspaceState,
   saveFileWorkspaceState,
   type PersistedFileWorkspaceState,
@@ -195,39 +196,82 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     cwdLabel.value = s.cwdLabel ?? ''
   }
 
+  function normalizeCwd(path: string): string {
+    return path.replace(/\\/g, '/').replace(/^\/\/\?\//, '').replace(/\/+$/, '')
+  }
+
+  /** Windows paths are case-insensitive; POSIX/SSH paths are not. */
+  function sameCwd(a: string, b: string): boolean {
+    const left = normalizeCwd(a)
+    const right = normalizeCwd(b)
+    if (!left || !right) return false
+    const windows = /^[A-Za-z]:/.test(left) || /^[A-Za-z]:/.test(right)
+    return windows ? left.toLowerCase() === right.toLowerCase() : left === right
+  }
+
+  /**
+   * Live cwd of the session that owns this leaf. The persisted tree state can
+   * outlive the shell's cwd (pane re-mount, tab restore, `cd` while the pane was
+   * hidden); restoring that stale root is what made the explorer open in the
+   * user directory or a path it can no longer read. Null means "cannot tell" —
+   * keep the saved state rather than throwing it away.
+   */
+  async function readCurrentCwd(): Promise<string | null> {
+    const apiPane = sourcePaneId.value || paneId.value
+    if (!apiPane) return null
+    try {
+      await getApiBase()
+      const q = new URLSearchParams({ pane_id: apiPane })
+      const res = await authFetch(apiUrl(`/api/workspace/cwd?${q}`))
+      if (!res.ok) return null
+      const data = (await res.json()) as { cwd?: unknown }
+      return typeof data.cwd === 'string' && data.cwd.trim() ? data.cwd : null
+    } catch {
+      return null
+    }
+  }
+
   async function boot(): Promise<void> {
     const saved = paneId.value ? loadFileWorkspaceState(paneId.value) : undefined
     inlineCreate.value = null
     contextMenu.value = null
     previewErr.value = null
     if (saved) {
-      applyState(saved)
-      try {
-        connectTreeWatchSocket()
-        fetchGitStatus()
-      } catch {
-        // best-effort
-      }
-      // Old saved states (pre-cwdLabel persistence) restore childCache without
-      // cwdLabel, leaving the tree draggable but with no absolute path for
-      // drag-to-terminal. Refresh from backend to recover.
-      if (!cwdLabel.value) {
+      const liveCwd = await readCurrentCwd()
+      const staleCwd =
+        liveCwd !== null && (!saved.cwdLabel || !sameCwd(saved.cwdLabel, liveCwd))
+      if (!staleCwd) {
+        applyState(saved)
         try {
-          await ensureChildren('')
+          connectTreeWatchSocket()
+          fetchGitStatus()
         } catch {
-          // best-effort; tree stays interactive with cached entries
+          // best-effort
         }
+        // Old saved states (pre-cwdLabel persistence) restore childCache without
+        // cwdLabel, leaving the tree draggable but with no absolute path for
+        // drag-to-terminal. Refresh from backend to recover.
+        if (!cwdLabel.value) {
+          try {
+            await ensureChildren('')
+          } catch {
+            // best-effort; tree stays interactive with cached entries
+          }
+        }
+        const leaf = activeLeaf.value
+        // Old in-memory state (pre-decoupling) may have a leaf stuck on a
+        // directory - clear it so the placeholder shows instead of a blank
+        // dir leaf, then re-open the file if one was remembered.
+        if (leaf?.isDir) {
+          leaf.filePath = null
+          leaf.isDir = false
+        }
+        if (leaf?.filePath) void onSelectFile(leaf.filePath)
+        return
       }
-      const leaf = activeLeaf.value
-      // Old in-memory state (pre-decoupling) may have a leaf stuck on a
-      // directory - clear it so the placeholder shows instead of a blank
-      // dir leaf, then re-open the file if one was remembered.
-      if (leaf?.isDir) {
-        leaf.filePath = null
-        leaf.isDir = false
-      }
-      if (leaf?.filePath) void onSelectFile(leaf.filePath)
-      return
+      // Editor tab paths (and the cached listings) were relative to the old
+      // root. Drop them and rebuild at the session's current cwd.
+      if (paneId.value) clearFileWorkspaceState(paneId.value)
     }
     selectedRel.value = null
     selectedIsDir.value = false

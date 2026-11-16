@@ -831,9 +831,17 @@ export const TreeRows = defineComponent({
             stopAutoScroll()
           },
           onDrop: (ev: DragEvent) => {
+            // Only the root recursion owns background drops. Nested levels are
+            // separate `.tree-rows` wrappers; handling here too would emit
+            // `upload-to-dir` once per ancestor (a single drop uploading the
+            // same file several times) and let the workspace wrapper upload
+            // again. Stop propagation so the outer workspace drop is not a
+            // second upload path.
+            if (p.depth !== 0) return
             clearHoverExpand()
             stopAutoScroll()
             ev.preventDefault()
+            ev.stopPropagation()
             const srcRel = ev.dataTransfer?.getData('application/x-tree-move')
             if (srcRel !== undefined && srcRel.includes('/')) {
               emit('move-entry', { src: srcRel, destDir: '' })

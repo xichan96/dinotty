@@ -38,10 +38,17 @@ export function useFileWatch(opts: FileWatchOptions): FileWatch {
   let hasOpened = false
 
   function absToRel(absPath: string): string | null {
-    const cwd = (opts.cwdLabel.value || '').replace(/\\/g, '/')
+    const stripLongPath = (p: string) => p.replace(/^\/\/\?\//, '')
+    const cwd = stripLongPath((opts.cwdLabel.value || '').replace(/\\/g, '/'))
     const cwdNorm = cwd.endsWith('/') ? cwd : cwd + '/'
-    const norm = absPath.replace(/\\/g, '/')
-    if (norm.startsWith(cwdNorm)) {
+    const norm = stripLongPath(absPath.replace(/\\/g, '/'))
+    // Windows drive paths are case-insensitive; a casing difference between the
+    // watcher event and the canonical cwd silently dropped every event.
+    const windows = /^[A-Za-z]:/.test(norm) || /^[A-Za-z]:/.test(cwdNorm)
+    const matches = windows
+      ? norm.toLowerCase().startsWith(cwdNorm.toLowerCase())
+      : norm.startsWith(cwdNorm)
+    if (matches) {
       let rel = norm.slice(cwdNorm.length)
       if (rel.endsWith('/')) rel = rel.slice(0, -1)
       return rel

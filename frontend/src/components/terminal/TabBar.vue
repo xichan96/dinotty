@@ -83,11 +83,11 @@
           <input
             v-if="editingPaneId === tab.paneId"
             :ref="setEditInput"
-            class="tab-title-input"
+            :class="TAB_TITLE_INPUT_CLASS"
             :value="editValue"
             @input="editValue = ($event.target as HTMLInputElement).value"
             @blur="finishEdit(tab.paneId)"
-            @keydown.enter="finishEdit(tab.paneId)"
+            @keydown.enter="commitEdit(tab.paneId)"
             @keydown.escape.stop="cancelEdit"
             @mousedown.stop
             @click.stop
@@ -256,7 +256,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
 import {
   X,
   Terminal,
@@ -296,6 +296,8 @@ import { useToast } from 'vue-toastification'
 import { resolveResponsiveToastPosition } from '../../utils/toastPosition'
 import { singleElRef } from '../../utils/singleElRef'
 import type { PreviewToolbarId } from '../../utils/previewToolbar'
+import { FOCUS_ACTIVE_KEY } from '../../composables/useFocusActive'
+import { TAB_TITLE_INPUT_CLASS } from '../../utils/renameFocusGuard'
 
 const { t } = useI18n()
 const { getBinding, formatBinding } = useKeybindings()
@@ -532,12 +534,21 @@ const editingPaneId = ref<string | null>(null)
 const editValue = ref('')
 const editInputRef = ref<HTMLInputElement | null>(null)
 const setEditInput = singleElRef(editInputRef)
+const focusActive = inject(FOCUS_ACTIVE_KEY, undefined)
 
 function onDocMouseDown(e: MouseEvent) {
   const el = e.target as HTMLElement
-  if (!el.closest('.tab-title-input')) {
+  if (!el.closest(`.${TAB_TITLE_INPUT_CLASS}`)) {
     finishEditIfAny()
   }
+}
+
+/** The editor is unmounted by commit/cancel, so focus falls to <body>; hand it
+ *  back to the active pane instead of leaving the keyboard dead. A blur caused
+ *  by clicking elsewhere must not steal focus back, so this is only wired to
+ *  the explicit Enter/Escape paths. */
+function focusActiveAfterEdit() {
+  nextTick(() => focusActive?.())
 }
 
 function finishEditIfAny() {
@@ -692,9 +703,15 @@ function finishEdit(paneId: string) {
   if (val) emit('rename', paneId, val)
 }
 
+function commitEdit(paneId: string) {
+  finishEdit(paneId)
+  focusActiveAfterEdit()
+}
+
 function cancelEdit() {
   editingPaneId.value = null
   document.removeEventListener('mousedown', onDocMouseDown)
+  focusActiveAfterEdit()
 }
 
 const pluginMenuOpen = ref(false)

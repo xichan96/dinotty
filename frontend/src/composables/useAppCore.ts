@@ -31,7 +31,7 @@ import { FOCUS_ACTIVE_KEY } from './useFocusActive'
 import { useSshAuth } from './useSshAuth'
 import { useCursorPicker } from './useCursorPicker'
 import { useOverviewCallbacks } from './useOverviewCallbacks'
-import { markServerVerified, useRemoteServers } from './useRemoteServers'
+import { markServerVerified, reconcileActiveServer, useRemoteServers } from './useRemoteServers'
 import { useNotificationPresentation } from './useNotificationPresentation'
 import {
   setToastInstance,
@@ -892,6 +892,9 @@ export function useAppCore(options: AppCoreOptions) {
     // The Rust process still owns any windows from before a reload, and tabs
     // are about to arrive: rebuild the filter before they mount their panes.
     await detachedStore.refreshFromRust()
+    // Drop an active-server id the hub no longer lists before anything reads
+    // settings, tabs or the sync socket through its relay prefix.
+    await reconcileActiveServer()
     await settingsStore.load()
     void loadAll()
     void syncWs.connectSyncWS()

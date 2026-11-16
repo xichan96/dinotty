@@ -461,6 +461,7 @@ import {
   apiUrl,
   authFetch,
 } from './composables/apiBase'
+import { reconcileActiveServer } from './composables/useRemoteServers'
 import { useToast } from 'vue-toastification'
 import {
   useNotification,
@@ -846,6 +847,10 @@ onMounted(async () => {
   try {
     if (authenticated.value) {
       await getApiBase()
+      // A device can keep a roster id in localStorage after that entry is
+      // deleted. Every API call would then carry `/__srv/<id>` and the hub's
+      // relay would 404/403 it, so reset before settings and tabs load.
+      await reconcileActiveServer()
       // The Rust process may still own detached windows from before a reload.
       // Rebuild the filter before sync WS/REST deliver tabs, so those panes
       // never mount in the main window first.

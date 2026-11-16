@@ -2,7 +2,6 @@ type MessageTable = Record<string, string>
 
 export default {
   'app.settings': 'Settings',
-  'app.debugPanel': 'Debug panel',
   'app.reload': 'Reload',
   'app.preview': 'Web preview',
   'app.fileWorkspace': 'Files',

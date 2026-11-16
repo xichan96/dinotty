@@ -197,7 +197,11 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
   }
 
   function normalizeCwd(path: string): string {
-    return path.replace(/\\/g, '/').replace(/^\/\/\?\//, '').replace(/\/+$/, '')
+    // Only Windows paths treat '\' as a separator. POSIX paths are allowed to
+    // contain backslashes, and rewriting them would corrupt the comparison.
+    const windows = /^[A-Za-z]:/.test(path) || path.startsWith('\\\\')
+    const slashed = windows ? path.replace(/\\/g, '/') : path
+    return slashed.replace(/^\/\/\?\//, '').replace(/\/+$/, '')
   }
 
   /** Windows paths are case-insensitive; POSIX/SSH paths are not. */
@@ -237,7 +241,11 @@ export function useFileWorkspaceBoot(opts: FileWorkspaceBootOptions): FileWorksp
     contextMenu.value = null
     previewErr.value = null
     if (saved) {
-      const liveCwd = await readCurrentCwd()
+      // SSH panes deliberately persist `cwdLabel="/"`: their tree rel paths are
+      // relative to the remote root, while `/api/workspace/cwd` reports the
+      // shell's cwd (e.g. /home/me/project). Comparing the two would discard
+      // every SSH tree on each mount.
+      const liveCwd = shellType.value === 'ssh' ? null : await readCurrentCwd()
       const staleCwd =
         liveCwd !== null && (!saved.cwdLabel || !sameCwd(saved.cwdLabel, liveCwd))
       if (!staleCwd) {

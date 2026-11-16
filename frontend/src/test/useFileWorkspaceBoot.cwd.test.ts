@@ -119,6 +119,27 @@ describe('file workspace boot cwd reconciliation', () => {
     expect(loadFileWorkspaceState('files-1')).toBeDefined()
   })
 
+  it('keeps the persisted SSH tree because cwdLabel is the virtual root', async () => {
+    saveFileWorkspaceState('files-1', {
+      editorLayout: layout,
+      activeEditorLeafId: 'leaf-1',
+      childCache: { '': [{ name: 'home', is_dir: true, size: 0 }] },
+      expanded: new Set(['home']),
+      cwdLabel: '/',
+    })
+    authFetch.mockResolvedValue(cwdResponse('/home/me/project'))
+
+    const opts = makeOptions({ shellType: ref('ssh') })
+    const boot = useFileWorkspaceBoot(opts)
+    await boot.boot()
+
+    // The remote shell cwd is not the tree root; do not even ask.
+    expect(authFetch).not.toHaveBeenCalled()
+    expect(opts.cwdLabel.value).toBe('/')
+    expect(opts.expanded.value.has('home')).toBe(true)
+    expect(loadFileWorkspaceState('files-1')).toBeDefined()
+  })
+
   it('keeps the saved tree when the live cwd cannot be determined', async () => {
     saveFileWorkspaceState('files-1', {
       editorLayout: layout,

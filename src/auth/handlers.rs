@@ -503,11 +503,16 @@ pub async fn token_configured(State(state): State<AuthHandlerState>) -> impl Int
         let s = state.settings.read().await;
         s.auth.login_method.clone()
     };
-    Json(serde_json::json!({
-        "configured": !token.is_empty(),
-        "server_mode": cfg!(feature = "server"),
-        "login_method": login_method,
-    }))
+    // Public, and read by the login page before a session exists. A proxy or
+    // browser must not keep an old `login_method` after the user switches modes.
+    (
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(serde_json::json!({
+            "configured": !token.is_empty(),
+            "server_mode": cfg!(feature = "server"),
+            "login_method": login_method,
+        })),
+    )
 }
 
 pub async fn auto_token(

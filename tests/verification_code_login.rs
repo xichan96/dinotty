@@ -124,6 +124,9 @@ async fn token_configured_reports_default_login_method() -> TestResult {
 
     let resp = client.get(format!("{base}/api/token-configured")).send().await?;
     assert!(resp.status().is_success());
+    // The login page reads this before a session exists; a cache must not keep
+    // serving the previous login method after the user switches modes.
+    assert_eq!(resp.headers().get(reqwest::header::CACHE_CONTROL).unwrap(), "no-store");
     let body: Value = resp.json().await?;
     assert_eq!(body.get("login_method").and_then(Value::as_str), Some("token"));
     Ok(())

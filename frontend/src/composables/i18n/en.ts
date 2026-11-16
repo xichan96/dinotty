@@ -1165,7 +1165,7 @@ export default {
   'settings.diagnostics.panel': 'Debug panel',
   'settings.diagnostics.show': 'Show panel',
   'settings.diagnostics.hint':
-    'Shows the always-on hang recorder (resize, stall, WebSocket, visibility and long-task events). It keeps recording while the panel is hidden, and opens by itself after a crash. Desktop shortcut: Ctrl+Shift+Alt+D.',
+    'Shows the always-on hang recorder (resize, stall, WebSocket, visibility and long-task events). It keeps recording while the panel is hidden and never opens by itself, including after a crash; open it here or with Ctrl+Shift+Alt+D.',
   'settings.confirmBeforeCloseTab': 'Confirm before closing terminal tab',
   'settings.confirmBeforeCloseTabHint': 'Show a confirmation dialog before closing a terminal tab',
   'settings.restoreSessionOnStartup': 'Restore tabs on startup',

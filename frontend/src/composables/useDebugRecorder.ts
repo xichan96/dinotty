@@ -15,8 +15,8 @@
  * part happens before the hang, not after it.
  *
  * If the previous page disappeared without a `pagehide` (the renderer was
- * killed while frozen), the panel opens automatically on the next load with
- * the recovered log instead of staying invisible.
+ * killed while frozen), the recovered log is recorded and kept, but the panel
+ * never opens by itself: it only appears when explicitly requested.
  *
  * Imported for its side effects from `main.ts`, before any socket or terminal
  * is created.
@@ -24,7 +24,6 @@
 
 const EVENTS_KEY = 'dinotty_debug_events_v1'
 const RECORDING_KEY = 'dinotty_debug_recording'
-const PANEL_KEY = 'dinotty_debug_panel'
 const OP_KEY = 'dinotty_debug_lastop_v1'
 const SUMMARY_KEY = 'dinotty_debug_summary_v1'
 const LEGACY_HUD_KEY = 'dinotty_debug_hud'
@@ -583,52 +582,73 @@ function buildPanel(): void {
   const host = document.createElement('div')
   host.id = 'dinotty-debug-hud'
   const shadow = host.attachShadow({ mode: 'open' })
+  // Same shell as the server-log dialog (Settings → Logs → View Log): a dimmed
+  // backdrop and a centered card with a header, actions and a scrollable body.
   shadow.innerHTML = `
     <style>
       :host { all: initial; }
+      .overlay {
+        position: fixed; inset: 0; z-index: 2147483647;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(0, 0, 0, 0.6);
+      }
       .panel {
-        position: fixed; left: 8px; bottom: 8px; z-index: 2147483647;
-        width: min(460px, calc(100vw - 16px)); max-height: 55vh;
-        display: flex; flex-direction: column;
-        background: rgba(12, 16, 14, 0.94); color: #d7e2da;
-        border: 1px solid #3a4a40; border-radius: 8px;
-        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        box-shadow: 0 8px 28px rgba(0,0,0,.45);
+        background: var(--bg, #1e1e1e); color: var(--text-secondary, #cccccc);
+        border: 1px solid var(--border, #3c3c3c); border-radius: 12px;
+        width: 90vw; max-width: 900px; height: 80vh;
+        display: flex; flex-direction: column; overflow: hidden;
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
       }
-      .bar {
-        display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
-        padding: 6px 8px; border-bottom: 1px solid #2c3a32;
+      .header {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 12px; flex-wrap: wrap;
+        padding: 16px 20px; border-bottom: 1px solid var(--border, #3c3c3c);
       }
-      .title { font-weight: 700; color: #9fe3b8; margin-right: auto; }
+      .title {
+        margin: 0; font-size: 16px; font-weight: 600;
+        color: var(--text-primary, #d0d0d0);
+      }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; }
       button {
-        font: inherit; color: #d7e2da; background: #223029;
-        border: 1px solid #3a4a40; border-radius: 4px; padding: 2px 6px;
+        padding: 6px 10px; border: 1px solid var(--border, #3c3c3c);
+        border-radius: 5px; background: var(--bg-input, #2a2a2c);
+        color: var(--fg, #cccccc); font: inherit; font-size: 12px;
+        white-space: nowrap; cursor: pointer;
       }
-      button:active { background: #33463c; }
-      button:focus-visible { outline: 1px solid #9fe3b8; }
-      .metrics { padding: 5px 8px; color: #a9bcae; border-bottom: 1px solid #2c3a32; }
-      .log { overflow: auto; padding: 4px 8px 8px; white-space: pre; }
-      .row { display: flex; gap: 6px; }
-      .t { color: #6f8577; flex: none; }
-      .prev { color: #6f8577; }
-      .ev { color: #e6efe9; }
-      .warn { color: #ffb86b; }
-      .ws { color: #7fd1ff; }
-      .vis { color: #c9a7ff; }
+      button:hover { background: var(--bg-hover, #333333); }
+      button:focus-visible { outline: 1px solid var(--accent, #8a8a8a); }
+      .metrics {
+        padding: 10px 20px; border-bottom: 1px solid var(--border, #3c3c3c);
+        color: var(--text-muted, #858585);
+        font-family: inherit; font-size: 11px; word-break: break-word;
+      }
+      .log { flex: 1; overflow: auto; padding: 16px 20px; margin: 0; white-space: pre; }
+      .row { display: flex; gap: 8px; }
+      .t { color: var(--text-muted, #858585); flex: none; }
+      .prev { color: var(--text-muted, #858585); }
+      .ev { color: var(--text-primary, #d0d0d0); }
+      .warn { color: var(--warning, #d7a34a); }
+      .ws { color: var(--color-blue, #569cd6); }
+      .vis { color: var(--color-magenta, #c586c0); }
     </style>
-    <div class="panel">
-      <div class="bar">
-        <span class="title" title="Ctrl+Shift+Alt+D shows or hides this panel">dinotty debug</span>
-        <button data-act="killgl">Kill GL</button>
-        <button data-act="dropws">Drop WS</button>
-        <button data-act="togglewgl"></button>
-        <button data-act="copy">Copy</button>
-        <button data-act="clear">Clear</button>
-        <button data-act="hide">Hide</button>
-        <button data-act="stop">Stop</button>
+    <div class="overlay" data-role="overlay">
+      <div class="panel" role="dialog" aria-label="dinotty debug">
+        <div class="header">
+          <h3 class="title" title="Ctrl+Shift+Alt+D shows or hides this panel">dinotty debug</h3>
+          <div class="actions">
+            <button data-act="killgl">Kill GL</button>
+            <button data-act="dropws">Drop WS</button>
+            <button data-act="togglewgl"></button>
+            <button data-act="copy">Copy</button>
+            <button data-act="clear">Clear</button>
+            <button data-act="stop">Stop</button>
+            <button data-act="hide">Close</button>
+          </div>
+        </div>
+        <div class="metrics"></div>
+        <div class="log"></div>
       </div>
-      <div class="metrics"></div>
-      <div class="log"></div>
     </div>
   `
   const metrics = shadow.querySelector('.metrics') as HTMLDivElement
@@ -695,8 +715,13 @@ function buildPanel(): void {
   }
 
   shadow.addEventListener('click', (event) => {
-    const target = (event.target as HTMLElement).closest('button') as HTMLButtonElement | null
-    if (!target) return
+    const targetEl = event.target as HTMLElement
+    const target = targetEl.closest('button') as HTMLButtonElement | null
+    if (!target) {
+      // Clicking the dimmed backdrop closes the dialog, like the log viewer.
+      if (targetEl.dataset.role === 'overlay') setPanelVisible(false)
+      return
+    }
     const act = target.dataset.act
     if (act === 'killgl') {
       loseAllWebglContexts()
@@ -734,7 +759,6 @@ function buildPanel(): void {
 function setPanelVisible(visible: boolean): void {
   if (visible === panelVisible) return
   panelVisible = visible
-  safeSet(PANEL_KEY, visible ? '1' : '0')
   if (visible) {
     buildPanel()
   } else {
@@ -826,7 +850,6 @@ function syncFromLocation(): void {
   if (mode === 'off') {
     safeSet(LEGACY_HUD_KEY, null)
     safeSet(RECORDING_KEY, '0')
-    safeSet(PANEL_KEY, null)
     stopRecording()
   }
 }
@@ -854,16 +877,13 @@ function boot(): void {
   if (safeGet(LEGACY_HUD_KEY) === '1') {
     safeSet(LEGACY_HUD_KEY, null)
     safeSet(RECORDING_KEY, '1')
-    safeSet(PANEL_KEY, '0')
   }
 
   const mode = debugModeFromLocation()
   if (mode === 'on') {
     safeSet(RECORDING_KEY, '1')
-    safeSet(PANEL_KEY, '1')
   } else if (mode === 'off') {
     safeSet(RECORDING_KEY, '0')
-    safeSet(PANEL_KEY, null)
   }
 
   installHotkey()
@@ -879,12 +899,12 @@ function boot(): void {
     recoveredFromCrash = true
     recoveredLastEvent = previous.op ? `${previous.last.e}@${previous.op}` : previous.last.e
     record('recovered', { last: previous.last.e, ageMs: previous.ageMs, op: previous.op }, true)
-    // The previous page never got to say goodbye (no `pagehide`): this is the
-    // freeze that killed the renderer. Surface its log instead of hiding it.
-    setPanelVisible(true)
-    return
   }
-  if (safeGet(PANEL_KEY) === '1') setPanelVisible(true)
+  // Never restore the panel at startup — it stays hidden until explicitly
+  // requested (hotkey, Settings → Diagnostics, or an explicit `?debug=1`).
+  // A previous session's unclean ending is still surfaced in the log itself
+  // (`recovered` event + PREV=abnormal metric) once the panel is opened.
+  if (mode === 'on') setPanelVisible(true)
 }
 
 /**

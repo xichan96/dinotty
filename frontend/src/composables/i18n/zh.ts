@@ -870,7 +870,7 @@ export default {
   'settings.diagnostics.panel': '调试面板',
   'settings.diagnostics.show': '显示面板',
   'settings.diagnostics.hint':
-    '显示常驻的卡顿记录面板（调整窗口大小、卡顿、WebSocket、可见性与长任务事件）。面板隐藏时仍会继续记录，崩溃后会自动打开。桌面快捷键：Ctrl+Shift+Alt+D。',
+    '显示常驻的卡顿记录面板（调整窗口大小、卡顿、WebSocket、可见性与长任务事件）。面板隐藏时仍会继续记录，且不会自动打开（崩溃后也不会）；可在此或按 Ctrl+Shift+Alt+D 打开。',
   'login.subtitle': '请输入访问令牌以继续',
   'login.placeholder': '访问令牌',
   'login.submit': '登录',

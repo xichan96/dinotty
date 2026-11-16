@@ -12,19 +12,38 @@
       <div class="ws-picker-grab" aria-hidden="true" />
       <div class="ws-picker-head">
         <span class="ws-picker-title">
-          {{ query.trim() ? t('workspace.search') : t('workspace.switch') }}
+          {{
+            managing
+              ? t('workspace.manageTitle')
+              : query.trim()
+                ? t('workspace.search')
+                : t('workspace.switch')
+          }}
         </span>
-        <button
-          class="ws-picker-close"
-          type="button"
-          :aria-label="t('dialog.close')"
-          @click="emit('close')"
-        >
-          <X :size="18" />
-        </button>
+        <div class="ws-picker-head-actions">
+          <button
+            v-if="!managing && !query.trim() && workspaces.length"
+            class="ws-picker-manage-entry"
+            type="button"
+            @click="enterManage"
+          >
+            {{ t('workspace.manage') }}
+          </button>
+          <button v-else-if="managing" class="ws-picker-done" type="button" @click="exitManage">
+            {{ t('workspace.done') }}
+          </button>
+          <button
+            class="ws-picker-close"
+            type="button"
+            :aria-label="t('dialog.close')"
+            @click="emit('close')"
+          >
+            <X :size="18" />
+          </button>
+        </div>
       </div>
 
-      <label class="ws-picker-search">
+      <label v-if="!managing" class="ws-picker-search">
         <Search :size="14" class="ws-picker-search-icon" />
         <input
           ref="searchRef"
@@ -48,7 +67,75 @@
         </button>
       </label>
 
-      <div class="ws-picker-list" role="listbox" :aria-label="t('workspace.switch')">
+      <div
+        v-if="managing"
+        ref="manageListRef"
+        class="ws-picker-list ws-picker-list--manage"
+        :aria-label="t('workspace.manageTitle')"
+      >
+        <p class="ws-picker-manage-hint">{{ t('workspace.reorderHint') }}</p>
+        <div
+          v-for="ws in managedWorkspaces"
+          :key="ws.id"
+          class="ws-picker-manage-row"
+          :class="{
+            dragging: ws.id === draggingId,
+            'drag-over-top': ws.id === dragOverId && dragOverPos === 'before',
+            'drag-over-bottom': ws.id === dragOverId && dragOverPos === 'after',
+          }"
+          :data-ws-manage-id="ws.id"
+        >
+          <span
+            v-if="ws.id !== DEFAULT_WORKSPACE_ID"
+            class="ws-picker-drag"
+            role="button"
+            tabindex="0"
+            :aria-label="t('workspace.reorder')"
+            @pointerdown="onDragPointerDown($event, ws.id)"
+            @keydown.up.prevent="moveByKeyboard(ws.id, -1)"
+            @keydown.down.prevent="moveByKeyboard(ws.id, 1)"
+          >
+            <GripVertical :size="15" />
+          </span>
+          <span v-else class="ws-picker-drag-spacer" aria-hidden="true" />
+          <WorkspaceBadge
+            :remote="!!ws.connection_id"
+            :abbr="resolveAbbr(ws)"
+            :color="resolveColor(ws)"
+            :size="22"
+          />
+          <span class="ws-picker-row-main">
+            <span class="ws-picker-row-name">{{ ws.name }}</span>
+            <span class="ws-picker-row-path">
+              {{ ws.path || t('workspace.connectionNone') }}
+            </span>
+          </span>
+          <span v-if="ws.id === DEFAULT_WORKSPACE_ID" class="ws-picker-fixed-tag">
+            {{ t('workspace.defaultFixed') }}
+          </span>
+          <button
+            class="ws-picker-action"
+            type="button"
+            :title="t('palette.rename')"
+            :aria-label="t('palette.rename')"
+            @click="emit('rename', ws.id)"
+          >
+            <Pencil :size="14" />
+          </button>
+          <button
+            v-if="ws.id !== DEFAULT_WORKSPACE_ID"
+            class="ws-picker-action danger"
+            type="button"
+            :title="t('workspace.delete')"
+            :aria-label="t('workspace.delete')"
+            @click="requestDelete(ws)"
+          >
+            <Trash2 :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="ws-picker-list" role="listbox" :aria-label="t('workspace.switch')">
         <template v-for="section in visibleSections" :key="section.key">
           <div class="ws-picker-section">{{ section.label }}</div>
           <button
@@ -96,9 +183,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { Check, Plus, Search, X } from 'lucide-vue-next'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { Check, GripVertical, Pencil, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
+import { uiConfirm } from '../../composables/useConfirm'
+import { DEFAULT_WORKSPACE_ID } from '../../composables/useWorkspaces'
 import { resolveAbbr, resolveColor } from '../../utils/workspaceIcon'
 import type { Workspace } from '../../types/workspace'
 import WorkspaceBadge from '../WorkspaceBadge.vue'
@@ -130,11 +219,43 @@ const emit = defineEmits<{
   close: []
   select: [id: string]
   add: []
+  rename: [id: string]
+  delete: [id: string]
+  reorder: [ids: string[]]
 }>()
 
 const { t } = useI18n()
 const query = ref('')
 const searchRef = ref<HTMLInputElement | null>(null)
+
+// ── Manage mode ─────────────────────────────────────────────────
+//
+// On a phone the vertical WorkspaceList (which owns the right-click menu and
+// drag-to-reorder) is hidden; this sheet is the only workspace surface. Manage
+// mode keeps that surface and adds the two missing operations: a delete button
+// per row, and a drag handle for reordering. The default workspace is a fixed
+// row: it can be renamed but never reordered or deleted, matching the backend,
+// which only knows real workspace ids.
+
+const managing = ref(false)
+const manageListRef = ref<HTMLElement | null>(null)
+
+const managedWorkspaces = computed(() => props.workspaces)
+
+function enterManage() {
+  managing.value = true
+  query.value = ''
+  searchRef.value?.blur()
+}
+
+function exitManage() {
+  cleanupDrag()
+  managing.value = false
+}
+
+function choose(id: string) {
+  emit('select', id)
+}
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -175,17 +296,17 @@ const hasResults = computed(() => visibleSections.value.some((section) => sectio
 watch(
   () => props.visible,
   async (isOpen) => {
-    if (!isOpen) return
+    if (!isOpen) {
+      exitManage()
+      query.value = ''
+      return
+    }
     query.value = ''
     if (props.focusSearch === false) return
     await nextTick()
     searchRef.value?.focus()
   }
 )
-
-function choose(id: string) {
-  emit('select', id)
-}
 
 function clearQuery() {
   query.value = ''
@@ -195,6 +316,123 @@ function clearQuery() {
 function selectFirstResult() {
   const first = filtered.value[0]
   if (first) choose(first.id)
+}
+
+// …… Delete / rename ……
+
+async function requestDelete(ws: Workspace) {
+  if (ws.id === DEFAULT_WORKSPACE_ID) return
+  const ok = await uiConfirm(t('workspace.confirmDelete').replace('{name}', ws.name), {
+    title: t('workspace.delete'),
+    confirmText: t('workspace.delete'),
+    cancelText: t('filePreview.cancel'),
+  })
+  if (!ok) return
+  emit('delete', ws.id)
+}
+
+// …… Drag reorder (pointer events; the desktop drag path is width-gated) ……
+
+const draggingId = ref<string | null>(null)
+const dragOverId = ref<string | null>(null)
+const dragOverPos = ref<'before' | 'after' | null>(null)
+
+function onDragPointerDown(e: PointerEvent, id: string) {
+  if (e.button !== undefined && e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  draggingId.value = id
+  dragOverId.value = null
+  dragOverPos.value = null
+
+  window.addEventListener('pointermove', onDragPointerMove)
+  window.addEventListener('pointerup', onDragPointerUp)
+  window.addEventListener('pointercancel', onDragPointerCancel)
+}
+
+function onDragPointerMove(e: PointerEvent) {
+  if (!draggingId.value) return
+  e.preventDefault()
+
+  const list = manageListRef.value
+  if (list) {
+    const rect = list.getBoundingClientRect()
+    if (e.clientY < rect.top + 48) list.scrollTop -= 12
+    else if (e.clientY > rect.bottom - 48) list.scrollTop += 12
+  }
+
+  const hit =
+    typeof document.elementFromPoint === 'function'
+      ? document.elementFromPoint(e.clientX, e.clientY)
+      : null
+  const row = hit?.closest?.('[data-ws-manage-id]') as HTMLElement | null
+  const toId = row?.dataset.wsManageId
+  if (!row || !toId || toId === draggingId.value) {
+    dragOverId.value = null
+    dragOverPos.value = null
+    return
+  }
+  const rowRect = row.getBoundingClientRect()
+  dragOverId.value = toId
+  dragOverPos.value = e.clientY < rowRect.top + rowRect.height / 2 ? 'before' : 'after'
+}
+
+function onDragPointerUp() {
+  const fromId = draggingId.value
+  const toId = dragOverId.value
+  const pos = dragOverPos.value
+  cleanupDrag()
+  if (!fromId || !toId || fromId === toId || !pos) return
+
+  const full = props.workspaces.map((ws) => ws.id)
+  const fromIdx = full.indexOf(fromId)
+  const toIdx = full.indexOf(toId)
+  if (fromIdx < 0 || toIdx < 0) return
+
+  const next = [...full]
+  next.splice(fromIdx, 1)
+  const targetIdx = next.indexOf(toId)
+  next.splice(pos === 'before' ? targetIdx : targetIdx + 1, 0, fromId)
+
+  // The default workspace is pinned above the reorderable range.
+  const defaultIdx = next.indexOf(DEFAULT_WORKSPACE_ID)
+  if (defaultIdx > 0) {
+    next.splice(defaultIdx, 1)
+    next.unshift(DEFAULT_WORKSPACE_ID)
+  }
+
+  emitReorder(next.filter((id) => id !== DEFAULT_WORKSPACE_ID))
+}
+
+function onDragPointerCancel() {
+  cleanupDrag()
+}
+
+function cleanupDrag() {
+  draggingId.value = null
+  dragOverId.value = null
+  dragOverPos.value = null
+  window.removeEventListener('pointermove', onDragPointerMove)
+  window.removeEventListener('pointerup', onDragPointerUp)
+  window.removeEventListener('pointercancel', onDragPointerCancel)
+}
+
+onUnmounted(cleanupDrag)
+
+function emitReorder(ids: string[]) {
+  const current = props.workspaces.map((ws) => ws.id).filter((id) => id !== DEFAULT_WORKSPACE_ID)
+  if (current.length === ids.length && current.every((id, i) => id === ids[i])) return
+  emit('reorder', ids)
+}
+
+/** Keyboard/accessibility path for reordering, one slot per press. */
+function moveByKeyboard(id: string, delta: number) {
+  const ids = props.workspaces.map((ws) => ws.id).filter((wsId) => wsId !== DEFAULT_WORKSPACE_ID)
+  const from = ids.indexOf(id)
+  const to = from + delta
+  if (from < 0 || to < 0 || to >= ids.length) return
+  ;[ids[from], ids[to]] = [ids[to], ids[from]]
+  emit('reorder', ids)
 }
 </script>
 
@@ -224,8 +462,43 @@ function selectFirstResult() {
 }
 
 .ws-picker-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   color: var(--fg-bright);
   font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ws-picker-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.ws-picker-manage-entry,
+.ws-picker-done {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: var(--text-muted, #888);
+  font: inherit;
+  font-size: 13px;
+}
+.ws-picker-manage-entry:hover,
+.ws-picker-manage-entry:active,
+.ws-picker-done:hover,
+.ws-picker-done:active {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.ws-picker-done {
+  color: var(--fg-bright);
   font-weight: 600;
 }
 
@@ -302,6 +575,95 @@ function selectFirstResult() {
   overflow-y: auto;
   padding-bottom: 4px;
   overscroll-behavior: contain;
+}
+
+/* ── Manage mode ─────────────────────────────────────────────── */
+
+.ws-picker-manage-hint {
+  margin: 0;
+  padding: 2px 16px 8px;
+  color: var(--text-muted, #888);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ws-picker-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  padding-right: 8px;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.ws-picker-manage-row.dragging {
+  background: var(--bg-hover);
+  opacity: 0.6;
+}
+.ws-picker-manage-row.drag-over-top {
+  box-shadow: inset 0 2px 0 var(--fg-muted);
+}
+.ws-picker-manage-row.drag-over-bottom {
+  box-shadow: inset 0 -2px 0 var(--fg-muted);
+}
+
+.ws-picker-drag,
+.ws-picker-drag-spacer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 44px;
+}
+.ws-picker-drag {
+  color: var(--text-muted, #888);
+  touch-action: none;
+  cursor: grab;
+}
+.ws-picker-drag:active {
+  color: var(--fg);
+  cursor: grabbing;
+}
+.ws-picker-drag:focus-visible {
+  border-radius: 8px;
+  outline: 1px solid var(--fg-muted);
+  outline-offset: -4px;
+}
+
+.ws-picker-fixed-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted, #888);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ws-picker-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ws-picker-action:hover,
+.ws-picker-action:active {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.ws-picker-action.danger:hover,
+.ws-picker-action.danger:active {
+  background: color-mix(in srgb, var(--color-red, #f44747) 14%, transparent);
+  color: var(--color-red, #f44747);
 }
 
 .ws-picker-section {

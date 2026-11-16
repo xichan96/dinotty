@@ -1,5 +1,5 @@
 <template>
-  <div class="status-bar" :class="{ 'is-elevated': serverPickerOpen }">
+  <div class="status-bar" :class="{ 'is-elevated': serverPickerOpen, 'is-mobile': isMobile }">
     <!-- The one switch entry. A fixed-width slot at the far left, so the
          monitor items beside it never move when the server name changes. -->
     <div class="status-bar-server-wrap">
@@ -17,58 +17,92 @@
         <span class="server-name" :class="{ stale: currentMissing }">{{ activeServerLabel }}</span>
         <span class="server-dot" :class="{ 'is-offline': chipOffline }" />
       </button>
-      <div v-if="serverPickerOpen" class="server-picker" @click.stop>
-        <!-- One wrapper per row: the failure notice belongs to the row but
-             cannot live inside its <button>, which may hold no interactive
-             content of its own - the retry button would be nested. -->
-        <div v-for="(s, i) in servers" :key="s.id" class="server-option-row">
-          <button
-            class="server-option"
-            :class="{ 'is-active': s.id === currentId, active: i === cursor }"
-            :aria-busy="isBusy(s.id) ? 'true' : undefined"
-            @mouseenter="cursor = i"
-            @click="onPickServer(s)"
-          >
-            <span class="server-option-dot" :class="dotClass(s)" />
-            <span class="server-option-main">
-              <span class="server-option-name">{{ label(s) }}</span>
-              <!-- The origin: two LAN boards are easy to name alike, and this
-                   is what tells them apart. -->
-              <span class="server-option-url">{{ subtitle(s) }}</span>
-            </span>
-            <!-- A dot alone cannot say "no token", which is the one state that
-                 means anyone reaching this server is an admin. -->
-            <span v-if="statusText(s)" class="server-option-tag" :class="statusKind(s)">
-              {{ statusText(s) }}
-            </span>
-            <span v-if="isBusy(s.id)" class="server-option-spin" />
-            <KeyRound
-              v-else-if="s.hasToken && !s.local"
-              class="server-option-lock"
-              :title="t('server.tokenConfigured')"
-            />
-            <Check
-              v-if="s.id === currentId && !isBusy(s.id)"
-              class="server-option-check"
-              :size="14"
-            />
-          </button>
-          <p v-if="failures[s.id]" class="server-option-error">
-            <AlertCircle class="server-option-err-icon" :size="12" />
-            <span>{{ failureText(failures[s.id]) }}</span>
-            <button class="server-option-retry" @click.stop="onPickServer(s)">
+      <!-- On a phone the 24px status bar leaves no room for a usable popover,
+           so the same list becomes a bottom sheet. The backdrop is fixed, which
+           is also why `.is-elevated` lifts the whole bar above Mission
+           Control's backdrop (see the CSS below). -->
+      <div
+        v-if="serverPickerOpen && isMobile"
+        class="server-sheet-backdrop"
+        @click="closeServerPicker"
+      />
+      <div
+        v-if="serverPickerOpen"
+        class="server-picker"
+        :class="{ 'server-picker--sheet': isMobile }"
+        :role="isMobile ? 'dialog' : undefined"
+        :aria-modal="isMobile ? 'true' : undefined"
+        :aria-label="isMobile ? t('server.switch') : undefined"
+        @click.stop
+      >
+        <template v-if="isMobile">
+          <div class="server-sheet-grab" aria-hidden="true" />
+          <div class="server-sheet-head">
+            <span class="server-sheet-title">{{ t('server.switch') }}</span>
+            <button
+              class="server-sheet-close"
+              type="button"
+              :aria-label="t('dialog.close')"
+              @click.stop="closeServerPicker"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+        </template>
+
+        <div class="server-picker-scroll">
+          <!-- One wrapper per row: the failure notice belongs to the row but
+               cannot live inside its <button>, which may hold no interactive
+               content of its own - the retry button would be nested. -->
+          <div v-for="(s, i) in servers" :key="s.id" class="server-option-row">
+            <button
+              class="server-option"
+              :class="{ 'is-active': s.id === currentId, active: i === cursor }"
+              :aria-busy="isBusy(s.id) ? 'true' : undefined"
+              @mouseenter="cursor = i"
+              @click="onPickServer(s)"
+            >
+              <span class="server-option-dot" :class="dotClass(s)" />
+              <span class="server-option-main">
+                <span class="server-option-name">{{ label(s) }}</span>
+                <!-- The origin: two LAN boards are easy to name alike, and this
+                     is what tells them apart. -->
+                <span class="server-option-url">{{ subtitle(s) }}</span>
+              </span>
+              <!-- A dot alone cannot say "no token", which is the one state that
+                   means anyone reaching this server is an admin. -->
+              <span v-if="statusText(s)" class="server-option-tag" :class="statusKind(s)">
+                {{ statusText(s) }}
+              </span>
+              <span v-if="isBusy(s.id)" class="server-option-spin" />
+              <KeyRound
+                v-else-if="s.hasToken && !s.local"
+                class="server-option-lock"
+                :title="t('server.tokenConfigured')"
+              />
+              <Check
+                v-if="s.id === currentId && !isBusy(s.id)"
+                class="server-option-check"
+                :size="14"
+              />
+            </button>
+            <p v-if="failures[s.id]" class="server-option-error">
+              <AlertCircle class="server-option-err-icon" :size="12" />
+              <span>{{ failureText(failures[s.id]) }}</span>
+              <button class="server-option-retry" @click.stop="onPickServer(s)">
+                {{ t('server.retry') }}
+              </button>
+            </p>
+          </div>
+
+          <p v-if="status === 'loading'" class="server-picker-hint">{{ t('server.loading') }}</p>
+          <p v-else-if="status === 'unavailable'" class="server-picker-hint">
+            {{ t('server.listUnavailable') }}
+            <button class="server-option-retry" @click.stop="refreshRemoteServers()">
               {{ t('server.retry') }}
             </button>
           </p>
         </div>
-
-        <p v-if="status === 'loading'" class="server-picker-hint">{{ t('server.loading') }}</p>
-        <p v-else-if="status === 'unavailable'" class="server-picker-hint">
-          {{ t('server.listUnavailable') }}
-          <button class="server-option-retry" @click.stop="refreshRemoteServers()">
-            {{ t('server.retry') }}
-          </button>
-        </p>
 
         <button class="server-picker-manage" @click.stop="onManageServers">
           {{ t('server.manage') }}
@@ -132,7 +166,8 @@ import {
   gpuUtilHistory,
   gpuMemHistory,
 } from '../../composables/useMonitor'
-import { AlertCircle, Check, KeyRound, Server } from 'lucide-vue-next'
+import { AlertCircle, Check, KeyRound, Server, X } from 'lucide-vue-next'
+import { useIsMobile } from '../../composables/useIsMobile'
 import { useSettings } from '../../composables/useSettings'
 import { usePaneWarning } from '../../composables/usePaneWarning'
 import { useI18n } from '../../composables/useI18n'
@@ -170,6 +205,7 @@ const PluginSeriesPopover = defineAsyncComponent(() => import('./PluginSeriesPop
 const data = monitorData
 const { settings } = useSettings()
 const { t } = useI18n()
+const { isMobile } = useIsMobile()
 const ui = useUiStore()
 const warning = usePaneWarning()
 const store = useStatusBarItemsStore()
@@ -565,11 +601,159 @@ watch(serverPickerOpen, (open) => {
   flex-direction: column;
   min-width: 180px;
   max-width: 320px;
+  max-height: min(70vh, 460px);
   padding: 4px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--dialog-shadow);
+}
+
+.server-picker-scroll {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ── Mobile: the same list as a bottom sheet ─────────────────── */
+/* The bar is only 24px tall, so a popover anchored to it cannot give rows a
+   touch-sized target. On a phone the list takes over the bottom of the screen
+   instead; the chip itself keeps a 44px hit area. */
+
+.status-bar.is-mobile .status-bar-server {
+  position: relative;
+}
+.status-bar.is-mobile .status-bar-server::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  left: -6px;
+  height: 44px;
+  transform: translateY(-50%);
+}
+
+.server-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.server-picker--sheet {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 11;
+  width: 100%;
+  max-width: none;
+  max-height: min(72vh, 640px);
+  padding: 0 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.5);
+  animation: server-sheet-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes server-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0.4;
+  }
+}
+
+.server-sheet-grab {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 5px;
+  margin: 8px auto 0;
+  border-radius: 3px;
+  background: #565656;
+}
+
+.server-sheet-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 50px;
+  padding: 2px 8px 2px 18px;
+}
+
+.server-sheet-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-bright);
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.server-sheet-close {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.server-sheet-close:hover,
+.server-sheet-close:active {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.server-picker--sheet .server-picker-scroll {
+  padding: 2px 8px 0;
+}
+
+.server-picker--sheet .server-option {
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border-radius: 10px;
+}
+.server-picker--sheet .server-option-name {
+  font-size: 14px;
+}
+.server-picker--sheet .server-option-url {
+  font-size: 11px;
+}
+.server-picker--sheet .server-option-tag {
+  padding: 1px 7px;
+  font-size: 10px;
+}
+.server-picker--sheet .server-option-error {
+  padding: 0 12px 7px;
+  font-size: 11px;
+}
+.server-picker--sheet .server-picker-hint {
+  padding: 12px;
+  font-size: 12px;
+}
+.server-picker--sheet .server-picker-manage {
+  margin: 8px 12px 2px;
+  padding: 13px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  font-size: 14px;
+  text-align: center;
+}
+.server-picker--sheet .server-picker-manage:active {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+  color: var(--fg-bright);
 }
 .server-option-row {
   display: flex;

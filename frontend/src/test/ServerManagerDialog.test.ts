@@ -8,6 +8,16 @@ const mocks = vi.hoisted(() => ({
   activeId: 'a',
 }))
 
+const mobile = vi.hoisted(() => ({ isMobile: false }))
+
+vi.mock('../composables/useIsMobile', async () => {
+  const { computed } = await import('vue')
+  return {
+    useIsMobile: () => ({ isMobile: computed(() => mobile.isMobile) }),
+    isTouchDevice: () => mobile.isMobile,
+  }
+})
+
 vi.mock('../composables/apiBase', () => ({
   authFetch: mocks.authFetch,
   hubApiUrl: (p: string) => p,
@@ -43,7 +53,10 @@ const LAB = { id: 'a', name: 'Lab board', url: 'http://192.168.1.5:58901', has_t
 const ATTIC = { id: 'b', name: 'Attic', url: 'http://192.168.1.9:58901', has_token: false }
 
 /** The hub, answering the roster read and the roster write separately. */
-function hub(entries: unknown[], putResult: { body: unknown; status: number } = { body: {}, status: 200 }) {
+function hub(
+  entries: unknown[],
+  putResult: { body: unknown; status: number } = { body: {}, status: 200 }
+) {
   mocks.authFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       return jsonResponse(putResult.body, putResult.status)
@@ -61,6 +74,7 @@ beforeEach(() => {
   mocks.activeId = 'a'
   mocks.switchServer.mockResolvedValue({ ok: true, id: '__local__' })
   mocks.uiConfirm.mockResolvedValue(true)
+  mobile.isMobile = false
   closeServerManager()
   hub([LAB, ATTIC])
 })
@@ -430,6 +444,138 @@ describe('ServerManagerDialog', () => {
     await wrapper.find(SAVE).trigger('click')
     await flushPromises()
 
+    expect(putBody().map((s) => s.id)).toEqual(['b', 'a'])
+  })
+})
+
+describe('ServerManagerDialog on a phone', () => {
+  beforeEach(() => {
+    mobile.isMobile = true
+  })
+
+  const TAP_ROW = '.srv-mlist-row--tap'
+
+  it('opens the editor as a second page and returns with the back button', async () => {
+    const wrapper = await openManager()
+
+    expect(wrapper.find('.srv-mlist').exists()).toBe(true)
+    expect(wrapper.findAll(TAP_ROW)).toHaveLength(2)
+
+    await wrapper.findAll(TAP_ROW)[0].trigger('click')
+    expect(wrapper.find('.dialog-title').text()).toBe('Edit server')
+    expect(wrapper.findAll('.srv-mgr-input')[0].element).toHaveProperty('value', 'Lab board')
+
+    await wrapper.find('.srv-mgr-back').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.dialog-title').text()).toBe('Manage servers')
+    expect(wrapper.findAll(TAP_ROW)).toHaveLength(2)
+  })
+
+  it('drops a brand-new row when leaving its editor untouched', async () => {
+    const wrapper = await openManager()
+
+    await wrapper.find('.srv-mlist-add').trigger('click')
+    expect(wrapper.find('.dialog-title').text()).toBe('Edit server')
+
+    await wrapper.find('.srv-mgr-back').trigger('click')
+    await flushPromises()
+
+    expect(mocks.uiConfirm).not.toHaveBeenCalled()
+    expect(wrapper.findAll(TAP_ROW)).toHaveLength(2)
+  })
+
+  it('asks before discarding edits and rolls that row back', async () => {
+    const wrapper = await openManager()
+
+    await wrapper.findAll(TAP_ROW)[0].trigger('click')
+    await wrapper.findAll('.srv-mgr-input')[0].setValue('Renamed')
+    await wrapper.find('.srv-mgr-back').trigger('click')
+    await flushPromises()
+
+    expect(mocks.uiConfirm).toHaveBeenCalled()
+    expect(wrapper.find('.dialog-title').text()).toBe('Manage servers')
+    expect(wrapper.find(TAP_ROW).text()).toContain('Lab board')
+    expect(wrapper.find(TAP_ROW).text()).not.toContain('Renamed')
+  })
+
+  it('keeps the editor open when the discard confirmation is declined', async () => {
+    mocks.uiConfirm.mockResolvedValue(false)
+    const wrapper = await openManager()
+
+    await wrapper.findAll(TAP_ROW)[0].trigger('click')
+    await wrapper.findAll('.srv-mgr-input')[0].setValue('Renamed')
+    await wrapper.find('.srv-mgr-back').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.dialog-title').text()).toBe('Edit server')
+    expect(wrapper.findAll('.srv-mgr-input')[0].element).toHaveProperty('value', 'Renamed')
+  })
+
+  it('reorders in the dedicated mode and saves the new order', async () => {
+    const wrapper = await openManager()
+
+    await wrapper.find('.srv-mgr-head-action').trigger('click')
+    expect(wrapper.find('.dialog-title').text()).toBe('Reorder servers')
+    expect(wrapper.findAll('.srv-mlist-grip')).toHaveLength(2)
+
+    // Move the first row down one slot: the second control is the down arrow.
+    await wrapper
+      .findAll('.srv-mlist-row--reorder')[0]
+      .findAll('.srv-mlist-move')[1]
+      .trigger('click')
+    await wrapper.find(SAVE).trigger('click')
+    await flushPromises()
+
+    expect(putBody().map((s) => s.id)).toEqual(['b', 'a'])
+  })
+
+  it('saves from the editor and returns to the roster', async () => {
+    const wrapper = await openManager()
+
+    await wrapper.findAll(TAP_ROW)[0].trigger('click')
+    await wrapper.findAll('.srv-mgr-input')[0].setValue('Lab board 2')
+    await wrapper.find(SAVE).trigger('click')
+    await flushPromises()
+
+    expect(managerOpen.value).toBe(true)
+    expect(wrapper.find('.dialog-title').text()).toBe('Manage servers')
+    expect(wrapper.find(TAP_ROW).text()).toContain('Lab board 2')
+    expect(putBody()[0].name).toBe('Lab board 2')
+  })
+
+  it('returns to the list after deleting the row being edited', async () => {
+    const wrapper = await openManager()
+
+    await wrapper.findAll(TAP_ROW)[0].trigger('click')
+    await wrapper.find('.srv-mgr-btn--danger').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.dialog-title').text()).toBe('Manage servers')
+    expect(wrapper.findAll(TAP_ROW)).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('Lab board')
+  })
+
+  it('reorders by dragging a handle in the dedicated mode', async () => {
+    const wrapper = await openManager()
+    await wrapper.find('.srv-mgr-head-action').trigger('click')
+
+    const target = wrapper.findAll('.srv-mlist-row--reorder')[1].element
+    const original = document.elementFromPoint
+    document.elementFromPoint = () => target
+    try {
+      const handle = wrapper.findAll('.srv-mlist-grip')[0].element
+      handle.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 })
+      )
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 60 }))
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      await flushPromises()
+    } finally {
+      document.elementFromPoint = original
+    }
+
+    await wrapper.find(SAVE).trigger('click')
+    await flushPromises()
     expect(putBody().map((s) => s.id)).toEqual(['b', 'a'])
   })
 })

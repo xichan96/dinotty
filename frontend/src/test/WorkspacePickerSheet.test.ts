@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import type { Workspace } from '../types/workspace'
+
+const confirmMock = vi.hoisted(() => vi.fn())
+vi.mock('../composables/useConfirm', () => ({ uiConfirm: confirmMock }))
 
 // BaseDialog teleports to <body>, which would put the sheet content outside the
 // wrapper in these focused tests. The dialog behaviour itself is covered by
@@ -34,6 +37,7 @@ vi.mock('../composables/useI18n', () => ({
 }))
 
 import WorkspacePickerSheet from '../components/overview/WorkspacePickerSheet.vue'
+import { DEFAULT_WORKSPACE_ID } from '../composables/useWorkspaces'
 
 const workspaces: Workspace[] = [
   { id: 'default', name: 'Default', path: '~', order: 0 },
@@ -42,11 +46,11 @@ const workspaces: Workspace[] = [
   { id: 'gamma', name: 'Gamma', path: '/gamma', order: 3 },
 ]
 
-function mountSheet(recentIds: string[] = ['beta', 'alpha']) {
+function mountSheet(recentIds: string[] = ['beta', 'alpha'], list: Workspace[] = workspaces) {
   return mount(WorkspacePickerSheet, {
     props: {
       visible: true,
-      workspaces,
+      workspaces: list,
       selectedId: 'alpha',
       tabCounts: { alpha: 3 },
       recentIds,
@@ -157,5 +161,105 @@ describe('WorkspacePickerSheet', () => {
 
     await wrapper.find('.ws-picker-add').trigger('click')
     expect(wrapper.emitted('add')).toEqual([[]])
+  })
+})
+
+describe('WorkspacePickerSheet manage mode', () => {
+  const manageWorkspaces: Workspace[] = [
+    { id: DEFAULT_WORKSPACE_ID, name: 'Default', path: '~', order: 0 },
+    { id: 'alpha', name: 'Alpha', path: '/alpha', order: 1 },
+    { id: 'beta', name: 'Beta', path: '/beta', order: 2 },
+  ]
+
+  function row(wrapper: ReturnType<typeof mountSheet>, id: string) {
+    return wrapper.find(`[data-ws-manage-id="${id}"]`)
+  }
+
+  async function enterManage(wrapper: ReturnType<typeof mountSheet>) {
+    await wrapper.find('.ws-picker-manage-entry').trigger('click')
+  }
+
+  it('replaces search/sections with a flat, ordered manage list', async () => {
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+
+    expect(wrapper.find('.ws-picker-search').exists()).toBe(false)
+    expect(
+      wrapper.findAll('.ws-picker-manage-row').map((el) => el.attributes('data-ws-manage-id'))
+    ).toEqual([DEFAULT_WORKSPACE_ID, 'alpha', 'beta'])
+    expect(row(wrapper, DEFAULT_WORKSPACE_ID).find('.ws-picker-fixed-tag').exists()).toBe(true)
+    expect(row(wrapper, DEFAULT_WORKSPACE_ID).find('.ws-picker-drag').exists()).toBe(false)
+    expect(row(wrapper, DEFAULT_WORKSPACE_ID).find('.ws-picker-action.danger').exists()).toBe(false)
+    expect(row(wrapper, 'alpha').find('.ws-picker-drag').exists()).toBe(true)
+  })
+
+  it('returns to the normal picker on Done', async () => {
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+    await wrapper.find('.ws-picker-done').trigger('click')
+
+    expect(wrapper.find('.ws-picker-search').exists()).toBe(true)
+    expect(wrapper.findAll('.ws-picker-row').length).toBe(3)
+  })
+
+  it('emits rename for a row action', async () => {
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+
+    await row(wrapper, 'alpha').find('.ws-picker-action').trigger('click')
+    expect(wrapper.emitted('rename')).toEqual([['alpha']])
+  })
+
+  it('asks for confirmation before emitting delete', async () => {
+    confirmMock.mockResolvedValue(true)
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+
+    await row(wrapper, 'alpha').find('.ws-picker-action.danger').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('delete')).toEqual([['alpha']])
+  })
+
+  it('does not delete when the confirmation is declined', async () => {
+    confirmMock.mockResolvedValue(false)
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+
+    await row(wrapper, 'alpha').find('.ws-picker-action.danger').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('delete')).toBeUndefined()
+  })
+
+  it('emits the reordered id list after dragging a handle', async () => {
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+
+    const target = row(wrapper, 'beta').element
+    const original = document.elementFromPoint
+    document.elementFromPoint = () => target
+    try {
+      const handle = row(wrapper, 'alpha').find('.ws-picker-drag').element
+      handle.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 })
+      )
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 40 }))
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      await nextTick()
+    } finally {
+      document.elementFromPoint = original
+    }
+
+    expect(wrapper.emitted('reorder')).toEqual([[['beta', 'alpha']]])
+  })
+
+  it('reorders one slot per keyboard press on a focused handle', async () => {
+    const wrapper = mountSheet([], manageWorkspaces)
+    await enterManage(wrapper)
+
+    await row(wrapper, 'alpha').find('.ws-picker-drag').trigger('keydown', { key: 'ArrowDown' })
+    expect(wrapper.emitted('reorder')).toEqual([[['beta', 'alpha']]])
   })
 })

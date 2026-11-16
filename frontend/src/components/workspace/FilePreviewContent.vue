@@ -318,12 +318,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import { apiUrl, getAuthToken } from '../../composables/apiBase'
+import { apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
 import { isTauri } from '../../composables/useTransport'
 import { isCsvPreviewFile } from '../../utils/csvPreview'
-import { rewriteHtmlPreview } from '../../utils/htmlPreview'
+import { injectBaseHref, rewriteHtmlPreview } from '../../utils/htmlPreview'
 import { renderMermaidBlocks } from '../../composables/mermaidPreview'
 import {
   enhanceMarkdownBlocks,
@@ -434,18 +434,102 @@ const htmlSandbox = computed(function computeHtmlSandbox() {
     : 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
 })
 
-const htmlPreviewSrcdoc = computed(function buildHtmlPreview() {
-  if (props.meta?.kind !== 'html') return ''
-  // Relative refs in the document resolve against the Dinotty page, not the
-  // HTML file's directory, so point them at the workspace raw endpoint.
-  return rewriteHtmlPreview(props.editorText, csvFilePath.value, function toRawUrl(rel) {
-    const q = new URLSearchParams({ pane_id: props.paneId ?? '', path: rel })
-    if (isTauri()) {
-      const token = getAuthToken()
-      if (token) q.set('token', token)
-    }
-    return apiUrl(`/api/workspace/raw?${q}`)
-  })
+/** Fallback URL when a preview token cannot be minted (see `rebuildHtmlPreview`). */
+function htmlRawUrl(rel: string): string {
+  const q = new URLSearchParams({ pane_id: props.paneId ?? '', path: rel })
+  if (isTauri()) {
+    const token = getAuthToken()
+    if (token) q.set('token', token)
+  }
+  return apiUrl(`/api/workspace/raw?${q}`)
+}
+
+/**
+ * Directory-scoped token for the current HTML file, so the sandboxed frame's
+ * relative URLs (static *and* script-built) can read workspace assets.
+ * Minted once per file and dropped when the file changes or the token expires.
+ */
+let htmlToken = ''
+let htmlTokenFile = ''
+let htmlTokenExpires = 0
+/** Server-side TTL is 2 h; refresh a little early so a long-open preview keeps working. */
+const HTML_TOKEN_TTL_MS = 90 * 60 * 1000
+
+async function mintPreviewToken(filePath: string): Promise<string> {
+  if (htmlToken && htmlTokenFile === filePath && Date.now() < htmlTokenExpires) {
+    return htmlToken
+  }
+  try {
+    const res = await authFetch(apiUrl('/api/workspace/preview-token'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pane_id: props.paneId ?? '', path: filePath }),
+    })
+    if (!res.ok) return ''
+    const body = (await res.json()) as { token?: string }
+    if (!body.token) return ''
+    htmlToken = body.token
+    htmlTokenFile = filePath
+    htmlTokenExpires = Date.now() + HTML_TOKEN_TTL_MS
+    return htmlToken
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * srcdoc for the HTML preview.
+ *
+ * The frame is sandboxed, so it cannot authenticate its own asset requests: the
+ * authenticated API answers 401 to every one of them, and script-built image
+ * URLs cannot be rewritten in the source at all. The host page — which *is*
+ * authenticated — mints a token scoped to the file's directory and the document
+ * gets a `<base href>` pointing at the matching reader, so every relative URL
+ * inside the frame resolves there. Falls back to raw-URL rewriting when no token
+ * is available (SSH pane, older server).
+ */
+const htmlPreviewSrcdoc = ref('')
+let htmlPreviewGeneration = 0
+let htmlPreviewTimer: number | undefined
+
+async function rebuildHtmlPreview() {
+  const generation = ++htmlPreviewGeneration
+  if (props.meta?.kind !== 'html' || !props.htmlShowPreview) {
+    htmlPreviewSrcdoc.value = ''
+    return
+  }
+  const html = props.editorText
+  const filePath = csvFilePath.value
+  if (!html || !filePath) {
+    htmlPreviewSrcdoc.value = html
+    return
+  }
+  const token = await mintPreviewToken(filePath)
+  if (generation !== htmlPreviewGeneration) return
+  if (!token) {
+    htmlPreviewSrcdoc.value = rewriteHtmlPreview(html, filePath, htmlRawUrl)
+    return
+  }
+  // Absolute (not root-relative): an `about:srcdoc` document inherits the
+  // parent's base URL, and relying on that inheritance to resolve the preview
+  // reader would be a subtle thing to break.
+  const base = new URL(apiUrl(`/preview-ws/${token}/`), window.location.href).href
+  htmlPreviewSrcdoc.value = injectBaseHref(html, base)
+}
+
+watch(
+  () => [props.meta?.kind, props.editorText, csvFilePath.value, props.htmlShowPreview] as const,
+  function scheduleHtmlPreview() {
+    window.clearTimeout(htmlPreviewTimer)
+    // Debounced: a rebuild re-parses and re-serializes the whole document, and
+    // typing in the source pane would otherwise do that on every keystroke.
+    htmlPreviewTimer = window.setTimeout(() => void rebuildHtmlPreview(), 150)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(function cancelHtmlPreview() {
+  window.clearTimeout(htmlPreviewTimer)
 })
 
 watch(csvFilePath, function resetCsvViewForFile() {

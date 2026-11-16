@@ -42,6 +42,18 @@ pub struct ResolveAbsResponse {
     pub abs: String,
 }
 
+/// Which file's directory the HTML preview wants to read through `/preview-ws`.
+#[derive(Deserialize)]
+pub struct PreviewTokenBody {
+    pub pane_id: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+pub struct PreviewTokenResponse {
+    pub token: String,
+}
+
 #[derive(Serialize)]
 pub(crate) struct UploadDirStatus {
     pub(crate) managed: bool,

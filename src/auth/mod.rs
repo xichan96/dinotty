@@ -184,6 +184,14 @@ pub async fn auth_middleware(
         return next.run(request).await;
     }
 
+    // /preview-ws/<token>/* is the workspace HTML preview's own asset reader.
+    // The frame is sandboxed without `allow-same-origin`, so it cannot send the
+    // session cookie; the minted path token is the credential, and the handler
+    // confines it to one directory (see `workspace::preview_ws`).
+    if path.starts_with("/preview-ws/") {
+        return next.run(request).await;
+    }
+
     // /__srv/* is the hub relay, which carries *another* server's credentials
     // and therefore enforces a stricter gate of its own (loopback-or-valid-auth
     // AND not cross-site AND target in the roster AND the X-Dinotty-Relay

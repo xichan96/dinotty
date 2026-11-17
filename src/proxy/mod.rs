@@ -164,10 +164,12 @@ fn is_valid_proxy_host(host: &str) -> bool {
 }
 
 /// Auth check for `/preview/*` requests.
-/// - Loopback IPs are always trusted (matches the main auth middleware's IP
-///   whitelist behavior: localhost users who bypass login still get preview
-///   access).
-/// - Non-loopback IPs:
+/// - Local requests (loopback peer, loopback `Host`, no forwarding headers —
+///   see [`crate::auth::is_local_request`]) are trusted, matching the main auth
+///   middleware's whitelist behavior: localhost users who bypass login still get
+///   preview access. A same-host tunnel also arrives from 127.0.0.1 but rewrites
+///   `Host` and adds `X-Forwarded-*`, so it is *not* local and must authenticate.
+/// - Non-local requests:
 ///   - `allow_external = false`: forbidden.
 ///   - `allow_external = true`: must have a valid session cookie or Bearer token.
 ///
@@ -179,7 +181,7 @@ fn check_preview_auth(
     sessions: &SessionStore,
     token: &str,
 ) -> Option<Response> {
-    if real_ip.is_loopback() {
+    if real_ip.is_loopback() && crate::auth::is_local_request(req.headers(), real_ip) {
         // Loopback is trusted without a session, but not when the call was
         // scripted cross-site by a website in the local user's browser.
         if crate::auth::is_cross_site_browser_request(req.headers()) {
@@ -610,6 +612,46 @@ mod tests {
     fn hop_by_hop_headers_are_dropped() {
         for h in ["host", "connection", "upgrade", "accept-encoding"] {
             assert!(!should_forward_header(h), "{h} describes this connection, not the upstream");
+        }
+    }
+
+    /// `/preview/*` is exempt from `auth_middleware` and applies its own gate.
+    /// A same-host tunnel must not inherit the loopback trust, or the preview
+    /// proxy becomes an unauthenticated server-side fetch (SSRF into
+    /// localhost/LAN) for anyone who can reach the tunnel URL.
+    #[test]
+    fn a_tunnel_is_not_granted_the_loopback_preview_trust() {
+        use super::check_preview_auth;
+        use crate::auth::session::SessionStore;
+        use axum::body::Body;
+        use axum::extract::Request;
+        use axum::http::{header, StatusCode};
+
+        let sessions = SessionStore::new(1);
+        let loopback = "127.0.0.1".parse().unwrap();
+        let uri = "/preview/abc/http://127.0.0.1:5173/";
+
+        let local = Request::builder()
+            .uri(uri)
+            .header(header::HOST, "127.0.0.1:8999")
+            .body(Body::empty())
+            .unwrap();
+        assert!(
+            check_preview_auth(&local, loopback, true, &sessions, "token").is_none(),
+            "a genuine local request keeps zero-config preview access"
+        );
+
+        for (host, forwarded_for) in
+            [("abc.ngrok-free.app", None), ("127.0.0.1:8999", Some("203.0.113.7"))]
+        {
+            let mut builder = Request::builder().uri(uri).header(header::HOST, host);
+            if let Some(xff) = forwarded_for {
+                builder = builder.header("x-forwarded-for", xff);
+            }
+            let req = builder.body(Body::empty()).unwrap();
+            let resp = check_preview_auth(&req, loopback, true, &sessions, "token")
+                .expect("tunnel-shaped preview request must be rejected");
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         }
     }
 

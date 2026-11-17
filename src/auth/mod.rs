@@ -211,10 +211,12 @@ pub async fn auth_middleware(
         (real, s.ip_whitelist.clone())
     };
 
-    // /api/auto-token exposes the raw auth token — loopback only.
+    // /api/auto-token exposes the raw auth token - local requests only.
+    // The gate is `is_local_request`, not the peer address: a same-host tunnel
+    // (cloudflared, ngrok, `tailscale serve`) also connects from 127.0.0.1.
     if path == "/api/auto-token" {
         let cross_site = is_cross_site_browser_request(request.headers());
-        if !real_ip.is_loopback() || cross_site {
+        if !is_local_request(request.headers(), real_ip) || cross_site {
             tracing::warn!(
                 "auth: reject {path} from {real_ip} (loopback-only, cross_site_browser={cross_site})"
             );
@@ -227,22 +229,41 @@ pub async fn auth_middleware(
         }
     }
 
-    // IP whitelist (loopback bypass) check - uses real IP, not direct peer.
+    // IP whitelist check - uses real IP, not the direct peer.
+    //
+    // A loopback match is honoured only for a request that is genuinely local.
+    // Every same-host forwarder (cloudflared, ngrok, `tailscale serve`, nginx,
+    // `ssh -L`) dials this server from 127.0.0.1, so the peer address alone
+    // cannot tell the user's own browser apart from the internet arriving
+    // through a tunnel; `is_local_request` adds the two properties the forwarder
+    // cannot hide. Non-loopback entries (a LAN CIDR the user added on purpose)
+    // keep their previous unconditional meaning.
+    //
     // Cross-site browser requests are rejected even from whitelisted peers
     // (see is_cross_site_browser_request).
     if is_ip_whitelisted(real_ip, &ip_whitelist) {
-        if is_cross_site_browser_request(request.headers()) {
+        if real_ip.is_loopback() && !is_local_request(request.headers(), real_ip) {
             tracing::warn!(
-                "auth: reject cross-site browser request to {path} via whitelisted {real_ip} (origin {:?})",
-                request.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok())
+                "auth: refusing loopback whitelist bypass for forwarded request {} {} (host {:?}, x-forwarded-for {:?}); falling back to credentials",
+                request.method(),
+                path,
+                request.headers().get(header::HOST).and_then(|v| v.to_str().ok()),
+                request.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
             );
-            return Response::builder()
-                .status(StatusCode::FORBIDDEN)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"error":"cross-site requests are not allowed"}"#))
-                .unwrap();
+        } else {
+            if is_cross_site_browser_request(request.headers()) {
+                tracing::warn!(
+                    "auth: reject cross-site browser request to {path} via whitelisted {real_ip} (origin {:?})",
+                    request.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok())
+                );
+                return Response::builder()
+                    .status(StatusCode::FORBIDDEN)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"error":"cross-site requests are not allowed"}"#))
+                    .unwrap();
+            }
+            return next.run(request).await;
         }
-        return next.run(request).await;
     }
 
     // /api/auth is the login endpoint - exempt from IP whitelist so non-loopback
@@ -365,10 +386,14 @@ fn extract_session_cookie(request: &Request, port: u16) -> Option<String> {
 /// (CIDR list), parse `X-Forwarded-For` and return the first non-trusted hop.
 /// Otherwise return the direct connection IP unchanged.
 ///
-/// This is critical for the loopback bypass: behind a same-host tunnel (e.g.
-/// ngrok/cloudflared on 127.0.0.1), the direct peer is always loopback and
-/// would bypass auth. With `trusted_proxies` empty (default), the direct peer
-/// is used as-is, so tunnel traffic from a remote ngrok exit keeps its real IP.
+/// This matters for the loopback bypass: behind a same-host tunnel (e.g.
+/// cloudflared/ngrok/`tailscale serve` on 127.0.0.1) the direct peer is always
+/// loopback. With `trusted_proxies` empty (the default) this function therefore
+/// returns `127.0.0.1` for tunnel traffic - it does **not** recover the remote
+/// client's IP, because the header is only parsed for configured proxies.
+/// Distinguishing a tunnel from the local user is [`is_local_request`]'s job,
+/// not this function's; treating the peer as authoritative is exactly why the
+/// whitelist bypass needs that extra check.
 #[must_use]
 pub fn real_client_ip(headers: &HeaderMap, conn_ip: IpAddr, trusted_proxies: &[String]) -> IpAddr {
     if !is_ip_whitelisted(conn_ip, trusted_proxies) {
@@ -391,19 +416,200 @@ pub fn real_client_ip(headers: &HeaderMap, conn_ip: IpAddr, trusted_proxies: &[S
     conn_ip
 }
 
-/// 暂时关闭：反代（极空间等 NAS）默认不带 X-Forwarded-Host，Host 被改写为内部
-/// 地址，导致 Origin 与 Host 比对失配，所有非 /ws 的 WS 端点（监控、sync、
-/// watch、notify、history 等）全部 403。cookie session 鉴权仍在 `auth_middleware`
-/// 生效，跨站 WS CSRF 风险有限。后续修复 `trusted_proxies` 语义 bug（应用直连
-/// peer 判断而非 `real_ip`）并加拒绝日志后再恢复。
+/// Headers that only a forwarding proxy adds. The proxy appends them after it
+/// receives the request, so a remote client cannot strip them back out.
+const FORWARDING_HEADERS: &[&str] = &[
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
+    "cf-connecting-ip",
+    "true-client-ip",
+];
+
+fn has_forwarding_headers(headers: &HeaderMap) -> bool {
+    FORWARDING_HEADERS.iter().any(|name| headers.contains_key(*name))
+}
+
+/// Whether `Host` names a loopback authority (`localhost`, `*.localhost`,
+/// `127.0.0.0/8`, `[::1]`), ignoring any port.
+fn host_header_is_loopback(headers: &HeaderMap) -> bool {
+    let Some(raw) = headers.get(header::HOST).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let authority = raw.trim();
+    if authority.is_empty() {
+        return false;
+    }
+    // Bracketed IPv6 literal, with or without a port: `[::1]`, `[::1]:8999`.
+    if let Some(rest) = authority.strip_prefix('[') {
+        let Some((addr, _)) = rest.split_once(']') else { return false };
+        return addr.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    }
+    let host = authority.rsplit_once(':').map_or(authority, |(host, _port)| host);
+    if host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost") {
+        return true;
+    }
+    host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Whether a request may be treated as a genuine on-host request - which is what
+/// the loopback entries of `ip_whitelist` mean by "local".
+///
+/// The peer address alone cannot answer that: every same-host forwarder
+/// (cloudflared, ngrok, `tailscale serve`, nginx, `ssh -L`) dials the server from
+/// 127.0.0.1, so a request arriving through a tunnel looks identical to the local
+/// user's browser. Two properties the forwarder cannot hide are checked instead:
+///
+/// * `Host` must name a loopback authority. Tunnels rewrite `Host` to the public
+///   hostname (measured against `tailscale serve`: it forwards
+///   `host: <node>.ts.net` plus `x-forwarded-*`; cloudflared and ngrok behave the
+///   same way), so a public-URL request fails even though its peer is loopback.
+/// * No forwarding header may be present, because the proxy adds those itself.
+///
+/// Residual, accepted: `ssh -L` forwards the far-end browser's own
+/// `Host: localhost` and adds no headers, so it still looks local. Whoever can
+/// open that tunnel already has shell access to this host, and dropping the
+/// bypass outright would break the desktop app's zero-config local access.
+#[must_use]
+pub fn is_local_request(headers: &HeaderMap, peer: IpAddr) -> bool {
+    peer.is_loopback() && !has_forwarding_headers(headers) && host_header_is_loopback(headers)
+}
+
+/// Split `scheme://authority...` into its scheme and authority.
+fn split_scheme_authority(url: &str) -> Option<(&str, &str)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if scheme.is_empty() || authority.is_empty() {
+        return None;
+    }
+    Some((scheme, authority))
+}
+
+/// Split `host[:port]`, respecting `[::1]:8999` literals.
+fn split_host_port(authority: &str) -> (&str, Option<&str>) {
+    if let Some(rest) = authority.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            let host_end = end + 2; // bracketed host, inclusive
+            let host = authority.get(..host_end).unwrap_or(authority);
+            let port = authority
+                .get(host_end..)
+                .and_then(|tail| tail.strip_prefix(':'))
+                .map(str::trim)
+                .filter(|port| !port.is_empty());
+            return (host, port);
+        }
+        return (authority, None);
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() && !port.is_empty() => (host, Some(port)),
+        _ => (authority, None),
+    }
+}
+
+fn is_loopback_hostname(host: &str) -> bool {
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if bare.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if bare.to_ascii_lowercase().ends_with(".localhost") {
+        return true;
+    }
+    bare.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// The desktop shell's own origin. Browsers set `Origin` themselves and only the
+/// app shell uses these schemes, so a website cannot forge one. The shell still
+/// authenticates normally; this is only the cross-site gate.
+fn is_app_shell_origin(origin: &str) -> bool {
+    let Some((scheme, authority)) = split_scheme_authority(origin) else { return false };
+    let (host, _port) = split_host_port(authority);
+    match scheme.to_ascii_lowercase().as_str() {
+        "tauri" | "asset" => is_loopback_hostname(host),
+        "http" | "https" => host.eq_ignore_ascii_case("tauri.localhost"),
+        _ => false,
+    }
+}
+
+fn authority_matches(origin_authority: &str, host: &str) -> bool {
+    if origin_authority.eq_ignore_ascii_case(host) {
+        return true;
+    }
+    let (origin_host, origin_port) = split_host_port(origin_authority);
+    let (host_host, host_port) = split_host_port(host);
+    if !origin_host.eq_ignore_ascii_case(host_host) {
+        return false;
+    }
+    // Same hostname but the ports disagree or are absent. The only benign
+    // explanation is a proxy that dropped the port from `Host`; a loopback URL
+    // always carries its port, so a missing one there is indistinguishable from
+    // another local app on a different port - which is the case to reject.
+    host_port.is_none() && origin_port.is_some() && !is_loopback_hostname(host_host)
+}
+
+/// Whether a WebSocket request's `Origin` may be trusted.
+///
+/// Rejecting a cross-origin browser handshake is the WebSocket equivalent of
+/// CSRF protection: `/ws` and `/ws/sync` accept terminal input, so a page on
+/// another origin must not be able to open one. Rules, in order:
+///
+/// 1. No `Origin` header: not a browser-driven request (agents, curl,
+///    `tauri_fetch`). Nothing to judge, and authentication already ran.
+/// 2. The desktop shell's own scheme (`tauri://`, `asset://`,
+///    `http(s)://tauri.localhost`). Only the app shell uses these.
+/// 3. An exact entry in `auth.allowed_origins` - the escape hatch for reverse
+///    proxies that rewrite `Host` and `Origin` in ways this cannot reconcile.
+/// 4. `Origin`'s authority must equal `Host`, or `X-Forwarded-Host` when the
+///    caller is in `trusted_proxies` (first value wins; chained proxies append).
+///
+/// A plain `localhost` origin gets no special treatment. A page served by any
+/// other app on this machine is exactly what this check exists to stop: it is
+/// same-host, so the loopback whitelist already lets it past authentication.
 #[must_use]
 pub fn check_ws_origin(
-    _headers: &HeaderMap,
-    _allowed_origins: &[String],
-    _client_ip: std::net::IpAddr,
-    _trusted_proxies: &[String],
+    headers: &HeaderMap,
+    allowed_origins: &[String],
+    client_ip: IpAddr,
+    trusted_proxies: &[String],
 ) -> bool {
-    true
+    let Some(raw_origin) = headers.get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = raw_origin.to_str() else {
+        return false;
+    };
+    let origin = origin.trim();
+    if origin.is_empty() {
+        return true;
+    }
+    if is_app_shell_origin(origin) {
+        return true;
+    }
+    if allowed_origins.iter().any(|allowed| allowed.trim() == origin) {
+        return true;
+    }
+    let Some((_scheme, origin_authority)) = split_scheme_authority(origin) else {
+        // `Origin: null` (sandboxed iframe) and anything unparseable.
+        return false;
+    };
+    let forwarded_host = if is_ip_whitelisted(client_ip, trusted_proxies) {
+        headers
+            .get("x-forwarded-host")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    } else {
+        None
+    };
+    let host = forwarded_host
+        .or_else(|| headers.get(header::HOST).and_then(|value| value.to_str().ok()).map(str::trim))
+        .filter(|value| !value.is_empty());
+    let Some(host) = host else {
+        return false;
+    };
+    authority_matches(origin_authority, host)
 }
 
 /// True when the request looks like a script-readable cross-site browser call.

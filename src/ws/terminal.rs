@@ -30,8 +30,8 @@ pub async fn ws_handler(
     State(history): State<HistoryState>,
     State(settings): State<SettingsState>,
     State(shell_probe): State<Arc<ShellProbeService>>,
-    ConnectInfo(_addr): ConnectInfo<SocketAddr>,
-    _headers: axum::http::HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     // WebSocket connections only attach to panes already created through /api/tabs.
     // Reject argv explicitly so a reconnect can never silently turn into a spawn request.
@@ -49,6 +49,24 @@ pub async fn ws_handler(
     if !manager.is_pane_in_any_tab(&pane_id) {
         return StatusCode::FORBIDDEN.into_response();
     }
+
+    // The same origin gate `/ws/sync` and `/ws/watch` apply. This socket takes
+    // terminal input, so an origin that is not the app itself must not open it:
+    // a page on another localhost port is same-host, which the loopback
+    // whitelist already lets past authentication.
+    let (allowed_origins, trusted_proxies) = {
+        let s = settings.read().await;
+        (s.auth.allowed_origins.clone(), s.auth.trusted_proxies.clone())
+    };
+    let real_ip = crate::auth::real_client_ip(&headers, addr.ip(), &trusted_proxies);
+    if !crate::auth::check_ws_origin(&headers, &allowed_origins, real_ip, &trusted_proxies) {
+        warn!(
+            "ws: reject origin {:?} for pane {pane_id}",
+            headers.get("origin").and_then(|value| value.to_str().ok())
+        );
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     ws.on_upgrade(move |socket| {
         handle_socket(socket, pane_id, manager, history, settings, shell_probe)
     })

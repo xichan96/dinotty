@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
+use crate::window_geometry::{
+    main_window_geometry, DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH,
+};
 use crate::window_host::{focus_window, run_on_main_thread_blocking};
 
 pub const LABEL_PREFIX: &str = "preview-";
@@ -17,10 +20,6 @@ const FILES_LABEL_PREFIX: &str = "preview-files-";
 const FILE_LABEL_PREFIX: &str = "preview-file-";
 const WEB_LABEL_PREFIX: &str = "preview-web-";
 const DEFAULT_TITLE: &str = "Preview";
-const WINDOW_WIDTH: f64 = 960.0;
-const WINDOW_HEIGHT: f64 = 640.0;
-const MIN_WINDOW_WIDTH: f64 = 480.0;
-const MIN_WINDOW_HEIGHT: f64 = 320.0;
 const CREATE_WAIT: Duration = Duration::from_secs(3);
 
 /// Built-in previews that can live in their own native window.
@@ -393,15 +392,38 @@ pub fn open_preview_window(
         if let Some(window) = app_for_create.get_webview_window(&label_for_create) {
             return Ok(window);
         }
-        WebviewWindowBuilder::new(&app_for_create, &label_for_create, WebviewUrl::App(entry))
-            .title(window_title)
-            .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
-            .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-            .decorations(true)
-            // Equivalent of `dragDropEnabled: false`: keep HTML5 drag and drop.
-            .disable_drag_drop_handler()
-            .build()
-            .map_err(|error| format!("failed to create preview window: {error}"))
+        // Only file browsers/viewers get placed next to the main window. Web
+        // previews keep the historical fixed size and OS-chosen position.
+        let geometry = matches!(kind, PreviewKind::Files | PreviewKind::File)
+            .then(|| main_window_geometry(&app_for_create));
+        if let Some(geometry) = geometry {
+            tracing::info!(
+                placement = ?geometry.placement,
+                width = geometry.size.width,
+                height = geometry.size.height,
+                x = geometry.position.map(|position| position.x),
+                y = geometry.position.map(|position| position.y),
+                "placing preview window next to the main window"
+            );
+        }
+        let mut builder =
+            WebviewWindowBuilder::new(&app_for_create, &label_for_create, WebviewUrl::App(entry))
+                .title(window_title)
+                .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
+                .decorations(true)
+                // Equivalent of `dragDropEnabled: false`: keep HTML5 drag and drop.
+                .disable_drag_drop_handler();
+        builder = match geometry {
+            Some(geometry) => {
+                builder = builder.inner_size(geometry.size.width, geometry.size.height);
+                match geometry.position {
+                    Some(position) => builder.position(position.x, position.y),
+                    None => builder,
+                }
+            }
+            None => builder.inner_size(DEFAULT_WIDTH, DEFAULT_HEIGHT),
+        };
+        builder.build().map_err(|error| format!("failed to create preview window: {error}"))
     });
 
     let window = match created {

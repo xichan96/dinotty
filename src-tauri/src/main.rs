@@ -22,6 +22,7 @@ mod shutdown;
 mod tray;
 mod update_download;
 mod window_actions;
+mod window_geometry;
 mod window_host;
 
 static EMBEDDED_HTTP_PORT: OnceLock<u16> = OnceLock::new();

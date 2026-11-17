@@ -18,6 +18,7 @@ import {
 import { wsUrl } from './apiBase'
 import { useKeybindings } from './useKeybindings'
 import { hostTarget, isWindowsClient } from '../utils/clientPlatform'
+import { copyToClipboard } from '../utils/clipboard'
 import { setupTouchScroll } from '../utils/touchScroll'
 import {
   DEDUP_WINDOW_MS,
@@ -580,7 +581,7 @@ export class TerminalInstance {
 
         if (e.ctrlKey && e.shiftKey) {
           if (e.key === 'C' && xt.hasSelection()) {
-            navigator.clipboard.writeText(xt.getSelection())
+            void copyToClipboard(xt.getSelection()).catch(() => {})
             e.preventDefault()
             return false
           }
@@ -599,6 +600,11 @@ export class TerminalInstance {
         // Windows: Ctrl+C with an active selection copies (cmd.exe behavior);
         // without a selection it falls through and xterm sends SIGINT (\x03).
         // Matches the Ctrl+C hint shown in the terminal context menu.
+        // Use the shared helper (async Clipboard API + execCommand fallback), the
+        // same path as the context menu: a raw `navigator.clipboard.writeText`
+        // silently writes nothing on insecure origins and in webviews that report
+        // "Document is not focused", while preventDefault below has already
+        // blocked the browser's own copy — leaving the old clipboard content.
         if (
           isWindowsClient &&
           e.ctrlKey &&
@@ -608,7 +614,7 @@ export class TerminalInstance {
           e.code === 'KeyC' &&
           xt.hasSelection()
         ) {
-          navigator.clipboard.writeText(xt.getSelection()).catch(() => {})
+          void copyToClipboard(xt.getSelection()).catch(() => {})
           e.preventDefault()
           return false
         }
@@ -616,7 +622,7 @@ export class TerminalInstance {
         const virtualMeta = settings.windowsAltAsCmd && isWindowsClient && e.altKey && !e.ctrlKey
         if (virtualMeta && !e.shiftKey) {
           if (e.code === 'KeyC' && xt.hasSelection()) {
-            navigator.clipboard.writeText(xt.getSelection())
+            void copyToClipboard(xt.getSelection()).catch(() => {})
             e.preventDefault()
             e.stopPropagation()
             return false

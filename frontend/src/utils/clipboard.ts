@@ -29,8 +29,20 @@ function copyViaRange(text: string): void {
 }
 
 export async function copyToClipboard(text: string): Promise<void> {
+  // The async Clipboard API only exists in secure contexts (https, localhost,
+  // 127.0.0.1). Over plain http from another machine/LAN IP it is undefined, and
+  // inside some webviews (WebView2) it exists but rejects with "Document is not
+  // focused". Both cases must land on the execCommand fallback: it is the only
+  // copy path that works in either. Missing it means nothing is written at all,
+  // so the clipboard silently keeps its previous content.
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+  if (typeof clipboard?.writeText !== 'function') {
+    // Still inside the caller's user gesture — run the legacy path synchronously.
+    copyViaRange(text)
+    return
+  }
   try {
-    await navigator.clipboard.writeText(text)
+    await clipboard.writeText(text)
   } catch {
     copyViaRange(text)
   }

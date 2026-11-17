@@ -64,7 +64,10 @@ fn execute(options: &args::GlobalOptions, command: Command) -> Result<(), CliErr
             if options.json {
                 commands::print_json(&response)?;
             } else {
-                println!("{}", commands::sessions_summary(&response));
+                // `/api/sessions` returns `tab_id: null`; enrich the table from
+                // `/api/tabs` when it is available.
+                let tabs = commands::tabs(&http).ok();
+                println!("{}", commands::sessions_summary(&response, tabs.as_ref()));
             }
         }
         Command::TabsList => {

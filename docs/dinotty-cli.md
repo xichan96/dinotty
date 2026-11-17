@@ -110,12 +110,18 @@ connected main UI (desktop window or browser tab) and a live pane.
 
 Lists terminal sessions: pane id, tab id, status, size, and cwd.
 
+`/api/sessions` currently returns `tab_id: null`, so the human table resolves
+the tab id from `/api/tabs` by pane id. `--json` still prints the raw
+`/api/sessions` payload.
+
 Requires **Settings → Open API** to be enabled on the server; otherwise the CLI
 reports `OPEN_API_DISABLED`.
 
 ### `dinotty tabs list`
 
-Lists tabs (`tab_id`, `pane_id`, `title`, `cwd`). Does not require Open API.
+Lists tabs (`tab_id`, `pane_id`, `title`, `cwd`). Titles come from
+`layout.title` or the layout leaves' `layout.children[].title`; multiple leaf
+titles are joined with ` | `. Does not require Open API.
 
 ### `dinotty input send <pane_id> <text>`
 

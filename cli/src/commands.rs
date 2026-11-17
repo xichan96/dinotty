@@ -1,5 +1,7 @@
 //! Read-only and input commands built on the HTTP client.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::api::{encode_component, HttpClient};
@@ -59,12 +61,18 @@ pub fn viewer_summary(value: &Value) -> String {
     format!("Opened {path}\nrequest_id: {request_id}\ndelivered_clients: {clients}")
 }
 
+/// Render `sessions list`.
+///
+/// `/api/sessions` currently returns `tab_id: null` even for panes that belong
+/// to a tab, so `tabs` (the `/api/tabs` payload) is used to map pane id ->
+/// tab id whenever the session field is missing.
 #[must_use]
-pub fn sessions_summary(value: &Value) -> String {
+pub fn sessions_summary(value: &Value, tabs: Option<&Value>) -> String {
     let sessions = value.get("sessions").and_then(Value::as_array);
     let Some(sessions) = sessions.filter(|sessions| !sessions.is_empty()) else {
         return "No active sessions.".to_string();
     };
+    let tab_ids = tabs.map(pane_tab_map).unwrap_or_default();
 
     let mut rows = vec![vec![
         "PANE ID".to_string(),
@@ -76,7 +84,7 @@ pub fn sessions_summary(value: &Value) -> String {
     for session in sessions {
         rows.push(vec![
             string_field(session, "pane_id"),
-            string_field(session, "tab_id"),
+            session_tab_id(session, &tab_ids),
             string_field(session, "status"),
             session.get("size").map_or_else(String::new, |size| {
                 format!(
@@ -89,6 +97,58 @@ pub fn sessions_summary(value: &Value) -> String {
         ]);
     }
     table(&rows)
+}
+
+/// Prefer the session's own `tab_id`; fall back to the pane -> tab mapping
+/// built from `/api/tabs`.
+fn session_tab_id(session: &Value, tab_ids: &HashMap<String, String>) -> String {
+    if let Some(tab_id) =
+        session.get("tab_id").and_then(Value::as_str).filter(|tab_id| !tab_id.is_empty())
+    {
+        return tab_id.to_string();
+    }
+    session
+        .get("pane_id")
+        .and_then(Value::as_str)
+        .and_then(|pane_id| tab_ids.get(pane_id))
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Map every pane id in `/api/tabs` (top-level and nested layout leaves) to its
+/// tab id.
+fn pane_tab_map(tabs: &Value) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let Some(tabs) = tabs.get("tabs").and_then(Value::as_array) else {
+        return map;
+    };
+    for tab in tabs {
+        let Some(tab_id) = tab.get("tab_id").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(layout) = tab.get("layout") {
+            let mut pane_ids = Vec::new();
+            collect_layout_pane_ids(layout, &mut pane_ids);
+            for pane_id in pane_ids {
+                map.insert(pane_id, tab_id.to_string());
+            }
+        }
+        if let Some(pane_id) = tab.get("pane_id").and_then(Value::as_str) {
+            map.entry(pane_id.to_string()).or_insert_with(|| tab_id.to_string());
+        }
+    }
+    map
+}
+
+fn collect_layout_pane_ids(node: &Value, out: &mut Vec<String>) {
+    if let Some(pane_id) = node.get("paneId").and_then(Value::as_str) {
+        out.push(pane_id.to_string());
+    }
+    if let Some(children) = node.get("children").and_then(Value::as_array) {
+        for child in children {
+            collect_layout_pane_ids(child, out);
+        }
+    }
 }
 
 #[must_use]
@@ -108,11 +168,46 @@ pub fn tabs_summary(value: &Value) -> String {
         rows.push(vec![
             string_field(tab, "tab_id"),
             string_field(tab, "pane_id"),
-            string_field(tab, "title"),
+            tab_title(tab),
             string_field(tab, "cwd"),
         ]);
     }
     table(&rows)
+}
+
+/// Tabs usually have no top-level `title`; the visible title lives on the
+/// layout (`layout.title`) or on its leaves (`layout.children[].title`).
+#[must_use]
+pub fn tab_title(tab: &Value) -> String {
+    if let Some(title) = tab
+        .pointer("/layout/title")
+        .and_then(Value::as_str)
+        .filter(|title| !title.trim().is_empty())
+    {
+        return title.to_string();
+    }
+    let mut titles = Vec::new();
+    if let Some(layout) = tab.get("layout") {
+        collect_layout_titles(layout, &mut titles);
+    }
+    if titles.is_empty() {
+        return string_field(tab, "title");
+    }
+    titles.join(" | ")
+}
+
+fn collect_layout_titles(node: &Value, out: &mut Vec<String>) {
+    if let Some(title) = node.get("title").and_then(Value::as_str) {
+        let title = title.trim();
+        if !title.is_empty() && !out.iter().any(|existing| existing == title) {
+            out.push(title.to_string());
+        }
+    }
+    if let Some(children) = node.get("children").and_then(Value::as_array) {
+        for child in children {
+            collect_layout_titles(child, out);
+        }
+    }
 }
 
 fn string_field(value: &Value, key: &str) -> String {
@@ -176,26 +271,118 @@ mod tests {
 
     #[test]
     fn sessions_summary_aligns_columns_and_handles_empty() {
-        assert_eq!(sessions_summary(&serde_json::json!({ "sessions": [] })), "No active sessions.");
-        let summary = sessions_summary(&serde_json::json!({
-            "sessions": [{
-                "pane_id": "p1",
-                "tab_id": "t1",
-                "status": "connected",
-                "size": { "cols": 120, "rows": 40 },
-                "cwd": "/tmp"
-            }]
-        }));
+        assert_eq!(
+            sessions_summary(&serde_json::json!({ "sessions": [] }), None),
+            "No active sessions."
+        );
+        let summary = sessions_summary(
+            &serde_json::json!({
+                "sessions": [{
+                    "pane_id": "p1",
+                    "tab_id": "t1",
+                    "status": "connected",
+                    "size": { "cols": 120, "rows": 40 },
+                    "cwd": "/tmp"
+                }]
+            }),
+            None,
+        );
         let lines: Vec<&str> = summary.lines().collect();
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("PANE ID"));
         assert!(lines[1].starts_with("p1"));
+        assert!(lines[1].contains("t1"));
         assert!(lines[1].contains("120x40"));
+    }
+
+    #[test]
+    fn sessions_summary_recovers_missing_tab_ids_from_tabs() {
+        let sessions = serde_json::json!({
+            "sessions": [
+                { "pane_id": "p1", "tab_id": null, "status": "connected", "cwd": "/a" },
+                // p2 is a nested leaf; only the tab's first leaf is top-level.
+                { "pane_id": "p2", "tab_id": null, "status": "connected", "cwd": "/b" }
+            ]
+        });
+        let tabs = serde_json::json!({
+            "tabs": [{
+                "tab_id": "tab-1",
+                "pane_id": "p1",
+                "layout": {
+                    "type": "split",
+                    "children": [
+                        { "type": "leaf", "paneId": "p1" },
+                        { "type": "leaf", "paneId": "p2" }
+                    ]
+                }
+            }]
+        });
+
+        let summary = sessions_summary(&sessions, Some(&tabs));
+        let lines: Vec<&str> = summary.lines().collect();
+        assert!(lines[1].contains("tab-1"), "first pane: {summary}");
+        assert!(lines[2].contains("tab-1"), "nested pane: {summary}");
+    }
+
+    #[test]
+    fn sessions_summary_leaves_unknown_panes_with_an_empty_tab_id() {
+        let sessions = serde_json::json!({
+            "sessions": [{ "pane_id": "orphan", "tab_id": null, "status": "connected" }]
+        });
+        let summary = sessions_summary(&sessions, Some(&serde_json::json!({ "tabs": [] })));
+        assert_eq!(summary.lines().count(), 2);
+        assert!(!summary.contains("tab-1"));
     }
 
     #[test]
     fn tabs_summary_handles_empty() {
         assert_eq!(tabs_summary(&serde_json::json!({ "tabs": [] })), "No open tabs.");
+    }
+
+    #[test]
+    fn tabs_summary_reads_titles_from_layout_children() {
+        let summary = tabs_summary(&serde_json::json!({
+            "tabs": [{
+                "tab_id": "t1",
+                "pane_id": "p1",
+                "cwd": "/tmp",
+                "layout": {
+                    "type": "split",
+                    "children": [
+                        { "type": "leaf", "paneId": "p1", "title": "editor" },
+                        {
+                            "type": "split",
+                            "children": [
+                                { "type": "leaf", "paneId": "p2", "title": "shell" }
+                            ]
+                        }
+                    ]
+                }
+            }]
+        }));
+
+        let line = summary.lines().nth(1).unwrap();
+        assert!(line.contains("t1"), "{summary}");
+        assert!(line.contains("editor | shell"), "{summary}");
+    }
+
+    #[test]
+    fn tab_title_prefers_the_layout_title_then_falls_back() {
+        assert_eq!(
+            tab_title(&serde_json::json!({
+                "layout": {
+                    "title": "Combined",
+                    "children": [{ "title": "leaf" }]
+                }
+            })),
+            "Combined"
+        );
+        assert_eq!(
+            tab_title(&serde_json::json!({ "layout": { "children": [{ "title": "leaf" }] } })),
+            "leaf"
+        );
+        assert_eq!(tab_title(&serde_json::json!({ "title": "top-level" })), "top-level");
+        assert_eq!(tab_title(&serde_json::json!({ "layout": {} })), "");
     }
 
     #[test]

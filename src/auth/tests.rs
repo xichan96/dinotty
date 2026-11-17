@@ -267,19 +267,19 @@ fn check_token_query_param_ignored() {
 }
 
 // ── check_ws_origin ────────────────────────────────────────────
-// 暂时全部 ignore：check_ws_origin 已关闭，函数恒返回 true。
-// 修复反代场景下的 Origin/Host 比对问题后恢复。
+// Origin/Host reconciliation for WebSocket upgrades. X-Forwarded-Host is only
+// consulted for a configured trusted proxy, and a plain localhost origin gets
+// no special treatment: another app on this machine is same-host, so the
+// loopback whitelist already lets it past authentication.
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
-fn ws_origin_loopback_always_allowed() {
+fn ws_origin_no_origin_from_loopback_is_allowed() {
     let headers = HeaderMap::new();
     let loopback: IpAddr = "127.0.0.1".parse().unwrap();
     assert!(check_ws_origin(&headers, &[], loopback, &[]));
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_no_origin_header_allowed() {
     let headers = HeaderMap::new();
     let ip: IpAddr = "192.168.1.100".parse().unwrap();
@@ -287,7 +287,6 @@ fn ws_origin_no_origin_header_allowed() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_same_origin_matches() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -297,7 +296,6 @@ fn ws_origin_same_origin_matches() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_mismatch_behind_proxy_fails_without_trusted() {
     // Proxy rewrites Host to internal address; Origin stays external.
     let mut headers = HeaderMap::new();
@@ -308,7 +306,6 @@ fn ws_origin_mismatch_behind_proxy_fails_without_trusted() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_with_trusted_proxy() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -320,7 +317,6 @@ fn ws_origin_x_forwarded_host_with_trusted_proxy() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_not_used_for_untrusted() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -332,7 +328,6 @@ fn ws_origin_x_forwarded_host_not_used_for_untrusted() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_hostname_only_fallback() {
     // Proxy strips port from Host header.
     let mut headers = HeaderMap::new();
@@ -343,7 +338,6 @@ fn ws_origin_hostname_only_fallback() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_allowed_origins_fallback() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://custom.domain.com".parse().unwrap());
@@ -354,7 +348,6 @@ fn ws_origin_allowed_origins_fallback() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_with_port() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com:8443".parse().unwrap());
@@ -366,7 +359,6 @@ fn ws_origin_x_forwarded_host_with_port() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_comma_separated() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -375,6 +367,69 @@ fn ws_origin_x_forwarded_host_comma_separated() {
     let ip: IpAddr = "192.168.1.100".parse().unwrap();
     let trusted = vec!["192.168.1.0/24".to_string()];
     assert!(check_ws_origin(&headers, &[], ip, &trusted));
+}
+
+#[test]
+fn ws_origin_another_localhost_port_is_rejected() {
+    // The bug-2 shape: another app on this machine. Same host, different port,
+    // so the origin is the only thing that can say no.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "http://localhost:58953".parse().unwrap());
+    headers.insert(header::HOST, "127.0.0.1:58911".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(!check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_same_localhost_port_is_allowed() {
+    // The app's own page, served by the server it is talking to.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "http://127.0.0.1:58911".parse().unwrap());
+    headers.insert(header::HOST, "127.0.0.1:58911".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_null_is_rejected() {
+    // A sandboxed iframe sends the literal string `null`.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "null".parse().unwrap());
+    headers.insert(header::HOST, "127.0.0.1:8999".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(!check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_app_shell_scheme_is_allowed_from_a_remote_server() {
+    // The desktop shell driving a hub or a remote server: its Origin is its own
+    // scheme while Host is the remote host. A website cannot forge either.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "tauri://localhost".parse().unwrap());
+    headers.insert(header::HOST, "192.168.1.5:8999".parse().unwrap());
+    let remote: IpAddr = "192.168.1.5".parse().unwrap();
+    assert!(check_ws_origin(&headers, &[], remote, &[]));
+}
+
+#[test]
+fn ws_origin_proxy_stripped_port_is_not_a_loopback_escape() {
+    // Host without a port happens when a proxy strips it; that fallback is for
+    // named hosts and must not hand a different localhost port a pass.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "http://localhost:5173".parse().unwrap());
+    headers.insert(header::HOST, "localhost".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(!check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_allowed_origins_match_is_exact() {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "https://custom.domain.com".parse().unwrap());
+    headers.insert(header::HOST, "192.168.1.100:8999".parse().unwrap());
+    let ip: IpAddr = "192.168.1.100".parse().unwrap();
+    assert!(check_ws_origin(&headers, &["https://custom.domain.com".to_string()], ip, &[]));
+    assert!(!check_ws_origin(&headers, &["https://custom.domain.com.evil".to_string()], ip, &[]));
 }
 
 #[test]

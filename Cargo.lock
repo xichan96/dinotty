@@ -1566,6 +1566,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dinotty-cli"
+version = "0.31.1"
+dependencies = [
+ "dirs 5.0.1",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "dinotty-desktop"
 version = "0.31.1"
 dependencies = [

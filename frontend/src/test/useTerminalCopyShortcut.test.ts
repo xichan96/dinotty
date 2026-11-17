@@ -15,9 +15,15 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     options: Record<string, any>
     unicode = { activeVersion: '' }
-    parser = { registerOscHandler() {} }
+    parser = {
+      handlers: {} as Record<number, (data: string) => boolean>,
+      registerOscHandler(this: any, id: number, cb: (data: string) => boolean) {
+        this.handlers[id] = cb
+      },
+    }
     buffer = { active: { getLine: () => null, cursorY: 0, cursorX: 0 } }
     keyHandler: ((event: KeyboardEvent) => boolean) | null = null
+    paste = vi.fn()
     constructor(options: Record<string, any>) {
       this.options = { ...options }
       mocks.instances.push(this)
@@ -265,6 +271,57 @@ describe('terminal Ctrl+C copy', () => {
     expect(writeText).not.toHaveBeenCalled()
     expect(execCommand).not.toHaveBeenCalled()
     expect(handled).toBe(true)
+    term.destroy()
+  })
+
+  it('writes OSC 52 clipboard data through the same fallback', async () => {
+    setClipboard({
+      writeText: vi.fn(async () => {
+        throw new Error('Document is not focused')
+      }),
+    })
+    const term = attach()
+    const handler = mocks.instances[mocks.instances.length - 1].parser.handlers[52]
+
+    handler(`c;${Buffer.from('copied by tmux', 'utf8').toString('base64')}`)
+    await flush()
+
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    term.destroy()
+  })
+
+  it('pastes from the host clipboard when the Clipboard API rejects', async () => {
+    setClipboard({
+      readText: vi.fn(async () => {
+        throw new Error('denied')
+      }),
+    })
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ text: 'host text' }) }))
+    vi.stubGlobal('fetch', fetchMock)
+    const term = attach()
+
+    pressCtrlC({ key: 'V', code: 'KeyV', shiftKey: true })
+    await flush()
+    await flush()
+
+    expect(fetchMock).toHaveBeenCalled()
+    expect(mocks.instances[mocks.instances.length - 1].paste).toHaveBeenCalledWith('host text')
+    term.destroy()
+  })
+
+  it('pastes from the host clipboard when navigator.clipboard does not exist', async () => {
+    setClipboard(undefined)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ text: 'lan paste' }) }))
+    )
+    const term = attach()
+
+    expect(() => pressCtrlC({ key: 'V', code: 'KeyV', shiftKey: true })).not.toThrow()
+    await flush()
+    await flush()
+
+    expect(mocks.instances[mocks.instances.length - 1].paste).toHaveBeenCalledWith('lan paste')
     term.destroy()
   })
 })

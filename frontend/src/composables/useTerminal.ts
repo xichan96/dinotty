@@ -18,7 +18,7 @@ import {
 import { wsUrl } from './apiBase'
 import { useKeybindings } from './useKeybindings'
 import { hostTarget, isWindowsClient } from '../utils/clientPlatform'
-import { copyToClipboard } from '../utils/clipboard'
+import { copyToClipboard, readClipboardText } from '../utils/clipboard'
 import { setupTouchScroll } from '../utils/touchScroll'
 import {
   DEDUP_WINDOW_MS,
@@ -533,6 +533,15 @@ export class TerminalInstance {
 
     // Ctrl+Shift+C/V: Linux-style copy/paste (macOS uses Cmd+C/V natively)
     const xt = this.xterm
+    // Paste goes through the same fallback chain as the context menu. A raw
+    // `navigator.clipboard.readText()` throws synchronously where the Clipboard
+    // API is unavailable (plain-http origin), which killed the keydown handler
+    // before paste — and before preventDefault — so Ctrl+Shift+V did nothing.
+    const pasteFromClipboard = () => {
+      void readClipboardText().then((text) => {
+        if (text && this.xterm) this.xterm.paste(text)
+      })
+    }
     const { isAppShortcut } = useKeybindings()
     xt.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       // maxTouchPoints, not isTouchDevice(): desktop Safari/WKWebView exposes
@@ -586,12 +595,7 @@ export class TerminalInstance {
             return false
           }
           if (e.key === 'V') {
-            navigator.clipboard
-              .readText()
-              .then((text) => {
-                if (text) xt.paste(text)
-              })
-              .catch(() => {})
+            pasteFromClipboard()
             e.preventDefault()
             return false
           }
@@ -628,12 +632,7 @@ export class TerminalInstance {
             return false
           }
           if (e.code === 'KeyV') {
-            navigator.clipboard
-              .readText()
-              .then((text) => {
-                if (text) xt.paste(text)
-              })
-              .catch(() => {})
+            pasteFromClipboard()
             e.preventDefault()
             e.stopPropagation()
             return false
@@ -671,7 +670,10 @@ export class TerminalInstance {
       try {
         const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0))
         const text = new TextDecoder('utf-8').decode(bytes)
-        if (text) navigator.clipboard?.writeText(text).catch(() => {})
+        // Same fallback chain as keyboard copy: OSC 52 is how tmux/zellij/Claude
+        // copy from inside mouse-tracking apps, so dropping it silently on an
+        // insecure origin would make those copies look like they did nothing.
+        if (text) void copyToClipboard(text).catch(() => {})
       } catch {
         /* ignore malformed payload */
       }

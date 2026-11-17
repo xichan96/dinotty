@@ -350,8 +350,12 @@ pub async fn token_configured(AxumState(state): AxumState<AppState>) -> impl Int
 pub async fn auto_token(
     AxumState(state): AxumState<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if !addr.ip().is_loopback() {
+    // The peer is 127.0.0.1 for any same-host tunnel, so it cannot be the
+    // deciding signal. `is_local_request` also requires a loopback `Host` and
+    // no forwarding headers; see its doc for the measured tunnel shapes.
+    if !auth::is_local_request(&headers, addr.ip()) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({"error": "auto-token is only available from localhost"})),

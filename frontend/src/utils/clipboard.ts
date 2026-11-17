@@ -48,6 +48,29 @@ export async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
+/**
+ * Read clipboard text, falling back to the host clipboard endpoint.
+ *
+ * The mirror image of `copyToClipboard`: `navigator.clipboard` is missing on
+ * insecure origins and `readText()` is permission-gated in some browsers and
+ * webviews, so the terminal's keyboard paste needs the same escape hatch the
+ * context-menu paste already has. On a remote client the host clipboard is a
+ * degraded fallback (the server's clipboard, not the device's); the desktop
+ * build reads its own clipboard first via the Tauri plugin.
+ */
+export async function readClipboardText(): Promise<string | null> {
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+  if (typeof clipboard?.readText === 'function') {
+    try {
+      const text = await clipboard.readText()
+      if (typeof text === 'string') return text
+    } catch {
+      /* missing permission or unfocused document — fall through */
+    }
+  }
+  return readHostClipboard()
+}
+
 export async function readHostClipboard(): Promise<string | null> {
   try {
     const response = await authFetch(apiUrl('/api/clipboard'))

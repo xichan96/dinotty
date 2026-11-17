@@ -137,7 +137,83 @@ impl HttpClient {
     pub fn post(&self, path: &str, body: &Value) -> Result<Value, CliError> {
         self.request(reqwest::Method::POST, path, Some(body)).map_err(Into::into)
     }
+
+    /// # Errors
+    /// Returns the mapped API error or connection failure.
+    pub fn put(&self, path: &str, body: &Value) -> Result<Value, CliError> {
+        self.request(reqwest::Method::PUT, path, Some(body)).map_err(Into::into)
+    }
+
+    /// # Errors
+    /// Returns the mapped API error or connection failure.
+    pub fn delete(&self, path: &str) -> Result<Value, CliError> {
+        self.request(reqwest::Method::DELETE, path, None).map_err(Into::into)
+    }
+
+    /// Stream a raw (non-JSON) response into `out`.
+    ///
+    /// `/api/workspace/raw` serves file bytes with a content type, so it does
+    /// not fit [`Self::get`]. The size guard matches the server's download cap.
+    ///
+    /// # Errors
+    /// Returns the mapped API error, a connection failure, or an I/O error
+    /// while writing the response.
+    pub fn download(
+        &self,
+        path: &str,
+        out: &mut dyn std::io::Write,
+    ) -> Result<RawResponse, CliError> {
+        let mut request = self.client.get(self.url(path));
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        let mut response = request.send().map_err(|error| {
+            CliError::runtime("REQUEST_FAILED", error.to_string()).with_hint(format!(
+                "could not reach {} - is Dinotty running? Set DINOTTY_URL or --url to point at it",
+                self.base_url
+            ))
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().unwrap_or_default();
+            let error = parse_api_error(status.as_u16(), &body);
+            return Err(error.into());
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        if let Some(length) = response.content_length() {
+            if length > MAX_DOWNLOAD_BYTES {
+                return Err(CliError::runtime(
+                    "FILE_TOO_LARGE",
+                    format!("response is {length} bytes; the limit is {MAX_DOWNLOAD_BYTES}"),
+                ));
+            }
+        }
+        let bytes = std::io::copy(&mut response, out).map_err(|error| {
+            CliError::runtime("IO_ERROR", format!("cannot write the response: {error}"))
+        })?;
+        if bytes > MAX_DOWNLOAD_BYTES {
+            return Err(CliError::runtime(
+                "FILE_TOO_LARGE",
+                format!("response exceeded the {MAX_DOWNLOAD_BYTES}-byte limit"),
+            ));
+        }
+        Ok(RawResponse { content_type, bytes })
+    }
 }
+
+/// Metadata for a streamed raw response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawResponse {
+    pub content_type: Option<String>,
+    pub bytes: u64,
+}
+
+/// Matches the server's `MAX_DOWNLOAD` (500 MiB) plus a small margin.
+const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Parse the server's `{"error": {"code", "message"}}` envelope, with fallbacks
 /// for the older `{"error": "text"}` shape and non-JSON bodies.
@@ -176,13 +252,33 @@ fn truncate(text: &str, limit: usize) -> String {
 }
 
 fn infer_code(status: u16, message: &str) -> String {
-    if message.contains("open_api is disabled") || message.contains("open api is disabled") {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("open_api is disabled") || lower.contains("open api is disabled") {
         return "OPEN_API_DISABLED".into();
     }
     // `/api/workspace/cwd`, `/screen`, and `/input` answer unknown sessions with
     // a plain 404 "unknown pane"/"pane not found" rather than a code.
-    if status == 404 && message.to_ascii_lowercase().contains("pane") {
+    if status == 404 && lower.contains("pane") {
         return "UNKNOWN_PANE".into();
+    }
+    // The workspace/tabs handlers answer with plain strings, so map the common
+    // ones to stable codes for skills.
+    let plain = match lower.as_str() {
+        "invalid path" => Some("INVALID_PATH"),
+        "outside workspace" => Some("OUTSIDE_WORKSPACE"),
+        "not a file" => Some("NOT_A_FILE"),
+        "not a directory" => Some("NOT_A_DIRECTORY"),
+        "file too large" | "content too large" => Some("FILE_TOO_LARGE"),
+        "cwd_unavailable_for_backend" => Some("CWD_UNAVAILABLE"),
+        "git_unavailable_for_backend" => Some("GIT_UNAVAILABLE"),
+        "sensitive system directory" => Some("SCOPE_DENIED"),
+        "tab not found" => Some("TAB_NOT_FOUND"),
+        "not found" => Some("NOT_FOUND"),
+        "already exists" => Some("ALREADY_EXISTS"),
+        _ => None,
+    };
+    if let Some(code) = plain {
+        return code.into();
     }
     match status {
         401 => "UNAUTHORIZED".into(),
@@ -206,10 +302,20 @@ fn hint_for(code: &str, status: u16) -> Option<String> {
             "the pane has no local workspace (SSH/remote sessions are not supported)"
         }
         "OUTSIDE_WORKSPACE" => {
-            "the file is outside the pane's workspace and could not be staged under .claude/artifacts"
+            "the path is outside the pane's workspace (viewer staging goes through .claude/artifacts)"
+        }
+        "INVALID_PATH" => "workspace paths are relative and must not contain `..`",
+        "TAB_NOT_FOUND" => "run `dinotty tabs list` to see open tabs",
+        "NOT_FOUND" => {
+            "the requested tab, pane, or workspace path was not found - run `dinotty tabs list` or `dinotty workspace list` to check"
         }
         "PATH_NOT_FOUND" => "the file does not exist or is not readable",
         "NOT_A_FILE" => "the target is not a regular file",
+        "NOT_A_DIRECTORY" => "the target is not a directory",
+        "GIT_UNAVAILABLE" => {
+            "git data is unavailable for this pane (SSH/remote backends do not expose it)"
+        }
+        "ALREADY_EXISTS" => "the target already exists; choose a different name",
         "FILE_TOO_LARGE" => "the file exceeds the viewer's size limit",
         "SCOPE_DENIED" => "the token lacks workspace:read or its path scope excludes the file",
         "OPEN_API_DISABLED" => {
@@ -269,6 +375,21 @@ mod tests {
         assert_eq!(parse_api_error(404, "").code, "NOT_FOUND");
         assert_eq!(parse_api_error(404, "unknown pane").code, "UNKNOWN_PANE");
         assert_eq!(parse_api_error(404, "pane not found").code, "UNKNOWN_PANE");
+    }
+
+    #[test]
+    fn maps_plain_workspace_and_tab_messages() {
+        assert_eq!(parse_api_error(400, "invalid path").code, "INVALID_PATH");
+        assert_eq!(parse_api_error(403, "outside workspace").code, "OUTSIDE_WORKSPACE");
+        assert_eq!(parse_api_error(400, "not a file").code, "NOT_A_FILE");
+        assert_eq!(parse_api_error(400, "not a directory").code, "NOT_A_DIRECTORY");
+        assert_eq!(parse_api_error(400, "file too large").code, "FILE_TOO_LARGE");
+        assert_eq!(parse_api_error(409, "cwd_unavailable_for_backend").code, "CWD_UNAVAILABLE");
+        assert_eq!(parse_api_error(409, "git_unavailable_for_backend").code, "GIT_UNAVAILABLE");
+        assert_eq!(parse_api_error(404, "tab not found").code, "TAB_NOT_FOUND");
+        assert_eq!(parse_api_error(404, "not found").code, "NOT_FOUND");
+        assert_eq!(parse_api_error(409, "already exists").code, "ALREADY_EXISTS");
+        assert!(parse_api_error(400, "invalid path").hint.unwrap().contains("`..`"));
     }
 
     #[test]

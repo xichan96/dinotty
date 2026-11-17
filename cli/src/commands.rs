@@ -23,6 +23,223 @@ pub fn tabs(http: &HttpClient) -> Result<Value, CliError> {
     http.get("/api/tabs")
 }
 
+/// `POST /api/tabs`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn create_tab(http: &HttpClient, payload: &Value) -> Result<Value, CliError> {
+    http.post("/api/tabs", payload)
+}
+
+/// Build the `POST /api/tabs` body.
+///
+/// The HTTP API has no `env` field, so `--env` assignments reuse the
+/// documented `/usr/bin/env KEY=VALUE …` argv prefix.
+///
+/// # Errors
+/// Returns a usage error when `env` is supplied without an argv or on a
+/// platform without `/usr/bin/env`.
+pub fn tabs_create_payload(
+    cwd: Option<&std::path::Path>,
+    title: Option<&str>,
+    env: &[(String, String)],
+    argv: &[String],
+) -> Result<Value, CliError> {
+    let argv = if env.is_empty() {
+        argv.to_vec()
+    } else {
+        if argv.is_empty() {
+            return Err(CliError::usage(
+                "--env requires an argv command (the API has no env field)",
+            ));
+        }
+        if !cfg!(unix) {
+            return Err(CliError::usage(
+                "--env is supported on POSIX platforms only (it prefixes the argv with /usr/bin/env)",
+            ));
+        }
+        let mut prefixed = Vec::with_capacity(argv.len() + env.len() + 1);
+        prefixed.push("/usr/bin/env".to_string());
+        prefixed.extend(env.iter().map(|(key, value)| format!("{key}={value}")));
+        prefixed.extend_from_slice(argv);
+        prefixed
+    };
+
+    let mut payload = serde_json::Map::new();
+    if let Some(cwd) = cwd {
+        payload.insert("cwd".into(), Value::String(cwd.to_string_lossy().into_owned()));
+    }
+    if let Some(title) = title {
+        payload.insert("title".into(), Value::String(title.to_string()));
+    }
+    if !argv.is_empty() {
+        payload
+            .insert("argv".into(), Value::Array(argv.iter().cloned().map(Value::String).collect()));
+    }
+    Ok(Value::Object(payload))
+}
+
+/// `DELETE /api/tabs/:tab_id`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn close_tab(http: &HttpClient, tab_id: &str) -> Result<Value, CliError> {
+    http.delete(&format!("/api/tabs/{}", encode_component(tab_id)))
+}
+
+/// `POST /api/tabs/:tab_id/rename`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn rename_tab(http: &HttpClient, tab_id: &str, title: &str) -> Result<Value, CliError> {
+    http.post(
+        &format!("/api/tabs/{}/rename", encode_component(tab_id)),
+        &serde_json::json!({ "title": title }),
+    )
+}
+
+/// `POST /api/tabs/:tab_id/pane` with a `SplitPaneRequest` body.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn split_pane(
+    http: &HttpClient,
+    tab_id: &str,
+    pane_id: &str,
+    direction: &str,
+    cwd: Option<&std::path::Path>,
+) -> Result<Value, CliError> {
+    let mut body = serde_json::json!({
+        "pane_id": pane_id,
+        "direction": direction,
+    });
+    if let Some(cwd) = cwd {
+        body["cwd"] = Value::String(cwd.to_string_lossy().into_owned());
+    }
+    http.post(&format!("/api/tabs/{}/pane", encode_component(tab_id)), &body)
+}
+
+/// `PUT /api/tabs/:tab_id/pane/:pane_id/activate`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn activate_pane(http: &HttpClient, tab_id: &str, pane_id: &str) -> Result<Value, CliError> {
+    http.put(
+        &format!(
+            "/api/tabs/{}/pane/{}/activate",
+            encode_component(tab_id),
+            encode_component(pane_id)
+        ),
+        &Value::Null,
+    )
+}
+
+/// Resolve a tab's first pane id from `GET /api/tabs`.
+///
+/// # Errors
+/// Returns `TAB_NOT_FOUND` when the tab is absent and API/connection errors
+/// otherwise.
+pub fn tab_pane_id(http: &HttpClient, tab_id: &str) -> Result<String, CliError> {
+    let tabs = tabs(http)?;
+    find_tab(&tabs, tab_id)
+        .and_then(|tab| tab.get("pane_id").and_then(Value::as_str).map(str::to_string))
+        .ok_or_else(|| {
+            CliError::runtime("TAB_NOT_FOUND", format!("tab {tab_id} is not open"))
+                .with_hint("run `dinotty tabs list` to see open tabs")
+        })
+}
+
+fn find_tab<'a>(tabs: &'a Value, tab_id: &str) -> Option<&'a Value> {
+    tabs.get("tabs")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|tab| tab.get("tab_id").and_then(Value::as_str) == Some(tab_id))
+}
+
+/// `GET /api/workspace/list`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn workspace_list(http: &HttpClient, pane_id: &str, path: &str) -> Result<Value, CliError> {
+    http.get(&format!(
+        "/api/workspace/list?pane_id={}&path={}",
+        encode_component(pane_id),
+        encode_component(path)
+    ))
+}
+
+/// `GET /api/workspace/meta` (text preview capped at 512 KiB).
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn workspace_meta(http: &HttpClient, pane_id: &str, path: &str) -> Result<Value, CliError> {
+    http.get(&format!(
+        "/api/workspace/meta?pane_id={}&path={}",
+        encode_component(pane_id),
+        encode_component(path)
+    ))
+}
+
+/// `GET /api/workspace/raw`, streamed into `out`.
+///
+/// # Errors
+/// Returns API/connection errors and I/O errors while writing.
+pub fn workspace_raw(
+    http: &HttpClient,
+    pane_id: &str,
+    path: &str,
+    out: &mut dyn std::io::Write,
+) -> Result<crate::api::RawResponse, CliError> {
+    http.download(
+        &format!(
+            "/api/workspace/raw?pane_id={}&path={}",
+            encode_component(pane_id),
+            encode_component(path)
+        ),
+        out,
+    )
+}
+
+/// `PUT /api/workspace/file`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn workspace_write(
+    http: &HttpClient,
+    pane_id: &str,
+    path: &str,
+    content: &str,
+) -> Result<Value, CliError> {
+    http.put(
+        &format!(
+            "/api/workspace/file?pane_id={}&path={}",
+            encode_component(pane_id),
+            encode_component(path)
+        ),
+        &serde_json::json!({ "content": content }),
+    )
+}
+
+/// `GET /api/workspace/git-changes`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn workspace_git_status(http: &HttpClient, pane_id: &str) -> Result<Value, CliError> {
+    http.get(&format!("/api/workspace/git-changes?pane_id={}", encode_component(pane_id)))
+}
+
+/// `GET /api/workspace/git-file-diff`.
+///
+/// # Errors
+/// Returns API/connection errors.
+pub fn workspace_git_diff(http: &HttpClient, pane_id: &str, path: &str) -> Result<Value, CliError> {
+    http.get(&format!(
+        "/api/workspace/git-file-diff?pane_id={}&path={}",
+        encode_component(pane_id),
+        encode_component(path)
+    ))
+}
+
 /// `POST /api/sessions/:pane/input` - requires Open API to be enabled.
 ///
 /// # Errors
@@ -175,10 +392,167 @@ pub fn tabs_summary(value: &Value) -> String {
     table(&rows)
 }
 
-/// Tabs usually have no top-level `title`; the visible title lives on the
-/// layout (`layout.title`) or on its leaves (`layout.children[].title`).
+#[must_use]
+pub fn created_tab_summary(value: &Value) -> String {
+    let tab_id = value.get("tab_id").and_then(Value::as_str).unwrap_or("<unknown>");
+    let pane_id = value.get("pane_id").and_then(Value::as_str).unwrap_or("<unknown>");
+    let cwd = value.get("cwd").and_then(Value::as_str).unwrap_or("-");
+    format!("Created tab {tab_id}\npane_id: {pane_id}\ncwd: {cwd}")
+}
+
+#[must_use]
+pub fn created_pane_summary(value: &Value, tab_id: &str) -> String {
+    let pane_id = value.get("new_pane_id").and_then(Value::as_str).unwrap_or("<unknown>");
+    format!("Created pane {pane_id} in tab {tab_id}.")
+}
+
+/// `workspace list` table: name, type, and size.
+#[must_use]
+pub fn workspace_list_summary(value: &Value) -> String {
+    let entries = value.get("entries").and_then(Value::as_array);
+    let Some(entries) = entries.filter(|entries| !entries.is_empty()) else {
+        return "No entries.".to_string();
+    };
+    let mut rows = vec![vec!["NAME".to_string(), "TYPE".to_string(), "SIZE".to_string()]];
+    for entry in entries {
+        let name = string_field(entry, "name");
+        let is_dir = entry.get("is_dir").and_then(Value::as_bool).unwrap_or(false);
+        let is_symlink = entry.get("is_symlink").and_then(Value::as_bool).unwrap_or(false);
+        let is_cycle = entry.get("is_cycle").and_then(Value::as_bool).unwrap_or(false);
+        let kind = if is_cycle {
+            "link (cycle)".to_string()
+        } else if is_symlink {
+            format!("{} (link)", if is_dir { "dir" } else { "file" })
+        } else if is_dir {
+            "dir".to_string()
+        } else {
+            "file".to_string()
+        };
+        let size = if is_dir {
+            "-".to_string()
+        } else {
+            human_size(entry.get("size").and_then(Value::as_u64).unwrap_or(0))
+        };
+        rows.push(vec![name, kind, size]);
+    }
+    table(&rows)
+}
+
+fn human_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes_f < KIB * KIB {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else if bytes_f < KIB * KIB * KIB {
+        format!("{:.1} MiB", bytes_f / (KIB * KIB))
+    } else {
+        format!("{:.1} GiB", bytes_f / (KIB * KIB * KIB))
+    }
+}
+
+/// `workspace git status` from `/api/workspace/git-changes`.
+#[must_use]
+pub fn workspace_git_status_summary(value: &Value) -> String {
+    if !value.get("is_git_repo").and_then(Value::as_bool).unwrap_or(false) {
+        return "Not a git repository.".to_string();
+    }
+    let files = value.get("files").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut output = String::new();
+    if let Some(root) = value.get("repo_root").and_then(Value::as_str) {
+        output.push_str("repo: ");
+        output.push_str(root);
+        if let Some(head) = value.get("head").and_then(Value::as_str) {
+            let short: String = head.chars().take(8).collect();
+            output.push_str(&format!(" (HEAD {short})"));
+        }
+        output.push('\n');
+    }
+    if files.is_empty() {
+        output.push_str("Working tree clean.");
+        return output;
+    }
+    let mut rows = vec![vec!["STATUS".to_string(), "PATH".to_string(), "LINES".to_string()]];
+    for file in &files {
+        let status = string_field(file, "status");
+        let path = if let Some(orig) = file.get("orig_path").and_then(Value::as_str) {
+            format!("{orig} -> {}", string_field(file, "path"))
+        } else {
+            string_field(file, "path")
+        };
+        let lines = if file.get("binary").and_then(Value::as_bool).unwrap_or(false) {
+            "binary".to_string()
+        } else if file.get("conflicted").and_then(Value::as_bool).unwrap_or(false) {
+            "conflict".to_string()
+        } else {
+            match (
+                file.get("additions").and_then(Value::as_u64),
+                file.get("deletions").and_then(Value::as_u64),
+            ) {
+                (Some(added), Some(removed)) => format!("+{added} -{removed}"),
+                _ => "-".to_string(),
+            }
+        };
+        rows.push(vec![status, path, lines]);
+    }
+    output.push_str(&table(&rows));
+    if let Some(summary) = value.get("summary") {
+        let count = summary.get("files").and_then(Value::as_u64).unwrap_or(0);
+        let added = summary.get("additions").and_then(Value::as_u64).unwrap_or(0);
+        let removed = summary.get("deletions").and_then(Value::as_u64).unwrap_or(0);
+        let incomplete = !summary.get("counts_complete").and_then(Value::as_bool).unwrap_or(true);
+        output.push_str(&format!(
+            "\n{count} file(s), +{added} -{removed}{}",
+            if incomplete { " (counts incomplete)" } else { "" }
+        ));
+    }
+    output
+}
+
+/// `workspace git diff` from `/api/workspace/git-file-diff` (whole-file
+/// contents for the working tree and HEAD).
+#[must_use]
+pub fn workspace_git_diff_summary(value: &Value) -> String {
+    if !value.get("is_git_repo").and_then(Value::as_bool).unwrap_or(false) {
+        return "Not a git repository.".to_string();
+    }
+    let path = value.get("path").and_then(Value::as_str).unwrap_or("<unknown>");
+    let mut output = format!("path: {path}\nbase: {}\n", string_field(value, "base"));
+    if value.get("binary").and_then(Value::as_bool).unwrap_or(false) {
+        output.push_str("binary file: content not shown\n");
+        return output;
+    }
+    if value.get("too_large").and_then(Value::as_bool).unwrap_or(false) {
+        output.push_str("file too large: content not shown\n");
+        return output;
+    }
+    let original = value.get("original").and_then(Value::as_str).unwrap_or("(not available)");
+    let modified = value.get("modified").and_then(Value::as_str).unwrap_or("(not available)");
+    output.push_str("\n--- original (HEAD) ---\n");
+    output.push_str(original);
+    if !original.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str("\n--- modified (working tree) ---\n");
+    output.push_str(modified);
+    if !modified.ends_with('\n') && !modified.is_empty() {
+        output.push('\n');
+    }
+    output
+}
+
+/// Precedence: the explicit top-level `title` (written by `tabs rename`), then
+/// `layout.title`, then the layout leaves (`layout.children[].title`) joined
+/// with ` | `. Older tabs have no top-level title, so the layout fallbacks
+/// still matter.
 #[must_use]
 pub fn tab_title(tab: &Value) -> String {
+    if let Some(title) =
+        tab.get("title").and_then(Value::as_str).filter(|title| !title.trim().is_empty())
+    {
+        return title.to_string();
+    }
     if let Some(title) = tab
         .pointer("/layout/title")
         .and_then(Value::as_str)
@@ -189,9 +563,6 @@ pub fn tab_title(tab: &Value) -> String {
     let mut titles = Vec::new();
     if let Some(layout) = tab.get("layout") {
         collect_layout_titles(layout, &mut titles);
-    }
-    if titles.is_empty() {
-        return string_field(tab, "title");
     }
     titles.join(" | ")
 }
@@ -367,7 +738,14 @@ mod tests {
     }
 
     #[test]
-    fn tab_title_prefers_the_layout_title_then_falls_back() {
+    fn tab_title_prefers_the_explicit_title_then_falls_back() {
+        assert_eq!(
+            tab_title(&serde_json::json!({
+                "title": "renamed",
+                "layout": { "title": "Combined", "children": [{ "title": "leaf" }] }
+            })),
+            "renamed"
+        );
         assert_eq!(
             tab_title(&serde_json::json!({
                 "layout": {
@@ -381,7 +759,7 @@ mod tests {
             tab_title(&serde_json::json!({ "layout": { "children": [{ "title": "leaf" }] } })),
             "leaf"
         );
-        assert_eq!(tab_title(&serde_json::json!({ "title": "top-level" })), "top-level");
+        assert_eq!(tab_title(&serde_json::json!({ "title": "" })), "");
         assert_eq!(tab_title(&serde_json::json!({ "layout": {} })), "");
     }
 
@@ -389,5 +767,133 @@ mod tests {
     fn input_summary_counts_characters() {
         assert_eq!(input_summary("p1", "ls\n"), "Sent 3 characters to p1.");
         assert_eq!(input_summary("p1", "x"), "Sent 1 character to p1.");
+    }
+
+    #[test]
+    fn tabs_create_payload_omits_empty_fields() {
+        let payload = tabs_create_payload(None, None, &[], &[]).unwrap();
+        assert_eq!(payload, serde_json::json!({}));
+    }
+
+    #[test]
+    fn tabs_create_payload_passes_argv_and_metadata() {
+        let payload = tabs_create_payload(
+            Some(std::path::Path::new("/tmp/ws")),
+            Some("agent"),
+            &[],
+            &["claude".to_string(), "--model".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "cwd": "/tmp/ws",
+                "title": "agent",
+                "argv": ["claude", "--model"]
+            })
+        );
+    }
+
+    #[test]
+    fn tabs_create_payload_prefixes_env_with_the_env_binary() {
+        let payload = tabs_create_payload(
+            None,
+            None,
+            &[("A".to_string(), "1".to_string())],
+            &["claude".to_string()],
+        )
+        .unwrap();
+        assert_eq!(payload, serde_json::json!({ "argv": ["/usr/bin/env", "A=1", "claude"] }));
+    }
+
+    #[test]
+    fn tabs_create_payload_rejects_env_without_argv() {
+        let error = tabs_create_payload(None, None, &[("A".to_string(), "1".to_string())], &[])
+            .unwrap_err();
+        assert_eq!(error.code, "USAGE");
+        assert!(error.message.contains("requires an argv"));
+    }
+
+    #[test]
+    fn created_tab_and_pane_summaries_read_the_payloads() {
+        assert_eq!(
+            created_tab_summary(&serde_json::json!({
+                "tab_id": "t1", "pane_id": "p1", "cwd": "/tmp"
+            })),
+            "Created tab t1\npane_id: p1\ncwd: /tmp"
+        );
+        assert_eq!(
+            created_pane_summary(&serde_json::json!({ "new_pane_id": "p2" }), "t1"),
+            "Created pane p2 in tab t1."
+        );
+    }
+
+    #[test]
+    fn workspace_list_summary_renders_entries() {
+        let summary = workspace_list_summary(&serde_json::json!({
+            "cwd": "/tmp",
+            "path": "",
+            "entries": [
+                { "name": "src", "is_dir": true, "size": 0 },
+                { "name": "a.rs", "is_dir": false, "size": 1536 },
+                { "name": "link", "is_dir": true, "size": 0, "is_symlink": true, "is_cycle": true }
+            ]
+        }));
+        let lines: Vec<&str> = summary.lines().collect();
+        assert!(lines[0].starts_with("NAME"));
+        assert!(lines[1].contains("src"));
+        assert!(lines[1].contains("dir"));
+        assert!(lines[2].contains("1.5 KiB"));
+        assert!(lines[3].contains("link (cycle)"));
+        assert_eq!(workspace_list_summary(&serde_json::json!({ "entries": [] })), "No entries.");
+    }
+
+    #[test]
+    fn workspace_git_status_summary_handles_repos_and_clean_trees() {
+        assert_eq!(
+            workspace_git_status_summary(&serde_json::json!({ "is_git_repo": false })),
+            "Not a git repository."
+        );
+        assert_eq!(
+            workspace_git_status_summary(&serde_json::json!({
+                "is_git_repo": true, "files": []
+            })),
+            "Working tree clean."
+        );
+        let summary = workspace_git_status_summary(&serde_json::json!({
+            "is_git_repo": true,
+            "repo_root": "/repo",
+            "head": "1234567890abcdef",
+            "files": [
+                { "path": "src/a.rs", "status": "modified", "additions": 3, "deletions": 1 },
+                { "path": "logo.png", "status": "untracked", "binary": true }
+            ],
+            "summary": { "files": 2, "additions": 3, "deletions": 1, "counts_complete": true }
+        }));
+        assert!(summary.contains("repo: /repo (HEAD 12345678)"));
+        assert!(summary.contains("modified"));
+        assert!(summary.contains("+3 -1"));
+        assert!(summary.contains("binary"));
+        assert!(summary.contains("2 file(s), +3 -1"));
+    }
+
+    #[test]
+    fn workspace_git_diff_summary_labels_sides_and_binary_files() {
+        let summary = workspace_git_diff_summary(&serde_json::json!({
+            "is_git_repo": true,
+            "path": "a.txt",
+            "base": "head",
+            "original": "old\n",
+            "modified": "new"
+        }));
+        assert!(summary.contains("path: a.txt"));
+        assert!(summary.contains("--- original (HEAD) ---\nold"));
+        assert!(summary.contains("--- modified (working tree) ---\nnew"));
+        assert!(workspace_git_diff_summary(&serde_json::json!({
+            "is_git_repo": true,
+            "path": "a.png",
+            "binary": true
+        }))
+        .contains("binary file"));
     }
 }

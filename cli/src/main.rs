@@ -11,6 +11,7 @@ mod config;
 mod error;
 mod viewer;
 
+use std::io::Read;
 use std::process::ExitCode;
 
 use args::{Command, HelpTopic, Invocation};
@@ -79,6 +80,62 @@ fn execute(options: &args::GlobalOptions, command: Command) -> Result<(), CliErr
                 println!("{}", commands::tabs_summary(&response));
             }
         }
+        Command::TabsCreate { cwd, title, env, argv } => {
+            let http = api::HttpClient::connect(&config)?;
+            let payload =
+                commands::tabs_create_payload(cwd.as_deref(), title.as_deref(), &env, &argv)?;
+            let response = commands::create_tab(&http, &payload)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("{}", commands::created_tab_summary(&response));
+            }
+        }
+        Command::TabsClose { tab_id } => {
+            let http = api::HttpClient::connect(&config)?;
+            let response = commands::close_tab(&http, &tab_id)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("Closed tab {tab_id}.");
+            }
+        }
+        Command::TabsRename { tab_id, title } => {
+            let http = api::HttpClient::connect(&config)?;
+            let response = commands::rename_tab(&http, &tab_id, &title)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("Renamed tab {tab_id} to {title}.");
+            }
+        }
+        Command::TabsSplit { tab_id, pane_id, direction, cwd } => {
+            let http = api::HttpClient::connect(&config)?;
+            let pane_id = match pane_id {
+                Some(pane_id) => pane_id,
+                None => commands::tab_pane_id(&http, &tab_id)?,
+            };
+            let response =
+                commands::split_pane(&http, &tab_id, &pane_id, &direction, cwd.as_deref())?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("{}", commands::created_pane_summary(&response, &tab_id));
+            }
+        }
+        Command::TabsActivate { tab_id, pane_id } => {
+            let http = api::HttpClient::connect(&config)?;
+            let pane_id = match pane_id {
+                Some(pane_id) => pane_id,
+                None => commands::tab_pane_id(&http, &tab_id)?,
+            };
+            let response = commands::activate_pane(&http, &tab_id, &pane_id)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("Activated pane {pane_id} (tab {tab_id}).");
+            }
+        }
         Command::InputSend { pane_id, text } => {
             let http = api::HttpClient::connect(&config)?;
             let response = commands::send_input(&http, &pane_id, &text)?;
@@ -101,6 +158,62 @@ fn execute(options: &args::GlobalOptions, command: Command) -> Result<(), CliErr
                         println!();
                     }
                 }
+            }
+        }
+        Command::WorkspaceList { path } => {
+            let pane_id = config.require_pane()?.to_string();
+            let http = api::HttpClient::connect(&config)?;
+            let response = commands::workspace_list(&http, &pane_id, &path)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("{}", commands::workspace_list_summary(&response));
+            }
+        }
+        Command::WorkspaceRead { path } => {
+            let pane_id = config.require_pane()?.to_string();
+            let http = api::HttpClient::connect(&config)?;
+            if options.json {
+                let response = commands::workspace_meta(&http, &pane_id, &path)?;
+                commands::print_json(&response)?;
+            } else {
+                let stdout = std::io::stdout();
+                let mut lock = stdout.lock();
+                commands::workspace_raw(&http, &pane_id, &path, &mut lock)?;
+            }
+        }
+        Command::WorkspaceWrite { path } => {
+            let pane_id = config.require_pane()?.to_string();
+            let mut content = String::new();
+            std::io::stdin().read_to_string(&mut content).map_err(|error| {
+                CliError::runtime("IO_ERROR", format!("cannot read stdin: {error}"))
+            })?;
+            let http = api::HttpClient::connect(&config)?;
+            let response = commands::workspace_write(&http, &pane_id, &path, &content)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("Wrote {} bytes to {path}.", content.len());
+            }
+        }
+        Command::WorkspaceGitStatus => {
+            let pane_id = config.require_pane()?.to_string();
+            let http = api::HttpClient::connect(&config)?;
+            let response = commands::workspace_git_status(&http, &pane_id)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("{}", commands::workspace_git_status_summary(&response));
+            }
+        }
+        Command::WorkspaceGitDiff { path } => {
+            let pane_id = config.require_pane()?.to_string();
+            let http = api::HttpClient::connect(&config)?;
+            let response = commands::workspace_git_diff(&http, &pane_id, &path)?;
+            if options.json {
+                commands::print_json(&response)?;
+            } else {
+                println!("{}", commands::workspace_git_diff_summary(&response));
             }
         }
     }
@@ -126,5 +239,6 @@ const fn help_text(topic: HelpTopic) -> &'static str {
         HelpTopic::Tabs => args::tabs_help(),
         HelpTopic::Input => args::input_help(),
         HelpTopic::Screen => args::screen_help(),
+        HelpTopic::Workspace => args::workspace_help(),
     }
 }

@@ -119,9 +119,63 @@ reports `OPEN_API_DISABLED`.
 
 ### `dinotty tabs list`
 
-Lists tabs (`tab_id`, `pane_id`, `title`, `cwd`). Titles come from
-`layout.title` or the layout leaves' `layout.children[].title`; multiple leaf
-titles are joined with ` | `. Does not require Open API.
+Lists tabs (`tab_id`, `pane_id`, `title`, `cwd`). Titles prefer the explicit
+top-level `title` (set by `tabs rename`), then `layout.title`, then the layout
+leaves' `layout.children[].title`; multiple leaf titles are joined with ` | `.
+Does not require Open API.
+
+### `dinotty tabs create`
+
+```bash
+dinotty tabs create [--cwd <dir>] [--title <title>] [--env KEY=VALUE]... [-- <argv>...]
+```
+
+Posts `{cwd, title, argv}` to `POST /api/tabs`. Everything after `--` is sent
+as the argv array verbatim; without an argv the server opens the user's default
+shell. The response contains the new `tab_id`, `pane_id`, `layout`, and `cwd`.
+
+The HTTP API has **no env field**. `--env KEY=VALUE` therefore prefixes the
+argv with `/usr/bin/env KEY=VALUE …` (POSIX only, like the dispatch skill's
+existing convention); it requires an argv. Prefer absolute argv paths: Dinotty
+only guarantees `/opt/homebrew/bin` and `/usr/local/bin` on the spawned PATH.
+
+Everything after `--` belongs to the argv, including `--json`; put global
+options before the separator:
+
+```bash
+dinotty --json tabs create --cwd /tmp -- /bin/sh -c 'sleep 60'
+```
+
+### `dinotty tabs close <tab_id>`
+
+`DELETE /api/tabs/:tab_id`. Closing a tab terminates its panes. Does not
+require Open API.
+
+### `dinotty tabs rename <tab_id> <title>`
+
+`POST /api/tabs/:tab_id/rename` with `{"title": "..."}`. The title may also be
+passed as `--title`.
+
+The server stores the rename as a tab-level `title`. A later layout update for
+the same tab (for example a split) replaces that entry and can drop the renamed
+title; rename after the layout is final.
+
+### `dinotty tabs split <tab_id>`
+
+```bash
+dinotty tabs split <tab_id> --direction horizontal|vertical [--pane <pane_id>] [--cwd <dir>]
+```
+
+`POST /api/tabs/:tab_id/pane` with a split request. `--direction` accepts `h`
+and `v` as shorthands. Without `--pane` (or the global `--pane`), the target is
+the tab's first pane, resolved from `GET /api/tabs`. `--cwd` overrides the new
+pane's working directory for local splits.
+
+### `dinotty tabs activate <tab_id> [pane_id]`
+
+`PUT /api/tabs/:tab_id/pane/:pane_id/activate`. Without a pane id it activates
+the tab's first pane. This moves the server-global active pane, which also
+brings the tab to the front in connected UIs.
 
 ### `dinotty input send <pane_id> <text>`
 
@@ -139,6 +193,53 @@ is plain text. The pane id may come from `--pane`/`DINOTTY_PANE_ID` instead of a
 positional argument.
 
 Requires Open API.
+
+## Workspace commands
+
+All workspace commands resolve the pane from `--pane` / `DINOTTY_PANE_ID` and
+take **workspace-relative paths**. The server strips leading slashes and
+rejects `..`, so an absolute path like `/tmp/a.txt` means `<workspace>/tmp/a.txt`
+rather than the filesystem path. Use `viewer open` when you want the CLI to
+resolve and stage an arbitrary local path.
+
+### `dinotty workspace list [<path>]`
+
+`GET /api/workspace/list` for a directory (the workspace root when `path` is
+omitted). Human output is a `NAME / TYPE / SIZE` table; `--json` prints the
+server payload (`cwd`, `path`, `entries[]` with `is_dir`, `size`, `is_symlink`,
+`is_cycle`).
+
+### `dinotty workspace read <path>`
+
+Streams raw bytes from `GET /api/workspace/raw` to stdout, so it works for any
+file type and can be piped. The server caps downloads at 500 MiB.
+
+With `--json` the command instead prints the `GET /api/workspace/meta` payload:
+text preview, detected language, `truncated`, and MIME/kind. The preview is
+capped at 512 KiB, so use plain output for full content.
+
+### `dinotty workspace write <path> -`
+
+Reads the new content from stdin and sends `PUT /api/workspace/file` with
+`{"content": "..."}`. The trailing `-` is required to make the stdin source
+explicit. Content must be UTF-8; the server accepts up to 500 MiB.
+
+```bash
+printf '# Notes\n' | dinotty workspace write notes.md -
+```
+
+### `dinotty workspace git status`
+
+`GET /api/workspace/git-changes`, which reports `is_git_repo`, `repo_root`,
+`head`, a summary (`files`, `additions`, `deletions`, `counts_complete`) and one
+entry per changed path. Human output is a status table plus a totals line.
+
+### `dinotty workspace git diff <path>`
+
+`GET /api/workspace/git-file-diff` for one path. The endpoint returns whole-file
+`original` (HEAD) and `modified` (working tree) contents rather than a unified
+patch; `--json` exposes the full payload (`binary`, `too_large`, `orig_path`,
+…).
 
 ## Error codes
 
@@ -161,9 +262,15 @@ Exit codes: `0` success, `1` API/runtime error, `2` usage error.
 | `CWD_UNAVAILABLE` | The pane has no local workspace (remote/SSH sessions are unsupported). |
 | `SSH_UNSUPPORTED` | The pane is an SSH session; the file viewer is local-only. |
 | `OUTSIDE_WORKSPACE` | The file could not be staged under the workspace. |
+| `TAB_NOT_FOUND` | The CLI could not find that tab in `GET /api/tabs` (it may have been closed). |
+| `NOT_FOUND` | A tab, pane, or workspace path returned 404; check `tabs list` / `workspace list`. |
+| `INVALID_PATH` | A workspace path contained `..`; paths are workspace-relative. |
 | `PATH_NOT_FOUND` | The file does not exist or is not readable. |
 | `NOT_A_FILE` | The target is a directory or special file. |
-| `FILE_TOO_LARGE` | The file exceeds the viewer's limit. |
+| `NOT_A_DIRECTORY` | The target of a listing is not a directory. |
+| `ALREADY_EXISTS` | A create/rename target already exists. |
+| `GIT_UNAVAILABLE` | Git data is not exposed for this pane (SSH/remote backends). |
+| `FILE_TOO_LARGE` | The file exceeds the viewer's or download limit. |
 | `SCOPE_DENIED` | The token lacks `workspace:read` or its path scope excludes the file. |
 | `OPEN_API_DISABLED` | Enable Settings → Open API for `sessions`, `screen`, and `input`. |
 | `UNAUTHORIZED` / `FORBIDDEN` | Check `--token`/`DINOTTY_TOKEN`; removing it allows loopback auto-token. |
@@ -181,6 +288,11 @@ Skills should shell out to `dinotty` rather than growing their own scripts. The
 expected contract is: stable command names, machine-readable `--json` output,
 and the error codes above.
 
+The repository's `skills/` directory holds the reusable Dinotty skill series
+(`dinotty-cli`, `dinotty-viewer`, `dinotty-sessions`, `dinotty-tabs`,
+`dinotty-workspace`). They are the source of truth and are copied to
+`~/.claude/skills/`; see `skills/README.md`.
+
 ## Remote Dinotty instances
 
 `viewer open` stages out-of-workspace files **on the machine running the CLI**.
@@ -194,10 +306,13 @@ long as the token is accepted.
 The command layout leaves room for additional subcommands without breaking the
 current surface:
 
-- `dinotty tabs new` / `dinotty tabs close <tab_id>`
-- `dinotty workspace list|read|write`
-- `dinotty input send --pane <id>` reusing the default pane
+- `dinotty tabs move` / `dinotty tabs close-pane` for the remaining layout
+  endpoints (`/pane/move`, `DELETE /api/tabs/:tab_id/pane/:pane_id`)
+- `dinotty wait --pane <id> --until approval|idle|change` for event-driven
+  dispatch (the current watcher polls `/screen` and `git rev-parse`)
 - `dinotty viewer open -` to read a path from stdin
+- `--env` for `tabs create` once `/api/tabs` grows an env field (today it uses
+  the `/usr/bin/env` argv prefix)
 
 New commands should be added as variants of `args::Command` plus a handler in
 `cli/src/commands.rs`; HTTP helpers live in `cli/src/api.rs`.

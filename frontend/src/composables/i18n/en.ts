@@ -929,6 +929,8 @@ export default {
   'keybinding.focusPrevPane': 'Previous Pane',
   'keybinding.searchTerminal': 'Search Terminal',
   'keybinding.switchTab': 'Switch to Tab (⌘1~9)',
+  'keybinding.prevTab': 'Previous Tab',
+  'keybinding.nextTab': 'Next Tab',
   'keybinding.missionControl': 'Mission Control',
   'keybinding.switchServer': 'Switch Server',
   'keybinding.superviseTabs': 'Supervise Tabs',

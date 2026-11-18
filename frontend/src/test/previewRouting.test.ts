@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { mountPrefix, previewPathFor, targetFromPreviewPath, urlToPreviewSrc } from '../utils/previewRouting'
+import {
+  isPreviewProxyUrl,
+  mountPrefix,
+  previewPathFor,
+  targetFromPreviewPath,
+  urlToPreviewSrc,
+} from '../utils/previewRouting'
 
 // base64url(origin), no padding — must match `encode_preview_target` (Rust).
 const IP80 = 'aHR0cDovLzE3Mi4yNS4yNi4yNTI6ODA'
@@ -47,6 +53,32 @@ describe('urlToPreviewSrc', () => {
 
   it('keeps about:blank for an empty target', () => {
     expect(urlToPreviewSrc('')).toBe('about:blank')
+  })
+})
+
+describe('already-proxied URLs', () => {
+  it('不再包裹 /api/proxy?url= 路由', () => {
+    const proxied = urlToPreviewSrc('https://wileylau.github.io/docs')
+    expect(isPreviewProxyUrl(proxied)).toBe(true)
+    expect(urlToPreviewSrc(proxied)).toBe(proxied)
+    expect(urlToPreviewSrc(proxied)).not.toContain('%253A')
+  })
+
+  it('不再包裹 /preview/<origin>/ 路由', () => {
+    const proxied = urlToPreviewSrc('http://172.25.26.252:8080/app?a=1')
+    expect(isPreviewProxyUrl(proxied)).toBe(true)
+    expect(urlToPreviewSrc(proxied)).toBe(proxied)
+  })
+
+  it('绝对 URL 形式的代理路由也不会被再次包裹', () => {
+    const proxied = 'https://wileylau.github.io/api/proxy?url=https%3A%2F%2Fgoogle.com&_t=7'
+    expect(isPreviewProxyUrl(proxied)).toBe(true)
+    expect(urlToPreviewSrc(proxied)).toBe(proxied)
+  })
+
+  it('普通 URL 不算代理路由', () => {
+    expect(isPreviewProxyUrl('https://google.com')).toBe(false)
+    expect(isPreviewProxyUrl('http://172.25.26.252')).toBe(false)
   })
 })
 

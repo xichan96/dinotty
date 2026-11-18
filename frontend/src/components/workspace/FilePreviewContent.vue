@@ -323,7 +323,11 @@ import { useI18n } from '../../composables/useI18n'
 import { apiUrl, authFetch, getAuthToken } from '../../composables/apiBase'
 import { isTauri } from '../../composables/useTransport'
 import { isCsvPreviewFile } from '../../utils/csvPreview'
-import { injectBaseHref, rewriteHtmlPreview } from '../../utils/htmlPreview'
+import {
+  injectBaseHref,
+  injectFragmentNavigation,
+  rewriteHtmlPreview,
+} from '../../utils/htmlPreview'
 import { renderMermaidBlocks } from '../../composables/mermaidPreview'
 import {
   enhanceMarkdownBlocks,
@@ -501,20 +505,22 @@ async function rebuildHtmlPreview() {
   const html = props.editorText
   const filePath = csvFilePath.value
   if (!html || !filePath) {
-    htmlPreviewSrcdoc.value = html
+    htmlPreviewSrcdoc.value = injectFragmentNavigation(html)
     return
   }
   const token = await mintPreviewToken(filePath)
   if (generation !== htmlPreviewGeneration) return
   if (!token) {
-    htmlPreviewSrcdoc.value = rewriteHtmlPreview(html, filePath, htmlRawUrl)
+    htmlPreviewSrcdoc.value = injectFragmentNavigation(
+      rewriteHtmlPreview(html, filePath, htmlRawUrl)
+    )
     return
   }
   // Absolute (not root-relative): an `about:srcdoc` document inherits the
   // parent's base URL, and relying on that inheritance to resolve the preview
   // reader would be a subtle thing to break.
   const base = new URL(apiUrl(`/preview-ws/${token}/`), window.location.href).href
-  htmlPreviewSrcdoc.value = injectBaseHref(html, base)
+  htmlPreviewSrcdoc.value = injectFragmentNavigation(injectBaseHref(html, base))
 }
 
 watch(

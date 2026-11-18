@@ -123,28 +123,63 @@ fn make_base_tag(prefix: &str, path: &str) -> String {
     format!("<base href=\"{prefix}{dir}\">")
 }
 
-/// Hub relay prefix attached to a proxied response's URLs, e.g. `/__srv/abc`.
+/// Mount prefix attached to a proxied response's URLs, e.g. `/__srv/abc` or
+/// `/apps/terminal`.
 ///
-/// The relay carries the remote server's `/preview` response verbatim, so a
-/// previewed page served through the hub would otherwise keep requesting
-/// `/preview/...` from the hub's local server instead of the remote one.
-/// Only the hub sets this header; the shape is validated so a hand-written
-/// value cannot smuggle markup into the base tag or injected script.
+/// A reverse proxy that mounts Dinotty under a path prefix (`/apps/<slug>` in
+/// Dojo) forwards requests with the prefix stripped. The previewed page's own
+/// URLs must carry the prefix back, otherwise every root-absolute resource it
+/// emits (`/preview/...`, `/assets/...`) is resolved against the *parent's*
+/// root and escapes the mount.
+///
+/// Two sources, in order:
+/// 1. `x-dinotty-relay-prefix` — the hub's own header, validated against the
+///    `/__srv/<id>` shape it has always used.
+/// 2. `x-forwarded-prefix` — the de-facto reverse-proxy header (also set by
+///    Dojo). Accepts a plain absolute path; the shape is validated so a
+///    hand-written value cannot smuggle markup into the base tag or script.
 fn relay_prefix(headers: &HeaderMap) -> String {
-    let Some(value) = headers.get("x-dinotty-relay-prefix").and_then(|v| v.to_str().ok()) else {
-        return String::new();
-    };
-    let Some(id) = value.trim_end_matches('/').strip_prefix("/__srv/") else {
-        return String::new();
-    };
-    let valid = !id.is_empty()
-        && !id.contains('/')
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if valid {
-        format!("/__srv/{id}")
-    } else {
-        String::new()
+    if let Some(value) = headers.get("x-dinotty-relay-prefix").and_then(|v| v.to_str().ok()) {
+        if let Some(id) = value.trim_end_matches('/').strip_prefix("/__srv/") {
+            let valid = !id.is_empty()
+                && !id.contains('/')
+                && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if valid {
+                return format!("/__srv/{id}");
+            }
+        }
     }
+    let Some(value) = headers.get("x-forwarded-prefix").and_then(|v| v.to_str().ok()) else {
+        return String::new();
+    };
+    normalize_mount_prefix(value)
+}
+
+/// Normalize an `x-forwarded-prefix` value to a safe absolute path, or empty.
+///
+/// Accepts `segment/segment` and `/segment/segment`; rejects anything that
+/// could break out of a path context once interpolated into HTML or JS: no
+/// scheme, no `..`, no backslashes, no quotes/angle brackets/whitespace, and
+/// only unreserved path characters.
+fn normalize_mount_prefix(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > 200 {
+        return String::new();
+    }
+    let path = if trimmed.starts_with('/') { trimmed.to_string() } else { format!("/{trimmed}") };
+    let path = path.trim_end_matches('/');
+    if path.is_empty() || path.contains("//") {
+        return String::new();
+    }
+    // Every character must be URL-path safe; this also rules out quotes, `<`,
+    // `>`, `&`, spaces and control characters.
+    let valid = path.chars().all(|c| c.is_ascii_alphanumeric() || "/-._~%".contains(c));
+    // `.` is a legitimate character in a path segment, so reject traversal
+    // explicitly rather than by character class.
+    if !valid || path.split('/').any(|segment| segment == "." || segment == "..") {
+        return String::new();
+    }
+    path.to_string()
 }
 
 fn is_valid_proxy_host(host: &str) -> bool {
@@ -358,7 +393,13 @@ fn parse_preview_target(after: &str) -> Option<(String, u16, String)> {
 fn should_forward_header(name: &str) -> bool {
     !matches!(
         name,
-        "host" | "connection" | "upgrade" | "accept-encoding" | "origin" | "x-dinotty-relay-prefix"
+        "host"
+            | "connection"
+            | "upgrade"
+            | "accept-encoding"
+            | "origin"
+            | "x-dinotty-relay-prefix"
+            | "x-forwarded-prefix"
     ) && !name.starts_with("sec-fetch-")
 }
 
@@ -581,8 +622,8 @@ async fn extract_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_preview_target, is_valid_proxy_host, parse_preview_path, relay_prefix,
-        same_origin_headers, should_forward_header,
+        encode_preview_target, is_valid_proxy_host, normalize_mount_prefix, parse_preview_path,
+        relay_prefix, same_origin_headers, should_forward_header,
     };
 
     /// The regression this file exists for. A dev server that guards its API
@@ -612,6 +653,15 @@ mod tests {
     fn hop_by_hop_headers_are_dropped() {
         for h in ["host", "connection", "upgrade", "accept-encoding"] {
             assert!(!should_forward_header(h), "{h} describes this connection, not the upstream");
+        }
+    }
+
+    /// The mount prefix describes how the *caller's* proxy exposes Dinotty;
+    /// the previewed app has no use for it and must not see it.
+    #[test]
+    fn mount_prefix_headers_are_dropped() {
+        for h in ["x-dinotty-relay-prefix", "x-forwarded-prefix"] {
+            assert!(!should_forward_header(h), "{h} must not leak to the upstream");
         }
     }
 
@@ -808,6 +858,54 @@ mod tests {
         assert_eq!(relay_prefix(&headers), "");
         headers.insert("x-dinotty-relay-prefix", "/evil".parse().unwrap());
         assert_eq!(relay_prefix(&headers), "");
+    }
+
+    /// A path-mounting reverse proxy (Dojo's `/apps/<slug>`) sets
+    /// `x-forwarded-prefix`; the preview's own URLs must carry it back or they
+    /// resolve against the parent's root and escape the mount.
+    #[test]
+    fn forwarded_prefix_is_accepted_as_mount_prefix() {
+        use axum::http::HeaderMap;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-prefix", "/apps/macmini".parse().unwrap());
+        assert_eq!(relay_prefix(&headers), "/apps/macmini");
+
+        headers.insert("x-forwarded-prefix", "/apps/macmini/".parse().unwrap());
+        assert_eq!(relay_prefix(&headers), "/apps/macmini");
+
+        // Missing leading slash is tolerated for proxies that emit it bare.
+        headers.insert("x-forwarded-prefix", "apps/terminal".parse().unwrap());
+        assert_eq!(relay_prefix(&headers), "/apps/terminal");
+    }
+
+    /// The mount prefix is interpolated into a `<base href>` and an inline
+    /// script, so anything that could break out of a path context is refused.
+    #[test]
+    fn forwarded_prefix_rejects_unsafe_values() {
+        let bad = [
+            "/apps/\"><script>",
+            "/apps/a b",
+            "/../etc",
+            "http://evil.com/x",
+            "//evil.com",
+            "/apps//double",
+            "",
+        ];
+        for value in bad {
+            assert_eq!(normalize_mount_prefix(value), "", "value {value:?} must be rejected");
+        }
+    }
+
+    /// The hub's own header wins over a generic one: a remote server reached
+    /// through the relay must keep `/__srv/<id>` so its preview stays routed
+    /// to *that* server, not to the hub.
+    #[test]
+    fn relay_header_takes_precedence() {
+        use axum::http::HeaderMap;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-dinotty-relay-prefix", "/__srv/abc-1".parse().unwrap());
+        headers.insert("x-forwarded-prefix", "/apps/macmini".parse().unwrap());
+        assert_eq!(relay_prefix(&headers), "/__srv/abc-1");
     }
 
     /// An IPv6 literal arrives bracketed from `Url::host_str()`. It is a valid

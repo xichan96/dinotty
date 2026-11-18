@@ -152,6 +152,23 @@ export const defs: KeyBindingDef[] = [
     readonly: true,
   },
   {
+    // Shift turns the pane-nav brackets into tab-nav brackets. Readonly like
+    // switchTab: the shifted punctuation is a fixed chord, and the recorder
+    // stores e.key ('}' / '{') instead of the physical bracket for this combo.
+    id: 'prevTab',
+    defaultBinding: { key: '[', shift: true },
+    icon: ChevronLeft,
+    titleKey: 'keybinding.prevTab',
+    readonly: true,
+  },
+  {
+    id: 'nextTab',
+    defaultBinding: { key: ']', shift: true },
+    icon: ChevronRight,
+    titleKey: 'keybinding.nextTab',
+    readonly: true,
+  },
+  {
     id: 'missionControl',
     defaultBinding: { key: 'm', shift: true },
     icon: LayoutDashboard,

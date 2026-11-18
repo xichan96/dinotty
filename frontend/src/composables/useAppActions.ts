@@ -11,6 +11,7 @@ import { resolveResponsiveToastPosition } from '../utils/toastPosition'
 import { getTerminalSequenceAppAction, isDispatchableAppAction } from '../utils/appActionCatalog'
 import { toggleServerPicker } from './useAppCore'
 import { isWindowsClient } from '../utils/clientPlatform'
+import { adjacentTabPaneId } from '../utils/tabNavigation'
 import { getEffectiveSuperviseReload } from './useDeviceSuperviseReload'
 import type { AppActionOptions } from '../components/keyboard/mkbTypes'
 import type { useToast } from 'vue-toastification'
@@ -63,6 +64,11 @@ export function useAppActions(options: AppActionsOptions) {
   } = core
   const { getBinding, formatBinding } = useKeybindings()
   const { supervise } = useSuperviseTabs()
+
+  function switchTabBy(step: 1 | -1) {
+    const target = adjacentTabPaneId(visibleTabList.value, activePaneId.value, step)
+    if (target) void activateTab(target)
+  }
 
   const hostClipboardPaste = createHostClipboardPasteController({
     fetchText: async () => {
@@ -245,6 +251,8 @@ export function useAppActions(options: AppActionsOptions) {
     togglePalette: () => paletteRef.value?.toggle(),
     openBookmarks: () => bookmarksRef.value?.open(),
     newTab: () => newTab(),
+    prevTab: () => switchTabBy(-1),
+    nextTab: () => switchTabBy(1),
     applyTemplate: () => {
       templatePickerVisible.value = true
     },

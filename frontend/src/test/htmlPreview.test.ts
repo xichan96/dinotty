@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import {
   injectBaseHref,
+  injectFragmentNavigation,
   isWorkspaceRelativeRef,
   resolveRelativePath,
   rewriteHtmlPreview,
@@ -142,6 +143,62 @@ describe('injectBaseHref', function injectBaseHrefSuite() {
     const result = injectBaseHref(html, '/preview-ws/tok/prototype/')
     expect(result).toContain('href="css/base.css"')
     expect(result).toContain('src="assets/img/a.jpg"')
+  })
+})
+
+describe('injectFragmentNavigation', function fragmentNavigationSuite() {
+  const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    'scrollIntoView'
+  )
+
+  afterEach(function restoreScrollIntoView() {
+    if (originalScrollIntoView) {
+      Object.defineProperty(Element.prototype, 'scrollIntoView', originalScrollIntoView)
+    } else {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('在 body 结束标签前注入脚本，且重复调用不会注入两次', function injectsOnce() {
+    const html = '<html><body><a href="#q2">go</a></body></html>'
+    const once = injectFragmentNavigation(html)
+    expect(once).toContain('data-dinotty-fragment-nav')
+    expect(once.indexOf('<script')).toBeLessThan(once.indexOf('</body>'))
+    expect(injectFragmentNavigation(once)).toBe(once)
+    expect(injectFragmentNavigation('')).toBe('')
+  })
+
+  it('点击 #hash 时滚动到目标，而不是让浏览器导航离开 srcdoc', function scrollsToTarget() {
+    const result = injectFragmentNavigation('<a href="#q2">go</a><h2 id="q2">Q2</h2>')
+    const script = result.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
+    expect(script).toContain('a[href^="#"]')
+
+    document.body.innerHTML = result.replace(/<script[^>]*>[\s\S]*?<\/script>/, '')
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+    })
+    ;(new Function(script) as () => void)()
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    document.querySelector('a')!.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(scrollIntoView).toHaveBeenCalledOnce()
+  })
+
+  it('不改写到其他文件的链接', function leavesOtherLinksAlone() {
+    const result = injectFragmentNavigation('<a href="sessions.html#q2">go</a>')
+    const script = result.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
+    document.body.innerHTML = result.replace(/<script[^>]*>[\s\S]*?<\/script>/, '')
+    ;(new Function(script) as () => void)()
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    document.querySelector('a')!.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
   })
 })
 

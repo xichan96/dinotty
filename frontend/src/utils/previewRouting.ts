@@ -83,6 +83,16 @@ export function targetFromPreviewPath(input: string): string | null {
 }
 
 /**
+ * True when `url` is already one of Dinotty's own preview routes. Both the
+ * canonical `/preview/<origin>/...` form and the external `/api/proxy?url=...`
+ * route count. Used to stop a proxied URL being wrapped in another proxy —
+ * which otherwise grows a new `?url=` layer on every navigation.
+ */
+export function isPreviewProxyUrl(url: string): boolean {
+  return targetFromPreviewPath(url) !== null
+}
+
+/**
  * Path prefix the app is mounted under, without the trailing slash (`''` when
  * served from the origin root).
  *
@@ -136,5 +146,8 @@ export function previewPathFor(url: string): string | null {
  */
 export function urlToPreviewSrc(url: string): string {
   if (!url) return 'about:blank'
+  // The caller may hand back a URL read from the iframe's address bar. It is
+  // already a proxy route: wrapping it again would nest `?url=` forever.
+  if (isPreviewProxyUrl(url)) return url
   return previewPathFor(url) ?? `${mountPrefix()}/api/proxy?url=${encodeURIComponent(url)}`
 }

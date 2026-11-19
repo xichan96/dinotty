@@ -924,6 +924,8 @@ export default {
   'keybinding.focusPrevPane': '上一个窗格',
   'keybinding.searchTerminal': '搜索终端',
   'keybinding.switchTab': '切换标签页 (⌘1~9)',
+  'keybinding.prevTab': '上一个标签页',
+  'keybinding.nextTab': '下一个标签页',
   'keybinding.missionControl': '任务控制',
   'keybinding.switchServer': '切换服务端',
   'keybinding.superviseTabs': '标签页巡查',

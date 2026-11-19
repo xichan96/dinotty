@@ -111,6 +111,55 @@ export function injectBaseHref(html: string, baseHref: string): string {
 }
 
 /**
+ * Same-page fragment links (`href="#q2"`) cannot use the browser's built-in
+ * jump here. The preview is an `about:srcdoc` document with an injected
+ * `<base href>`, so `#q2` resolves against that base URL and navigates the
+ * frame to the preview reader instead of scrolling to the section.
+ *
+ * This script is appended to the framed document and handles those clicks
+ * itself: it finds the target by id/name and scrolls to it, leaving links to
+ * other files alone. It uses event delegation so links added by page scripts
+ * work too, and it runs in the sandboxed (opaque-origin) frame.
+ */
+const FRAGMENT_NAV_MARKER = 'data-dinotty-fragment-nav'
+const FRAGMENT_NAV_SCRIPT = `<script ${FRAGMENT_NAV_MARKER}>
+(function () {
+  function findTarget(id) {
+    return document.getElementById(id) || document.getElementsByName(id)[0] || null
+  }
+  document.addEventListener('click', function (event) {
+    if (event.defaultPrevented || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    var anchor = event.target && event.target.closest ? event.target.closest('a[href^="#"]') : null
+    if (!anchor) return
+    var href = anchor.getAttribute('href') || ''
+    if (href === '#') {
+      event.preventDefault()
+      window.scrollTo(0, 0)
+      return
+    }
+    var id = href.slice(1)
+    try { id = decodeURIComponent(id) } catch (e) { /* keep the raw fragment */ }
+    var target = findTarget(id)
+    if (!target) return
+    event.preventDefault()
+    target.scrollIntoView({ block: 'start' })
+  })
+})();
+</script>`
+
+export function injectFragmentNavigation(html: string): string {
+  if (!html || html.includes(FRAGMENT_NAV_MARKER)) return html
+  const bodyClose = /<\/body\s*>/i.exec(html)
+  if (bodyClose) {
+    return (
+      html.slice(0, bodyClose.index) + FRAGMENT_NAV_SCRIPT + html.slice(bodyClose.index)
+    )
+  }
+  return html + FRAGMENT_NAV_SCRIPT
+}
+
+/**
  * Rewrite relative URLs in an HTML document so they resolve through
  * `toRawUrl`. Used only when the preview token could not be minted (an older
  * server, or an SSH pane, which has no local reader): an authenticated raw URL

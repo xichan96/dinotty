@@ -93,7 +93,11 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import DevToolsPanel from './DevToolsPanel.vue'
 import AddressDropdown from './AddressDropdown.vue'
-import { targetFromPreviewPath, urlToPreviewSrc } from '../../utils/previewRouting'
+import {
+  isPreviewProxyUrl,
+  targetFromPreviewPath,
+  urlToPreviewSrc,
+} from '../../utils/previewRouting'
 import { apiUrl, getApiBase } from '../../composables/apiBase'
 import { useI18n } from '../../composables/useI18n'
 import { useWebBookmarks } from '../../composables/useWebBookmarks'
@@ -213,6 +217,13 @@ const resolvedSrc = computed(() => {
   if (!iframeUrl.value) return 'about:blank'
   const path = urlToPreviewSrc(iframeUrl.value)
   if (path === 'about:blank') return path
+  // An already-proxied absolute URL can arrive from a docked window or an
+  // iframe location; it cannot go through `apiUrl`, which only takes paths.
+  const absolute = /^https?:\/\//i.test(path)
+  if (absolute) {
+    const sep = path.includes('?') ? '&' : '?'
+    return `${path}${sep}_t=${navCounter.value}`
+  }
   // `apiUrl` carries the active server's relay prefix, so a preview driven
   // from a remote server goes through the hub like every other request.
   const base = apiUrl(path)
@@ -417,7 +428,10 @@ function handleIframeLoad() {
     return
   }
   // The proxy's own error page and canonical preview URLs are not escapes.
-  if (escaped.pathname.includes('/preview/')) return
+  // This must also cover `/api/proxy?url=...`: a page on the app's own origin
+  // (or a redirected/error response without the inject marker) lands there,
+  // and treating it as a fresh target wraps another proxy around it.
+  if (escaped.pathname.includes('/preview/') || isPreviewProxyUrl(href)) return
   let target: URL
   try {
     target = new URL(currentUrl.value)

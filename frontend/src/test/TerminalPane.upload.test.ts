@@ -35,6 +35,7 @@ vi.mock('../composables/useUpload', () => ({
   formatMB: (bytes: number) => (bytes / 1048576).toFixed(1),
   useUpload: () => ({
     uploadFiles: paneMocks.uploadFiles,
+    uploadFilesOneByOne: paneMocks.uploadFiles,
     uploadErrorStatus: (err: unknown) =>
       typeof err === 'object' && err && 'status' in err ? Number((err as any).status) : undefined,
   }),

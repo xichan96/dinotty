@@ -4,6 +4,14 @@ import { uiConfirm } from './useConfirm'
 import { uiAlert } from './useAlert'
 import { isTauri, tauriInvoke } from './useTransport'
 import { settings } from './useSettings'
+import { postMultipartWithProgress } from './useUpload'
+import {
+  addTask as addUploadTask,
+  finishTask as finishUploadTask,
+  runWithConcurrency,
+  setTaskStatus as setUploadTaskStatus,
+  updateTaskProgress as updateUploadTaskProgress,
+} from './useUploadTracker'
 import type { DirEntry } from '../components/workspace/TreeRows'
 
 interface ParsedUploadBody {
@@ -167,30 +175,45 @@ export function useFileOperations(opts: {
       } else {
         const q = new URLSearchParams({ pane_id: opts.paneId(), dir })
         if (opts.cwdLabel.value) q.set('cwd', opts.cwdLabel.value)
-        const fd = new FormData()
-        for (const { file, path } of files) {
+        const url = apiUrl(`/api/workspace/upload?${q}`)
+        const taskIds = files.map(({ file, path }) => addUploadTask(path || file.name, file.size))
+        await runWithConcurrency(files, 3, async ({ file, path }, i) => {
+          setUploadTaskStatus(taskIds[i], 'uploading')
+          // The server pairs each `path` with the following `file` field, so
+          // one pair per request keeps the same semantics as the old batch.
+          const fd = new FormData()
           fd.append('path', path)
           fd.append('file', file)
-        }
-        const res = await authFetch(apiUrl(`/api/workspace/upload?${q}`), {
-          method: 'POST',
-          body: fd,
-        })
-        if (!res.ok) {
-          const body = await res.text().catch(() => '')
-          console.error('[upload] server error:', res.status, body)
-          alertUploadError(res.status, body)
-          hadErrors = true
-        } else {
-          const parsed = (await res.json().catch(() => null)) as ParsedUploadBody | null
-          if (parsed?.errors?.length) {
-            console.error('[upload] server errors:', parsed.errors)
-            void uiAlert(`Upload failed:\n${parsed.errors.join('\n')}`, {
-              title: opts.t('fileOps.uploadFailedTitle'),
+          try {
+            const res = await postMultipartWithProgress(url, fd, (p) => {
+              updateUploadTaskProgress(taskIds[i], p.loaded, p.total)
             })
+            if (res.status < 200 || res.status >= 300) {
+              console.error('[upload] server error:', res.status, res.bodyText)
+              alertUploadError(res.status, res.bodyText)
+              hadErrors = true
+              finishUploadTask(taskIds[i], false, `HTTP ${res.status}`)
+              return
+            }
+            const parsed = parseUploadBody(res.bodyText)
+            if (parsed.errors?.length) {
+              console.error('[upload] server errors:', parsed.errors)
+              void uiAlert(`Upload failed:\n${parsed.errors.join('\n')}`, {
+                title: opts.t('fileOps.uploadFailedTitle'),
+              })
+              hadErrors = true
+              finishUploadTask(taskIds[i], false, parsed.errors.join('\n'))
+              return
+            }
+            setUploadTaskStatus(taskIds[i], 'processing')
+            finishUploadTask(taskIds[i], true)
+          } catch (e) {
+            console.error('[upload] request failed:', e)
+            void uiAlert(`Upload failed: ${e}`, { title: opts.t('fileOps.uploadFailedTitle') })
             hadErrors = true
+            finishUploadTask(taskIds[i], false, String(e))
           }
-        }
+        })
       }
     } catch (e) {
       console.error('[upload] request failed:', e)

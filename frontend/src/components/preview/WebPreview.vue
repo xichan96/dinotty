@@ -379,12 +379,20 @@ function stripCacheBuster(url: string): string {
  * in the parent instead of relying on a script injected into the previewed
  * site (which a CSP or an unusual proxy path can block).
  */
+let focusCheckTimer: ReturnType<typeof setTimeout> | null = null
+
 function onWindowFocus() {
-  setTimeout(() => {
+  if (focusCheckTimer) clearTimeout(focusCheckTimer)
+  // For a cross-origin iframe the parent's focus event fires *before*
+  // document.activeElement moves to the iframe element, so check on the next
+  // frame instead of immediately. A short delay is also fine here: activation
+  // only changes which pane is active, it does not gate input into the site.
+  focusCheckTimer = setTimeout(() => {
+    focusCheckTimer = null
     if (!props.isActive && iframeRef.value && document.activeElement === iframeRef.value) {
       emit('focus')
     }
-  }, 0)
+  }, 120)
 }
 
 function onProxyMessage(e: MessageEvent) {
@@ -525,6 +533,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('message', onProxyMessage)
   window.removeEventListener('focus', onWindowFocus)
   window.removeEventListener('resize', onResize)
+  if (focusCheckTimer) clearTimeout(focusCheckTimer)
 })
 </script>
 

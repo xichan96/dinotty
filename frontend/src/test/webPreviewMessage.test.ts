@@ -29,12 +29,12 @@ describe('WebPreview iframe focus bridge', () => {
 
     try {
       window.dispatchEvent(new Event('focus'))
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await new Promise((resolve) => setTimeout(resolve, 150))
       expect(wrapper.emitted('focus')).toHaveLength(1)
 
       await wrapper.setProps({ isActive: true })
       window.dispatchEvent(new Event('focus'))
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await new Promise((resolve) => setTimeout(resolve, 150))
       expect(wrapper.emitted('focus')).toHaveLength(1)
     } finally {
       if (original) Object.defineProperty(document, 'activeElement', original)

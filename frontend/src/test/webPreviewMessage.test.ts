@@ -43,6 +43,24 @@ describe('WebPreview iframe focus bridge', () => {
     }
   })
 
+  it('also detects iframe activation from a blur event', async () => {
+    const wrapper = mount(WebPreview, {
+      props: { visible: true, url: 'http://localhost:3000', isActive: false },
+    })
+    const iframe = wrapper.find('iframe').element
+    const original = Object.getOwnPropertyDescriptor(document, 'activeElement')
+    Object.defineProperty(document, 'activeElement', { configurable: true, get: () => iframe })
+    try {
+      window.dispatchEvent(new Event('blur'))
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      expect(wrapper.emitted('focus')).toHaveLength(1)
+    } finally {
+      if (original) Object.defineProperty(document, 'activeElement', original)
+      else delete (document as any).activeElement
+      wrapper.unmount()
+    }
+  })
+
   it('exposes a focus method for pane activation', () => {
     const wrapper = mount(WebPreview, {
       props: { visible: true, url: 'http://localhost:3000', inLeaf: true },

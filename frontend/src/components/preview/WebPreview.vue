@@ -381,12 +381,12 @@ function stripCacheBuster(url: string): string {
  */
 let focusCheckTimer: ReturnType<typeof setTimeout> | null = null
 
-function onWindowFocus() {
+function onFocusChange() {
   if (focusCheckTimer) clearTimeout(focusCheckTimer)
-  // For a cross-origin iframe the parent's focus event fires *before*
-  // document.activeElement moves to the iframe element, so check on the next
-  // frame instead of immediately. A short delay is also fine here: activation
-  // only changes which pane is active, it does not gate input into the site.
+  // Clicking into an iframe moves document.activeElement to the iframe element
+  // in the parent, but which event announces that varies: some setups fire a
+  // focus event, others only fire blur on the element losing focus. Listen to
+  // both and check after the focus change has settled.
   focusCheckTimer = setTimeout(() => {
     focusCheckTimer = null
     if (!props.isActive && iframeRef.value && document.activeElement === iframeRef.value) {
@@ -523,7 +523,8 @@ function startDragTouch(e: TouchEvent) {
 
 onMounted(async () => {
   window.addEventListener('message', onProxyMessage)
-  window.addEventListener('focus', onWindowFocus)
+  window.addEventListener('focus', onFocusChange, true)
+  window.addEventListener('blur', onFocusChange, true)
   window.addEventListener('resize', onResize)
   previewHttpBase.value = await getApiBase()
   allowOrigin(previewHttpBase.value)
@@ -531,7 +532,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onProxyMessage)
-  window.removeEventListener('focus', onWindowFocus)
+  window.removeEventListener('focus', onFocusChange, true)
+  window.removeEventListener('blur', onFocusChange, true)
   window.removeEventListener('resize', onResize)
   if (focusCheckTimer) clearTimeout(focusCheckTimer)
 })

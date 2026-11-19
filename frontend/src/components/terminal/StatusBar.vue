@@ -1,5 +1,12 @@
 <template>
-  <div class="status-bar" :class="{ 'is-elevated': serverPickerOpen, 'is-mobile': isMobile }">
+  <div
+    class="status-bar"
+    :class="{
+      'is-elevated': serverPickerOpen,
+      'is-mobile': isMobile,
+      'has-uploads': uploadTasks.length > 0,
+    }"
+  >
     <!-- The one switch entry. A fixed-width slot at the far left, so the
          monitor items beside it never move when the server name changes. -->
     <div class="status-bar-server-wrap">
@@ -121,6 +128,9 @@
     >
       <StatusBarItemRenderer v-for="item in allRightItems" :key="item.id" :item="item" />
     </div>
+    <!-- One more metric, pinned to the far right: live upload progress with a
+         detail popover that opens upward from the bar. -->
+    <UploadTracker />
     <span v-if="warning.message.value" class="pane-warning">{{ warning.message.value }}</span>
 
     <MonitorPopover
@@ -198,6 +208,8 @@ import {
 } from '../../composables/useSystemStatusBarItems'
 import { pluginSeriesToStatusBarItem } from '../../composables/usePluginStatusBarAdapter'
 import StatusBarItemRenderer from './StatusBarItemRenderer.vue'
+import UploadTracker from '../uploads/UploadTracker.vue'
+import { useUploadTracker } from '../../composables/useUploadTracker'
 
 const MonitorPopover = defineAsyncComponent(() => import('./MonitorPopover.vue'))
 const PluginSeriesPopover = defineAsyncComponent(() => import('./PluginSeriesPopover.vue'))
@@ -210,6 +222,7 @@ const ui = useUiStore()
 const warning = usePaneWarning()
 const store = useStatusBarItemsStore()
 const pluginMonitor = usePluginMonitorStore()
+const { tasks: uploadTasks } = useUploadTracker()
 
 const monitorSettings = computed(
   () =>
@@ -966,6 +979,11 @@ watch(serverPickerOpen, (open) => {
 .status-bar-right:not(.has-overflow-left):not(.has-overflow-right) {
   -webkit-mask-image: none;
   mask-image: none;
+}
+/* The far-right upload metric owns that corner; keep the transient warning
+   clear of it instead of printing the two on top of each other. */
+.status-bar.has-uploads .pane-warning {
+  right: 84px;
 }
 .pane-warning {
   position: absolute;

@@ -182,7 +182,7 @@ let insertQueue = Promise.resolve()
 const searchVisible = ref(false)
 const toast = useToast()
 const { t } = useI18n()
-const { uploadFiles, uploadErrorStatus } = useUpload()
+const { uploadFilesOneByOne, uploadErrorStatus } = useUpload()
 const {
   uploadInProgress,
   uploadProgress,
@@ -1085,7 +1085,7 @@ onMounted(() => {
     // Attach the settle handlers synchronously so a fast-rejecting upload can never
     // surface as an unhandled rejection while an earlier insert is still queued.
     beginUploadProgress()
-    const uploadResult = uploadFiles(files, {
+    const uploadResult = uploadFilesOneByOne(files, {
       synthesizeNames: true,
       onProgress: updateUploadProgress,
     })
@@ -1103,7 +1103,11 @@ onMounted(() => {
         const saved = data.saved ?? []
         if (saved.length) self.sendData(saved.map(shellEscapePath).join(' ') + ' ', true)
         window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
-        toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
+        if (data.errors?.length) {
+          toast.error(data.errors.join('\n'), { position: resolveResponsiveToastPosition() })
+        } else {
+          toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
+        }
       } catch (err) {
         if (!paneAlive) return
         toast.error(uploadErrorMessage(err), { position: resolveResponsiveToastPosition() })

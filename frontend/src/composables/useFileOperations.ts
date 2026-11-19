@@ -4,7 +4,11 @@ import { uiConfirm } from './useConfirm'
 import { uiAlert } from './useAlert'
 import { isTauri, tauriInvoke } from './useTransport'
 import { settings } from './useSettings'
-import { postMultipartWithProgress } from './useUpload'
+import {
+  postMultipartWithProgress,
+  uploadErrorStatus,
+  uploadErrorText,
+} from './useUpload'
 import {
   addTask as addUploadTask,
   finishTask as finishUploadTask,
@@ -209,9 +213,24 @@ export function useFileOperations(opts: {
             finishUploadTask(taskIds[i], true)
           } catch (e) {
             console.error('[upload] request failed:', e)
-            void uiAlert(`Upload failed: ${e}`, { title: opts.t('fileOps.uploadFailedTitle') })
+            // `postMultipartWithProgress` rejects on every non-2xx, so this —
+            // not the status check above — is where HTTP failures land. Keep
+            // the status-specific message instead of printing the rejection
+            // object as `[object Object]`.
+            const status = uploadErrorStatus(e)
+            const bodyText =
+              typeof e === 'object' && e && 'bodyText' in e
+                ? String((e as { bodyText?: string }).bodyText ?? '')
+                : undefined
+            if (status && bodyText !== undefined) {
+              alertUploadError(status, bodyText)
+            } else {
+              void uiAlert(`Upload failed: ${uploadErrorText(e)}`, {
+                title: opts.t('fileOps.uploadFailedTitle'),
+              })
+            }
             hadErrors = true
-            finishUploadTask(taskIds[i], false, String(e))
+            finishUploadTask(taskIds[i], false, uploadErrorText(e))
           }
         })
       }

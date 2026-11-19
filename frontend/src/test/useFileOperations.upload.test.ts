@@ -16,9 +16,11 @@ vi.mock('../composables/apiBase', () => ({
   getAuthToken: () => 'token',
 }))
 
-vi.mock('../composables/useUpload', () => ({
-  postMultipartWithProgress: mocks.postMultipart,
-}))
+vi.mock('../composables/useUpload', async () => {
+  const actual =
+    await vi.importActual<typeof import('../composables/useUpload')>('../composables/useUpload')
+  return { ...actual, postMultipartWithProgress: mocks.postMultipart }
+})
 
 vi.mock('../composables/useTransport', () => ({
   isTauri: () => false,
@@ -119,8 +121,10 @@ describe('useFileOperations upload size limit', () => {
     expect(fd.get('path')).toBe('small.txt')
   })
 
-  it('maps a 413 response to the localized rejected message', async () => {
-    mocks.postMultipart.mockResolvedValue({
+  it('maps a 413 rejection to the localized rejected message', async () => {
+    // The real helper rejects (not resolves) for non-2xx; mocking it as a
+    // resolution would exercise a branch production can never reach.
+    mocks.postMultipart.mockRejectedValue({
       status: 413,
       bodyText: JSON.stringify({ error: "file 'big.bin' exceeds upload size limit of 1 MB" }),
     })
@@ -132,6 +136,16 @@ describe('useFileOperations upload size limit', () => {
     expect(mocks.uiAlert.mock.calls[0][0]).toBe(
       "Upload rejected: file 'big.bin' exceeds upload size limit of 1 MB"
     )
+  })
+
+  it('reports a transport failure instead of [object Object]', async () => {
+    mocks.postMultipart.mockRejectedValue({ status: 0, reason: 'network error' })
+    const ops = useFileOperations(makeOps())
+
+    await ops.uploadFiles(makeFiles())
+
+    expect(mocks.uiAlert).toHaveBeenCalledTimes(1)
+    expect(mocks.uiAlert.mock.calls[0][0]).toBe('Upload failed: network error')
   })
 
   it('leaves per-field server errors unchanged', async () => {

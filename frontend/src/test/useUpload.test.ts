@@ -188,7 +188,10 @@ describe('useUpload', () => {
 
     await expect(
       useUpload().uploadFiles([new File(['x'], 'x.bin')], { onProgress: vi.fn() })
-    ).rejects.toEqual({ status: 507 })
+    ).rejects.toMatchObject({
+      status: 507,
+      bodyText: JSON.stringify({ ok: false }),
+    })
   })
 })
 

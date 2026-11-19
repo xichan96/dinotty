@@ -53,6 +53,20 @@ export function uploadErrorStatus(err: unknown): number | undefined {
   return typeof err === 'object' && err && 'status' in err ? Number((err as any).status) : undefined
 }
 
+/**
+ * Human-readable form of a rejection from `postMultipartWithProgress`. Those
+ * are plain objects (`{ status, bodyText }`), so `String(err)` would print
+ * `[object Object]`; surface the status or the transport reason instead.
+ */
+export function uploadErrorText(err: unknown): string {
+  const status = uploadErrorStatus(err)
+  if (status) return `HTTP ${status}`
+  if (typeof err === 'object' && err && 'reason' in err) {
+    return String((err as { reason: unknown }).reason)
+  }
+  return String(err)
+}
+
 export interface MultipartResult {
   status: number
   bodyText: string
@@ -92,13 +106,16 @@ export function postMultipartWithProgress(
       onProgress?.({ loaded: ev.loaded, total: ev.total })
     }
     xhr.onload = () => {
+      const bodyText = xhr.responseText || ''
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject({ status: xhr.status })
+        // Carry the body: callers turn a 413 into a localized "too large"
+        // message and print the server detail for every other status.
+        reject({ status: xhr.status, bodyText })
         return
       }
-      resolve({ status: xhr.status, bodyText: xhr.responseText || '' })
+      resolve({ status: xhr.status, bodyText })
     }
-    xhr.onerror = () => reject({ status: xhr.status })
+    xhr.onerror = () => reject({ status: xhr.status, reason: 'network error' })
     xhr.send(fd)
   })
 }
@@ -157,8 +174,7 @@ export function useUpload() {
         finishUploadTask(taskIds[i], true)
       } catch (err) {
         firstError ??= err
-        const status = uploadErrorStatus(err)
-        const message = status ? `HTTP ${status}` : String(err)
+        const message = uploadErrorText(err)
         errors.push(message)
         finishUploadTask(taskIds[i], false, message)
       }

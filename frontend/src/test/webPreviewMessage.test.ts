@@ -1,5 +1,4 @@
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../composables/useDevTools', async () => {
@@ -19,30 +18,29 @@ vi.mock('../composables/useDevTools', async () => {
 
 import WebPreview from '../components/preview/WebPreview.vue'
 
-function sendFocusMessage() {
-  window.dispatchEvent(
-    new MessageEvent('message', {
-      data: { type: 'preview-focus' },
-      origin: window.location.origin,
-    })
-  )
-}
-
 describe('WebPreview iframe focus bridge', () => {
-  it('emits focus on an iframe click only while the pane is inactive', async () => {
+  it('emits focus when the parent detects the iframe took focus', async () => {
     const wrapper = mount(WebPreview, {
       props: { visible: true, url: 'http://localhost:3000', isActive: false },
     })
+    const iframe = wrapper.find('iframe').element
+    const original = Object.getOwnPropertyDescriptor(document, 'activeElement')
+    Object.defineProperty(document, 'activeElement', { configurable: true, get: () => iframe })
 
-    sendFocusMessage()
-    await nextTick()
-    expect(wrapper.emitted('focus')).toHaveLength(1)
+    try {
+      window.dispatchEvent(new Event('focus'))
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(wrapper.emitted('focus')).toHaveLength(1)
 
-    await wrapper.setProps({ isActive: true })
-    sendFocusMessage()
-    await nextTick()
-    expect(wrapper.emitted('focus')).toHaveLength(1)
-    wrapper.unmount()
+      await wrapper.setProps({ isActive: true })
+      window.dispatchEvent(new Event('focus'))
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(wrapper.emitted('focus')).toHaveLength(1)
+    } finally {
+      if (original) Object.defineProperty(document, 'activeElement', original)
+      else delete (document as any).activeElement
+      wrapper.unmount()
+    }
   })
 
   it('exposes a focus method for pane activation', () => {

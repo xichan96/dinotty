@@ -1,6 +1,4 @@
 import { mount } from '@vue/test-utils'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const hook = vi.hoisted(() => ({
@@ -90,12 +88,4 @@ describe('web pane focus bridge', () => {
     wrapper.unmount()
   })
 
-  it('posts a focus message from both injected preview scripts', () => {
-    const source = readFileSync(
-      resolve(__dirname, '../../../src/proxy/inject.rs'),
-      'utf8'
-    )
-    const matches = source.match(/type:'preview-focus'/g) ?? []
-    expect(matches).toHaveLength(2)
-  })
 })

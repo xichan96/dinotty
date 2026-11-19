@@ -373,14 +373,22 @@ function stripCacheBuster(url: string): string {
   }
 }
 
+/**
+ * Clicking inside an iframe never bubbles to the parent document, but the
+ * browser does move DOM focus to the iframe element in the parent. Detect that
+ * in the parent instead of relying on a script injected into the previewed
+ * site (which a CSP or an unusual proxy path can block).
+ */
+function onWindowFocus() {
+  setTimeout(() => {
+    if (!props.isActive && iframeRef.value && document.activeElement === iframeRef.value) {
+      emit('focus')
+    }
+  }, 0)
+}
+
 function onProxyMessage(e: MessageEvent) {
   if (!isAllowedOrigin(e.origin)) return
-  if (e.data?.type === 'preview-focus') {
-    // Only activate when needed: a busy web app fires many clicks, and every
-    // activation persists/syncs the tab layout.
-    if (!props.isActive) emit('focus')
-    return
-  }
   if (e.data?.type === 'proxy-navigate' && e.data.url) {
     const url = stripCacheBuster(e.data.url)
     // Address bar only: changing `resolvedSrc` here would reload the iframe
@@ -507,6 +515,7 @@ function startDragTouch(e: TouchEvent) {
 
 onMounted(async () => {
   window.addEventListener('message', onProxyMessage)
+  window.addEventListener('focus', onWindowFocus)
   window.addEventListener('resize', onResize)
   previewHttpBase.value = await getApiBase()
   allowOrigin(previewHttpBase.value)
@@ -514,6 +523,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onProxyMessage)
+  window.removeEventListener('focus', onWindowFocus)
   window.removeEventListener('resize', onResize)
 })
 </script>

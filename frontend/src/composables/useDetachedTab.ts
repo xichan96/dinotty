@@ -48,6 +48,8 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
   const { t } = useI18n()
 
   const termRefs: Record<string, InstanceType<typeof TerminalPane>> = {}
+  const webRefs: Record<string, any> = {}
+  const filesRefs: Record<string, any> = {}
 
   const tab = computed<TerminalTab | null>(() => {
     const found = tabs.value.find((candidate) => candidate.paneId === tabId)
@@ -90,7 +92,8 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
   function focusActive(): void {
     const paneId = tab.value?.activePaneId
     if (!paneId) return
-    void nextTick(() => termRefs[paneId]?.focus())
+    const paneRef: any = termRefs[paneId] ?? webRefs[paneId] ?? filesRefs[paneId]
+    void nextTick(() => paneRef?.focus?.())
   }
 
   const syncWs = useSyncWebSocket({
@@ -117,6 +120,8 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
     tabs,
     activePaneId,
     termRefs,
+    webRefs,
+    filesRefs,
     genPaneId,
     sendSync: (msg) => syncWs.sendSync(msg),
     // A detached window may focus/resize/split, but it must never move the
@@ -223,6 +228,10 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
     if (!el) return
     if (typeof (el as any).setOutputListener === 'function') {
       termRefs[paneId] = el as InstanceType<typeof TerminalPane>
+    } else if (typeof (el as any).openFromTerminal === 'function') {
+      filesRefs[paneId] = el
+    } else if (typeof (el as any).openFromWebUrl === 'function') {
+      webRefs[paneId] = el
     }
   }
 
@@ -308,6 +317,8 @@ export function useDetachedTab(tabId: string, opts: DetachedTabOptions = {}) {
     broadcastActive,
     allowClose,
     termRefs,
+    webRefs,
+    filesRefs,
     load,
     focusActive,
     registerTermRef,

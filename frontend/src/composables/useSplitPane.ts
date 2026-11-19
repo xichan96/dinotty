@@ -37,6 +37,8 @@ export function useSplitPane(opts: {
   tabs: Ref<Tab[]>
   activePaneId: Ref<string | null>
   termRefs: Record<string, InstanceType<typeof TerminalPane>>
+  webRefs?: Record<string, any>
+  filesRefs?: Record<string, any>
   genPaneId: () => string
   sendSync: (msg: SyncClientMsg) => void
   sendLayoutSync: (
@@ -52,6 +54,8 @@ export function useSplitPane(opts: {
     tabs,
     activePaneId,
     termRefs,
+    webRefs = {},
+    filesRefs = {},
     genPaneId,
     sendSync,
     sendLayoutSync,
@@ -420,6 +424,11 @@ export function useSplitPane(opts: {
     }
   }
 
+  /** A pane's component, regardless of whether it is a terminal, web or files. */
+  function paneRef(paneId: string): any {
+    return termRefs[paneId] ?? webRefs[paneId] ?? filesRefs[paneId]
+  }
+
   /** Focus a specific pane */
   function focusPane(paneId: string) {
     const tab = findTabByPaneId(paneId)
@@ -443,10 +452,10 @@ export function useSplitPane(opts: {
         // Blur all other panes first to prevent duplicate input in Tauri WKWebView
         for (const leaf of getAllLeaves(tab.layout)) {
           if (leaf.paneId !== paneId) {
-            termRefs[leaf.paneId]?.blur()
+            paneRef(leaf.paneId)?.blur?.()
           }
         }
-        termRefs[paneId]?.focus()
+        paneRef(paneId)?.focus?.()
       })
     }
   }

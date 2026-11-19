@@ -50,6 +50,8 @@ export interface TabLifecycleOptions {
   activeWorkspacePath: Ref<string | undefined>
   notif: { clearForPaneIds: (paneIds: string[], reason: MarkReadReason) => void }
   termRefs: Record<string, any>
+  webRefs?: Record<string, any>
+  filesRefs?: Record<string, any>
   isMobile: Ref<boolean>
   tabBarRef: Ref<
     | { scrollTabIntoView: (paneId: string) => boolean; hasTab: (paneId: string) => boolean }
@@ -103,6 +105,8 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     activeWorkspacePath,
     notif,
     termRefs,
+    webRefs = {},
+    filesRefs = {},
     isMobile,
     tabBarRef,
     persist,
@@ -590,18 +594,29 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
       const focused = typeof document === 'undefined' ? null : document.activeElement
       if (isRenamingTabTitle(focused)) return
       const paneId = tab.activePaneId
-      for (const leaf of getAllLeaves(tab.layout)) {
-        if (termRefs[leaf.paneId]?.isComposing()) return
-      }
-      if (!isKbTypingLocked()) {
+      const paneRef: any = termRefs[paneId] ?? webRefs[paneId] ?? filesRefs[paneId]
+      if (paneRef && typeof paneRef.setOutputListener === 'function') {
+        for (const leaf of getAllLeaves(tab.layout)) {
+          if (termRefs[leaf.paneId]?.isComposing()) return
+        }
+        if (!isKbTypingLocked()) {
+          for (const leaf of getAllLeaves(tab.layout)) {
+            if (leaf.paneId !== paneId) {
+              termRefs[leaf.paneId]?.blur()
+            }
+          }
+          paneRef.focus()
+        }
+        paneRef.fit?.()
+      } else if (!isKbTypingLocked()) {
+        // Web and file previews have their own focus target, not an xterm.
         for (const leaf of getAllLeaves(tab.layout)) {
           if (leaf.paneId !== paneId) {
             termRefs[leaf.paneId]?.blur()
           }
         }
-        termRefs[paneId]?.focus()
+        paneRef?.focus?.()
       }
-      termRefs[paneId]?.fit()
     }
   }
 

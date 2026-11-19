@@ -71,6 +71,7 @@
       <div class="web-preview-content">
         <iframe
           ref="iframeRef"
+          tabindex="-1"
           :src="resolvedSrc"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"
           @load="onIframeLoad"
@@ -117,12 +118,14 @@ const props = withDefaults(
     visible: boolean
     url: string
     inLeaf?: boolean
+    isActive?: boolean
   }>(),
-  { inLeaf: true }
+  { inLeaf: true, isActive: false }
 )
 
 const emit = defineEmits<{
   close: []
+  focus: []
 }>()
 
 const { t } = useI18n()
@@ -299,9 +302,9 @@ function onAddressFocus() {
 }
 
 function onAddressBlur() {
-  setTimeout(() => {
-    addressDropdownVisible.value = false
-  }, 200)
+  // Dropdown items preventDefault on mousedown, so selecting one never blurs
+  // the input. Anything else that takes focus closes the list immediately.
+  addressDropdownVisible.value = false
 }
 
 function onDropdownSelect(url: string) {
@@ -353,7 +356,12 @@ function getCurrentUrl(): string {
   return currentUrl.value
 }
 
-defineExpose({ openFromWebUrl, getCurrentUrl })
+/** Move DOM focus into the preview so keyboard events land in the iframe. */
+function focus() {
+  iframeRef.value?.focus()
+}
+
+defineExpose({ openFromWebUrl, getCurrentUrl, focus })
 
 function stripCacheBuster(url: string): string {
   try {
@@ -367,6 +375,12 @@ function stripCacheBuster(url: string): string {
 
 function onProxyMessage(e: MessageEvent) {
   if (!isAllowedOrigin(e.origin)) return
+  if (e.data?.type === 'preview-focus') {
+    // Only activate when needed: a busy web app fires many clicks, and every
+    // activation persists/syncs the tab layout.
+    if (!props.isActive) emit('focus')
+    return
+  }
   if (e.data?.type === 'proxy-navigate' && e.data.url) {
     const url = stripCacheBuster(e.data.url)
     // Address bar only: changing `resolvedSrc` here would reload the iframe

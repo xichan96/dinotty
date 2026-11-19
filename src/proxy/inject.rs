@@ -4,6 +4,10 @@ window.parent.postMessage({type:'preview-console',level:'info',args:['[dinotty] 
 window.addEventListener('error',function(e){
 window.parent.postMessage({type:'preview-error',message:e.message,source:e.filename,line:e.lineno},'*');
 });
+// Clicks inside an iframe never bubble to the parent document, so the split
+// pane wrapper cannot activate a web pane on its own. Announce the press and
+// let the parent decide whether the pane needs activating.
+document.addEventListener('pointerdown',function(){try{window.parent.postMessage({type:'preview-focus'},'*');}catch(e){}},true);
 var PORT=__DN_PORT__;
 var HOST=__DN_HOST__;
 var SCHEME=__DN_SCHEME__;
@@ -231,6 +235,10 @@ window.parent.postMessage({type:'preview-ready'},'*');
 window.addEventListener('error',function(e){
 window.parent.postMessage({type:'preview-error',message:e.message,source:e.filename,line:e.lineno},'*');
 });
+// Clicks inside an iframe never bubble to the parent document, so the split
+// pane wrapper cannot activate a web pane on its own. Announce the press and
+// let the parent decide whether the pane needs activating.
+document.addEventListener('pointerdown',function(){try{window.parent.postMessage({type:'preview-focus'},'*');}catch(e){}},true);
 if(window.__dinotty_ext_proxy)return;
 window.__dinotty_ext_proxy=true;
 (function(){var _c={};['log','warn','info','debug','error'].forEach(function(l){_c[l]=console[l];console[l]=function(){_c[l].apply(console,arguments);try{var a=[];for(var i=0;i<arguments.length;i++){var v=arguments[i];if(v instanceof Error)a.push(v.message+'\n'+v.stack);else if(typeof v==='object'){try{a.push(JSON.stringify(v));}catch(e){a.push(String(v));}}else a.push(String(v));}window.parent.postMessage({type:'preview-console',level:l,args:a,ts:Date.now()},'*');}catch(e){}};});var _cl=console.clear;console.clear=function(){_cl.apply(console);try{window.parent.postMessage({type:'preview-console',level:'clear',args:[],ts:Date.now()},'*');}catch(e){}};

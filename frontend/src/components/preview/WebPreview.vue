@@ -71,6 +71,7 @@
       <div class="web-preview-content">
         <iframe
           ref="iframeRef"
+          tabindex="-1"
           :src="resolvedSrc"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation"
           @load="onIframeLoad"
@@ -121,12 +122,14 @@ const props = withDefaults(
     visible: boolean
     url: string
     inLeaf?: boolean
+    isActive?: boolean
   }>(),
-  { inLeaf: true }
+  { inLeaf: true, isActive: false }
 )
 
 const emit = defineEmits<{
   close: []
+  focus: []
 }>()
 
 const { t } = useI18n()
@@ -310,9 +313,9 @@ function onAddressFocus() {
 }
 
 function onAddressBlur() {
-  setTimeout(() => {
-    addressDropdownVisible.value = false
-  }, 200)
+  // Dropdown items preventDefault on mousedown, so selecting one never blurs
+  // the input. Anything else that takes focus closes the list immediately.
+  addressDropdownVisible.value = false
 }
 
 function onDropdownSelect(url: string) {
@@ -364,7 +367,12 @@ function getCurrentUrl(): string {
   return currentUrl.value
 }
 
-defineExpose({ openFromWebUrl, getCurrentUrl })
+/** Move DOM focus into the preview so keyboard events land in the iframe. */
+function focus() {
+  iframeRef.value?.focus()
+}
+
+defineExpose({ openFromWebUrl, getCurrentUrl, focus })
 
 function stripCacheBuster(url: string): string {
   try {
@@ -374,6 +382,28 @@ function stripCacheBuster(url: string): string {
   } catch {
     return url
   }
+}
+
+/**
+ * Clicking inside an iframe never bubbles to the parent document, but the
+ * browser does move DOM focus to the iframe element in the parent. Detect that
+ * in the parent instead of relying on a script injected into the previewed
+ * site (which a CSP or an unusual proxy path can block).
+ */
+let focusCheckTimer: ReturnType<typeof setTimeout> | null = null
+
+function onFocusChange() {
+  if (focusCheckTimer) clearTimeout(focusCheckTimer)
+  // Clicking into an iframe moves document.activeElement to the iframe element
+  // in the parent, but which event announces that varies: some setups fire a
+  // focus event, others only fire blur on the element losing focus. Listen to
+  // both and check after the focus change has settled.
+  focusCheckTimer = setTimeout(() => {
+    focusCheckTimer = null
+    if (!props.isActive && iframeRef.value && document.activeElement === iframeRef.value) {
+      emit('focus')
+    }
+  }, 120)
 }
 
 function onProxyMessage(e: MessageEvent) {
@@ -507,6 +537,8 @@ function startDragTouch(e: TouchEvent) {
 
 onMounted(async () => {
   window.addEventListener('message', onProxyMessage)
+  window.addEventListener('focus', onFocusChange, true)
+  window.addEventListener('blur', onFocusChange, true)
   window.addEventListener('resize', onResize)
   previewHttpBase.value = await getApiBase()
   allowOrigin(previewHttpBase.value)
@@ -514,7 +546,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onProxyMessage)
+  window.removeEventListener('focus', onFocusChange, true)
+  window.removeEventListener('blur', onFocusChange, true)
   window.removeEventListener('resize', onResize)
+  if (focusCheckTimer) clearTimeout(focusCheckTimer)
 })
 </script>
 

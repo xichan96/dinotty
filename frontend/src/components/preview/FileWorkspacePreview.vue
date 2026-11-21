@@ -1,6 +1,8 @@
 <template>
   <div
     v-if="visible"
+    ref="rootEl"
+    tabindex="-1"
     class="file-workspace"
     :class="inLeaf ? ['in-leaf'] : [layout.direction.value]"
   >
@@ -353,6 +355,7 @@ const lastTreePointerTs = ref(0)
 const gitStatusMap = ref<Record<string, string>>({})
 const recentDropdownOpen = ref(false)
 const fileWorkspaceBodyRef = ref<HTMLElement | null>(null)
+const rootEl = ref<HTMLElement | null>(null)
 const treeWrapRef = ref<HTMLElement | null>(null)
 const treeHostRef = ref<HTMLElement | null>(null)
 
@@ -987,7 +990,13 @@ function getCurrentPath(): string {
   return ops.absolutePath(selectedRel.value ?? '')
 }
 
+/** Move DOM focus into the file pane when the pane is activated. */
+function focus() {
+  rootEl.value?.focus()
+}
+
 defineExpose({
+  focus,
   openFromTerminal,
   getCurrentPath,
   reloadAll,
@@ -1005,5 +1014,12 @@ defineExpose({
 </script>
 
 <style scoped src="../../styles/file-workspace-preview.css"></style>
+
+<style scoped>
+/* The root is focusable only so pane activation can move DOM focus here. */
+.file-workspace:focus {
+  outline: none;
+}
+</style>
 
 <style src="../../styles/file-workspace-preview-global.css"></style>

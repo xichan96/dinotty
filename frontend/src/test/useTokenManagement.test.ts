@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../composables/apiBase', () => ({
-  apiUrl: (path: string) => path,
+  hubApiUrl: (path: string) => path,
   authFetch: mocks.authFetch,
   fetchServerToken: mocks.fetchServerToken,
   getAuthToken: mocks.getAuthToken,

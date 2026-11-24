@@ -459,7 +459,7 @@ pub async fn post_theme(Query(params): Query<InstallQuery>, body: Bytes) -> Resp
     // the user's picker reported. `is_valid_theme_id` rejects separators
     // anyway, but taking the basename first gives a clearer error than
     // "invalid theme id `../dracula`".
-    let fallback = params.file.as_deref().map(theme_id_from_filename).unwrap_or_default();
+    let fallback = params.file.as_deref().map_or_else(String::new, theme_id_from_filename);
 
     let theme = match sanitize_theme(text, &fallback) {
         Ok(theme) => theme,

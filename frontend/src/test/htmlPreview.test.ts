@@ -1,11 +1,21 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import {
+  injectBaseHref,
+  injectFragmentNavigation,
   isWorkspaceRelativeRef,
   resolveRelativePath,
   rewriteHtmlPreview,
 } from '../utils/htmlPreview'
 import FilePreviewContent from '../components/workspace/FilePreviewContent.vue'
+
+// The host page mints the preview token through `authFetch`; unit tests must not
+// touch the network, so the mock decides whether a token exists.
+const authFetchMock = vi.hoisted(() => vi.fn())
+vi.mock('../composables/apiBase', async function mockApiBase(importOriginal) {
+  const actual = await importOriginal<typeof import('../composables/apiBase')>()
+  return { ...actual, authFetch: authFetchMock }
+})
 
 function toRaw(rel: string): string {
   return `/api/workspace/raw?pane_id=p1&path=${encodeURIComponent(rel)}`
@@ -99,6 +109,99 @@ describe('rewriteHtmlPreview', function rewriteHtmlPreviewSuite() {
   })
 })
 
+describe('injectBaseHref', function injectBaseHrefSuite() {
+  it('应在 head 开头插入 base，使相对与脚本生成的 URL 都指向预览读取器', function injectsIntoHead() {
+    const html = '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>'
+    const result = injectBaseHref(html, '/preview-ws/tok/')
+    expect(result).toContain('<head><base href="/preview-ws/tok/"><meta charset="utf-8">')
+  })
+
+  it('应改写页面自带的 base，而不是重复插入', function rewritesExistingBase() {
+    const html = '<html><head><base href="https://example.com/" target="_blank"></head></html>'
+    const result = injectBaseHref(html, '/preview-ws/tok/')
+    expect(result).toContain('<base href="/preview-ws/tok/" target="_blank">')
+    expect(result.match(/<base\b/gi)).toHaveLength(1)
+  })
+
+  it('原文没有 head 时应补一个', function createsHead() {
+    expect(injectBaseHref('<html><body>hi</body></html>', '/preview-ws/t/')).toContain(
+      '<html><head><base href="/preview-ws/t/"></head><body>hi</body></html>'
+    )
+    expect(injectBaseHref('<img src="a.png">', '/preview-ws/t/')).toBe(
+      '<base href="/preview-ws/t/"><img src="a.png">'
+    )
+  })
+
+  it('空内容或空 base 时应原样返回', function handlesEmptyInput() {
+    expect(injectBaseHref('', '/preview-ws/t/')).toBe('')
+    expect(injectBaseHref('<img src="a.png">', '')).toBe('<img src="a.png">')
+  })
+
+  it('不改变文档里的相对引用：交给 base 解析', function leavesRefsAlone() {
+    const html =
+      '<html><head><link rel="stylesheet" href="css/base.css"></head><body><img src="assets/img/a.jpg"></body></html>'
+    const result = injectBaseHref(html, '/preview-ws/tok/prototype/')
+    expect(result).toContain('href="css/base.css"')
+    expect(result).toContain('src="assets/img/a.jpg"')
+  })
+})
+
+describe('injectFragmentNavigation', function fragmentNavigationSuite() {
+  const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    'scrollIntoView'
+  )
+
+  afterEach(function restoreScrollIntoView() {
+    if (originalScrollIntoView) {
+      Object.defineProperty(Element.prototype, 'scrollIntoView', originalScrollIntoView)
+    } else {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('在 body 结束标签前注入脚本，且重复调用不会注入两次', function injectsOnce() {
+    const html = '<html><body><a href="#q2">go</a></body></html>'
+    const once = injectFragmentNavigation(html)
+    expect(once).toContain('data-dinotty-fragment-nav')
+    expect(once.indexOf('<script')).toBeLessThan(once.indexOf('</body>'))
+    expect(injectFragmentNavigation(once)).toBe(once)
+    expect(injectFragmentNavigation('')).toBe('')
+  })
+
+  it('点击 #hash 时滚动到目标，而不是让浏览器导航离开 srcdoc', function scrollsToTarget() {
+    const result = injectFragmentNavigation('<a href="#q2">go</a><h2 id="q2">Q2</h2>')
+    const script = result.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
+    expect(script).toContain('a[href^="#"]')
+
+    document.body.innerHTML = result.replace(/<script[^>]*>[\s\S]*?<\/script>/, '')
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+    })
+    ;(new Function(script) as () => void)()
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    document.querySelector('a')!.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(scrollIntoView).toHaveBeenCalledOnce()
+  })
+
+  it('不改写到其他文件的链接', function leavesOtherLinksAlone() {
+    const result = injectFragmentNavigation('<a href="sessions.html#q2">go</a>')
+    const script = result.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
+    document.body.innerHTML = result.replace(/<script[^>]*>[\s\S]*?<\/script>/, '')
+    ;(new Function(script) as () => void)()
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    document.querySelector('a')!.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+  })
+})
+
 describe('FilePreviewContent HTML integration', function htmlIntegrationSuite() {
   function mountHtml(htmlShowPreview: boolean) {
     return mount(FilePreviewContent, {
@@ -133,14 +236,45 @@ describe('FilePreviewContent HTML integration', function htmlIntegrationSuite() 
     })
   }
 
-  it('预览模式应渲染改写后的 srcdoc iframe', function rendersIframe() {
-    const wrapper = mountHtml(true)
+  afterEach(function resetAuthFetch() {
+    authFetchMock.mockReset()
+    vi.useRealTimers()
+  })
+
+  async function mountAndSettle(htmlShowPreview: boolean) {
+    // Fake timers must be installed before mount: the preview rebuild is
+    // debounced, so a timer created on the real clock would never fire here.
+    vi.useFakeTimers()
+    const wrapper = mountHtml(htmlShowPreview)
+    await vi.advanceTimersByTimeAsync(200)
+    await flushPromises()
+    return wrapper
+  }
+
+  it('拿到令牌后应注入 base，让 iframe 自己加载相对资源', async function rendersBaseHref() {
+    authFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ token: 'tok123' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    )
+    const wrapper = await mountAndSettle(true)
     const iframe = wrapper.find('iframe')
     expect(iframe.exists()).toBe(true)
     expect(iframe.attributes('sandbox')).toContain('allow-scripts')
-    expect(unescapeHtml(iframe.attributes('srcdoc'))).toContain(
-      '/api/workspace/raw?pane_id=pane-1&path=site%2Flogo.png'
-    )
+    const srcdoc = unescapeHtml(iframe.attributes('srcdoc'))
+    expect(srcdoc).toMatch(/<base href="[^"]*\/preview-ws\/tok123\/">/)
+    // The document keeps its own relative references: the browser resolves them
+    // against the base, which is what makes script-built URLs work too.
+    expect(srcdoc).toContain('src="logo.png"')
+  })
+
+  it('拿不到令牌时应回退到 raw 端点改写', async function fallsBackToRawUrls() {
+    authFetchMock.mockResolvedValue(new Response(null, { status: 401 }))
+    const wrapper = await mountAndSettle(true)
+    const srcdoc = unescapeHtml(wrapper.find('iframe').attributes('srcdoc'))
+    expect(srcdoc).not.toContain('<base')
+    expect(srcdoc).toContain('/api/workspace/raw?pane_id=pane-1&path=site%2Flogo.png')
   })
 
   it('源码模式应渲染编辑器而非 iframe', function rendersSource() {

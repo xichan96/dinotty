@@ -14,12 +14,16 @@
           dialogClass,
           { 'dialog--bottom-sheet': variant === 'bottom-sheet' },
         ]"
-        :style="width ? { width, maxWidth: 'none' } : undefined"
+        :style="[width ? { width, maxWidth: 'none' } : undefined, dialogStyle]"
         role="dialog"
         aria-modal="true"
         :aria-label="title || undefined"
       >
-        <header v-if="title || closable || $slots['header-extra']" class="dialog-header">
+        <header
+          v-if="title || closable || $slots['header-leading'] || $slots['header-extra']"
+          class="dialog-header"
+        >
+          <slot name="header-leading" />
           <span v-if="title" class="dialog-title">{{ title }}</span>
           <slot name="header-extra" />
           <button
@@ -44,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, type StyleValue } from 'vue'
 import { X } from 'lucide-vue-next'
 import { useDialogStack } from '../../composables/useDialogStack'
 import { useI18n } from '../../composables/useI18n'
@@ -57,6 +61,8 @@ const props = withDefaults(
     size?: 'sm' | 'md' | 'lg' | 'xl'
     width?: string
     dialogClass?: string
+    /** Extra inline style on the dialog root (e.g. a keyboard-inset variable). */
+    dialogStyle?: StyleValue
     variant?: 'modal' | 'bottom-sheet'
     closable?: boolean
     closeOnBackdrop?: boolean
@@ -68,6 +74,7 @@ const props = withDefaults(
     size: 'sm',
     width: undefined,
     dialogClass: undefined,
+    dialogStyle: undefined,
     variant: 'modal',
     closable: true,
     closeOnBackdrop: true,
@@ -200,5 +207,16 @@ defineExpose({ rootEl })
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px 14px;
+}
+
+/* Touch-sized close target and home-indicator clearance. */
+@media (max-width: 600px) {
+  .dialog-close {
+    width: 40px;
+    height: 40px;
+  }
+  .dialog--bottom-sheet .dialog-footer {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  }
 }
 </style>

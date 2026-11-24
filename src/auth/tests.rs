@@ -267,19 +267,19 @@ fn check_token_query_param_ignored() {
 }
 
 // ── check_ws_origin ────────────────────────────────────────────
-// 暂时全部 ignore：check_ws_origin 已关闭，函数恒返回 true。
-// 修复反代场景下的 Origin/Host 比对问题后恢复。
+// Origin/Host reconciliation for WebSocket upgrades. X-Forwarded-Host is only
+// consulted for a configured trusted proxy, and a plain localhost origin gets
+// no special treatment: another app on this machine is same-host, so the
+// loopback whitelist already lets it past authentication.
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
-fn ws_origin_loopback_always_allowed() {
+fn ws_origin_no_origin_from_loopback_is_allowed() {
     let headers = HeaderMap::new();
     let loopback: IpAddr = "127.0.0.1".parse().unwrap();
     assert!(check_ws_origin(&headers, &[], loopback, &[]));
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_no_origin_header_allowed() {
     let headers = HeaderMap::new();
     let ip: IpAddr = "192.168.1.100".parse().unwrap();
@@ -287,7 +287,6 @@ fn ws_origin_no_origin_header_allowed() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_same_origin_matches() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -297,7 +296,6 @@ fn ws_origin_same_origin_matches() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_mismatch_behind_proxy_fails_without_trusted() {
     // Proxy rewrites Host to internal address; Origin stays external.
     let mut headers = HeaderMap::new();
@@ -308,7 +306,6 @@ fn ws_origin_mismatch_behind_proxy_fails_without_trusted() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_with_trusted_proxy() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -320,7 +317,6 @@ fn ws_origin_x_forwarded_host_with_trusted_proxy() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_not_used_for_untrusted() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -332,7 +328,6 @@ fn ws_origin_x_forwarded_host_not_used_for_untrusted() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_hostname_only_fallback() {
     // Proxy strips port from Host header.
     let mut headers = HeaderMap::new();
@@ -343,7 +338,6 @@ fn ws_origin_hostname_only_fallback() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_allowed_origins_fallback() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://custom.domain.com".parse().unwrap());
@@ -354,7 +348,6 @@ fn ws_origin_allowed_origins_fallback() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_with_port() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com:8443".parse().unwrap());
@@ -366,7 +359,6 @@ fn ws_origin_x_forwarded_host_with_port() {
 }
 
 #[test]
-#[ignore = "check_ws_origin disabled - see auth/mod.rs"]
 fn ws_origin_x_forwarded_host_comma_separated() {
     let mut headers = HeaderMap::new();
     headers.insert(header::ORIGIN, "https://nas.example.com".parse().unwrap());
@@ -375,6 +367,69 @@ fn ws_origin_x_forwarded_host_comma_separated() {
     let ip: IpAddr = "192.168.1.100".parse().unwrap();
     let trusted = vec!["192.168.1.0/24".to_string()];
     assert!(check_ws_origin(&headers, &[], ip, &trusted));
+}
+
+#[test]
+fn ws_origin_another_localhost_port_is_rejected() {
+    // The bug-2 shape: another app on this machine. Same host, different port,
+    // so the origin is the only thing that can say no.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "http://localhost:58953".parse().unwrap());
+    headers.insert(header::HOST, "127.0.0.1:58911".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(!check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_same_localhost_port_is_allowed() {
+    // The app's own page, served by the server it is talking to.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "http://127.0.0.1:58911".parse().unwrap());
+    headers.insert(header::HOST, "127.0.0.1:58911".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_null_is_rejected() {
+    // A sandboxed iframe sends the literal string `null`.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "null".parse().unwrap());
+    headers.insert(header::HOST, "127.0.0.1:8999".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(!check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_app_shell_scheme_is_allowed_from_a_remote_server() {
+    // The desktop shell driving a hub or a remote server: its Origin is its own
+    // scheme while Host is the remote host. A website cannot forge either.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "tauri://localhost".parse().unwrap());
+    headers.insert(header::HOST, "192.168.1.5:8999".parse().unwrap());
+    let remote: IpAddr = "192.168.1.5".parse().unwrap();
+    assert!(check_ws_origin(&headers, &[], remote, &[]));
+}
+
+#[test]
+fn ws_origin_proxy_stripped_port_is_not_a_loopback_escape() {
+    // Host without a port happens when a proxy strips it; that fallback is for
+    // named hosts and must not hand a different localhost port a pass.
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "http://localhost:5173".parse().unwrap());
+    headers.insert(header::HOST, "localhost".parse().unwrap());
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(!check_ws_origin(&headers, &[], loopback, &[]));
+}
+
+#[test]
+fn ws_origin_allowed_origins_match_is_exact() {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ORIGIN, "https://custom.domain.com".parse().unwrap());
+    headers.insert(header::HOST, "192.168.1.100:8999".parse().unwrap());
+    let ip: IpAddr = "192.168.1.100".parse().unwrap();
+    assert!(check_ws_origin(&headers, &["https://custom.domain.com".to_string()], ip, &[]));
+    assert!(!check_ws_origin(&headers, &["https://custom.domain.com.evil".to_string()], ip, &[]));
 }
 
 #[test]
@@ -579,4 +634,171 @@ async fn a_plain_api_path_is_still_gated_from_a_non_whitelisted_peer() {
     // 401 (`UNAUTHORIZED`, no session and no Bearer), not 403 - 403 is the
     // separate cross-site-from-a-whitelisted-peer branch.
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// ── is_local_request (loopback whitelist hardening) ────────────
+//
+// The peer address is 127.0.0.1 for every same-host forwarder, so the loopback
+// whitelist bypass must not be decided by the peer alone. These cases mirror
+// what was measured on the wire: `tailscale serve` forwards
+// `host: <node>.ts.net` plus `x-forwarded-for/-host/-proto`; cloudflared and
+// ngrok add the same family of headers.
+
+fn hdr(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+    use axum::http::HeaderValue;
+    let mut h = HeaderMap::new();
+    for (k, v) in pairs {
+        h.insert(*k, HeaderValue::from_str(v).unwrap());
+    }
+    h
+}
+
+fn loopback_ip() -> IpAddr {
+    "127.0.0.1".parse().unwrap()
+}
+
+#[test]
+fn local_request_accepts_every_share_of_a_genuine_local_caller() {
+    // Desktop app webview and a local browser: Host is a loopback authority.
+    assert!(is_local_request(&hdr(&[("host", "127.0.0.1:8999")]), loopback_ip()));
+    assert!(is_local_request(&hdr(&[("host", "localhost:8999")]), loopback_ip()));
+    assert!(is_local_request(&hdr(&[("host", "LOCALHOST")]), loopback_ip()));
+    assert!(is_local_request(&hdr(&[("host", "[::1]:8999")]), loopback_ip()));
+    assert!(is_local_request(&hdr(&[("host", "app.localhost:8999")]), loopback_ip()));
+}
+
+#[test]
+fn local_request_rejects_the_tunnel_shapes_measured_on_the_wire() {
+    // tailscale serve / cloudflared / ngrok rewrite Host to the public name.
+    assert!(!is_local_request(&hdr(&[("host", "noah.tailb26b2e.ts.net")]), loopback_ip()));
+    assert!(!is_local_request(&hdr(&[("host", "abc.ngrok-free.app")]), loopback_ip()));
+
+    // Forwarding headers are enough on their own, even with a loopback Host:
+    // the proxy writes them after receiving the request, so a remote caller
+    // cannot strip them.
+    for name in FORWARDING_HEADERS {
+        assert!(
+            !is_local_request(
+                &hdr(&[("host", "127.0.0.1:8999"), (name, "203.0.113.7")]),
+                loopback_ip()
+            ),
+            "header {name} must disqualify the loopback bypass"
+        );
+    }
+}
+
+#[test]
+fn local_request_rejects_missing_host_and_non_loopback_peers() {
+    // No Host (HTTP/1.0 clients) cannot be proven local.
+    assert!(!is_local_request(&hdr(&[]), loopback_ip()));
+    assert!(!is_local_request(&hdr(&[("host", "")]), loopback_ip()));
+    // A loopback Host claimed by a remote peer is still remote.
+    assert!(!is_local_request(&hdr(&[("host", "127.0.0.1:8999")]), "203.0.113.9".parse().unwrap()));
+}
+
+/// The bypass must still work for the two callers it exists for, and must not
+/// hand a tunnel the settings API, the auto-token endpoint or a PTY.
+#[tokio::test]
+async fn loopback_whitelist_is_bypassed_locally_but_not_through_a_tunnel() {
+    use axum::{body::Body, middleware, routing::any, Router};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    async fn status(
+        whitelist: Vec<String>,
+        peer: &str,
+        pairs: &[(&'static str, &'static str)],
+    ) -> StatusCode {
+        let settings = crate::settings::Settings {
+            ip_whitelist: whitelist,
+            ..crate::settings::Settings::default()
+        };
+        let settings: crate::settings::SettingsState = Arc::new(tokio::sync::RwLock::new(settings));
+        let sessions = SessionStore::new(30);
+        let settings_for_layer = settings.clone();
+        let peer_ip: IpAddr = peer.parse().unwrap();
+        let app = Router::new().route("/api/settings", any(|| async { "reached" })).layer(
+            middleware::from_fn(move |req, next| {
+                let settings = settings_for_layer.clone();
+                let sessions = sessions.clone();
+                async move {
+                    auth_middleware(
+                        req,
+                        next,
+                        "configured-token",
+                        &settings,
+                        &sessions,
+                        peer_ip,
+                        8999,
+                    )
+                    .await
+                }
+            }),
+        );
+
+        let mut builder = axum::http::Request::builder().uri("/api/settings");
+        for (k, v) in pairs {
+            builder = builder.header(*k, *v);
+        }
+        app.oneshot(builder.body(Body::empty()).unwrap()).await.unwrap().status()
+    }
+
+    let loopback = vec!["127.0.0.1".to_string(), "::1".to_string()];
+
+    // Unchanged: the local browser and the desktop webview keep zero-config access.
+    assert_eq!(
+        status(loopback.clone(), "127.0.0.1", &[("host", "127.0.0.1:8999")]).await,
+        StatusCode::OK
+    );
+
+    // The bug: a tunnel arrives from 127.0.0.1 as well.
+    assert_eq!(
+        status(
+            loopback.clone(),
+            "127.0.0.1",
+            &[("host", "abc.ngrok-free.app"), ("x-forwarded-for", "203.0.113.7")]
+        )
+        .await,
+        StatusCode::UNAUTHORIZED,
+        "tunnel-shaped request must fall back to credentials"
+    );
+    // Host rewrite alone is enough to disqualify; no forwarding header needed.
+    assert_eq!(
+        status(loopback.clone(), "127.0.0.1", &[("host", "noah.tailb26b2e.ts.net")]).await,
+        StatusCode::UNAUTHORIZED
+    );
+    // Forwarding header alone is enough too.
+    assert_eq!(
+        status(
+            loopback.clone(),
+            "127.0.0.1",
+            &[("host", "127.0.0.1:8999"), ("x-forwarded-proto", "https")]
+        )
+        .await,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // A real credential still works through the tunnel: the refusal is a
+    // fallback to auth, not a hard 403 that would lock the owner out.
+    assert_eq!(
+        status(
+            loopback,
+            "127.0.0.1",
+            &[
+                ("host", "abc.ngrok-free.app"),
+                ("x-forwarded-for", "203.0.113.7"),
+                ("authorization", "Bearer configured-token"),
+            ]
+        )
+        .await,
+        StatusCode::OK
+    );
+
+    // Non-loopback whitelist entries keep their unconditional meaning: the user
+    // opted into trusting that network.
+    assert_eq!(
+        status(vec!["192.168.0.0/16".to_string()], "192.168.1.20", &[("host", "192.168.1.5:8999")])
+            .await,
+        StatusCode::OK
+    );
 }

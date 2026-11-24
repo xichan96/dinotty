@@ -71,6 +71,7 @@
     @close="closeMenu"
     @copy="onMenuCopy"
     @paste="onMenuPaste"
+    @find="toggleSearch"
     @select-all="onMenuSelectAll"
     @open-file="onMenuOpenFile"
     @open-link="onMenuOpenLink"
@@ -181,7 +182,7 @@ let insertQueue = Promise.resolve()
 const searchVisible = ref(false)
 const toast = useToast()
 const { t } = useI18n()
-const { uploadFiles, uploadErrorStatus } = useUpload()
+const { uploadFilesOneByOne, uploadErrorStatus } = useUpload()
 const {
   uploadInProgress,
   uploadProgress,
@@ -1061,16 +1062,15 @@ onMounted(() => {
   }
   // Primary link activation opens directly instead of showing the menu,
   // so left-click and right-click no longer produce two menu variants (#306).
+  // It opens in the in-app web preview (server-side proxy), not the device's
+  // browser: that is the only way `localhost` links mean the server's machine,
+  // which matters when the client is a phone or tablet (#306).
   self.onPreviewLinkOpen = (url) => {
     emit('linkActivate')
     try {
       const parsed = new URL(url)
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
-      if (isTauri()) {
-        void openUrlInSystemBrowser(url)
-      } else {
-        window.open(url, '_blank', 'noopener,noreferrer')
-      }
+      emit('previewLink', url)
     } catch {
       // Ignore malformed terminal links.
     }
@@ -1085,7 +1085,7 @@ onMounted(() => {
     // Attach the settle handlers synchronously so a fast-rejecting upload can never
     // surface as an unhandled rejection while an earlier insert is still queued.
     beginUploadProgress()
-    const uploadResult = uploadFiles(files, {
+    const uploadResult = uploadFilesOneByOne(files, {
       synthesizeNames: true,
       onProgress: updateUploadProgress,
     })
@@ -1103,7 +1103,11 @@ onMounted(() => {
         const saved = data.saved ?? []
         if (saved.length) self.sendData(saved.map(shellEscapePath).join(' ') + ' ', true)
         window.dispatchEvent(new CustomEvent('dinotty-upload-status', { detail: data }))
-        toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
+        if (data.errors?.length) {
+          toast.error(data.errors.join('\n'), { position: resolveResponsiveToastPosition() })
+        } else {
+          toast.success(t('mobileKb.uploadDone'), { position: resolveResponsiveToastPosition() })
+        }
       } catch (err) {
         if (!paneAlive) return
         toast.error(uploadErrorMessage(err), { position: resolveResponsiveToastPosition() })

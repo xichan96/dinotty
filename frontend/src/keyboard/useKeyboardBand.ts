@@ -28,7 +28,14 @@ export function useKeyboardBand(deps: KeyboardBandDeps) {
 
   function writeVar() {
     const h = deps.visible.value ? reserved.value : 0
-    document.documentElement.style.setProperty('--mkb-height', `${h}px`)
+    const value = `${h}px`
+    // The observer fires on every height change (including the provider's own
+    // 0.25s panel transition). Writing an identical value still invalidates
+    // document styles, so compare against the live value first.
+    const root = document.documentElement
+    if (root.style.getPropertyValue('--mkb-height') !== value) {
+      root.style.setProperty('--mkb-height', value)
+    }
   }
 
   function rootEl(): HTMLElement | null {

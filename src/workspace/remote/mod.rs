@@ -439,8 +439,7 @@ pub async fn remote_move(session: Arc<Session>, q: PanePathQuery, dest_dir: Stri
     };
     let file_name = Path::new(&source)
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let dest = format!("{}/{}", dest_canon.trim_end_matches('/'), file_name);
     match sftp.try_exists(&dest).await {
         Ok(true) => return json_err(StatusCode::CONFLICT, "already exists in destination"),

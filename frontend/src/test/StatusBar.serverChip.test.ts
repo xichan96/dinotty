@@ -11,6 +11,16 @@ const mocks = vi.hoisted(() => ({
   switchServer: vi.fn(),
 }))
 
+const mobile = vi.hoisted(() => ({ isMobile: false }))
+
+vi.mock('../composables/useIsMobile', async () => {
+  const { computed } = await import('vue')
+  return {
+    useIsMobile: () => ({ isMobile: computed(() => mobile.isMobile) }),
+    isTouchDevice: () => mobile.isMobile,
+  }
+})
+
 vi.mock('../composables/activeServer', async () => {
   const actual = await vi.importActual<typeof import('../composables/activeServer')>(
     '../composables/activeServer'
@@ -116,6 +126,7 @@ beforeEach(async () => {
   mocks.activeId = '__local__'
   mocks.switchServer.mockResolvedValue({ ok: true })
   settings.monitor.enabled = true
+  mobile.isMobile = false
   activeServerIdRef.value = '__local__'
   serverPickerOpen.value = false
   mocks.authFetch.mockResolvedValue(jsonResponse([REMOTE]))
@@ -223,5 +234,33 @@ describe('status bar server chip', () => {
     await openPicker(wrapper)
 
     expect(wrapper.find('.status-bar').classes()).toContain('is-elevated')
+  })
+
+  it('turns into a bottom sheet with touch-sized rows on a phone', async () => {
+    mobile.isMobile = true
+    const wrapper = await mountBar()
+
+    expect(wrapper.find('.status-bar').classes()).toContain('is-mobile')
+
+    await openPicker(wrapper)
+
+    expect(wrapper.find('.server-picker--sheet').exists()).toBe(true)
+    expect(wrapper.find('.server-sheet-backdrop').exists()).toBe(true)
+    expect(wrapper.find('.server-sheet-title').text()).toBe('Switch server')
+    expect(wrapper.findAll('.server-option')).toHaveLength(2)
+
+    await wrapper.find('.server-sheet-close').trigger('click')
+    await nextTick()
+    expect(serverPickerOpen.value).toBe(false)
+  })
+
+  it('closes the mobile sheet from its backdrop', async () => {
+    mobile.isMobile = true
+    const wrapper = await mountBar()
+    await openPicker(wrapper)
+
+    await wrapper.find('.server-sheet-backdrop').trigger('click')
+    await nextTick()
+    expect(serverPickerOpen.value).toBe(false)
   })
 })

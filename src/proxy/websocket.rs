@@ -42,8 +42,7 @@ pub async fn proxy_websocket(
         .headers()
         .get("sec-websocket-protocol")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
-        .unwrap_or_default();
+        .map_or_else(Vec::new, |s| s.split(',').map(|p| p.trim().to_string()).collect());
 
     let mut forward_headers = Vec::new();
     for (name, value) in req.headers() {

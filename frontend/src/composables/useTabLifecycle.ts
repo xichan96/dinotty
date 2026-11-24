@@ -3,6 +3,7 @@ import type { Tab, TerminalTab } from '../types/pane'
 import { getAllLeaves, findLeaf, findFirstLeaf, ensureSplitRoot } from '../types/pane'
 import type { Workspace } from '../types/workspace'
 import { nextRevealNavGen, currentRevealNavGen } from '../utils/navGen'
+import { isRenamingTabTitle } from '../utils/renameFocusGuard'
 import { pickSuccessorTab } from '../utils/tabSuccessor'
 import { isKbTypingLocked } from './useTerminal'
 import { clearFileWorkspaceState } from './useFileWorkspaceState'
@@ -49,6 +50,8 @@ export interface TabLifecycleOptions {
   activeWorkspacePath: Ref<string | undefined>
   notif: { clearForPaneIds: (paneIds: string[], reason: MarkReadReason) => void }
   termRefs: Record<string, any>
+  webRefs?: Record<string, any>
+  filesRefs?: Record<string, any>
   isMobile: Ref<boolean>
   tabBarRef: Ref<
     | { scrollTabIntoView: (paneId: string) => boolean; hasTab: (paneId: string) => boolean }
@@ -102,6 +105,8 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     activeWorkspacePath,
     notif,
     termRefs,
+    webRefs = {},
+    filesRefs = {},
     isMobile,
     tabBarRef,
     persist,
@@ -576,24 +581,42 @@ export function useTabLifecycle(opts: TabLifecycleOptions): TabLifecycleState {
     nextTick(() => focusActive())
   }
 
+  // Renaming a tab opens an inline <input> on double-click and focuses it, but
+  // activation is async (it awaits the server) and only focuses the terminal on
+  // a later tick. That deferred focus lands *after* the rename input has taken
+  // focus, and the resulting blur closes the editor — which made renaming feel
+  // impossible to trigger (measured: input focused, stolen 8 ms later).
   function focusActive() {
     if (!activePaneId.value) return
     const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
     if (!tab) return
     if (tab.type === 'terminal') {
+      const focused = typeof document === 'undefined' ? null : document.activeElement
+      if (isRenamingTabTitle(focused)) return
       const paneId = tab.activePaneId
-      for (const leaf of getAllLeaves(tab.layout)) {
-        if (termRefs[leaf.paneId]?.isComposing()) return
-      }
-      if (!isKbTypingLocked()) {
+      const paneRef: any = termRefs[paneId] ?? webRefs[paneId] ?? filesRefs[paneId]
+      if (paneRef && typeof paneRef.setOutputListener === 'function') {
+        for (const leaf of getAllLeaves(tab.layout)) {
+          if (termRefs[leaf.paneId]?.isComposing()) return
+        }
+        if (!isKbTypingLocked()) {
+          for (const leaf of getAllLeaves(tab.layout)) {
+            if (leaf.paneId !== paneId) {
+              termRefs[leaf.paneId]?.blur()
+            }
+          }
+          paneRef.focus()
+        }
+        paneRef.fit?.()
+      } else if (!isKbTypingLocked()) {
+        // Web and file previews have their own focus target, not an xterm.
         for (const leaf of getAllLeaves(tab.layout)) {
           if (leaf.paneId !== paneId) {
             termRefs[leaf.paneId]?.blur()
           }
         }
-        termRefs[paneId]?.focus()
+        paneRef?.focus?.()
       }
-      termRefs[paneId]?.fit()
     }
   }
 

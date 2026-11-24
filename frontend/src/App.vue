@@ -80,16 +80,17 @@
           >
             <RefreshCw :size="16" />
           </button>
-          <button
-            v-else-if="itemId === 'settings'"
-            type="button"
-            class="tab-bar-icon-btn"
-            :title="t('app.settings')"
-            @click="settingsOpen = true"
-            @touchend.prevent="settingsOpen = true"
-          >
-            <Settings :size="16" />
-          </button>
+          <template v-else-if="itemId === 'settings'">
+            <button
+              type="button"
+              class="tab-bar-icon-btn"
+              :title="t('app.settings')"
+              @click="settingsOpen = true"
+              @touchend.prevent="settingsOpen = true"
+            >
+              <Settings :size="16" />
+            </button>
+          </template>
           <button
             v-else-if="
               itemId === 'notifications' &&
@@ -460,6 +461,7 @@ import {
   apiUrl,
   authFetch,
 } from './composables/apiBase'
+import { reconcileActiveServer } from './composables/useRemoteServers'
 import { useToast } from 'vue-toastification'
 import {
   useNotification,
@@ -595,6 +597,7 @@ const actions = useAppActions({
   lastTabCloseShortcutAt,
   toast,
 })
+
 const keyboard = useAppKeyboard({ core, actions, settingsStore, bookmarksRef, appRootRef })
 const connectivity = useAppConnectivity({ core, sshPanelRef, persist })
 const tauri = useAppTauri({
@@ -844,6 +847,10 @@ onMounted(async () => {
   try {
     if (authenticated.value) {
       await getApiBase()
+      // A device can keep a roster id in localStorage after that entry is
+      // deleted. Every API call would then carry `/__srv/<id>` and the hub's
+      // relay would 404/403 it, so reset before settings and tabs load.
+      await reconcileActiveServer()
       // The Rust process may still own detached windows from before a reload.
       // Rebuild the filter before sync WS/REST deliver tabs, so those panes
       // never mount in the main window first.

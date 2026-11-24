@@ -366,6 +366,8 @@ pub fn create_session(
         status: std::sync::Mutex::new(SessionStatus::Connected),
         is_connected: std::sync::atomic::AtomicBool::new(true),
         size: std::sync::Mutex::new((80, 24)),
+        size_owner: std::sync::Mutex::new(None),
+        resize_gate: tokio::sync::Mutex::new(()),
         exited: std::sync::Mutex::new(false),
         shell_type: shell_type.clone(),
         shell_launch_kind,

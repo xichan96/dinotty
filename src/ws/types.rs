@@ -7,13 +7,31 @@ pub struct WsQuery {
     pub argv: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SizeClaim {
+    pub cols: u16,
+    pub rows: u16,
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
     Input {
         data: String,
+        /// Optional size claim carried on the user input that triggers it. The
+        /// server applies the claim before writing `data`, which preserves
+        /// resize-then-write ordering on both the WebSocket and Tauri IPC paths.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claim: Option<SizeClaim>,
     },
     Resize {
+        cols: u16,
+        rows: u16,
+    },
+    /// Explicit size claim without input (focus/tap that did not produce a
+    /// keystroke). Claims always win; ordinary `Resize` from a non-owner is
+    /// ignored.
+    Claim {
         cols: u16,
         rows: u16,
     },
@@ -27,6 +45,11 @@ pub enum ClientMsg {
     SnapshotRequest {
         cols: u16,
         rows: u16,
+        /// True when the requesting client is the active device and wants to
+        /// own the PTY size. A non-claim request snapshots at the current owner
+        /// size without resizing the PTY.
+        #[serde(default)]
+        claim: bool,
     },
 }
 

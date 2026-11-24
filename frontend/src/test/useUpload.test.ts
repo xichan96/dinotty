@@ -19,6 +19,7 @@ vi.mock('../composables/apiBase', () => ({
 }))
 
 import { formatMB, useUpload, uploadErrorStatus } from '../composables/useUpload'
+import { useUploadTracker } from '../composables/useUploadTracker'
 
 function jsonResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status })
@@ -132,6 +133,50 @@ describe('useUpload', () => {
     expect(requests[0].headers['X-Dinotty-Relay']).toBe('1')
   })
 
+  it('uploads one request per file and gives each its own tracker row', async () => {
+    useUploadTracker().resetUploadTracker()
+    const requests: MockXHR[] = []
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class extends MockXHR {
+        constructor() {
+          super()
+          requests.push(this)
+        }
+      }
+    )
+
+    const data = await useUpload().uploadFilesOneByOne([
+      new File(['a'], 'a.txt'),
+      new File(['b'], 'b.txt'),
+    ])
+
+    expect(requests).toHaveLength(2)
+    expect(data.saved).toHaveLength(2)
+    const tasks = useUploadTracker().tasks.value
+    expect(tasks.map((t) => t.name)).toEqual(['a.txt', 'b.txt'])
+    expect(tasks.every((t) => t.status === 'done')).toBe(true)
+    useUploadTracker().resetUploadTracker()
+  })
+
+  it('keeps successful files when only one file fails', async () => {
+    useUploadTracker().resetUploadTracker()
+    MockXHR.nextStatus = 507
+    vi.stubGlobal('XMLHttpRequest', MockXHR)
+
+    const data = await useUpload().uploadFilesOneByOne([
+      new File(['a'], 'a.txt'),
+      new File(['b'], 'b.txt'),
+    ])
+
+    expect(data.saved).toHaveLength(1)
+    expect(data.errors).toEqual(['HTTP 507'])
+    const tasks = useUploadTracker().tasks.value
+    expect(tasks.filter((t) => t.status === 'failed')).toHaveLength(1)
+    expect(tasks.filter((t) => t.status === 'done')).toHaveLength(1)
+    useUploadTracker().resetUploadTracker()
+  })
+
   it('formats raw byte counts as one-decimal MB values', () => {
     expect(formatMB(1572864)).toBe('1.5')
   })
@@ -143,7 +188,10 @@ describe('useUpload', () => {
 
     await expect(
       useUpload().uploadFiles([new File(['x'], 'x.bin')], { onProgress: vi.fn() })
-    ).rejects.toEqual({ status: 507 })
+    ).rejects.toMatchObject({
+      status: 507,
+      bodyText: JSON.stringify({ ok: false }),
+    })
   })
 })
 

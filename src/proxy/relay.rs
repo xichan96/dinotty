@@ -188,9 +188,13 @@ fn forbidden(msg: &str) -> Response {
 /// last, so an unauthenticated caller cannot probe which ids exist, and a
 /// *missing* id answers exactly like an id the roster no longer has.
 ///
-/// The loopback test uses [`crate::auth::real_client_ip`]'s verdict rather
-/// than the raw peer address: behind a same-host tunnel every caller looks
-/// loopback, which is the vulnerability `real_client_ip` exists to close.
+/// The loopback test combines the address with
+/// [`crate::auth::is_local_request`] rather than using the raw peer address:
+/// behind a same-host tunnel every caller's peer is 127.0.0.1 and the request
+/// arrives with a rewritten `Host` plus `X-Forwarded-*`, which is exactly the
+/// shape that must authenticate. [`crate::auth::real_client_ip`] alone does not
+/// close that (it only consults `X-Forwarded-For` for configured
+/// `trusted_proxies`).
 ///
 /// The rejection is boxed to keep the happy path small - `Response` is much
 /// wider than the `RemoteServer` it competes with - matching how
@@ -204,7 +208,9 @@ fn authorized_target(
     id: &str,
     rest: &str,
 ) -> Result<RemoteServer, Box<Response>> {
-    if !real_ip.is_loopback() && !crate::auth::has_valid_auth(req, sessions, token) {
+    if !crate::auth::is_local_request(req.headers(), real_ip)
+        && !crate::auth::has_valid_auth(req, sessions, token)
+    {
         tracing::warn!(
             "relay: reject {} {} from {real_ip} (no valid session or token)",
             req.method(),
@@ -570,7 +576,14 @@ mod tests {
     }
 
     fn request(method: &str, path: &str) -> Request {
-        Request::builder().method(method).uri(path).body(Body::empty()).unwrap()
+        // A real local caller always sends a loopback `Host`; the gate now
+        // requires it (see `is_local_request`), so the helper must too.
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1:8999")
+            .body(Body::empty())
+            .unwrap()
     }
 
     fn loopback() -> IpAddr {
@@ -587,6 +600,51 @@ mod tests {
     fn a_loopback_read_only_request_is_allowed() {
         let target = gate(&request("GET", "/__srv/abc/api/info"), loopback(), "api/info");
         assert_eq!(target.unwrap().url, "http://192.0.2.10:58901");
+    }
+
+    /// A same-host tunnel reaches the relay from 127.0.0.1 as well, but it comes
+    /// with a rewritten `Host` and forwarding headers. Without this check the
+    /// relay would replay the hub's stored upstream credentials for an
+    /// unauthenticated internet caller.
+    #[test]
+    fn a_same_host_tunnel_does_not_inherit_the_loopback_trust() {
+        let req = Request::builder()
+            .method("GET")
+            .uri("/__srv/abc/api/info")
+            .header(header::HOST, "abc.ngrok-free.app")
+            .header("x-forwarded-for", "203.0.113.7")
+            .body(Body::empty())
+            .unwrap();
+        let resp = gate(&req, loopback(), "api/info").unwrap_err();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Either signal alone is enough: `tailscale serve` rewrites both, but a
+    /// bare `Host`-rewriting proxy or a header-adding proxy must each be caught.
+    #[test]
+    fn host_rewrite_or_forwarding_header_alone_disqualifies_loopback() {
+        let host_only = Request::builder()
+            .method("GET")
+            .uri("/__srv/abc/api/info")
+            .header(header::HOST, "noah.tailb26b2e.ts.net")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            gate(&host_only, loopback(), "api/info").unwrap_err().status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let header_only = Request::builder()
+            .method("GET")
+            .uri("/__srv/abc/api/info")
+            .header(header::HOST, "127.0.0.1:8999")
+            .header("x-forwarded-proto", "https")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            gate(&header_only, loopback(), "api/info").unwrap_err().status(),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[test]
@@ -654,6 +712,7 @@ mod tests {
         let req = Request::builder()
             .method("GET")
             .uri("/__srv/abc/api/info")
+            .header(header::HOST, "127.0.0.1:8999")
             .header(header::ORIGIN, "https://evil.example")
             .header("sec-fetch-site", "cross-site")
             .body(Body::empty())
@@ -671,6 +730,7 @@ mod tests {
             let req = Request::builder()
                 .method("GET")
                 .uri("/__srv/abc/api/info")
+                .header(header::HOST, "127.0.0.1:8999")
                 .header(header::ORIGIN, origin)
                 .header("sec-fetch-site", "cross-site")
                 .body(Body::empty())
@@ -696,6 +756,7 @@ mod tests {
         let signed = Request::builder()
             .method("POST")
             .uri("/__srv/abc/api/tabs")
+            .header(header::HOST, "127.0.0.1:8999")
             .header(RELAY_CSRF_HEADER, "1")
             .body(Body::empty())
             .unwrap();
@@ -717,6 +778,7 @@ mod tests {
         let req = Request::builder()
             .method("POST")
             .uri("/__srv/abc/api/tabs")
+            .header(header::HOST, "127.0.0.1:8999")
             .header(RELAY_CSRF_HEADER, "")
             .body(Body::empty())
             .unwrap();
@@ -930,6 +992,7 @@ mod tests {
         let cross_site = Request::builder()
             .method("GET")
             .uri("/__srv/abc/ws/sync")
+            .header(header::HOST, "127.0.0.1:8999")
             .header(header::UPGRADE, "websocket")
             .header("connection", "Upgrade")
             .header(header::ORIGIN, "https://evil.example")
@@ -986,6 +1049,7 @@ mod tests {
         let req = Request::builder()
             .method("GET")
             .uri("/__srv/abc/api/echo?x=1")
+            .header(header::HOST, "127.0.0.1:8999")
             .header(header::AUTHORIZATION, "Bearer hub-session-token")
             // The hub's own session cookie, which the upstream must never see.
             .header(header::COOKIE, "dinotty_sid=hub-session-secret")

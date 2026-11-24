@@ -37,6 +37,8 @@ export function useSplitPane(opts: {
   tabs: Ref<Tab[]>
   activePaneId: Ref<string | null>
   termRefs: Record<string, InstanceType<typeof TerminalPane>>
+  webRefs?: Record<string, any>
+  filesRefs?: Record<string, any>
   genPaneId: () => string
   sendSync: (msg: SyncClientMsg) => void
   sendLayoutSync: (
@@ -52,6 +54,8 @@ export function useSplitPane(opts: {
     tabs,
     activePaneId,
     termRefs,
+    webRefs = {},
+    filesRefs = {},
     genPaneId,
     sendSync,
     sendLayoutSync,
@@ -420,10 +424,21 @@ export function useSplitPane(opts: {
     }
   }
 
+  /** A pane's component, regardless of whether it is a terminal, web or files. */
+  function paneRef(paneId: string): any {
+    return termRefs[paneId] ?? webRefs[paneId] ?? filesRefs[paneId]
+  }
+
   /** Focus a specific pane */
   function focusPane(paneId: string) {
     const tab = findTabByPaneId(paneId)
     if (tab) {
+      // Clicking inside an already-active web pane also fires this (its
+      // toolbar and dropdown live in the parent DOM). Re-focusing the iframe
+      // there would blur the address input and kill its dropdown.
+      const wasActive = tab.activePaneId === paneId
+      const target = paneRef(paneId)
+      const isTerminal = typeof target?.setOutputListener === 'function'
       tab.paneMru = touchPaneMru(tab.paneMru, paneId)
       tab.activePaneId = paneId
       // Update immediately so onData guard blocks other panes before nextTick
@@ -440,13 +455,14 @@ export function useSplitPane(opts: {
         // is only ever set on touch under the collapse guard, so off/open_only and
         // desktop keep the original blur/focus behaviour untouched.
         if (isKbTypingLocked()) return
+        if (wasActive && !isTerminal) return
         // Blur all other panes first to prevent duplicate input in Tauri WKWebView
         for (const leaf of getAllLeaves(tab.layout)) {
           if (leaf.paneId !== paneId) {
-            termRefs[leaf.paneId]?.blur()
+            paneRef(leaf.paneId)?.blur?.()
           }
         }
-        termRefs[paneId]?.focus()
+        paneRef(paneId)?.focus?.()
       })
     }
   }

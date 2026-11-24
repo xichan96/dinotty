@@ -122,12 +122,15 @@ export async function validateToken(token: string): Promise<ValidateTokenResult>
     if (!isTauri()) {
       ;(init as RequestInit).credentials = 'include'
     }
-    // Deliberately *not* `authFetch`: `/api/auth` is in the relay's
-    // `is_hub_only_path` list, so `apiUrl`'s prefix is never carried upstream
-    // and this always resolves against the hub. No `X-Dinotty-Relay` header —
-    // nothing on that path checks it. Same for every other `fetch` in this
-    // file (`/api/token-configured`, `/api/auto-token`, `/api/auth/request-code`).
-    const res = await fetch(apiUrl('/api/auth'), init)
+    // `hubApiUrl`, not `apiUrl`: `/api/auth` is in the relay's
+    // `is_hub_only_path` list. `apiUrl` would still prepend `/__srv/<id>`, and
+    // the relay rejects that with 403 before forwarding — so a browser whose
+    // active-server id points at a remote server could never log in. The hub
+    // is also the only server that can complete this: it owns the roster
+    // credentials the relay uses. See `hubApiUrl` in this file. Same for the
+    // other auth helpers (`/api/token-configured`, `/api/auto-token`,
+    // `/api/auth/request-code`).
+    const res = await fetch(hubApiUrl('/api/auth'), init)
     if (res.ok) {
       setAuthToken(token)
       return { ok: true }
@@ -158,7 +161,7 @@ export async function checkTokenConfigured(): Promise<{
 }> {
   try {
     await getApiBase()
-    const res = await fetch(apiUrl('/api/token-configured'))
+    const res = await fetch(hubApiUrl('/api/token-configured'))
     if (!res.ok) return { configured: true, serverMode: true }
     const data = await res.json()
     return {
@@ -174,7 +177,7 @@ export async function checkTokenConfigured(): Promise<{
 export async function fetchAutoToken(): Promise<string> {
   try {
     await getApiBase()
-    const res = await fetch(apiUrl('/api/auto-token'))
+    const res = await fetch(hubApiUrl('/api/auto-token'))
     if (!res.ok) return ''
     const data = await res.json()
     return data.token || ''
@@ -186,7 +189,7 @@ export async function fetchAutoToken(): Promise<string> {
 export async function fetchServerToken(): Promise<string> {
   try {
     await getApiBase()
-    const res = await authFetch(apiUrl('/api/token'))
+    const res = await authFetch(hubApiUrl('/api/token'))
     if (!res.ok) return ''
     const data = await res.json()
     return data.token || ''
@@ -362,7 +365,7 @@ export async function requestCode(): Promise<RequestCodeResult> {
     if (!isTauri()) {
       ;(init as RequestInit).credentials = 'include'
     }
-    const res = await fetch(apiUrl('/api/auth/request-code'), init)
+    const res = await fetch(hubApiUrl('/api/auth/request-code'), init)
     if (res.ok) {
       const data = await res.json()
       return { ok: true, requestId: String(data.request_id ?? '') }
@@ -406,7 +409,7 @@ export async function validateCode(requestId: string, code: string): Promise<Val
     if (!isTauri()) {
       ;(init as RequestInit).credentials = 'include'
     }
-    const res = await fetch(apiUrl('/api/auth'), init)
+    const res = await fetch(hubApiUrl('/api/auth'), init)
     if (res.ok) {
       setAuthToken('cookie')
       return { ok: true }

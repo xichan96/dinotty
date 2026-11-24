@@ -18,8 +18,8 @@ use crate::settings::{self, SettingsState};
 use super::session::SessionStore;
 use super::verification_code::{CodeStore, VerifyOutcome};
 use super::{
-    check_lockout, constant_time_eq, get_fail_count, real_client_ip, record_auth_failure,
-    session_cookie_name,
+    check_lockout, constant_time_eq, get_fail_count, is_local_request, real_client_ip,
+    record_auth_failure, session_cookie_name,
 };
 
 /// Subset of app state needed by auth HTTP handlers.
@@ -503,22 +503,33 @@ pub async fn token_configured(State(state): State<AuthHandlerState>) -> impl Int
         let s = state.settings.read().await;
         s.auth.login_method.clone()
     };
-    Json(serde_json::json!({
-        "configured": !token.is_empty(),
-        "server_mode": cfg!(feature = "server"),
-        "login_method": login_method,
-    }))
+    // Public, and read by the login page before a session exists. A proxy or
+    // browser must not keep an old `login_method` after the user switches modes.
+    (
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(serde_json::json!({
+            "configured": !token.is_empty(),
+            "server_mode": cfg!(feature = "server"),
+            "login_method": login_method,
+        })),
+    )
 }
 
 pub async fn auto_token(
     State(state): State<AuthHandlerState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if cfg!(feature = "server") {
         return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "not available"})))
             .into_response();
     }
-    if !addr.ip().is_loopback() {
+    // `addr.ip()` is the peer, which is 127.0.0.1 for *any* same-host tunnel -
+    // exactly the request this endpoint must not answer. `is_local_request`
+    // additionally requires a loopback `Host` and no forwarding headers, so a
+    // tunnel (which rewrites Host and adds X-Forwarded-*) is refused here even
+    // though the auth middleware already gates this path.
+    if !is_local_request(&headers, addr.ip()) {
         return (
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({"error": "auto-token is only available from localhost"})),

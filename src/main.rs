@@ -494,6 +494,10 @@ async fn main() {
             .route("/api/workspace/list", get(workspace::workspace_list))
             .route("/api/workspace/meta", get(workspace::workspace_meta))
             .route("/api/workspace/raw", get(workspace::workspace_raw))
+            // Token for the sandboxed HTML preview's own asset loads; the
+            // companion reader is `/preview-ws/:token/*path`, mounted below the
+            // auth layer because a sandboxed frame cannot carry the cookie.
+            .route("/api/workspace/preview-token", post(workspace::workspace_preview_token))
             .merge(
                 Router::new()
                     .route("/api/workspace/upload", post(workspace::workspace_upload))
@@ -620,6 +624,9 @@ async fn main() {
             .route("/preview", any(proxy::proxy_handler_wildcard))
             .route("/preview/", any(proxy::proxy_handler_wildcard))
             .route("/preview/*path", any(proxy::proxy_handler_wildcard))
+            // `preview-ws`, not `preview`, so this does not collide with the
+            // catch-all above. Token-authenticated: see workspace::preview_ws.
+            .route("/preview-ws/:token/*path", get(workspace::serve_preview_asset))
             // Hub relay to a roster server. One dispatcher serves all three
             // shapes and splits HTTP from WebSocket on the Upgrade header; the
             // gate lives inside the relay, not in auth_middleware (see the

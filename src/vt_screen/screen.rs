@@ -69,10 +69,9 @@ impl VirtualScreen {
 
     /// Get the collected stdout from the current/last command
     pub fn take_command_output(&mut self) -> String {
-        self.pending_command
-            .as_mut()
-            .map(|p| String::from_utf8_lossy(&std::mem::take(&mut p.output_buf)).into_owned())
-            .unwrap_or_default()
+        self.pending_command.as_mut().map_or_else(String::new, |p| {
+            String::from_utf8_lossy(&std::mem::take(&mut p.output_buf)).into_owned()
+        })
     }
 
     /// Check if shell integration (OSC 133) has been detected
@@ -156,8 +155,7 @@ impl VirtualScreen {
         let pending = self.pending_command.take();
         let stdout = pending
             .as_ref()
-            .map(|p| String::from_utf8_lossy(&p.output_buf).into_owned())
-            .unwrap_or_default();
+            .map_or_else(String::new, |p| String::from_utf8_lossy(&p.output_buf).into_owned());
         let duration_ms = pending.map_or(0, |p| p.start_time.elapsed().as_millis() as u64);
 
         let result = CommandResult { exit_code, duration_ms, method: "timeout".to_string() };

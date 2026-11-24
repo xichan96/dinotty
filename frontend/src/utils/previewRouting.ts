@@ -83,6 +83,36 @@ export function targetFromPreviewPath(input: string): string | null {
 }
 
 /**
+ * True when `url` is already one of Dinotty's own preview routes. Both the
+ * canonical `/preview/<origin>/...` form and the external `/api/proxy?url=...`
+ * route count. Used to stop a proxied URL being wrapped in another proxy —
+ * which otherwise grows a new `?url=` layer on every navigation.
+ */
+export function isPreviewProxyUrl(url: string): boolean {
+  return targetFromPreviewPath(url) !== null
+}
+
+/**
+ * Path prefix the app is mounted under, without the trailing slash (`''` when
+ * served from the origin root).
+ *
+ * A reverse proxy that mounts Dinotty at `/apps/<slug>/` injects
+ * `<base href="/apps/<slug>/">`; `document.baseURI` then carries that prefix.
+ * Every proxy route built here must include it, otherwise a root-absolute
+ * `/preview/...` resolves against the *parent's* root and the preview escapes
+ * the mount (it lands on the parent app's SPA instead of Dinotty).
+ */
+export function mountPrefix(): string {
+  try {
+    const path = new URL(document.baseURI).pathname
+    if (!path.endsWith('/') || path === '/') return ''
+    return path.slice(0, -1)
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Path under `/preview` for a loopback/intranet URL, or `null` when the URL
  * must go through the external `/api/proxy` route.
  *
@@ -101,7 +131,7 @@ export function previewPathFor(url: string): string | null {
     const scheme = parsed.protocol === 'https:' ? 'https' : 'http'
     const port = parsed.port || (scheme === 'https' ? '443' : '80')
     const segment = encodeTarget(`${scheme}://${host}:${port}`)
-    return `/preview/${segment}${parsed.pathname || '/'}${parsed.search}${parsed.hash}`
+    return `${mountPrefix()}/preview/${segment}${parsed.pathname || '/'}${parsed.search}${parsed.hash}`
   } catch {
     return null
   }
@@ -116,5 +146,8 @@ export function previewPathFor(url: string): string | null {
  */
 export function urlToPreviewSrc(url: string): string {
   if (!url) return 'about:blank'
-  return previewPathFor(url) ?? `/api/proxy?url=${encodeURIComponent(url)}`
+  // The caller may hand back a URL read from the iframe's address bar. It is
+  // already a proxy route: wrapping it again would nest `?url=` forever.
+  if (isPreviewProxyUrl(url)) return url
+  return previewPathFor(url) ?? `${mountPrefix()}/api/proxy?url=${encodeURIComponent(url)}`
 }

@@ -1,0 +1,1887 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dinotty — 移动端工作区 / 服务端交互原型</title>
+    <style>
+      /* ── Dinotty design tokens (frontend/src/styles/base.css, dark theme) ── */
+      :root {
+        color-scheme: dark;
+        --bg: #1e1e1e;
+        --bg-surface: #252526;
+        --bg-overlay: #1e1e1e;
+        --bg-input: #2a2a2c;
+        --bg-hover: #2a2a2c;
+        --bg-surface-hover: #333333;
+        --border: #3c3c3c;
+        --border-hover: #555555;
+        --divider: #2d2d2d;
+        --fg: #cccccc;
+        --fg-bright: #d0d0d0;
+        --fg-muted: #858585;
+        --accent: #8a8a8a;
+        --accent-hover: #9e9e9e;
+        --danger: #f44747;
+        --warning: #d7a34a;
+        --success: #49cc90;
+        --color-red: #f44747;
+        --radius: 4px;
+        --dialog-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: #4a4a4a transparent;
+      }
+      *::-webkit-scrollbar {
+        width: 6px;
+      }
+      *::-webkit-scrollbar-thumb {
+        background: #4a4a4a;
+        border-radius: 3px;
+      }
+
+      body {
+        min-height: 100vh;
+        background: #101011;
+        color: var(--fg);
+        font-family: var(--font-ui);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button {
+        font-family: inherit;
+        color: inherit;
+        border: none;
+        background: none;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* ── Page chrome ─────────────────────────────────────────── */
+
+      .page {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 36px 28px 56px;
+      }
+
+      .eyebrow {
+        margin-bottom: 8px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        color: #f0f0f0;
+        font-size: 24px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      .lede {
+        max-width: 760px;
+        margin-top: 10px;
+        color: var(--fg-muted);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .lede kbd {
+        padding: 1px 5px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-input);
+        color: var(--fg);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .layout {
+        display: flex;
+        gap: 40px;
+        align-items: flex-start;
+        margin-top: 30px;
+      }
+
+      .stage-col {
+        flex: 0 0 auto;
+      }
+
+      .scenario-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        width: 390px;
+        margin-bottom: 14px;
+      }
+
+      .scenario-nav button {
+        padding: 7px 11px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+        transition:
+          color 0.12s,
+          border-color 0.12s,
+          background 0.12s;
+      }
+      .scenario-nav button:hover {
+        border-color: var(--border-hover);
+        color: var(--fg);
+      }
+      .scenario-nav button.active {
+        border-color: var(--fg);
+        background: #2b2b2e;
+        color: #f0f0f0;
+      }
+
+      /* ── Phone ───────────────────────────────────────────────── */
+
+      .phone {
+        position: relative;
+        width: 390px;
+        height: 844px;
+        overflow: hidden;
+        border: 10px solid #000;
+        border-radius: 48px;
+        background: var(--bg);
+        box-shadow:
+          0 0 0 1px #2a2a2a,
+          0 30px 80px rgba(0, 0, 0, 0.65);
+        isolation: isolate;
+      }
+
+      .phone::after {
+        content: '';
+        position: absolute;
+        right: 114px;
+        bottom: 7px;
+        left: 114px;
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.45);
+        pointer-events: none;
+        z-index: 60;
+      }
+
+      .island {
+        position: absolute;
+        top: 9px;
+        left: 50%;
+        z-index: 70;
+        width: 112px;
+        height: 28px;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: #000;
+        pointer-events: none;
+      }
+
+      /* iOS status bar */
+      .ios-bar {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        height: 48px;
+        padding: 0 26px 6px;
+        color: #eee;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .ios-icons {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .ios-icons span {
+        display: inline-block;
+        width: 15px;
+        height: 9px;
+        border: 1px solid #eee;
+        border-radius: 2px;
+      }
+      .ios-icons span:first-child {
+        width: 14px;
+        border: none;
+        background: linear-gradient(90deg, #eee 3px, transparent 3px 5px) 0 3px / 14px 6px
+          repeat-x;
+      }
+
+      /* Fake app behind the sheets */
+      .app {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .app-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 42px;
+        margin-top: 0;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--divider);
+        background: var(--tab-bg, #181818);
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+      .app-bar .tab-chip {
+        padding: 4px 9px;
+        border-radius: 5px;
+        background: var(--bg);
+        color: var(--fg-bright);
+      }
+      .app-bar .grow {
+        flex: 1;
+      }
+
+      .terminal {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        padding: 14px 14px 0;
+        background: var(--bg);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.75;
+        color: #9a9a9a;
+      }
+      .terminal .prompt {
+        color: #73c991;
+      }
+      .terminal .dim {
+        color: #5c5c5c;
+      }
+      .terminal .blue {
+        color: #569cd6;
+      }
+
+      .app-status {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        height: 24px;
+        padding: 0 12px;
+        border-top: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+      .server-chip {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 5px;
+        border-radius: 3px;
+        color: var(--fg-muted);
+        font-size: 11.5px;
+      }
+      /* The 44px hit area the prototype proposes: invisible, does not change
+         the 24px bar layout. */
+      .server-chip::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: -10px;
+        right: -10px;
+        height: 44px;
+        transform: translateY(-50%);
+      }
+      .server-chip .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+      .server-chip .hit-note {
+        position: absolute;
+        bottom: 30px;
+        left: -4px;
+        z-index: 30;
+        padding: 5px 8px;
+        border: 1px dashed #6a6a6a;
+        border-radius: 6px;
+        background: #202023;
+        color: #aaa;
+        font-size: 10px;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.15s;
+        pointer-events: none;
+      }
+      .server-chip:hover .hit-note {
+        opacity: 1;
+      }
+
+      /* ── Scenes / sheets ─────────────────────────────────────── */
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: none;
+      }
+      .scene.active {
+        display: block;
+      }
+
+      .scrim {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.58);
+        backdrop-filter: blur(1px);
+      }
+
+      .sheet {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        flex-direction: column;
+        max-height: 100%;
+        padding-bottom: 10px;
+        border-top: 1px solid #3a3a3c;
+        border-radius: 20px 20px 0 0;
+        background: var(--bg-surface);
+        box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.5);
+        animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+      }
+      @keyframes sheet-in {
+        from {
+          transform: translateY(24px);
+          opacity: 0.4;
+        }
+      }
+      .sheet.h-62 {
+        height: 62%;
+      }
+      .sheet.h-70 {
+        height: 70%;
+      }
+      .sheet.h-80 {
+        height: 80%;
+      }
+      .sheet.h-90 {
+        height: 90%;
+      }
+
+      .grabber {
+        flex: 0 0 auto;
+        width: 38px;
+        height: 5px;
+        margin: 8px auto 2px;
+        border-radius: 3px;
+        background: #565656;
+      }
+
+      .sheet-head {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 8px;
+        min-height: 52px;
+        padding: 2px 8px 2px 18px;
+      }
+      .sheet-title {
+        flex: 1;
+        min-width: 0;
+        color: var(--fg-bright);
+        font-size: 15px;
+        font-weight: 650;
+      }
+      .sheet-sub {
+        display: block;
+        margin-top: 2px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        font-weight: 400;
+      }
+      .head-action {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-width: 44px;
+        height: 44px;
+        padding: 0 10px;
+        border-radius: 10px;
+        color: var(--fg-muted);
+        font-size: 13px;
+      }
+      .head-action:hover,
+      .head-action:active {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .head-action.strong {
+        color: var(--fg-bright);
+        font-weight: 600;
+      }
+      .head-action .icon {
+        display: flex;
+      }
+
+      .sheet-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      .sheet-foot {
+        flex: 0 0 auto;
+        padding: 8px 14px 4px;
+        border-top: 1px solid var(--border);
+      }
+
+      .section-label {
+        padding: 12px 18px 5px;
+        color: var(--fg-muted);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .hint-line {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        padding: 6px 18px 8px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      .hint-line svg {
+        flex: 0 0 auto;
+      }
+
+      /* ── List rows ───────────────────────────────────────────── */
+
+      .row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        width: 100%;
+        min-height: 58px;
+        padding: 8px 16px;
+        text-align: left;
+        transition: background 0.12s;
+      }
+      .row:active {
+        background: var(--bg-hover);
+      }
+      .row.static {
+        cursor: default;
+      }
+      .row.selected {
+        background: var(--bg-surface-hover);
+      }
+      .row.current::after {
+        content: '';
+        position: absolute;
+        top: 14px;
+        bottom: 14px;
+        left: 0;
+        width: 3px;
+        border-radius: 0 3px 3px 0;
+        background: var(--fg-bright);
+      }
+      .row.drag-row {
+        padding-left: 8px;
+      }
+      .row.drag-row.dragging {
+        z-index: 5;
+        border-radius: 10px;
+        background: #323235;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+      }
+      .row.drag-row.drop-before::before,
+      .row.drag-row.drop-after::after {
+        content: '';
+        position: absolute;
+        right: 14px;
+        left: 14px;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--fg-bright);
+      }
+      .row.drag-row.drop-before::before {
+        top: -1px;
+      }
+      .row.drag-row.drop-after::after {
+        bottom: -1px;
+      }
+
+      .drag-handle {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 44px;
+        border-radius: 8px;
+        color: #6f6f6f;
+        touch-action: none;
+        cursor: grab;
+      }
+      .drag-handle:active {
+        background: var(--bg-hover);
+        color: var(--fg);
+        cursor: grabbing;
+      }
+
+      .badge {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border: 1px solid #4a4a4a;
+        border-radius: 8px;
+        background: #2f2f31;
+        color: #ddd;
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+      }
+      .badge.remote {
+        border-color: #4b6a58;
+        background: #26352c;
+        color: #8fd3ab;
+      }
+
+      .row-main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .row-name {
+        overflow: hidden;
+        color: var(--fg-bright);
+        font-size: 13.5px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .row-path {
+        overflow: hidden;
+        color: var(--fg-muted);
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .row-count,
+      .tag {
+        flex: 0 0 auto;
+        padding: 1px 6px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--fg-muted);
+        font-size: 10px;
+        line-height: 1.6;
+        white-space: nowrap;
+      }
+      .tag.strong {
+        border-color: #666;
+        color: var(--fg-bright);
+      }
+      .tag.warn {
+        border-color: #8a6424;
+        color: var(--warning);
+      }
+      .tag.ok {
+        border-color: #356b53;
+        color: #73c991;
+      }
+
+      .status-dot {
+        flex: 0 0 auto;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #777;
+      }
+      .status-dot.on {
+        background: #d0d0d0;
+      }
+      .status-dot.warn {
+        background: var(--warning);
+      }
+      .status-dot.off {
+        background: var(--danger);
+      }
+
+      .row-icon-btn {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 44px;
+        border-radius: 9px;
+        color: var(--fg-muted);
+      }
+      .row-icon-btn:hover,
+      .row-icon-btn:active {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .row-icon-btn.danger:hover,
+      .row-icon-btn.danger:active {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+        color: var(--danger);
+      }
+
+      .chevron {
+        flex: 0 0 auto;
+        color: #666;
+      }
+
+      .check {
+        flex: 0 0 auto;
+        color: var(--fg-bright);
+      }
+
+      .empty {
+        padding: 34px 22px;
+        color: var(--fg-muted);
+        font-size: 12.5px;
+        text-align: center;
+        line-height: 1.6;
+      }
+
+      /* ── Search field ────────────────────────────────────────── */
+
+      .search-wrap {
+        flex: 0 0 auto;
+        padding: 2px 14px 8px;
+      }
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 42px;
+        padding: 0 11px;
+        border: 1px solid var(--border);
+        border-radius: 11px;
+        background: var(--bg-input);
+        color: #777;
+      }
+      .search input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: none;
+        background: none;
+        color: var(--fg);
+        font: inherit;
+        font-size: 16px; /* stops iOS focus zoom */
+      }
+      .search input::placeholder {
+        color: #777;
+      }
+
+      /* ── Footer buttons ──────────────────────────────────────── */
+
+      .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        width: 100%;
+        min-height: 46px;
+        border-radius: 11px;
+        font-size: 14px;
+        transition:
+          background 0.12s,
+          border-color 0.12s,
+          color 0.12s;
+      }
+      .btn.outline {
+        border: 1px dashed var(--border);
+        color: var(--fg-muted);
+      }
+      .btn.outline:active {
+        border-color: var(--fg-muted);
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .btn.solid {
+        background: #d6d6d6;
+        color: #1b1b1b;
+        font-weight: 650;
+      }
+      .btn.solid:active {
+        background: #f0f0f0;
+      }
+      .btn.ghost {
+        height: 42px;
+        min-height: 42px;
+        border: 1px solid var(--border);
+        color: var(--fg);
+      }
+      .btn.ghost:active {
+        border-color: var(--border-hover);
+        background: var(--bg-hover);
+      }
+      .btn.danger {
+        width: auto;
+        min-height: 42px;
+        padding: 0 14px;
+        border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+        color: var(--danger);
+        font-size: 13px;
+      }
+      .btn.danger:active {
+        background: color-mix(in srgb, var(--danger) 14%, transparent);
+      }
+
+      /* ── Edit page ───────────────────────────────────────────── */
+
+      .back-btn {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin-left: 4px;
+        border-radius: 10px;
+        color: var(--fg);
+      }
+      .back-btn:active {
+        background: var(--bg-hover);
+      }
+
+      .form {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        padding: 8px 18px 22px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .field-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--fg-muted);
+        font-size: 12px;
+      }
+      .input {
+        width: 100%;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        outline: none;
+        background: var(--bg);
+        color: var(--fg-bright);
+        font: inherit;
+        font-size: 16px; /* stops iOS focus zoom */
+      }
+      .input:focus {
+        border-color: #8a8a8a;
+        background: #232325;
+      }
+      .input.mono {
+        font-family: var(--font-mono);
+        font-size: 15px;
+      }
+      .token-row {
+        display: flex;
+        gap: 7px;
+      }
+      .token-row .input {
+        flex: 1;
+      }
+      .inline-btn {
+        flex: 0 0 auto;
+        height: 44px;
+        padding: 0 13px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--fg-muted);
+        font-size: 12.5px;
+      }
+      .inline-btn:active {
+        background: var(--bg-hover);
+        color: var(--fg-bright);
+      }
+      .field-hint {
+        color: var(--fg-muted);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .test-result {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        padding: 10px 12px;
+        border: 1px solid #356b53;
+        border-radius: 10px;
+        background: color-mix(in srgb, #356b53 12%, transparent);
+        color: #a9d9bd;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .test-result .ok-icon {
+        flex: 0 0 auto;
+        margin-top: 1px;
+        color: #73c991;
+      }
+      .test-result .meta {
+        display: block;
+        margin-top: 2px;
+        color: #7d9b8a;
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+      }
+
+      .danger-zone {
+        margin-top: 6px;
+        padding-top: 15px;
+        border-top: 1px solid var(--border);
+      }
+      .danger-title {
+        margin-bottom: 7px;
+        color: var(--fg-muted);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .save-bar {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 8px;
+        padding: 10px 14px 4px;
+        border-top: 1px solid var(--border);
+      }
+      .save-bar .btn {
+        flex: 1;
+      }
+
+      /* ── In-phone confirm / toast ────────────────────────────── */
+
+      .confirm-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 90;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 26px;
+        background: rgba(0, 0, 0, 0.6);
+      }
+      .confirm-layer.open {
+        display: flex;
+      }
+      .confirm-card {
+        width: 100%;
+        padding: 18px;
+        border: 1px solid #444;
+        border-radius: 16px;
+        background: #2b2b2e;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+      }
+      .confirm-title {
+        color: #f0f0f0;
+        font-size: 15px;
+        font-weight: 650;
+      }
+      .confirm-text {
+        margin-top: 8px;
+        color: var(--fg-muted);
+        font-size: 12.5px;
+        line-height: 1.6;
+      }
+      .confirm-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 18px;
+      }
+      .confirm-actions .btn {
+        width: auto;
+        min-width: 84px;
+        min-height: 40px;
+        padding: 0 16px;
+        font-size: 13px;
+      }
+      .btn.danger-solid {
+        background: var(--danger);
+        color: #fff;
+        font-weight: 600;
+      }
+
+      .toast {
+        position: absolute;
+        bottom: 78px;
+        left: 50%;
+        z-index: 95;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        max-width: 300px;
+        padding: 10px 14px;
+        border: 1px solid #444;
+        border-radius: 11px;
+        background: #2d2d30;
+        color: #e0e0e0;
+        font-size: 12px;
+        opacity: 0;
+        transform: translate(-50%, 8px);
+        transition:
+          opacity 0.2s,
+          transform 0.2s;
+        pointer-events: none;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+
+      /* ── Notes column ────────────────────────────────────────── */
+
+      .notes {
+        flex: 1;
+        min-width: 0;
+        max-width: 560px;
+      }
+      .note-card {
+        padding: 18px 20px;
+        border: 1px solid #2e2e30;
+        border-radius: 14px;
+        background: #171719;
+      }
+      .note-card + .note-card {
+        margin-top: 14px;
+      }
+      .note-card h2 {
+        color: #e8e8e8;
+        font-size: 13px;
+        font-weight: 650;
+      }
+      .note-card h2 .pill {
+        margin-left: 7px;
+        padding: 2px 7px;
+        border: 1px solid #3a3a3d;
+        border-radius: 999px;
+        color: var(--fg-muted);
+        font-size: 9.5px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        vertical-align: 1px;
+      }
+      .note-card p {
+        margin-top: 7px;
+        color: #9a9a9a;
+        font-size: 12.5px;
+        line-height: 1.7;
+      }
+      .note-card ul {
+        margin: 9px 0 0;
+        padding-left: 17px;
+        color: #9a9a9a;
+        font-size: 12.5px;
+        line-height: 1.75;
+      }
+      .note-card li + li {
+        margin-top: 4px;
+      }
+      .note-card strong {
+        color: #d6d6d6;
+        font-weight: 600;
+      }
+      .note-card .muted {
+        color: #6f6f6f;
+      }
+      .note-card code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #232326;
+        color: #bdbdbd;
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+      .note-card .warnbox {
+        margin-top: 11px;
+        padding: 10px 12px;
+        border-left: 2px solid var(--warning);
+        border-radius: 0 8px 8px 0;
+        background: color-mix(in srgb, var(--warning) 9%, transparent);
+        color: #c9b076;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .note-card .decision {
+        margin-top: 12px;
+        padding: 11px 12px;
+        border: 1px solid #3a3a3d;
+        border-radius: 9px;
+        background: #1d1d20;
+        color: #ababab;
+        font-size: 12px;
+        line-height: 1.65;
+      }
+      .note-card .decision strong {
+        color: #e0e0e0;
+      }
+
+      .reset-row {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 12px;
+      }
+      .reset-row button {
+        padding: 6px 10px;
+        border: 1px solid #333;
+        border-radius: 7px;
+        color: #777;
+        font-size: 11px;
+      }
+      .reset-row button:hover {
+        border-color: #555;
+        color: #bbb;
+      }
+
+      @media (max-width: 900px) {
+        .layout {
+          flex-direction: column;
+        }
+        .notes {
+          max-width: 390px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="eyebrow">Dinotty · Mobile UX prototype</div>
+      <h1>手机端：工作区管理与服务端管理</h1>
+      <p class="lede">
+        可交互原型。切换上方场景查看；工作区列表和服务端排序列表都支持<strong>直接拖动把手</strong>。
+        服务端切换 / 管理部分是需要你确认的交互方案。
+      </p>
+
+      <div class="layout">
+        <div class="stage-col">
+          <div class="scenario-nav" id="scenarioNav">
+            <button class="active" data-goto="ws-picker">① 工作区切换</button>
+            <button data-goto="ws-manage">② 管理工作区</button>
+            <button data-goto="srv-picker">③ 服务端切换</button>
+            <button data-goto="srv-manage">④ 管理服务端</button>
+            <button data-goto="srv-edit">⑤ 编辑服务端</button>
+            <button data-goto="srv-reorder">⑥ 服务端排序</button>
+          </div>
+
+          <div class="phone">
+            <div class="island"></div>
+
+            <!-- The app behind every sheet -->
+            <div class="app">
+              <div class="ios-bar">
+                <span>9:41</span>
+                <span class="ios-icons"><span></span><span></span><span></span></span>
+              </div>
+              <div class="app-bar">
+                <span class="tab-chip">zsh</span>
+                <span>~ / project / dinotty</span>
+                <span class="grow"></span>
+                <span>⋯</span>
+              </div>
+              <div class="terminal">
+                <div><span class="prompt">❯</span> git status</div>
+                <div class="dim">On branch dev</div>
+                <div class="dim">Your branch is up to date with 'origin/dev'.</div>
+                <div>&nbsp;</div>
+                <div class="dim">nothing to commit, working tree clean</div>
+                <div>&nbsp;</div>
+                <div><span class="prompt">❯</span> cargo test --workspace</div>
+                <div class="dim">   Compiling dinotty v0.8.2</div>
+                <div class="blue">    Finished `test` profile [unoptimized + debuginfo] target(s)</div>
+                <div>&nbsp;</div>
+                <div><span class="prompt">❯</span> <span class="dim">▌</span></div>
+              </div>
+              <div class="app-status">
+                <button class="server-chip" title="点击打开服务端切换（原型：在场景 ③ 中展示）">
+                  <span class="dot"></span>
+                  <span>香港 VPS</span>
+                  <span class="hit-note">44px 命中区（视觉仍为 24px 状态栏）</span>
+                </button>
+                <span>CPU 12%</span>
+                <span>MEM 3.2G</span>
+                <span class="grow" style="flex: 1"></span>
+                <span>UTF-8</span>
+              </div>
+            </div>
+
+            <!-- ① Workspace picker -->
+            <div class="scene active" data-scene="ws-picker">
+              <div class="scrim" data-goto="ws-picker"></div>
+              <div class="sheet h-70">
+                <div class="grabber"></div>
+                <div class="sheet-head">
+                  <span class="sheet-title">切换工作区</span>
+                  <button class="head-action" data-goto="ws-manage" title="管理工作区">
+                    <span class="icon" aria-hidden="true">☰</span>管理
+                  </button>
+                  <button class="head-action" title="关闭" aria-label="关闭">✕</button>
+                </div>
+                <div class="search-wrap">
+                  <label class="search">
+                    <span aria-hidden="true">⌕</span>
+                    <input type="text" placeholder="搜索名称或路径…" />
+                  </label>
+                </div>
+                <div class="sheet-body">
+                  <div class="section-label">最近使用</div>
+                  <button class="row current selected">
+                    <span class="badge remote">HK</span>
+                    <span class="row-main">
+                      <span class="row-name">香港 VPS</span>
+                      <span class="row-path">/srv/app/dinotty</span>
+                    </span>
+                    <span class="row-count">5</span>
+                    <span class="check">✓</span>
+                  </button>
+                  <button class="row">
+                    <span class="badge">FE</span>
+                    <span class="row-main">
+                      <span class="row-name">前端</span>
+                      <span class="row-path">~/project/web</span>
+                    </span>
+                    <span class="row-count">3</span>
+                  </button>
+
+                  <div class="section-label">其他工作区</div>
+                  <button class="row">
+                    <span class="badge remote">API</span>
+                    <span class="row-main">
+                      <span class="row-name">后端 API</span>
+                      <span class="row-path">/opt/api</span>
+                    </span>
+                    <span class="row-count">2</span>
+                  </button>
+                  <button class="row">
+                    <span class="badge">OPS</span>
+                    <span class="row-main">
+                      <span class="row-name">运维</span>
+                      <span class="row-path">~/project/infra</span>
+                    </span>
+                  </button>
+                  <button class="row">
+                    <span class="badge">APP</span>
+                    <span class="row-main">
+                      <span class="row-name">客户端</span>
+                      <span class="row-path">~/project/app</span>
+                    </span>
+                  </button>
+                </div>
+                <div class="sheet-foot">
+                  <button class="btn outline">＋ 添加工作区</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ② Workspace manage mode -->
+            <div class="scene" data-scene="ws-manage">
+              <div class="scrim" data-goto="ws-picker"></div>
+              <div class="sheet h-80">
+                <div class="grabber"></div>
+                <div class="sheet-head">
+                  <span class="sheet-title">
+                    管理工作区
+                    <span class="sheet-sub">拖动把手排序 · 点按垃圾桶删除</span>
+                  </span>
+                  <button class="head-action strong" data-goto="ws-picker">完成</button>
+                </div>
+                <div class="sheet-body" id="wsManageList">
+                  <div class="row static" title="默认工作区不可排序/删除">
+                    <span class="drag-handle" style="visibility: hidden" aria-hidden="true">⠿</span>
+                    <span class="badge">DEF</span>
+                    <span class="row-main">
+                      <span class="row-name">默认工作区</span>
+                      <span class="row-path">~</span>
+                    </span>
+                    <span class="tag">默认 · 固定</span>
+                    <button class="row-icon-btn" title="重命名默认工作区" aria-label="重命名">
+                      ✎
+                    </button>
+                  </div>
+
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="badge remote">HK</span>
+                    <span class="row-main">
+                      <span class="row-name">香港 VPS</span>
+                      <span class="row-path">/srv/app/dinotty</span>
+                    </span>
+                    <button class="row-icon-btn" title="重命名" aria-label="重命名">✎</button>
+                    <button
+                      class="row-icon-btn danger"
+                      title="删除"
+                      aria-label="删除"
+                      data-delete-ws="香港 VPS"
+                    >
+                      🗑
+                    </button>
+                  </div>
+
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="badge">FE</span>
+                    <span class="row-main">
+                      <span class="row-name">前端</span>
+                      <span class="row-path">~/project/web</span>
+                    </span>
+                    <button class="row-icon-btn" title="重命名" aria-label="重命名">✎</button>
+                    <button
+                      class="row-icon-btn danger"
+                      title="删除"
+                      aria-label="删除"
+                      data-delete-ws="前端"
+                    >
+                      🗑
+                    </button>
+                  </div>
+
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="badge remote">API</span>
+                    <span class="row-main">
+                      <span class="row-name">后端 API</span>
+                      <span class="row-path">/opt/api</span>
+                    </span>
+                    <button class="row-icon-btn" title="重命名" aria-label="重命名">✎</button>
+                    <button
+                      class="row-icon-btn danger"
+                      title="删除"
+                      aria-label="删除"
+                      data-delete-ws="后端 API"
+                    >
+                      🗑
+                    </button>
+                  </div>
+
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="badge">OPS</span>
+                    <span class="row-main">
+                      <span class="row-name">运维</span>
+                      <span class="row-path">~/project/infra</span>
+                    </span>
+                    <button class="row-icon-btn" title="重命名" aria-label="重命名">✎</button>
+                    <button
+                      class="row-icon-btn danger"
+                      title="删除"
+                      aria-label="删除"
+                      data-delete-ws="运维"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </div>
+                <div class="sheet-foot">
+                  <button class="btn outline">＋ 添加工作区</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ③ Server picker -->
+            <div class="scene" data-scene="srv-picker">
+              <div class="scrim" data-goto="srv-picker"></div>
+              <div class="sheet h-62">
+                <div class="grabber"></div>
+                <div class="sheet-head">
+                  <span class="sheet-title">
+                    切换服务端
+                    <span class="sheet-sub">同一份终端会跟随所选服务端</span>
+                  </span>
+                  <button class="head-action" title="关闭" aria-label="关闭">✕</button>
+                </div>
+                <div class="sheet-body">
+                  <div class="section-label">可用服务端</div>
+
+                  <button class="row">
+                    <span class="badge">LOC</span>
+                    <span class="row-main">
+                      <span class="row-name">本机</span>
+                      <span class="row-path">当前设备 · 127.0.0.1</span>
+                    </span>
+                    <span class="status-dot on"></span>
+                  </button>
+
+                  <button class="row selected current">
+                    <span class="badge remote">HK</span>
+                    <span class="row-main">
+                      <span class="row-name">香港 VPS</span>
+                      <span class="row-path">https://hk.example.com</span>
+                    </span>
+                    <span class="tag strong">当前</span>
+                    <span class="check">✓</span>
+                  </button>
+
+                  <button class="row">
+                    <span class="badge remote">NAS</span>
+                    <span class="row-main">
+                      <span class="row-name">家里 NAS</span>
+                      <span class="row-path">192.168.1.20:8080</span>
+                    </span>
+                    <span class="tag ok">已配置 token</span>
+                  </button>
+
+                  <button class="row">
+                    <span class="badge remote">OFF</span>
+                    <span class="row-main">
+                      <span class="row-name">办公室</span>
+                      <span class="row-path">10.0.0.8:3000</span>
+                    </span>
+                    <span class="tag warn">未设 token</span>
+                  </button>
+
+                  <button class="row">
+                    <span class="badge remote">PI</span>
+                    <span class="row-main">
+                      <span class="row-name">树莓派</span>
+                      <span class="row-path">192.168.1.42:8080</span>
+                    </span>
+                    <span class="status-dot off"></span>
+                  </button>
+
+                  <div class="row static" style="min-height: 44px; padding-top: 0; padding-bottom: 0">
+                    <span class="row-path" style="color: #d7a34a; white-space: normal">
+                      ⚠ 树莓派 在 4 秒内没有响应。
+                    </span>
+                    <button class="inline-btn" style="height: 30px; margin-left: auto">重试</button>
+                  </div>
+
+                  <p class="hint-line">
+                    长按或点按服务端即可切换；切换失败会留在本页并显示原因。
+                  </p>
+                </div>
+                <div class="sheet-foot">
+                  <button class="btn ghost" data-goto="srv-manage">⚙ 管理服务端</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ④ Server manager list -->
+            <div class="scene" data-scene="srv-manage">
+              <div class="scrim" data-goto="srv-picker"></div>
+              <div class="sheet h-90">
+                <div class="grabber"></div>
+                <div class="sheet-head">
+                  <span class="sheet-title">
+                    管理服务端
+                    <span class="sheet-sub">点按一行编辑 · 右上角进入排序</span>
+                  </span>
+                  <button class="head-action" data-goto="srv-reorder" title="排序">
+                    <span class="icon" aria-hidden="true">⠿</span>排序
+                  </button>
+                  <button class="head-action strong" data-goto="srv-picker">完成</button>
+                </div>
+                <div class="sheet-body">
+                  <div class="section-label">当前设备</div>
+                  <div class="row static">
+                    <span class="status-dot on"></span>
+                    <span class="row-main">
+                      <span class="row-name">本机</span>
+                      <span class="row-path">本地服务 · 不可编辑或删除</span>
+                    </span>
+                    <span class="tag">内置</span>
+                  </div>
+
+                  <div class="section-label">已保存的服务端 · 4</div>
+
+                  <button class="row current" data-goto="srv-edit">
+                    <span class="status-dot on"></span>
+                    <span class="row-main">
+                      <span class="row-name">香港 VPS</span>
+                      <span class="row-path">https://hk.example.com</span>
+                    </span>
+                    <span class="tag strong">当前</span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                  </button>
+
+                  <button class="row" data-goto="srv-edit">
+                    <span class="status-dot on"></span>
+                    <span class="row-main">
+                      <span class="row-name">家里 NAS</span>
+                      <span class="row-path">192.168.1.20:8080</span>
+                    </span>
+                    <span class="tag ok">token</span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                  </button>
+
+                  <button class="row" data-goto="srv-edit">
+                    <span class="status-dot warn"></span>
+                    <span class="row-main">
+                      <span class="row-name">办公室</span>
+                      <span class="row-path">10.0.0.8:3000</span>
+                    </span>
+                    <span class="tag warn">未设 token</span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                  </button>
+
+                  <button class="row" data-goto="srv-edit">
+                    <span class="status-dot off"></span>
+                    <span class="row-main">
+                      <span class="row-name">树莓派</span>
+                      <span class="row-path">192.168.1.42:8080</span>
+                    </span>
+                    <span class="chevron" aria-hidden="true">›</span>
+                  </button>
+
+                  <p class="empty" id="srvEmpty" style="display: none">
+                    还没有添加服务端。<br />点下方按钮添加一个。
+                  </p>
+                </div>
+                <div class="sheet-foot">
+                  <button class="btn outline" data-goto="srv-edit">＋ 添加服务端</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ⑤ Server edit page -->
+            <div class="scene" data-scene="srv-edit">
+              <div class="scrim" data-goto="srv-manage"></div>
+              <div class="sheet h-90">
+                <div class="grabber"></div>
+                <div class="sheet-head" style="padding-left: 4px">
+                  <button class="back-btn" data-goto="srv-manage" aria-label="返回">‹</button>
+                  <span class="sheet-title">
+                    编辑服务端
+                    <span class="sheet-sub">改动只在本页生效，点保存才写回</span>
+                  </span>
+                </div>
+                <div class="sheet-body">
+                  <div class="form">
+                    <label class="field">
+                      <span class="field-label">名称</span>
+                      <input class="input" value="香港 VPS" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">
+                        地址
+                        <span class="tag ok" style="margin-left: auto">连接正常</span>
+                      </span>
+                      <input class="input mono" value="https://hk.example.com" />
+                      <span class="field-hint">支持 http:// 或 https://；局域网可直接填 IP:端口。</span>
+                    </label>
+
+                    <div class="field">
+                      <span class="field-label">
+                        Token
+                        <span class="tag" style="margin-left: auto">已配置</span>
+                      </span>
+                      <div class="token-row">
+                        <input class="input mono" type="password" value="hk_9f2c8a71d4" />
+                        <button class="inline-btn">清除</button>
+                      </div>
+                      <span class="field-hint">留空表示保持不变；清除后任何能访问该地址的人都是管理员。</span>
+                    </div>
+
+                    <button class="btn ghost" style="margin-top: 2px">⟳ 测试连接</button>
+
+                    <div class="test-result">
+                      <span class="ok-icon">✓</span>
+                      <span>
+                        连接正常
+                        <span class="meta">版本 0.8.2 · 延迟 42 ms · token 已验证</span>
+                      </span>
+                    </div>
+
+                    <div class="danger-zone">
+                      <div class="danger-title">危险操作</div>
+                      <button class="btn danger" data-delete-server="香港 VPS">
+                        🗑 删除此服务端
+                      </button>
+                      <p class="field-hint" style="margin-top: 8px">
+                        这是当前正在使用的服务端；保存时会先切回本机，再删除它。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div class="save-bar">
+                  <button class="btn ghost" data-goto="srv-manage">取消</button>
+                  <button class="btn solid" data-save-server>保存</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ⑥ Server reorder -->
+            <div class="scene" data-scene="srv-reorder">
+              <div class="scrim" data-goto="srv-manage"></div>
+              <div class="sheet h-80">
+                <div class="grabber"></div>
+                <div class="sheet-head">
+                  <span class="sheet-title">
+                    调整顺序
+                    <span class="sheet-sub">按住把手拖动 · 顺序会同步到其他设备</span>
+                  </span>
+                  <button class="head-action strong" data-goto="srv-manage">完成</button>
+                </div>
+                <div class="sheet-body" id="srvReorderList" style="padding-top: 8px">
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="status-dot on"></span>
+                    <span class="row-main">
+                      <span class="row-name">香港 VPS</span>
+                      <span class="row-path">https://hk.example.com</span>
+                    </span>
+                    <span class="tag strong">当前</span>
+                  </div>
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="status-dot on"></span>
+                    <span class="row-main">
+                      <span class="row-name">家里 NAS</span>
+                      <span class="row-path">192.168.1.20:8080</span>
+                    </span>
+                    <span class="tag ok">token</span>
+                  </div>
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="status-dot warn"></span>
+                    <span class="row-main">
+                      <span class="row-name">办公室</span>
+                      <span class="row-path">10.0.0.8:3000</span>
+                    </span>
+                    <span class="tag warn">未设 token</span>
+                  </div>
+                  <div class="row drag-row">
+                    <span class="drag-handle" title="按住拖动排序" aria-label="拖动排序">⠿</span>
+                    <span class="status-dot off"></span>
+                    <span class="row-main">
+                      <span class="row-name">树莓派</span>
+                      <span class="row-path">192.168.1.42:8080</span>
+                    </span>
+                  </div>
+
+                  <p class="hint-line">
+                    也可以逐条上移 / 下移（本原型未画出箭头，正式实现会保留，作为无障碍与精确调整入口）。
+                  </p>
+                </div>
+                <div class="sheet-foot">
+                  <button class="btn solid" data-goto="srv-manage">完成排序</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Confirm dialog + toast live above every scene -->
+            <div class="confirm-layer" id="confirmLayer">
+              <div class="confirm-card">
+                <div class="confirm-title" id="confirmTitle">删除</div>
+                <div class="confirm-text" id="confirmText"></div>
+                <div class="confirm-actions">
+                  <button class="btn ghost" id="confirmCancel" style="min-width: 84px">取消</button>
+                  <button class="btn danger-solid" id="confirmOk">删除</button>
+                </div>
+              </div>
+            </div>
+            <div class="toast" id="toast">已删除</div>
+          </div>
+
+          <div class="reset-row">
+            <button id="resetBtn">重置原型数据</button>
+          </div>
+        </div>
+
+        <aside class="notes">
+          <div class="note-card">
+            <h2>① 工作区：删除与排序<span class="pill">修复</span></h2>
+            <p>
+              现状：≤600px 时纵向列表被隐藏，工作区选择器只有“选择”和“添加”，
+              删除/重命名/排序完全无入口。
+            </p>
+            <ul>
+              <li>选择器标题栏加 <strong>“管理”</strong>；进入后搜索框收起，列表变为可拖动。</li>
+              <li>左侧把手拖动排序；右侧 ✎ 重命名、🗑 删除（带确认）。</li>
+              <li>默认工作区固定在最上方，只能重命名，不能拖动或删除。</li>
+              <li>点击“完成”退出管理模式；排序在松手时写回服务端。</li>
+            </ul>
+          </div>
+
+          <div class="note-card">
+            <h2>② 服务端切换<span class="pill">需确认</span></h2>
+            <p>
+              现状：唯一的入口是底部 24px 状态栏里约 18px 高的服务端小字，
+              点开后是一个贴着状态栏的小下拉菜单，行高也偏小，手机上很容易点错。
+            </p>
+            <ul>
+              <li>服务端切换改为<strong>底部抽屉</strong>，与工作区选择器一致。</li>
+              <li>每行 ≥56px，完整显示名称、地址、状态；当前项有对勾与左侧高亮。</li>
+              <li>失败的切换留在本页显示原因与“重试”，不关闭抽屉。</li>
+              <li>状态栏小字的<strong>命中区扩到 44px</strong>，视觉高度不变。</li>
+            </ul>
+          </div>
+
+          <div class="note-card">
+            <h2>③ 服务端管理<span class="pill">需确认</span></h2>
+            <p>
+              现状：手机上是“列表 38% 高 + 表单”挤在同一张底部抽屉里；
+              输入框 13px 会触发 iOS 聚焦缩放，键盘弹出后保存栏容易被遮住，
+              删除入口埋在表单最底部。
+            </p>
+            <ul>
+              <li>改成<strong>列表页 → 编辑页</strong>两级。列表每行 58px，点整行进入编辑。</li>
+              <li>编辑页独立滚动，底部保存栏固定；输入框统一 16px，避免 iOS 缩放。</li>
+              <li>“测试连接”和结果卡片放在地址/Token 之后，删除放在最底部危险区。</li>
+              <li>返回时若有未保存改动，再弹“放弃修改？”确认。</li>
+              <li>“本机”作为固定行，不可编辑/删除，打消误操作。</li>
+            </ul>
+            <div class="warnbox">
+              需要你确认：编辑页是<strong>整页推入</strong>（推荐，键盘空间最大），
+              还是保留“列表在上、表单在下”的单页结构，只放大触控目标？
+            </div>
+          </div>
+
+          <div class="note-card">
+            <h2>④ 服务端排序<span class="pill">需确认</span></h2>
+            <p>
+              现状：手机上隐藏了拖拽把手，只保留“上移 / 下移”两个按钮，
+              而且必须先点选某一行才能移动。
+            </p>
+            <ul>
+              <li>标题栏增加<strong>“排序”</strong>，进入后每行左侧出现把手。</li>
+              <li>按住把手上下拖动，松手即写回顺序；不干扰点按编辑。</li>
+              <li>上下移动按钮保留，作为无障碍与精确调整入口。</li>
+            </ul>
+            <div class="decision">
+              <strong>请确认：</strong>服务端管理是否采用这个两级结构 + 独立排序模式？
+              工作区管理模式是否也按 ① 的方式做？确认后我按原型实现。
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script>
+      // ── Scenario switching ────────────────────────────────────
+      const scenes = Array.from(document.querySelectorAll('.scene'))
+      const navButtons = Array.from(document.querySelectorAll('#scenarioNav button'))
+
+      function show(name) {
+        scenes.forEach((scene) => scene.classList.toggle('active', scene.dataset.scene === name))
+        navButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.goto === name))
+        // Clicking the dimmed backdrop of the sheet returns to the app; use the
+        // previous scene as a sane fallback rather than leaving a blank phone.
+        closeConfirm()
+      }
+
+      navButtons.forEach((btn) => btn.addEventListener('click', () => show(btn.dataset.goto)))
+      document.querySelectorAll('[data-goto]').forEach((el) => {
+        if (el.closest('#scenarioNav')) return
+        el.addEventListener('click', () => show(el.dataset.goto))
+      })
+
+      // ── Toast ────────────────────────────────────────────────
+      const toast = document.getElementById('toast')
+      let toastTimer = null
+      function showToast(text) {
+        toast.textContent = text
+        toast.classList.add('show')
+        clearTimeout(toastTimer)
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 1800)
+      }
+
+      // ── Confirm dialog ───────────────────────────────────────
+      const confirmLayer = document.getElementById('confirmLayer')
+      const confirmTitle = document.getElementById('confirmTitle')
+      const confirmText = document.getElementById('confirmText')
+      let confirmAction = null
+
+      function openConfirm(title, text, okText, action) {
+        confirmTitle.textContent = title
+        confirmText.textContent = text
+        document.getElementById('confirmOk').textContent = okText
+        confirmAction = action
+        confirmLayer.classList.add('open')
+      }
+      function closeConfirm() {
+        confirmLayer.classList.remove('open')
+        confirmAction = null
+      }
+      document.getElementById('confirmCancel').addEventListener('click', closeConfirm)
+      document.getElementById('confirmOk').addEventListener('click', () => {
+        const action = confirmAction
+        closeConfirm()
+        action?.()
+      })
+
+      // ── Drag reorder (pointer events, works with mouse and touch) ──
+      function installDrag(list) {
+        if (!list || list.dataset.dragInstalled === '1') return
+        list.dataset.dragInstalled = '1'
+
+        list.querySelectorAll('.drag-handle').forEach((handle) => {
+          handle.addEventListener('pointerdown', (e) => {
+            const row = handle.closest('.drag-row')
+            if (!row) return
+            e.preventDefault()
+
+            let active = false
+            const startY = e.clientY
+            let lastY = startY
+
+            const clearMarks = () => {
+              list
+                .querySelectorAll('.drop-before, .drop-after')
+                .forEach((r) => r.classList.remove('drop-before', 'drop-after'))
+            }
+
+            const onMove = (ev) => {
+              lastY = ev.clientY
+              if (!active && Math.abs(lastY - startY) < 6) return
+              if (!active) {
+                active = true
+                row.classList.add('dragging')
+                document.body.style.userSelect = 'none'
+              }
+
+              const rows = Array.from(list.querySelectorAll('.drag-row'))
+              let target = null
+              for (const r of rows) {
+                if (r === row) continue
+                const rect = r.getBoundingClientRect()
+                if (lastY < rect.top + rect.height / 2) {
+                  target = { row: r, where: 'before' }
+                  break
+                }
+              }
+              if (!target) {
+                const last = rows[rows.length - 1]
+                if (last && last !== row) target = { row: last, where: 'after' }
+              }
+
+              clearMarks()
+              if (!target) return
+              target.row.classList.add(target.where === 'before' ? 'drop-before' : 'drop-after')
+              if (target.where === 'before') list.insertBefore(row, target.row)
+              else list.insertBefore(row, target.row.nextSibling)
+
+              // Keep the dragged row under the finger while the sheet scrolls.
+              const sheetBody = list.closest('.sheet-body')
+              if (sheetBody) {
+                const bounds = sheetBody.getBoundingClientRect()
+                if (lastY > bounds.bottom - 54) sheetBody.scrollTop += 12
+                else if (lastY < bounds.top + 54) sheetBody.scrollTop -= 12
+              }
+            }
+
+            const onUp = () => {
+              document.removeEventListener('pointermove', onMove)
+              document.removeEventListener('pointerup', onUp)
+              document.removeEventListener('pointercancel', onUp)
+              row.classList.remove('dragging')
+              document.body.style.userSelect = ''
+              clearMarks()
+              if (active) showToast('顺序已更新（原型演示）')
+            }
+
+            document.addEventListener('pointermove', onMove)
+            document.addEventListener('pointerup', onUp)
+            document.addEventListener('pointercancel', onUp)
+          })
+        })
+      }
+
+      const wsList = document.getElementById('wsManageList')
+      const srvList = document.getElementById('srvReorderList')
+      installDrag(wsList)
+      installDrag(srvList)
+
+      // ── Workspace delete demo ────────────────────────────────
+      document.querySelectorAll('[data-delete-ws]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const name = btn.dataset.deleteWs
+          openConfirm('删除工作区', `确定要删除工作区「${name}」吗？该工作区的终端会保留。`, '删除', () => {
+            btn.closest('.drag-row')?.remove()
+            showToast(`已删除「${name}」（原型演示）`)
+          })
+        })
+      })
+
+      // ── Server actions demo ──────────────────────────────────
+      document.querySelectorAll('[data-delete-server]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const name = btn.dataset.deleteServer
+          openConfirm(
+            '删除服务端',
+            `删除服务端「${name}」？保存后会先切回本机，再将它从列表中移除。`,
+            '删除',
+            () => {
+              show('srv-manage')
+              showToast(`已删除「${name}」（原型演示）`)
+            }
+          )
+        })
+      })
+
+      document.querySelectorAll('[data-save-server]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          show('srv-manage')
+          showToast('已保存（原型演示）')
+        })
+      })
+
+      // ── Reset demo ───────────────────────────────────────────
+      const initials = new Map()
+      ;[wsList, srvList].forEach((list) => initials.set(list, list.innerHTML))
+
+      document.getElementById('resetBtn').addEventListener('click', () => {
+        for (const [list, html] of initials) {
+          list.innerHTML = html
+          delete list.dataset.dragInstalled
+          installDrag(list)
+        }
+        document.querySelectorAll('[data-delete-ws]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const name = btn.dataset.deleteWs
+            openConfirm('删除工作区', `确定要删除工作区「${name}」吗？该工作区的终端会保留。`, '删除', () => {
+              btn.closest('.drag-row')?.remove()
+              showToast(`已删除「${name}」（原型演示）`)
+            })
+          })
+        })
+        showToast('原型已重置')
+      })
+    </script>
+  </body>
+</html>

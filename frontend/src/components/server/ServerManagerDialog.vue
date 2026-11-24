@@ -1,19 +1,73 @@
 <template>
   <BaseDialog
     :visible="managerOpen"
-    :title="t('server.managerTitle')"
+    :title="dialogTitle"
     size="xl"
     dialog-class="srv-mgr-dialog"
+    :dialog-style="dialogStyle"
     :variant="isMobile ? 'bottom-sheet' : 'modal'"
     @close="requestClose"
   >
+    <template v-if="isMobile && mobilePane === 'edit'" #header-leading>
+      <button
+        class="srv-mgr-back"
+        type="button"
+        :aria-label="t('server.back')"
+        @click="backToMobileList"
+      >
+        <ArrowLeft :size="20" />
+      </button>
+    </template>
+    <template v-if="isMobile" #header-extra>
+      <button
+        v-if="mobilePane === 'list' && drafts.length > 1"
+        class="srv-mgr-head-action"
+        type="button"
+        @click="mobilePane = 'reorder'"
+      >
+        <ArrowUpDown :size="15" />
+        <span>{{ t('server.sort') }}</span>
+      </button>
+      <button
+        v-else-if="mobilePane === 'reorder'"
+        class="srv-mgr-head-action strong"
+        type="button"
+        @click="mobilePane = 'list'"
+      >
+        {{ t('server.done') }}
+      </button>
+    </template>
+
     <div class="srv-mgr-shell">
       <p v-if="putError" class="srv-mgr-put-error">
         <TriangleAlert :size="13" />
         <span>{{ putError.message }}</span>
       </p>
 
-      <div class="srv-mgr-body">
+      <div v-if="isMobile" class="srv-mgr-mobile">
+        <ServerManagerMobileList
+          v-if="mobilePane !== 'edit'"
+          :drafts="drafts"
+          :current-id="currentId"
+          :mode="mobilePane === 'reorder' ? 'reorder' : 'list'"
+          @select="openMobileEdit"
+          @add="onAdd"
+          @move="onMoveDraft"
+          @reorder="onReorder"
+        />
+
+        <ServerEditForm
+          v-else
+          :draft="selected"
+          :testing="isTesting"
+          :result="selectedResult"
+          @edit="onDraftEdited"
+          @test="onTest"
+          @request-delete="onRequestDelete"
+        />
+      </div>
+
+      <div v-else class="srv-mgr-body">
         <ServerManagerList
           :drafts="drafts"
           :selected-id="selectedId"
@@ -37,9 +91,16 @@
     </div>
 
     <template #footer>
-      <button class="dialog-btn" :disabled="saving" @click="requestClose">
-        {{ t('server.cancel') }}
-      </button>
+      <template v-if="isMobile && mobilePane === 'edit'">
+        <button class="dialog-btn" :disabled="saving" @click="backToMobileList">
+          {{ t('server.back') }}
+        </button>
+      </template>
+      <template v-else>
+        <button class="dialog-btn" :disabled="saving" @click="requestClose">
+          {{ t('server.cancel') }}
+        </button>
+      </template>
       <button class="dialog-btn dialog-btn--primary" :disabled="!canSave" @click="onSave">
         <span v-if="saving" class="srv-mgr-spin" />
         {{ t('server.save') }}
@@ -49,12 +110,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToast } from 'vue-toastification'
-import { TriangleAlert } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUpDown, TriangleAlert } from 'lucide-vue-next'
 import BaseDialog from '../ui/BaseDialog.vue'
 import ServerEditForm from './ServerEditForm.vue'
 import ServerManagerList from './ServerManagerList.vue'
+import ServerManagerMobileList from './ServerManagerMobileList.vue'
 import { useI18n } from '../../composables/useI18n'
 import { uiConfirm } from '../../composables/useConfirm'
 import { useIsMobile } from '../../composables/useIsMobile'
@@ -88,6 +150,21 @@ const busyOps = ref<Set<string>>(new Set())
 const results = ref<Record<string, ProbeResult>>({})
 const putError = ref<{ message: string; serverId: string | null } | null>(null)
 
+// On a phone the manager is two pages inside one sheet: the roster, then the
+// editor for one row. A single split view leaves neither half enough room once
+// the soft keyboard is up.
+type MobilePane = 'list' | 'edit' | 'reorder'
+const mobilePane = ref<MobilePane>('list')
+let editBaseline: RemoteServerDraft | null = null
+let editWasNew = false
+
+const dialogTitle = computed(() => {
+  if (!isMobile.value) return t('server.managerTitle')
+  if (mobilePane.value === 'edit') return t('server.editTitle')
+  if (mobilePane.value === 'reorder') return t('server.reorderTitle')
+  return t('server.managerTitle')
+})
+
 const selected = computed(() => drafts.value.find((d) => d.id === selectedId.value) ?? null)
 const selectedResult = computed(() =>
   selectedId.value ? (results.value[selectedId.value] ?? null) : null
@@ -116,6 +193,73 @@ function setBusy(key: string, busy: boolean) {
 const testKey = (id: string) => `test:${id}`
 const SAVE_KEY = 'save'
 
+// ── Soft keyboard ───────────────────────────────────────────────
+//
+// A fixed bottom sheet sits at the layout viewport's bottom, which on iOS is
+// *under* the keyboard. Lifting it by the visual-viewport inset keeps the
+// fields and the save bar visible while typing. The inset is only computed
+// while a text field owns focus, so Safari's collapsing toolbars do not make
+// the sheet drift upwards on their own.
+
+const kbInset = ref(0)
+const dialogStyle = computed(() =>
+  isMobile.value ? { '--srv-kb-inset': `${kbInset.value}px` } : undefined
+)
+
+function isTextField(el: Element | null): boolean {
+  return !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+}
+
+let textFocused = false
+
+function updateKeyboardInset() {
+  if (!isMobile.value || !textFocused || !isTextField(document.activeElement)) {
+    kbInset.value = 0
+    return
+  }
+  const viewport = window.visualViewport
+  kbInset.value = viewport
+    ? Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))
+    : 0
+}
+
+let focusOutTimer: number | undefined
+
+function onFocusIn(event: FocusEvent) {
+  if (!isTextField(event.target as Element | null)) return
+  window.clearTimeout(focusOutTimer)
+  textFocused = true
+  updateKeyboardInset()
+}
+
+function onFocusOut() {
+  textFocused = false
+  window.clearTimeout(focusOutTimer)
+  // A tap on the save bar blurs the field before the click lands. Keeping the
+  // sheet lifted for one tap-length means the button does not slide out from
+  // under the finger.
+  focusOutTimer = window.setTimeout(updateKeyboardInset, 200)
+}
+
+function onViewportChange() {
+  if (textFocused) updateKeyboardInset()
+}
+
+onMounted(() => {
+  window.visualViewport?.addEventListener('resize', onViewportChange)
+  window.visualViewport?.addEventListener('scroll', onViewportChange)
+  document.addEventListener('focusin', onFocusIn)
+  document.addEventListener('focusout', onFocusOut)
+})
+
+onBeforeUnmount(() => {
+  window.clearTimeout(focusOutTimer)
+  window.visualViewport?.removeEventListener('resize', onViewportChange)
+  window.visualViewport?.removeEventListener('scroll', onViewportChange)
+  document.removeEventListener('focusin', onFocusIn)
+  document.removeEventListener('focusout', onFocusOut)
+})
+
 // ── Loading ─────────────────────────────────────────────────────
 //
 // Drafts are rebuilt from the shared roster every time the dialog opens. The
@@ -131,6 +275,10 @@ watch(
     busyOps.value = new Set()
     drafts.value = servers.value.filter((s) => !s.local).map(draftFromEntry)
     selectedId.value = drafts.value[0]?.id ?? null
+    mobilePane.value = 'list'
+    editBaseline = null
+    editWasNew = false
+    kbInset.value = 0
     baseline.value = snapshot()
     // Pick up a roster change made on another device while we were closed. The
     // drafts above are a one-time copy, so the re-read that lands afterwards
@@ -146,6 +294,58 @@ function onAdd() {
   const draft = newDraft()
   drafts.value = [...drafts.value, draft]
   selectedId.value = draft.id
+  if (isMobile.value) {
+    mobilePane.value = 'edit'
+    editBaseline = { ...draft }
+    editWasNew = true
+  }
+}
+
+function openMobileEdit(id: string) {
+  const draft = drafts.value.find((d) => d.id === id)
+  selectedId.value = id
+  editBaseline = draft ? { ...draft } : null
+  editWasNew = false
+  mobilePane.value = 'edit'
+}
+
+/**
+ * Leaving the editor. Unsaved edits to *this* row are rolled back rather than
+ * carried silently into the list, and a brand-new row is dropped even when it
+ * was not touched - an empty row would otherwise block Save forever.
+ */
+async function backToMobileList() {
+  if (!isMobile.value || mobilePane.value !== 'edit') {
+    mobilePane.value = 'list'
+    return
+  }
+
+  const draft = selected.value
+  const changed =
+    !!draft && !!editBaseline && JSON.stringify(draft) !== JSON.stringify(editBaseline)
+  if (changed) {
+    const ok = await uiConfirm(t('server.discardChanges'), {
+      title: t('server.editTitle'),
+      confirmText: t('server.discard'),
+      cancelText: t('server.cancel'),
+      danger: true,
+    })
+    if (!ok) return
+  }
+
+  if (draft && (editWasNew || changed)) {
+    if (editWasNew) {
+      drafts.value = drafts.value.filter((d) => d.id !== draft.id)
+      selectedId.value = drafts.value[0]?.id ?? null
+    } else if (editBaseline) {
+      Object.assign(draft, editBaseline)
+    }
+    results.value = omitKey(results.value, draft.id)
+  }
+
+  mobilePane.value = 'list'
+  editBaseline = null
+  editWasNew = false
 }
 
 function onReorder(fromId: string, toId: string, position: 'top' | 'bottom') {
@@ -163,6 +363,16 @@ function onReorder(fromId: string, toId: string, position: 'top' | 'bottom') {
 
 function onMove(delta: number) {
   const from = drafts.value.findIndex((d) => d.id === selectedId.value)
+  const to = from + delta
+  if (from < 0 || to < 0 || to >= drafts.value.length) return
+  const next = [...drafts.value]
+  ;[next[from], next[to]] = [next[to], next[from]]
+  drafts.value = next
+}
+
+/** The mobile reorder rows move themselves, so they name the row explicitly. */
+function onMoveDraft(id: string, delta: number) {
+  const from = drafts.value.findIndex((d) => d.id === id)
   const to = from + delta
   if (from < 0 || to < 0 || to >= drafts.value.length) return
   const next = [...drafts.value]
@@ -199,6 +409,11 @@ async function onRequestDelete() {
 
   drafts.value = drafts.value.filter((d) => d.id !== draft.id)
   selectedId.value = drafts.value[0]?.id ?? null
+  if (isMobile.value) {
+    mobilePane.value = 'list'
+    editBaseline = null
+    editWasNew = false
+  }
 }
 
 // ── Test connection ─────────────────────────────────────────────
@@ -218,10 +433,7 @@ function storedUrl(id: string): string | undefined {
 function probeRequestFor(draft: RemoteServerDraft): ProbeRequest {
   const stored = storedUrl(draft.id)
   const untouched =
-    stored !== undefined &&
-    draft.url.trim() === stored &&
-    !draft.tokenDirty &&
-    !draft.tokenCleared
+    stored !== undefined && draft.url.trim() === stored && !draft.tokenDirty && !draft.tokenCleared
   if (untouched) return { kind: 'entry', id: draft.id }
   return {
     kind: 'draft',
@@ -273,13 +485,28 @@ async function onSave() {
       putError.value = { message: result.error, serverId: result.serverId }
       // Point at the row the hub rejected, so the message and the field it is
       // about are on screen together.
-      if (result.serverId) selectedId.value = result.serverId
+      if (result.serverId) {
+        selectedId.value = result.serverId
+        // The mobile list has no form beside it; bring the rejected row's
+        // fields on screen with the message.
+        if (isMobile.value) mobilePane.value = 'edit'
+      }
       return
     }
 
     baseline.value = snapshot()
     if (result.refreshed) toast.success(t('server.saved'))
     else toast.warning(t('server.savedRefreshFailed'))
+
+    // Saving from the phone's editor returns to the roster, so another row can
+    // be edited without reopening the sheet. The roster's own Save (and the
+    // desktop dialog) still close.
+    if (isMobile.value && mobilePane.value === 'edit') {
+      mobilePane.value = 'list'
+      editBaseline = null
+      editWasNew = false
+      return
+    }
     closeServerManager()
   } finally {
     setBusy(SAVE_KEY, false)
@@ -309,10 +536,58 @@ async function requestClose() {
 }
 /* The sheet needs its own limits: `--xl`'s `max-width: 94vw` would otherwise
    beat the variant's `width: 100%` and leave the sheet wider than the
-   backdrop's inset, and a phone has more vertical room to give. */
+   backdrop's inset, and a phone has more vertical room to give. The visual
+   viewport inset lifts the sheet above the soft keyboard so the sticky save
+   bar stays reachable. */
 .srv-mgr-dialog.dialog--bottom-sheet {
   max-width: none;
-  max-height: 88vh;
+  max-height: calc(88vh - var(--srv-kb-inset, 0px));
+  transform: translateY(calc(-1 * var(--srv-kb-inset, 0px)));
+}
+
+.srv-mgr-back {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-left: -8px;
+  border-radius: 10px;
+  color: var(--fg);
+  -webkit-tap-highlight-color: transparent;
+}
+.srv-mgr-back:active {
+  background: var(--bg-hover);
+}
+
+.srv-mgr-head-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  color: var(--text-muted, #888);
+  font: inherit;
+  font-size: 13px;
+  -webkit-tap-highlight-color: transparent;
+}
+.srv-mgr-head-action:active {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.srv-mgr-head-action.strong {
+  color: var(--fg-bright);
+  font-weight: 600;
+}
+
+.srv-mgr-mobile {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .srv-mgr-shell {
@@ -609,6 +884,31 @@ async function requestClose() {
   display: flex;
   gap: 8px;
 }
+.srv-mgr-test .srv-mgr-btn--test {
+  flex: 1;
+}
+
+.srv-mgr-danger {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.srv-mgr-danger-title {
+  color: var(--text-muted, #888);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.srv-mgr-btn--delete {
+  justify-content: center;
+  width: 100%;
+  height: 44px;
+  border-color: color-mix(in srgb, var(--color-red, #dc2626) 55%, transparent);
+  color: var(--color-red, #dc2626);
+}
 .srv-mgr-result {
   display: flex;
   flex-direction: column;
@@ -660,11 +960,30 @@ async function requestClose() {
 /* ── Mobile ───────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
+  .srv-mgr-dialog .dialog-header {
+    gap: 4px;
+    padding: 8px 8px 0 12px;
+  }
+  .srv-mgr-dialog .dialog-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .srv-mgr-dialog .dialog-footer {
+    padding-top: 8px;
+  }
+  .srv-mgr-dialog .dialog-footer .dialog-btn {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  /* The desktop split view is not used here, but keep it sane if a caller
+     forces it at this width. */
   .srv-mgr-body {
     flex-direction: column;
   }
-  /* The list shares the sheet with the form, so cap it rather than letting a
-     long roster push the fields off-screen. */
   .srv-mgr-list {
     width: 100%;
     min-width: 0;
@@ -675,9 +994,14 @@ async function requestClose() {
   .srv-mgr-row {
     min-height: 48px;
   }
+  /* 16px keeps iOS Safari from zooming the page when a field focuses. */
   .srv-mgr-input,
+  .srv-mgr-input--mono {
+    height: 44px;
+    font-size: 16px;
+  }
   .srv-mgr-btn {
-    height: 40px;
+    height: 44px;
   }
 }
 </style>

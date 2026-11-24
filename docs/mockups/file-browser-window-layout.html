@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dinotty 文件浏览器窗口布局示意</title>
+<style>
+  :root{
+    --bg:#0b0d11; --panel:#141821; --panel2:#1b202b; --line:#2a3140;
+    --text:#e8ecf3; --muted:#8b94a5; --accent:#4f9cf9; --green:#3ecf8e; --red:#ff6b6b; --amber:#f5b84d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 700px at 15% -10%, #1a2538 0%, transparent 55%),
+      radial-gradient(900px 600px at 100% 0%, #171a2b 0%, transparent 50%),
+      #0b0d11;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,"PingFang SC","Hiragino Sans GB",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:34px 24px 90px}
+  h1{font-size:22px;margin:0 0 6px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:13px;line-height:1.6;margin:0}
+  .sub code{background:#1a1f29;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12px;color:#c9d3e2}
+
+  /* ---------- controls ---------- */
+  .controls{
+    margin-top:22px;display:grid;grid-template-columns:auto 1fr;gap:14px 18px;
+    background:linear-gradient(180deg,#151a23,#11151d);
+    border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+  }
+  .ctl-label{font-size:12px;color:var(--muted);align-self:center;white-space:nowrap}
+  .segmented{display:inline-flex;background:#0d1117;border:1px solid var(--line);border-radius:9px;padding:3px;gap:3px;flex-wrap:wrap}
+  .segmented button{
+    appearance:none;border:0;background:transparent;color:#aab4c4;font-size:12.5px;
+    padding:7px 12px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;
+  }
+  .segmented button:hover{color:#e8ecf3}
+  .segmented button.on{background:#243044;color:#fff;box-shadow:inset 0 0 0 1px #36527a}
+  .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  select{
+    appearance:none;background:#0d1117;border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:8px 12px;font-size:12.5px;font-family:inherit;cursor:pointer;
+  }
+  input[type=range]{width:150px;accent-color:var(--accent)}
+  .num{font-variant-numeric:tabular-nums;font-size:12px;color:#c9d3e2;min-width:74px}
+  .hint{grid-column:1 / -1;font-size:12px;color:var(--muted);line-height:1.6;border-top:1px dashed var(--line);padding-top:12px}
+  .hint b{color:#cdd7e6;font-weight:600}
+
+  /* ---------- stage / screen ---------- */
+  .stage{position:relative;width:100%;max-width:1000px;margin:26px auto 0}
+  .screen{
+    position:absolute;top:0;left:0;transform-origin:top left;overflow:hidden;border-radius:16px;
+    background:
+      radial-gradient(900px 500px at 18% -10%, #2d3d5c 0%, transparent 58%),
+      radial-gradient(700px 500px at 105% 110%, #25314a 0%, transparent 55%),
+      linear-gradient(155deg,#1a2333 0%, #0e121b 55%, #0a0d13 100%);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.07), 0 46px 110px rgba(0,0,0,.65);
+  }
+  .menubar{
+    position:absolute;left:0;right:0;top:0;height:26px;display:flex;align-items:center;
+    justify-content:space-between;padding:0 14px;font-size:12px;color:#c5cedd;
+    background:rgba(12,15,21,.62);backdrop-filter:blur(18px);border-bottom:1px solid rgba(255,255,255,.05);
+    z-index:50;
+  }
+  .menubar .left{display:flex;gap:16px;align-items:center}
+  .menubar .apple{font-size:13px}
+  .menubar .right{display:flex;gap:14px;align-items:center;opacity:.85}
+  .dock{
+    position:absolute;left:50%;bottom:7px;transform:translateX(-50%);height:54px;padding:0 12px;
+    display:flex;align-items:center;gap:10px;border-radius:14px;z-index:60;
+    background:rgba(30,36,48,.5);backdrop-filter:blur(18px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);
+  }
+  .dock i{display:block;width:34px;height:34px;border-radius:9px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+
+  /* ---------- windows ---------- */
+  .win{
+    position:absolute;border-radius:10px;overflow:hidden;background:#12151b;
+    box-shadow:0 0 0 1px rgba(255,255,255,.13), 0 26px 70px rgba(0,0,0,.6);
+    transition:left .42s cubic-bezier(.22,.8,.24,1), top .42s cubic-bezier(.22,.8,.24,1),
+               width .42s cubic-bezier(.22,.8,.24,1), height .42s cubic-bezier(.22,.8,.24,1);
+  }
+  .win.main{z-index:10}
+  .win.preview{z-index:20}
+  .win__bar{
+    height:30px;display:flex;align-items:center;padding:0 10px;position:relative;
+    background:linear-gradient(180deg,#242a36,#1a1f28);border-bottom:1px solid #07090d;
+  }
+  .lights{display:flex;gap:6px}
+  .lights i{width:11px;height:11px;border-radius:50%;display:block;box-shadow:inset 0 0 0 1px rgba(0,0,0,.2)}
+  .lights i:nth-child(1){background:#ff5f57}
+  .lights i:nth-child(2){background:#febc2e}
+  .lights i:nth-child(3){background:#28c840}
+  .win__title{
+    position:absolute;left:50%;transform:translateX(-50%);font-size:12px;color:#98a3b4;
+    white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis;
+  }
+  .win__tag{
+    margin-left:auto;font-size:10px;color:#7f8b9e;border:1px solid #333c4b;border-radius:999px;
+    padding:1px 7px;font-variant-numeric:tabular-nums;z-index:2;
+  }
+  .dim{
+    position:absolute;right:8px;bottom:8px;z-index:8;font-size:11px;color:#d7deea;
+    background:rgba(7,9,13,.8);border:1px solid rgba(255,255,255,.16);border-radius:999px;
+    padding:2px 8px;font-variant-numeric:tabular-nums;backdrop-filter:blur(8px);
+  }
+
+  /* main window content */
+  .tabs{display:flex;align-items:center;gap:2px;height:32px;padding:0 8px;background:#171b23;border-bottom:1px solid #0a0c11}
+  .tab{font-size:11.5px;color:#8e98a8;padding:5px 10px;border-radius:6px 6px 0 0}
+  .tab.on{background:#0f1218;color:#dfe6f1;box-shadow:inset 0 1px 0 #3b4a60}
+  .term{padding:12px 14px;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;color:#c3ccda;overflow:hidden}
+  .term .p{color:#5fb3ff}
+  .term .pn{color:#3ecf8e}
+  .term .dim2{color:#697386}
+  .term .warn{color:#f5b84d}
+  .term .line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* file-browser content */
+  .fb{display:flex;height:calc(100% - 30px);background:#0f1218}
+  .fb__tree{width:34%;min-width:140px;max-width:260px;border-right:1px solid #1c2230;padding:10px 0;overflow:hidden;background:#0c0f15}
+  .fb__tree .head{font-size:10px;letter-spacing:.08em;color:#5d6a7e;padding:0 14px 8px;text-transform:uppercase}
+  .frow{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#aeb9c9;padding:4px 14px;white-space:nowrap;overflow:hidden}
+  .frow.sel{background:#16233a;color:#e9f0fb;box-shadow:inset 2px 0 0 #4f9cf9}
+  .frow .ico{width:13px;text-align:center;opacity:.85;flex:none}
+  .frow.sub{padding-left:28px}
+  .frow.sub2{padding-left:42px}
+  .fb__editor{flex:1;overflow:hidden;padding:11px 14px;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.75;color:#c8d2e0;background:#101319}
+  .fb__editor .ln{color:#4b5769;display:inline-block;width:26px;user-select:none}
+  .fb__editor .kw{color:#c792ea}
+  .fb__editor .str{color:#a5e075}
+  .fb__editor .fn{color:#82aaff}
+  .fb__editor .cm{color:#5d6a7e}
+  .fb__editor .lnrow{white-space:pre;overflow:hidden}
+
+  /* annotations */
+  .tb-hl{
+    position:absolute;z-index:15;pointer-events:none;border:2px dashed rgba(62,207,142,.9);
+    border-radius:8px;box-shadow:0 0 0 1px rgba(62,207,142,.18), 0 0 24px rgba(62,207,142,.12);
+    transition:all .42s cubic-bezier(.22,.8,.24,1);
+  }
+  .ann{
+    position:absolute;z-index:70;pointer-events:none;font-size:11px;padding:4px 10px;border-radius:999px;
+    background:rgba(7,9,13,.82);border:1px solid rgba(255,255,255,.16);color:#dfe6f1;
+    backdrop-filter:blur(8px);white-space:nowrap;transition:all .42s cubic-bezier(.22,.8,.24,1);
+  }
+  .ann.ok{border-color:rgba(62,207,142,.55);color:#8ff0c3}
+  .ann.amber{border-color:rgba(245,184,77,.55);color:#ffd28a}
+  .ann.red{border-color:rgba(255,107,107,.55);color:#ffb0b0}
+
+  /* readout */
+  .readout{
+    margin-top:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
+  }
+  .card{
+    background:linear-gradient(180deg,#151a23,#11151d);border:1px solid var(--line);border-radius:11px;padding:11px 13px;
+  }
+  .card .k{font-size:10.5px;color:var(--muted);letter-spacing:.04em;margin-bottom:5px}
+  .card .v{font-size:13px;color:#e3e9f2;font-variant-numeric:tabular-nums;line-height:1.45}
+  .card .v small{color:#8f9aab;font-size:11px}
+  .card.good{border-color:rgba(62,207,142,.3);background:linear-gradient(180deg,rgba(62,207,142,.08),rgba(62,207,142,.02))}
+  .card.warn{border-color:rgba(245,184,77,.3);background:linear-gradient(180deg,rgba(245,184,77,.08),rgba(245,184,77,.02))}
+
+  /* rules */
+  .rules{margin-top:30px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .rule{background:#12161e;border:1px solid var(--line);border-radius:12px;padding:15px 16px}
+  .rule .n{display:inline-flex;width:20px;height:20px;border-radius:6px;background:#22314a;color:#9dc4ff;
+    font-size:11px;align-items:center;justify-content:center;margin-right:7px;font-weight:700}
+  .rule h3{font-size:13px;margin:0 0 7px;display:flex;align-items:center}
+  .rule p{margin:0;font-size:12px;color:var(--muted);line-height:1.65}
+  .rule p b{color:#cdd7e6;font-weight:600}
+  .foot{margin-top:18px;font-size:11.5px;color:#667185;line-height:1.7}
+  @media (max-width:760px){
+    .controls{grid-template-columns:1fr}
+    .readout{grid-template-columns:1fr 1fr}
+    .rules{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Dinotty · 文件浏览器独立窗口布局示意</h1>
+  <p class="sub">所有尺寸均为逻辑像素（logical px）。切换模式 / 屏幕 / 主窗口大小，观察文件浏览器窗口如何计算尺寸与落位。</p>
+
+  <div class="controls">
+    <div class="ctl-label">布局方案</div>
+    <div class="segmented" id="modeSeg">
+      <button data-mode="current">现状：固定 960 × 640</button>
+      <button data-mode="auto" class="on">方案 A：主窗口相对 + 智能落位</button>
+      <button data-mode="fixed">方案 B：固定放大 1280 × 860</button>
+    </div>
+
+    <div class="ctl-label">屏幕</div>
+    <div class="row">
+      <select id="screenSel">
+        <option value="1440x900">1440 × 900 · MacBook 13"</option>
+        <option value="1728x1117">1728 × 1117 · MacBook 16"</option>
+        <option value="1920x1080">1920 × 1080 · 外接 24"</option>
+        <option value="2560x1440">2560 × 1440 · 外接 27"</option>
+        <option value="1280x800">1280 × 800 · 小屏</option>
+      </select>
+      <span class="num" id="screenNum"></span>
+    </div>
+
+    <div class="ctl-label">主窗口尺寸</div>
+    <div class="row">
+      <input type="range" id="mainW" min="760" max="2000" step="20" value="1000">
+      <span class="num" id="mainWNum"></span>
+      <input type="range" id="mainH" min="480" max="1200" step="20" value="700">
+      <span class="num" id="mainHNum"></span>
+    </div>
+
+    <div class="ctl-label">主窗口位置</div>
+    <div class="row">
+      <div class="segmented" id="posSeg">
+        <button data-pos="left" class="on">靠左</button>
+        <button data-pos="center">居中</button>
+        <button data-pos="right">靠右</button>
+      </div>
+      <span class="num" id="posNum"></span>
+    </div>
+
+    <div class="hint">
+      <b>方案 A 规则：</b>新建窗口时读主窗口当前尺寸和工作区 —— ① 左右任一侧放得下（≥ 480px）就并排，完全不遮挡；② 两侧都放不下就相对主窗口偏移 <b>48px</b>、尺寸取主窗口的 <b>95%</b>，保证主窗口标题栏和一条边始终可见；③ 主窗口不存在 / 全屏 / 读取失败时回退居中。
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="screen" id="screen">
+      <div class="menubar">
+        <div class="left"><span class="apple">●</span><span>Dinotty</span><span>文件</span><span>编辑</span><span>视图</span><span>窗口</span></div>
+        <div class="right"><span>100%</span><span>⌘</span><span>周一 09:41</span></div>
+      </div>
+      <div class="dock">
+        <i style="background:linear-gradient(145deg,#5b8cff,#2b4fd8)"></i>
+        <i style="background:linear-gradient(145deg,#3ecf8e,#178f5f)"></i>
+        <i style="background:linear-gradient(145deg,#ffd166,#e08c00)"></i>
+        <i style="background:linear-gradient(145deg,#ff8fab,#d6336c)"></i>
+        <i style="background:linear-gradient(145deg,#8a93a6,#4a5263)"></i>
+      </div>
+
+      <div class="win main" id="mainWin">
+        <div class="win__bar">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <span class="win__title">Dinotty</span>
+          <span class="win__tag" id="mainTag">主窗口</span>
+        </div>
+        <div class="tabs">
+          <span class="tab on">zsh · dinotty</span>
+          <span class="tab">dev</span>
+          <span class="tab">logs</span>
+        </div>
+        <div class="term">
+          <div class="line"><span class="pn">➜</span> <span class="p">~/project/dinotty</span> <span class="dim2">git status</span></div>
+          <div class="line">On branch <span class="warn">dev</span> · Your branch is up to date with 'origin/dev'.</div>
+          <div class="line"> </div>
+          <div class="line">Changes not staged for commit:</div>
+          <div class="line">  <span class="warn">modified:</span>   src-tauri/src/preview_windows.rs</div>
+          <div class="line">  <span class="warn">modified:</span>   src-tauri/src/detached_windows.rs</div>
+          <div class="line"> </div>
+          <div class="line"><span class="pn">➜</span> <span class="p">~/project/dinotty</span> <span class="dim2">pnpm test --filter frontend</span></div>
+          <div class="line"><span class="pn">✓</span> 42 files · 318 tests passed <span class="dim2">(2.4s)</span></div>
+          <div class="line"><span class="pn">➜</span> <span class="p">~/project/dinotty</span> <span class="dim2">cargo check -p dinotty</span></div>
+          <div class="line"><span class="pn">✓</span> Finished dev profile <span class="dim2">in 1.82s</span></div>
+          <div class="line"> </div>
+          <div class="line"><span class="dim2">— 主窗口继续可用，文件浏览器在旁边独立打开 —</span></div>
+        </div>
+        <span class="dim" id="mainDim"></span>
+      </div>
+
+      <div class="win preview" id="prevWin">
+        <div class="win__bar">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <span class="win__title">文件浏览器 · zsh</span>
+          <span class="win__tag" id="prevTag">独立窗口</span>
+        </div>
+        <div class="fb">
+          <aside class="fb__tree">
+            <div class="head">Explorer</div>
+            <div class="frow"><span class="ico">▾</span> project</div>
+            <div class="frow sub"><span class="ico">▾</span> src-tauri</div>
+            <div class="frow sub2"><span class="ico">▾</span> src</div>
+            <div class="frow sel" style="padding-left:56px"><span class="ico">◇</span> preview_windows.rs</div>
+            <div class="frow" style="padding-left:56px"><span class="ico">◇</span> detached_windows.rs</div>
+            <div class="frow" style="padding-left:56px"><span class="ico">◇</span> window_actions.rs</div>
+            <div class="frow" style="padding-left:56px"><span class="ico">◇</span> lib.rs</div>
+            <div class="frow sub"><span class="ico">▸</span> frontend</div>
+            <div class="frow sub"><span class="ico">▸</span> docs</div>
+            <div class="frow"><span class="ico">▸</span> scripts</div>
+            <div class="frow"><span class="ico">◇</span> Cargo.toml</div>
+            <div class="frow"><span class="ico">◇</span> README.md</div>
+          </aside>
+          <div class="fb__editor">
+            <div class="lnrow"><span class="ln">1</span><span class="kw">use</span> tauri::{AppHandle, WebviewWindowBuilder};</div>
+            <div class="lnrow"><span class="ln">2</span> </div>
+            <div class="lnrow"><span class="ln">3</span><span class="cm">// 文件浏览器窗口：尺寸跟随主窗口</span></div>
+            <div class="lnrow"><span class="ln">4</span><span class="kw">let</span> (size, pos) = <span class="fn">auxiliary_geometry</span>(</div>
+            <div class="lnrow"><span class="ln">5</span>    main_rect, work_area);</div>
+            <div class="lnrow"><span class="ln">6</span> </div>
+            <div class="lnrow"><span class="ln">7</span>WebviewWindowBuilder::<span class="fn">new</span>(app, label, url)</div>
+            <div class="lnrow"><span class="ln">8</span>    .<span class="fn">inner_size</span>(size.w, size.h)</div>
+            <div class="lnrow"><span class="ln">9</span>    .<span class="fn">position</span>(pos.x, pos.y)</div>
+            <div class="lnrow"><span class="ln">10</span>   .<span class="fn">build</span>()?;</div>
+            <div class="lnrow"><span class="ln">11</span> </div>
+            <div class="lnrow"><span class="ln">12</span><span class="cm">// 并排优先；放不下时偏移 48px</span></div>
+            <div class="lnrow"><span class="ln">13</span><span class="kw">const</span> OFFSET: <span class="fn">f64</span> = <span class="str">48.0</span>;</div>
+            <div class="lnrow"><span class="ln">14</span><span class="kw">const</span> SHRINK: <span class="fn">f64</span> = <span class="str">0.95</span>;</div>
+            <div class="lnrow"><span class="ln">15</span> </div>
+            <div class="lnrow"><span class="ln">16</span><span class="kw">fn</span> <span class="fn">auxiliary_geometry</span>(…) {</div>
+            <div class="lnrow"><span class="ln">17</span>    <span class="cm">// …</span></div>
+            <div class="lnrow"><span class="ln">18</span>}</div>
+          </div>
+        </div>
+        <span class="dim" id="prevDim"></span>
+      </div>
+
+      <div class="tb-hl" id="tbHl" style="display:none"></div>
+      <div class="ann" id="ann" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="readout">
+    <div class="card">
+      <div class="k">文件浏览器窗口</div>
+      <div class="v" id="roSize">—</div>
+    </div>
+    <div class="card">
+      <div class="k">落位方式</div>
+      <div class="v" id="roPlace">—</div>
+    </div>
+    <div class="card" id="roOverlapCard">
+      <div class="k">与主窗口重叠</div>
+      <div class="v" id="roOverlap">—</div>
+    </div>
+    <div class="card" id="roTitleCard">
+      <div class="k">主窗口标题栏</div>
+      <div class="v" id="roTitle">—</div>
+    </div>
+  </div>
+
+  <div class="rules">
+    <div class="rule">
+      <h3><span class="n">1</span>并排优先</h3>
+      <p>主窗口左侧或右侧剩余宽度 <b>≥ 480px</b> 时，文件浏览器贴边并排、高度对齐主窗口。<b>真正零重叠</b>，两块内容都能完整看到。</p>
+    </div>
+    <div class="rule">
+      <h3><span class="n">2</span>放不下就偏移</h3>
+      <p>两侧都不够宽时，取主窗口尺寸的 <b>95%</b>，相对主窗口偏移 <b>48px</b> 落下，并夹紧到屏幕工作区内。主窗口标题栏和一条边始终露出，不会被完全盖死。</p>
+    </div>
+    <div class="rule">
+      <h3><span class="n">3</span>兜底与尊重用户</h3>
+      <p>主窗口缺失 / 全屏 / 读取失败 → 按工作区 80% 居中，再失败回退 960×640。窗口已存在时只聚焦、<b>不重排尺寸</b>，尊重手动调整。</p>
+    </div>
+  </div>
+
+  <p class="foot">注：示意图把菜单栏、Dock、窗口装饰都做了约等比例模拟，实际实现只需在创建窗口时计算一次 size/position（内部全用 logical px，读取主窗口的 physical 值后按屏幕 scale factor 换算）。全屏 Space 或 Stage Manager 下系统会强制切换 Space，位置规则不生效，走兜底即可。</p>
+</div>
+
+<script>
+(function(){
+  const S = {
+    mode: 'auto',
+    screen: { w: 1440, h: 900 },
+    mainW: 1000,
+    mainH: 700,
+    pos: 'left'
+  };
+
+  const MENU_H = 26, DOCK_H = 68, OUTER = 36, GAP = 18, MIN_W = 480, MIN_H = 320;
+  const OFFSET = 48, SHRINK = 0.95, VISIBLE_STRIP = 40;
+
+  const $ = (id) => document.getElementById(id);
+  const stage = $('stage'), screenEl = $('screen');
+  const mainEl = $('mainWin'), prevEl = $('prevWin');
+  const tbHl = $('tbHl'), ann = $('ann');
+
+  function intersect(a, b) {
+    const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y);
+    const r = Math.min(a.x + a.w, b.x + b.w), btm = Math.min(a.y + a.h, b.y + b.h);
+    if (r <= x || btm <= y) return null;
+    return { x, y, w: r - x, h: btm - y };
+  }
+
+  function geometry() {
+    const sw = S.screen.w, sh = S.screen.h;
+    const work = { x: 0, y: MENU_H, w: sw, h: sh - MENU_H - DOCK_H };
+    const wr = work.x + work.w, wb = work.y + work.h;
+
+    const mw = Math.min(S.mainW, work.w - OUTER * 2);
+    const mh = Math.min(S.mainH, work.h - OUTER * 2);
+    let mx;
+    if (S.pos === 'left') mx = work.x + OUTER;
+    else if (S.pos === 'right') mx = wr - OUTER - mw;
+    else mx = work.x + (work.w - mw) / 2;
+    const my = work.y + OUTER;
+    const main = { x: mx, y: my, w: mw, h: mh };
+
+    let preview, kind, label;
+
+    if (S.mode === 'current') {
+      const w = Math.min(960, work.w - OUTER * 2);
+      const h = Math.min(640, work.h - OUTER * 2);
+      const x = Math.max(work.x + OUTER, work.x + (work.w - w) / 2);
+      const y = Math.max(work.y + OUTER, work.y + (work.h - h) / 2);
+      preview = { x, y, w, h };
+      kind = 'fixed';
+      label = '固定尺寸 · 居中压在主窗口上';
+    } else if (S.mode === 'fixed') {
+      const w = Math.min(1280, work.w - OUTER * 2);
+      const h = Math.min(860, work.h - OUTER * 2);
+      const x = Math.max(work.x + OUTER, work.x + (work.w - w) / 2);
+      const y = Math.max(work.y + OUTER, work.y + (work.h - h) / 2);
+      preview = { x, y, w, h };
+      kind = 'fixed';
+      label = '固定尺寸 · 居中压在主窗口上';
+    } else {
+      const desiredW = Math.min(main.w * SHRINK, work.w - OUTER * 2);
+      const desiredH = Math.min(main.h * SHRINK, work.h - OUTER * 2);
+      const rightSpace = wr - OUTER - (main.x + main.w) - GAP;
+      const leftSpace = (main.x - GAP) - (work.x + OUTER);
+
+      if (rightSpace >= MIN_W) {
+        const w = Math.min(main.w, rightSpace);
+        const h = Math.min(main.h, work.h - OUTER * 2);
+        preview = { x: main.x + main.w + GAP, y: main.y, w, h };
+        kind = 'side-right';
+        label = '右侧并排 · 零重叠';
+      } else if (leftSpace >= MIN_W) {
+        const w = Math.min(main.w, leftSpace);
+        const h = Math.min(main.h, work.h - OUTER * 2);
+        preview = { x: main.x - GAP - w, y: main.y, w, h };
+        kind = 'side-left';
+        label = '左侧并排 · 零重叠';
+      } else {
+        const goRight = rightSpace >= leftSpace;
+        let w = Math.min(desiredW, work.w - OUTER * 2);
+        let h = desiredH;
+        let x = goRight ? main.x + OFFSET : main.x + main.w - OFFSET - w;
+        let y = main.y + OFFSET;
+        x = Math.min(Math.max(x, work.x + OUTER), wr - OUTER - w);
+        y = Math.min(Math.max(y, work.y + OUTER), wb - OUTER - h);
+        preview = { x, y, w, h };
+        kind = 'offset';
+        label = goRight ? '偏移落位 · 主窗口标题栏可见' : '偏移落位 · 主窗口标题栏可见';
+      }
+    }
+    return { work, main, preview, kind, label };
+  }
+
+  function render() {
+    const g = geometry();
+    const sw = S.screen.w, sh = S.screen.h;
+    const scale = 1000 / sw;
+
+    screenEl.style.width = sw + 'px';
+    screenEl.style.height = sh + 'px';
+    screenEl.style.transform = 'scale(' + scale + ')';
+    stage.style.height = (sh * scale) + 'px';
+
+    const place = (el, r) => {
+      el.style.left = r.x + 'px';
+      el.style.top = r.y + 'px';
+      el.style.width = r.w + 'px';
+      el.style.height = r.h + 'px';
+    };
+    place(mainEl, g.main);
+    place(prevEl, g.preview);
+
+    $('mainDim').textContent = Math.round(g.main.w) + ' × ' + Math.round(g.main.h);
+    $('prevDim').textContent = Math.round(g.preview.w) + ' × ' + Math.round(g.preview.h) + ' · ' + Math.round(g.preview.x) + ',' + Math.round(g.preview.y);
+
+    // overlap
+    const ov = intersect(g.main, g.preview);
+    const ovPct = ov ? Math.round((ov.w * ov.h) / (g.preview.w * g.preview.h) * 100) : 0;
+    const tb = { x: g.main.x, y: g.main.y, w: g.main.w, h: 30 };
+    const tbOv = intersect(tb, g.preview);
+    const tbVisible = !tbOv;
+
+    // titlebar highlight
+    if (g.kind === 'offset' && tbVisible) {
+      tbHl.style.display = 'block';
+      tbHl.style.left = g.main.x + 'px';
+      tbHl.style.top = g.main.y + 'px';
+      tbHl.style.width = g.main.w + 'px';
+      tbHl.style.height = '32px';
+    } else {
+      tbHl.style.display = 'none';
+    }
+
+    // annotation bubble
+    if (g.kind === 'side-right' || g.kind === 'side-left') {
+      ann.style.display = 'block';
+      ann.className = 'ann ok';
+      ann.textContent = '✓ 完全不重叠';
+      ann.style.left = (g.preview.x + g.preview.w / 2) + 'px';
+      ann.style.top = (g.preview.y - 34) + 'px';
+      ann.style.transform = 'translateX(-50%)';
+    } else if (g.kind === 'offset') {
+      ann.style.display = 'block';
+      ann.className = 'ann amber';
+      ann.textContent = '主窗口顶部 ' + OFFSET + 'px 保持可见';
+      ann.style.left = (g.main.x + g.main.w / 2) + 'px';
+      ann.style.top = (g.main.y - 34) + 'px';
+      ann.style.transform = 'translateX(-50%)';
+    } else {
+      ann.style.display = 'block';
+      ann.className = 'ann red';
+      ann.textContent = '固定尺寸，主窗口被压住';
+      ann.style.left = (g.preview.x + g.preview.w / 2) + 'px';
+      ann.style.top = Math.max(g.preview.y - 34, 34) + 'px';
+      ann.style.transform = 'translateX(-50%)';
+    }
+
+    // readout
+    $('roSize').innerHTML = Math.round(g.preview.w) + ' × ' + Math.round(g.preview.h) +
+      ' <small>@ ' + Math.round(g.preview.x) + ',' + Math.round(g.preview.y) + '</small>';
+    const placeNames = {
+      'side-right': '右侧并排',
+      'side-left': '左侧并排',
+      'offset': '偏移落位（95% + 48px）',
+      'fixed': '固定尺寸居中'
+    };
+    $('roPlace').textContent = placeNames[g.kind];
+    $('roOverlap').innerHTML = ov
+      ? ovPct + '% <small>占文件浏览器面积</small>'
+      : '0% <small>并排</small>';
+    $('roOverlapCard').className = 'card ' + (ov ? 'warn' : 'good');
+    $('roTitle').innerHTML = tbVisible
+      ? '<span style="color:#8ff0c3">完整可见</span>'
+      : '<span style="color:#ffb0b0">被遮挡</span>';
+    $('roTitleCard').className = 'card ' + (tbVisible ? 'good' : 'warn');
+  }
+
+  // controls
+  document.querySelectorAll('#modeSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S.mode = btn.dataset.mode;
+      document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b === btn));
+      render();
+    });
+  });
+  document.querySelectorAll('#posSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S.pos = btn.dataset.pos;
+      document.querySelectorAll('#posSeg button').forEach(b => b.classList.toggle('on', b === btn));
+      render();
+    });
+  });
+  $('screenSel').addEventListener('change', (e) => {
+    const [w, h] = e.target.value.split('x').map(Number);
+    S.screen = { w, h };
+    $('screenNum').textContent = w + ' × ' + h;
+    render();
+  });
+  $('mainW').addEventListener('input', (e) => {
+    S.mainW = Number(e.target.value);
+    $('mainWNum').textContent = S.mainW + ' px';
+    render();
+  });
+  $('mainH').addEventListener('input', (e) => {
+    S.mainH = Number(e.target.value);
+    $('mainHNum').textContent = S.mainH + ' px';
+    render();
+  });
+
+  $('screenNum').textContent = S.screen.w + ' × ' + S.screen.h;
+  $('mainWNum').textContent = S.mainW + ' px';
+  $('mainHNum').textContent = S.mainH + ' px';
+  $('posNum').textContent = '距工作区边缘 ' + OUTER + 'px';
+  render();
+})();
+</script>
+</body>
+</html>

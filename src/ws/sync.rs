@@ -361,8 +361,9 @@ async fn handle_sync_socket(
                                 .tab_layouts
                                 .get(&pane_id)
                                 .and_then(|v| v.get("layout").cloned())
-                                .map(|layout| crate::session::collect_leaf_pane_ids(&layout))
-                                .unwrap_or_default();
+                                .map_or_else(Vec::new, |layout| {
+                                    crate::session::collect_leaf_pane_ids(&layout)
+                                });
                             // Each session close prunes its leaf and emits the close protocol.
                             for leaf_id in &leaf_ids {
                                 manager.close_pane(leaf_id);

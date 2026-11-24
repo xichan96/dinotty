@@ -793,6 +793,18 @@
       </section>
     </CollapsibleSection>
 
+    <CollapsibleSection :title="t('settings.diagnostics')" level="group">
+      <section class="settings-section">
+        <div class="settings-row">
+          <label>{{ t('settings.diagnostics.panel') }}</label>
+          <button class="icon-btn" type="button" @click="showDebugPanel()">
+            {{ t('settings.diagnostics.show') }}
+          </button>
+        </div>
+        <p class="settings-hint">{{ t('settings.diagnostics.hint') }}</p>
+      </section>
+    </CollapsibleSection>
+
     <!-- Log Viewer Modal -->
     <div v-if="logModalVisible" class="log-modal-overlay" @click.self="logModalVisible = false">
       <div class="log-modal">
@@ -833,6 +845,7 @@ import { useUploadManagement } from '../../composables/useUploadManagement'
 import { useTokenManagement } from '../../composables/useTokenManagement'
 import { useAccessUrl } from '../../composables/useAccessUrl'
 import { useAutostart } from '../../composables/useAutostart'
+import { showDebugPanel } from '../../composables/useDebugRecorder'
 import { uiConfirm } from '../../composables/useConfirm'
 import { onAppForegroundGain } from '../../composables/useAppForeground'
 import {

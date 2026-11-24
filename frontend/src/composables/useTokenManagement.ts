@@ -1,5 +1,5 @@
 import { nextTick, onMounted, ref, type Ref } from 'vue'
-import { apiUrl, authFetch, fetchServerToken, getAuthToken, setAuthToken } from './apiBase'
+import { authFetch, fetchServerToken, getAuthToken, hubApiUrl, setAuthToken } from './apiBase'
 import { uiConfirm } from './useConfirm'
 import { copyToClipboard } from '../utils/clipboard'
 
@@ -86,7 +86,9 @@ export function useTokenManagement(opts: TokenManagementOptions): TokenManagemen
     tokenSaving.value = true
     tokenError.value = ''
     try {
-      const res = await authFetch(apiUrl('/api/token'), {
+      // `/api/token` is hub-only in the relay: the token being rotated is the
+      // hub's own credential, and the relay always answers 403 to this path.
+      const res = await authFetch(hubApiUrl('/api/token'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { authFetch, hubApiUrl } from './apiBase'
-import { activeServerId, LOCAL_SERVER_ID } from './activeServer'
+import { activeServerId, LOCAL_SERVER_ID, setActiveServerId } from './activeServer'
 
 /**
  * One entry in the server picker on the status bar.
@@ -111,6 +111,34 @@ export async function refreshRemoteServers(): Promise<void> {
 export async function ensureRemoteServers(): Promise<void> {
   if (status.value === 'ready' || status.value === 'loading') return
   await refreshRemoteServers()
+}
+
+/**
+ * Reset the active-server id when the hub no longer lists it.
+ *
+ * `activeServerId()` is a device-level localStorage value that survives every
+ * roster edit. If the entry it names is deleted (or the roster is replaced by
+ * another device), every `apiUrl()` call keeps its `/__srv/<id>` prefix and the
+ * hub's relay answers 404 on ordinary paths and 403 on hub-only ones. The app
+ * then looks logged out — and before the auth helpers moved to `hubApiUrl` it
+ * could not even read the login method, so switching to verification-code
+ * login appeared to have no effect.
+ *
+ * Run once after authentication, before settings and tabs load, so the rest of
+ * the boot talks to the local server again. Returns true when the id was reset.
+ * A failed roster read (offline, or 501 from a server that predates the
+ * endpoint) leaves the id alone: "we could not ask" is not "it is gone".
+ */
+export async function reconcileActiveServer(): Promise<boolean> {
+  if (activeServerId() === LOCAL_SERVER_ID) return false
+  await refreshRemoteServers()
+  if (status.value !== 'ready') return false
+  // Re-read after the await: a switch may have landed while the roster loaded.
+  const current = activeServerId()
+  if (current === LOCAL_SERVER_ID) return false
+  if (roster.value.some((s) => s.id === current)) return false
+  setActiveServerId(LOCAL_SERVER_ID)
+  return true
 }
 
 /**

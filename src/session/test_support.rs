@@ -41,6 +41,8 @@ fn stub_session_impl(cwd: PathBuf, ssh_params: Option<SshSessionParams>) -> Arc<
         status: Mutex::new(SessionStatus::Connected),
         is_connected: AtomicBool::new(true),
         size: Mutex::new((80, 24)),
+        size_owner: Mutex::new(None),
+        resize_gate: tokio::sync::Mutex::new(()),
         exited: Mutex::new(false),
         shell_type: "test".to_string(),
         shell_launch_kind: crate::platform::shell::ShellLaunchKind::Native,

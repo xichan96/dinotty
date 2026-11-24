@@ -1,8 +1,8 @@
 [workspace]
-members = ["src-tauri"]
+members = ["src-tauri", "cli"]
 
 [workspace.package]
-version = "0.31.1"
+version = "0.32.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/xichan96/dinotty"

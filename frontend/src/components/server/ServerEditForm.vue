@@ -68,16 +68,14 @@
           <span v-if="testing" class="srv-mgr-spin" />
           {{ testing ? t('server.testing') : t('server.test') }}
         </button>
-        <button class="srv-mgr-btn srv-mgr-btn--danger" @click="$emit('request-delete')">
-          <Trash2 :size="13" />
-          {{ t('server.delete') }}
-        </button>
       </div>
 
       <!-- The result belongs to the (url, token) pair that was tested, so the
            parent drops it on any edit rather than letting a stale "reachable"
            sit under a host that was just changed. -->
-      <div v-if="testing" class="srv-mgr-result"><span class="srv-mgr-spin" />{{ t('server.testing') }}</div>
+      <div v-if="testing" class="srv-mgr-result">
+        <span class="srv-mgr-spin" />{{ t('server.testing') }}
+      </div>
       <div v-else-if="result" class="srv-mgr-result" :class="resultOk ? 'ok' : 'bad'">
         <template v-if="!result.reachable">
           <span class="srv-mgr-result-line">{{ failedText }}</span>
@@ -110,6 +108,17 @@
             {{ t('server.testOldServer') }}
           </span>
         </template>
+      </div>
+
+      <div class="srv-mgr-danger">
+        <div class="srv-mgr-danger-title">{{ t('server.dangerZone') }}</div>
+        <button
+          class="srv-mgr-btn srv-mgr-btn--danger srv-mgr-btn--delete"
+          @click="$emit('request-delete')"
+        >
+          <Trash2 :size="13" />
+          {{ t('server.delete') }}
+        </button>
       </div>
     </template>
   </div>

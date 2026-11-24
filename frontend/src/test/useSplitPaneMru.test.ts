@@ -63,17 +63,21 @@ function setup() {
       { focus: vi.fn(), blur: vi.fn(), fit: vi.fn(), sendData: vi.fn() },
     ])
   ) as any
+  const webRefs = { w: { focus: vi.fn(), blur: vi.fn() } } as any
+  const filesRefs = { f: { focus: vi.fn(), blur: vi.fn() } } as any
   const subject = useSplitPane({
     tabs,
     activePaneId: ref<string | null>('tab-1'),
     termRefs,
+    webRefs,
+    filesRefs,
     genPaneId: () => 'd',
     sendSync: vi.fn(),
     sendLayoutSync: vi.fn(),
     persist: vi.fn(),
     showSplitTerminalError,
   })
-  return { tab, subject, termRefs, showSplitTerminalError }
+  return { tab, subject, termRefs, webRefs, filesRefs, showSplitTerminalError }
 }
 
 describe('useSplitPane MRU', () => {
@@ -109,6 +113,30 @@ describe('useSplitPane MRU', () => {
     expect(tab.paneMru).toEqual(['a', 'b', 'c'])
     expect(tab.activePaneId).toBe('a')
     expect(triggers.markPaneReadIfUnread).toHaveBeenCalledWith('a', 'focus')
+  })
+
+  it('focuses web and file panes through their own refs', async () => {
+    const { tab, subject, termRefs, webRefs, filesRefs } = setup()
+    tab.layout = {
+      type: 'split',
+      id: 'root',
+      direction: 'horizontal',
+      children: [
+        leaf('a'),
+        { ...leaf('w'), kind: 'web' },
+        { ...leaf('f'), kind: 'files' },
+      ] as PaneLayout[],
+      ratios: [1 / 3, 1 / 3, 1 / 3],
+    }
+
+    subject.focusPane('w')
+    await nextTick()
+    expect(webRefs.w.focus).toHaveBeenCalled()
+    expect(termRefs.a.blur).toHaveBeenCalled()
+
+    subject.focusPane('f')
+    await nextTick()
+    expect(filesRefs.f.focus).toHaveBeenCalled()
   })
 
   it('foreground-guards focus and terminal input read triggers', () => {

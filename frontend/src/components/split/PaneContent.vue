@@ -46,6 +46,8 @@
     :visible="true"
     :url="leaf.url || ''"
     :source-pane-id="leaf.sourcePaneId"
+    :is-active="isFocused"
+    @focus="emit('focus', leaf.paneId)"
     @close="emit('close', leaf.paneId)"
   />
   <div v-else class="pane-content-empty">
@@ -78,6 +80,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   register: [paneId: string, el: any]
+  focus: [paneId: string]
   titleChange: [paneId: string, title: string]
   shellInfo: [paneId: string, shell: string]
   input: [paneId: string, data: string]

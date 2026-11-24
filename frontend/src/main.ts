@@ -1,3 +1,4 @@
+import './composables/useDebugRecorder'
 import App from './App.vue'
 import { prepareRuntime, mountApp } from './bootstrap'
 import { loadAllBuiltins } from './composables/i18n/tables'

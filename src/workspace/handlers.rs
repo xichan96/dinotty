@@ -18,8 +18,9 @@ use super::remote;
 use super::search::NativeSearchRequest;
 use super::types::{
     CreateEntryBody, CreateEntryQuery, DirEntry, ListResponse, MetaResponse, MoveBody,
-    PanePathQuery, PaneQuery, PutFileBody, RenameBody, ResolveAbsResponse, ResolveQuery,
-    ResolveResponse, SearchResponse, WorkspaceListQuery, WorkspaceSearchBody,
+    PanePathQuery, PaneQuery, PreviewTokenBody, PreviewTokenResponse, PutFileBody, RenameBody,
+    ResolveAbsResponse, ResolveQuery, ResolveResponse, SearchResponse, WorkspaceListQuery,
+    WorkspaceSearchBody,
 };
 use super::util::{
     detect_language, get_root, is_user_path, json_err, media_kind, normalize_join, office_kind,
@@ -98,15 +99,20 @@ pub async fn workspace_list(
 fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Response {
     let outside_pane_jail = q.free || q.root.as_deref() == Some("/");
     let (raw_target, target, cwd_display) = if q.free {
-        let requested = Path::new(q.path.trim());
+        let trimmed = q.path.trim();
+        let requested = if trimmed == "~" {
+            dirs::home_dir().unwrap_or_default()
+        } else {
+            PathBuf::from(trimmed)
+        };
         if !requested.is_absolute() {
             return json_err(StatusCode::BAD_REQUEST, "path must be absolute");
         }
-        let raw = requested.to_path_buf();
+        let raw = requested.clone();
         let Ok(target) = requested.canonicalize() else {
             return json_err(StatusCode::NOT_FOUND, "not found");
         };
-        let cwd = target.to_string_lossy().into_owned();
+        let cwd = dunce::simplified(&target).to_string_lossy().into_owned();
         (raw, target, cwd)
     } else {
         let root = match q.root.as_deref() {
@@ -127,7 +133,7 @@ fn list_dirs_blocking(manager: &SessionManager, q: &WorkspaceListQuery) -> Respo
         } else {
             raw_target.clone()
         };
-        let cwd = root.to_string_lossy().into_owned();
+        let cwd = dunce::simplified(&root).to_string_lossy().into_owned();
         (raw_target, target, cwd)
     };
     // Sensitivity: check the raw (pre-canonicalize) path AND the canonical path.
@@ -378,6 +384,39 @@ pub async fn workspace_meta(
         message: truncated.then_some("truncated".into()),
     })
     .into_response()
+}
+
+/// Mint the token the sandboxed HTML preview uses to read its own assets.
+///
+/// The frame cannot authenticate (opaque origin, no cookie), so the host page
+/// asks for a capability scoped to the HTML file's directory and injects it as
+/// a `<base href>`. See [`super::preview_ws`] for why the sandbox is not widened
+/// instead.
+#[allow(clippy::unused_async)]
+pub async fn workspace_preview_token(
+    State(manager): State<Arc<SessionManager>>,
+    Json(body): Json<PreviewTokenBody>,
+) -> Response {
+    if ssh_session(&manager, &body.pane_id).is_some() {
+        return json_err(StatusCode::BAD_REQUEST, "not supported for SSH sessions");
+    }
+    let root = try_res!(get_root(&manager, &body.pane_id));
+    let joined = try_res!(normalize_join(&root, &body.path));
+    // The token covers the directory holding the document, so sibling `css/`,
+    // `js/` and `assets/` trees resolve no matter how the page spells them.
+    let dir = if joined.is_dir() {
+        joined
+    } else {
+        joined.parent().map_or_else(|| joined.clone(), Path::to_path_buf)
+    };
+    let Ok(dir) = dir.canonicalize() else {
+        return json_err(StatusCode::NOT_FOUND, "path not found");
+    };
+    try_res!(path_must_be_under(&root, &dir));
+    if !dir.is_dir() {
+        return json_err(StatusCode::BAD_REQUEST, "not a directory");
+    }
+    Json(PreviewTokenResponse { token: super::preview_ws::mint(&dir) }).into_response()
 }
 
 pub async fn workspace_raw(
@@ -723,5 +762,6 @@ pub async fn workspace_cwd(
     let Some(cwd) = session.cwd_for_workspace() else {
         return json_err(StatusCode::CONFLICT, "cwd_unavailable_for_backend");
     };
-    Json(serde_json::json!({ "cwd": cwd.to_string_lossy() })).into_response()
+    let cwd = dunce::simplified(&cwd).to_string_lossy().into_owned();
+    Json(serde_json::json!({ "cwd": cwd })).into_response()
 }

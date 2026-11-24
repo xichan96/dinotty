@@ -9,6 +9,7 @@ import {
   keyEventMatchesBinding,
   useKeybindings,
 } from '../composables/useKeybindings'
+import { isMacClient } from '../utils/clientPlatform'
 
 vi.mock('../composables/apiBase', () => ({
   apiUrl: (path: string) => path,
@@ -31,9 +32,11 @@ const APP_DEFAULTS = [
   ['equalizePanes', '=', false, false],
   ['focusNextPane', ']', false, false],
   ['focusPrevPane', '[', false, false],
-  ['searchTerminal', 'f', false, false],
+  ['searchTerminal', 'f', !isMacClient, false],
   ['addCursorsInFiles', 'l', true, false],
   ['switchTab', '1', false, true],
+  ['prevTab', '[', true, true],
+  ['nextTab', ']', true, true],
   ['missionControl', 'm', true, false],
   ['switchServer', 's', true, false],
   ['superviseTabs', '`', false, false],
@@ -93,10 +96,10 @@ describe('unified keybindings', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps the 23 app defaults and persisted shape unchanged', () => {
+  it('keeps the 25 app defaults and persisted shape unchanged', () => {
     const appDefs = keyBindingDefs.filter((def) => (def.kind ?? 'app') === 'app')
 
-    expect(appDefs).toHaveLength(23)
+    expect(appDefs).toHaveLength(25)
     expect(
       appDefs.map((def) => [
         def.id,
@@ -237,6 +240,29 @@ describe('unified keybindings', () => {
     )
     expect(
       keyEventMatchesBinding(keyEvent('+', { code: 'NumpadAdd', shiftKey: true }), binding)
+    ).toBe(false)
+  })
+
+  it('matches Shift+[ / Shift+] as the previous/next tab chords', () => {
+    const { getBinding } = useKeybindings()
+
+    expect(
+      keyEventMatchesBinding(
+        keyEvent('{', { code: 'BracketLeft', shiftKey: true }),
+        getBinding('prevTab')
+      )
+    ).toBe(true)
+    expect(
+      keyEventMatchesBinding(
+        keyEvent('}', { code: 'BracketRight', shiftKey: true }),
+        getBinding('nextTab')
+      )
+    ).toBe(true)
+    expect(
+      keyEventMatchesBinding(
+        keyEvent('}', { code: 'BracketRight', shiftKey: false }),
+        getBinding('nextTab')
+      )
     ).toBe(false)
   })
 

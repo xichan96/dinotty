@@ -107,7 +107,7 @@ async fn fit_then_snapshot_replays_scrollback_and_resumes_live_output() {
 
     session.broadcast("PRE"); // must be dropped while snapshot_pending
     session
-        .atomic_resize_and_snapshot_for_client(client_id, 100, 30)
+        .atomic_resize_and_snapshot_for_client(client_id, 100, 30, true)
         .await
         .expect("fit-then-snapshot must succeed");
 
@@ -164,7 +164,7 @@ async fn snapshot_content_reflects_requested_cols_and_rows() {
 
     let (client_id, mut rx) = session.add_client();
     session
-        .atomic_resize_and_snapshot_for_client(client_id, 60, 10)
+        .atomic_resize_and_snapshot_for_client(client_id, 60, 10, true)
         .await
         .expect("fit-then-snapshot must succeed");
 
@@ -206,7 +206,7 @@ async fn fit_then_snapshot_breaks_sync_mode_before_replay() {
     session.set_sync_mode(true);
     session.broadcast("BUF"); // buffered while sync is active
     session
-        .atomic_resize_and_snapshot_for_client(client_id, 90, 28)
+        .atomic_resize_and_snapshot_for_client(client_id, 90, 28, true)
         .await
         .expect("fit-then-snapshot must succeed");
 
@@ -239,7 +239,7 @@ async fn snapshot_for_unknown_or_disconnected_client_errors() {
     let session = stub_session();
 
     let err = session
-        .atomic_resize_and_snapshot_for_client(9999, 80, 24)
+        .atomic_resize_and_snapshot_for_client(9999, 80, 24, true)
         .await
         .expect_err("unknown client must be rejected");
     assert!(err.contains("not found"), "unexpected error: {err}");
@@ -247,10 +247,248 @@ async fn snapshot_for_unknown_or_disconnected_client_errors() {
     let (client_id, rx) = session.add_client();
     drop(rx); // closed channel is pruned from the client list
     let err = session
-        .atomic_resize_and_snapshot_for_client(client_id, 80, 24)
+        .atomic_resize_and_snapshot_for_client(client_id, 80, 24, true)
         .await
         .expect_err("disconnected client must be rejected");
     assert!(err.contains("not found"), "unexpected error: {err}");
+}
+
+/// Liveness net: a client that never sends `SnapshotRequest` is recovered at the
+/// session's current size by the watchdog path (`spawn_snapshot_watchdog` calls
+/// `recover_snapshot_if_pending`). Live Output must resume afterwards instead
+/// of being dropped forever.
+#[test]
+fn snapshot_recovery_clears_pending_at_current_size() {
+    let session = stub_session();
+    feed_lines(&session, 30);
+    let (client_id, mut rx) = session.add_client();
+    assert!(client_pending(&session, client_id), "add_client must start pending");
+
+    assert!(session.recover_snapshot_if_pending(client_id));
+    assert!(!client_pending(&session, client_id), "recovery must clear pending");
+
+    let events = drain(&mut rx);
+    assert!(
+        matches!(events.first(), Some(SessionClientEvent::ReplayBegin { cols: 80, rows: 24 })),
+        "recovery must replay at the current session size: {events:?}"
+    );
+    assert!(matches!(events.last(), Some(SessionClientEvent::ReplayEnd)));
+
+    session.broadcast("LIVE");
+    assert!(
+        matches!(&drain(&mut rx)[..], [SessionClientEvent::Output(data)] if data == "LIVE"),
+        "live output must resume after recovery"
+    );
+
+    // Second call is a no-op once the flag is clear.
+    assert!(!session.recover_snapshot_if_pending(client_id));
+}
+
+/// A resize attempt on an exited session must not publish geometry or tell
+/// peers about a size the backend never accepted.
+#[test]
+fn resize_on_exited_session_does_not_change_geometry_or_broadcast() {
+    let session = stub_session();
+    let (origin, _origin_rx) = add_ready_client(&session);
+    let (_peer, mut peer_rx) = add_ready_client(&session);
+    session.mark_exited();
+
+    session.apply_and_broadcast_resize(origin, 100, 30);
+
+    assert_eq!(*session.size.lock().unwrap(), (80, 24), "size must not change");
+    assert_eq!(screen_dims(&session), (80, 24), "screen must not change");
+    assert!(drain(&mut peer_rx).is_empty(), "peers must not receive a phantom resize");
+}
+
+/// The blocking resize publishes `size` and the virtual screen only after the
+/// backend accepts it, keeping the three in lockstep.
+#[test]
+fn resize_blocking_publishes_matching_size_and_screen() {
+    let session = stub_session();
+    let outcome = session.resize_blocking(100, 30).expect("stub resize must succeed");
+    assert_eq!(outcome, ResizeOutcome::Applied);
+    assert_eq!(*session.size.lock().unwrap(), (100, 30));
+    assert_eq!(screen_dims(&session), (100, 30));
+}
+
+/// Describes how the owner's grid is distributed to followers.
+/// A peer claim always wins, resizes the PTY, and notifies the old owner.
+#[tokio::test]
+async fn claim_wins_and_notifies_the_previous_owner() {
+    let session = stub_session();
+    let (origin, mut origin_rx) = add_ready_client(&session);
+    let (peer, mut peer_rx) = add_ready_client(&session);
+
+    session.claim_and_resize(origin, 100, 30).await.expect("claim must apply");
+    assert_eq!(session.size_owner_id(), Some(origin));
+    assert_eq!(*session.size.lock().unwrap(), (100, 30));
+    assert!(matches!(
+        drain(&mut peer_rx).first(),
+        Some(SessionClientEvent::Resize { cols: 100, rows: 30 })
+    ));
+
+    session.claim_and_resize(peer, 60, 20).await.expect("second claim must apply");
+    assert_eq!(session.size_owner_id(), Some(peer));
+    assert_eq!(*session.size.lock().unwrap(), (60, 20));
+    assert_eq!(screen_dims(&session), (60, 20));
+    assert!(matches!(
+        drain(&mut origin_rx).first(),
+        Some(SessionClientEvent::Resize { cols: 60, rows: 20 })
+    ));
+}
+
+/// A same-size claim moves ownership without touching the PTY, but the previous
+/// owner must still be told so it drops local ownership and can claim again.
+#[tokio::test]
+async fn same_size_claim_transfers_ownership_and_notifies_previous_owner() {
+    let session = stub_session();
+    let (owner, mut owner_rx) = add_ready_client(&session);
+    let (claimer, mut claimer_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut owner_rx);
+    let _ = drain(&mut claimer_rx);
+
+    session.claim_and_resize(claimer, 100, 30).await.expect("same-size claim must apply");
+
+    assert_eq!(*session.size.lock().unwrap(), (100, 30), "PTY must not move");
+    assert_eq!(session.size_owner_id(), Some(claimer));
+    assert!(
+        matches!(
+            drain(&mut owner_rx).first(),
+            Some(SessionClientEvent::Resize { cols: 100, rows: 30 })
+        ),
+        "previous owner must receive the ownership notice"
+    );
+
+    // Repeated same-owner claims stay silent (no claim/reclaim loop).
+    session.claim_and_resize(claimer, 100, 30).await.expect("repeat claim must apply");
+    assert!(drain(&mut owner_rx).is_empty());
+}
+
+/// The same ownership notice applies when the claim arrives as a snapshot
+/// request, which is how a reconnecting device claims.
+#[tokio::test]
+async fn same_size_claiming_snapshot_notifies_previous_owner() {
+    let session = stub_session();
+    let (owner, mut owner_rx) = add_ready_client(&session);
+    let (claimer, mut claimer_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut owner_rx);
+    let _ = drain(&mut claimer_rx);
+
+    session
+        .atomic_resize_and_snapshot_for_client(claimer, 100, 30, true)
+        .await
+        .expect("same-size claiming snapshot must succeed");
+
+    assert_eq!(*session.size.lock().unwrap(), (100, 30));
+    assert_eq!(session.size_owner_id(), Some(claimer));
+    assert!(matches!(
+        drain(&mut owner_rx).first(),
+        Some(SessionClientEvent::Resize { cols: 100, rows: 30 })
+    ));
+    assert!(matches!(
+        drain(&mut claimer_rx).first(),
+        Some(SessionClientEvent::ReplayBegin { cols: 100, rows: 30 })
+    ));
+}
+
+/// A non-owner's ordinary resize is ignored and answered with the owner size,
+/// so the follower can adopt the real PTY grid instead of drifting.
+#[tokio::test]
+async fn non_owner_resize_is_rejected_and_returns_owner_size() {
+    let session = stub_session();
+    let (owner, _owner_rx) = add_ready_client(&session);
+    let (follower, mut follower_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut follower_rx); // drop the claim broadcast
+
+    let session_for_resize = Arc::clone(&session);
+    tokio::task::spawn_blocking(move || {
+        session_for_resize.apply_and_broadcast_resize(follower, 60, 20);
+    })
+    .await
+    .expect("resize task must join");
+
+    assert_eq!(*session.size.lock().unwrap(), (100, 30), "non-owner must not resize");
+    assert_eq!(screen_dims(&session), (100, 30));
+    assert_eq!(session.size_owner_id(), Some(owner));
+    assert!(matches!(
+        drain(&mut follower_rx).first(),
+        Some(SessionClientEvent::Resize { cols: 100, rows: 30 })
+    ));
+}
+
+/// A snapshot request without an ownership claim must replay at the current
+/// owner size and leave the PTY untouched.
+#[tokio::test]
+async fn non_owner_snapshot_replays_at_owner_size() {
+    let session = stub_session();
+    let (owner, _owner_rx) = add_ready_client(&session);
+    let (follower, mut follower_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut follower_rx);
+
+    session
+        .atomic_resize_and_snapshot_for_client(follower, 60, 20, false)
+        .await
+        .expect("non-owner snapshot must succeed");
+
+    assert_eq!(*session.size.lock().unwrap(), (100, 30), "PTY must not move");
+    assert_eq!(session.size_owner_id(), Some(owner));
+    let events = drain(&mut follower_rx);
+    assert!(
+        matches!(events.first(), Some(SessionClientEvent::ReplayBegin { cols: 100, rows: 30 })),
+        "replay must use the owner size: {events:?}"
+    );
+}
+
+/// A claiming snapshot request takes ownership, resizes the PTY, and tells the
+/// previous owner to follow.
+#[tokio::test]
+async fn claiming_snapshot_resizes_and_notifies_peers() {
+    let session = stub_session();
+    let (owner, mut owner_rx) = add_ready_client(&session);
+    let (claimer, mut claimer_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+    let _ = drain(&mut owner_rx);
+    let _ = drain(&mut claimer_rx);
+
+    session
+        .atomic_resize_and_snapshot_for_client(claimer, 60, 20, true)
+        .await
+        .expect("claiming snapshot must succeed");
+
+    assert_eq!(*session.size.lock().unwrap(), (60, 20));
+    assert_eq!(session.size_owner_id(), Some(claimer));
+    assert!(matches!(
+        drain(&mut owner_rx).first(),
+        Some(SessionClientEvent::Resize { cols: 60, rows: 20 })
+    ));
+    let events = drain(&mut claimer_rx);
+    assert!(matches!(events.first(), Some(SessionClientEvent::ReplayBegin { cols: 60, rows: 20 })));
+}
+
+/// When the owner disconnects, ownership is released and the next resize wins.
+#[tokio::test]
+async fn owner_disconnect_releases_ownership() {
+    let session = stub_session();
+    let (owner, _owner_rx) = add_ready_client(&session);
+    let (next, _next_rx) = add_ready_client(&session);
+    session.claim_and_resize(owner, 100, 30).await.expect("claim must apply");
+
+    session.remove_client(owner);
+    assert_eq!(session.size_owner_id(), None);
+
+    let session_for_resize = Arc::clone(&session);
+    tokio::task::spawn_blocking(move || {
+        session_for_resize.apply_and_broadcast_resize(next, 60, 20);
+    })
+    .await
+    .expect("resize task must join");
+
+    assert_eq!(*session.size.lock().unwrap(), (60, 20));
+    assert_eq!(session.size_owner_id(), Some(next));
 }
 
 // ── concurrency ─────────────────────────────────────────────────
@@ -281,7 +519,7 @@ async fn feed_during_fit_and_snapshot_keeps_requested_dims() {
     let snapshotter = tokio::spawn(async move {
         for _ in 0..SNAPSHOTS {
             snap_session
-                .atomic_resize_and_snapshot_for_client(client_id, COLS, ROWS)
+                .atomic_resize_and_snapshot_for_client(client_id, COLS, ROWS, true)
                 .await
                 .expect("fit-then-snapshot must succeed while the reader feeds");
             assert_eq!(*snap_session.size.lock().unwrap(), (COLS, ROWS));
@@ -359,7 +597,7 @@ async fn concurrent_resize_feed_and_snapshot_storm_completes() {
         for i in 0..ITER {
             let (cols, rows) = SIZES[i % SIZES.len()];
             snap_session
-                .atomic_resize_and_snapshot_for_client(target_a, cols, rows)
+                .atomic_resize_and_snapshot_for_client(target_a, cols, rows, true)
                 .await
                 .expect("handshake A must keep succeeding under contention");
         }
@@ -369,7 +607,7 @@ async fn concurrent_resize_feed_and_snapshot_storm_completes() {
         for i in 0..ITER {
             let (cols, rows) = SIZES[SIZES.len() - 1 - (i % SIZES.len())];
             snap_session
-                .atomic_resize_and_snapshot_for_client(target_b, cols, rows)
+                .atomic_resize_and_snapshot_for_client(target_b, cols, rows, true)
                 .await
                 .expect("handshake B must keep succeeding under contention");
         }
@@ -415,10 +653,61 @@ async fn concurrent_resize_feed_and_snapshot_storm_completes() {
     // The session is still fully functional after the storm: one more
     // handshake completes and leaves a consistent geometry.
     session
-        .atomic_resize_and_snapshot_for_client(target_a, 80, 24)
+        .atomic_resize_and_snapshot_for_client(target_a, 80, 24, true)
         .await
         .expect("post-storm handshake must succeed");
     assert_eq!(*session.size.lock().unwrap(), (80, 24));
     assert_eq!(screen_dims(&session), (80, 24));
     assert!(!client_pending(&session, target_a));
+}
+
+/// The blocking resize must not publish a `size` the backend has not accepted.
+/// With the old `try_lock` implementation a contended backend silently skipped
+/// the PTY resize while `size`/the virtual screen still moved to the requested
+/// geometry, leaving the PTY and every client's grid disagreeing.
+#[test]
+fn resize_waits_for_the_backend_before_publishing_size() {
+    let session = stub_session();
+    let holder_session = Arc::clone(&session);
+    let (acquired_tx, acquired_rx) = std_mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _guard = holder_session.backend.blocking_lock();
+        acquired_tx.send(()).expect("signal lock acquisition");
+        std::thread::sleep(Duration::from_millis(300));
+    });
+    acquired_rx.recv().expect("backend lock must be acquired");
+
+    let resize_session = Arc::clone(&session);
+    let resizer = std::thread::spawn(move || resize_session.resize_blocking(100, 30));
+    // While the backend is busy the resize must still be waiting, not published.
+    std::thread::sleep(Duration::from_millis(100));
+
+    let while_contended = *session.size.lock().unwrap();
+    holder.join().unwrap();
+    let outcome = resizer.join().unwrap().expect("resize must succeed after the lock frees");
+    let after = *session.size.lock().unwrap();
+
+    assert_eq!(while_contended, (80, 24), "size published before the backend accepted it");
+    assert_eq!(outcome, ResizeOutcome::Applied);
+    assert_eq!(after, (100, 30));
+}
+
+/// The watchdog calls `recover_snapshot_if_pending` for every attached client
+/// shortly after attach. For a client that already completed its handshake this
+/// must be a pure no-op: in particular it must not end an active synchronized
+/// output (DEC 2026) block and cut a frame mid-draw. A genuinely pending client
+/// still gets its recovery replay.
+#[test]
+fn recovery_keeps_sync_mode_when_nothing_is_pending() {
+    let session = stub_session();
+    let (ready, _ready_rx) = add_ready_client(&session);
+
+    session.set_sync_mode(true);
+    assert!(!session.recover_snapshot_if_pending(ready), "nothing pending, no replay");
+    assert!(session.is_sync_active(), "no-op recovery must not break sync mode");
+
+    let (pending, mut pending_rx) = session.add_client();
+    assert!(session.recover_snapshot_if_pending(pending), "pending client must be recovered");
+    assert!(!session.is_sync_active(), "a real recovery still ends sync mode");
+    assert!(matches!(drain(&mut pending_rx).last(), Some(SessionClientEvent::ReplayEnd)));
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { previewPathFor, targetFromPreviewPath, urlToPreviewSrc } from '../utils/previewRouting'
+import {
+  isPreviewProxyUrl,
+  mountPrefix,
+  previewPathFor,
+  targetFromPreviewPath,
+  urlToPreviewSrc,
+} from '../utils/previewRouting'
 
 // base64url(origin), no padding — must match `encode_preview_target` (Rust).
 const IP80 = 'aHR0cDovLzE3Mi4yNS4yNi4yNTI6ODA'
@@ -7,6 +13,7 @@ const IP8080 = 'aHR0cDovLzE3Mi4yNS4yNi4yNTI6ODA4MA'
 const HTTPS443 = 'aHR0cHM6Ly8xNzIuMjUuMjYuMjUyOjQ0Mw'
 const HTTPS8443 = 'aHR0cHM6Ly8xNzIuMjUuMjYuMjUyOjg0NDM'
 const LOCAL5173 = 'aHR0cDovL2xvY2FsaG9zdDo1MTcz'
+const LOCAL_8999 = 'aHR0cDovLzEyNy4wLjAuMTo4OTk5'
 
 describe('previewPathFor', () => {
   it('encodes the origin into one segment and keeps the app path visible', () => {
@@ -49,6 +56,32 @@ describe('urlToPreviewSrc', () => {
   })
 })
 
+describe('already-proxied URLs', () => {
+  it('不再包裹 /api/proxy?url= 路由', () => {
+    const proxied = urlToPreviewSrc('https://wileylau.github.io/docs')
+    expect(isPreviewProxyUrl(proxied)).toBe(true)
+    expect(urlToPreviewSrc(proxied)).toBe(proxied)
+    expect(urlToPreviewSrc(proxied)).not.toContain('%253A')
+  })
+
+  it('不再包裹 /preview/<origin>/ 路由', () => {
+    const proxied = urlToPreviewSrc('http://172.25.26.252:8080/app?a=1')
+    expect(isPreviewProxyUrl(proxied)).toBe(true)
+    expect(urlToPreviewSrc(proxied)).toBe(proxied)
+  })
+
+  it('绝对 URL 形式的代理路由也不会被再次包裹', () => {
+    const proxied = 'https://wileylau.github.io/api/proxy?url=https%3A%2F%2Fgoogle.com&_t=7'
+    expect(isPreviewProxyUrl(proxied)).toBe(true)
+    expect(urlToPreviewSrc(proxied)).toBe(proxied)
+  })
+
+  it('普通 URL 不算代理路由', () => {
+    expect(isPreviewProxyUrl('https://google.com')).toBe(false)
+    expect(isPreviewProxyUrl('http://172.25.26.252')).toBe(false)
+  })
+})
+
 describe('targetFromPreviewPath', () => {
   it('round-trips the proxy route shown in the address box', () => {
     const url = 'http://10.70.11.20:8089/slaves/04403aa6fc000a00/workflow-manage'
@@ -70,5 +103,50 @@ describe('targetFromPreviewPath', () => {
   it('does not treat ordinary input as a route', () => {
     expect(targetFromPreviewPath('10.70.11.20:8089/x')).toBeNull()
     expect(targetFromPreviewPath('/preview/not-base64!/x')).toBeNull()
+  })
+})
+
+describe('mountPrefix', () => {
+  // A reverse proxy that mounts Dinotty under a path (Dojo's `/apps/<slug>/`)
+  // injects `<base>`, so `document.baseURI` carries the prefix. Proxy routes
+  // built without it resolve against the parent's root and escape the mount.
+  function withBase(href: string) {
+    const el = document.createElement('base')
+    el.href = href
+    document.head.appendChild(el)
+    return () => el.remove()
+  }
+
+  it('is empty at the origin root', () => {
+    const restore = withBase(`${location.origin}/`)
+    try {
+      expect(mountPrefix()).toBe('')
+      expect(previewPathFor('http://127.0.0.1:8999/')).toBe(`/preview/${LOCAL_8999}/`)
+    } finally {
+      restore()
+    }
+  })
+
+  it('carries the mount prefix into preview routes', () => {
+    const restore = withBase(`${location.origin}/apps/macmini/`)
+    try {
+      expect(mountPrefix()).toBe('/apps/macmini')
+      expect(previewPathFor('http://127.0.0.1:8999/')).toBe(
+        `/apps/macmini/preview/${LOCAL_8999}/`
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('carries the mount prefix into the external proxy route', () => {
+    const restore = withBase(`${location.origin}/apps/macmini/`)
+    try {
+      expect(urlToPreviewSrc('https://example.com/a')).toBe(
+        `/apps/macmini/api/proxy?url=${encodeURIComponent('https://example.com/a')}`
+      )
+    } finally {
+      restore()
+    }
   })
 })

@@ -162,7 +162,7 @@ pub(crate) fn suffixed_upload_name(base: &str, n: u32) -> String {
 
     let path = Path::new(base);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let ext = path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()));
     format!("{stem} ({n}){ext}")
 }
 
@@ -286,7 +286,7 @@ pub(crate) fn unique_path(dir: &Path, base: &str) -> PathBuf {
     }
     let p = Path::new(base);
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let ext = p.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()));
     let mut n = 1u32;
     loop {
         let cand = dir.join(format!("{stem} ({n}){ext}"));

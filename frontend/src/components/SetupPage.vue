@@ -36,7 +36,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { validateToken, apiUrl, authFetch } from '../composables/apiBase'
+import { validateToken, authFetch, hubApiUrl } from '../composables/apiBase'
 import { useI18n } from '../composables/useI18n'
 import { RefreshCw } from 'lucide-vue-next'
 
@@ -64,7 +64,9 @@ async function onSubmit() {
   loading.value = true
   error.value = ''
   try {
-    const res = await authFetch(apiUrl('/api/token'), {
+    // Hub scope: `/api/token` is in the relay's hub-only list and would 403
+    // through `/__srv/<id>`.
+    const res = await authFetch(hubApiUrl('/api/token'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: val }),

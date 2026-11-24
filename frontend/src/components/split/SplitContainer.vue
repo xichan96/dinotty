@@ -76,6 +76,7 @@
       :workspace-id="workspaceId"
       :force-web-socket="forceWebSocket"
       @register="(id: string, el: any) => emit('register', id, el)"
+      @focus="(id: string) => emit('focus', id)"
       @title-change="(id: string, title: string) => emit('titleChange', id, title)"
       @shell-info="(id: string, shell: string) => emit('shellInfo', id, shell)"
       @input="(id: string, data: string) => emit('input', id, data)"

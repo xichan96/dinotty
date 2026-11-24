@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirEntry } from '../components/workspace/TreeRows'
 
 const mocks = vi.hoisted(() => ({
-  authFetch: vi.fn(),
+  postMultipart: vi.fn(),
   getApiBase: vi.fn(async () => 'http://127.0.0.1:7681'),
   apiUrl: vi.fn((p: string) => p),
   uiConfirm: vi.fn(async () => true),
@@ -11,11 +11,16 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../composables/apiBase', () => ({
-  authFetch: mocks.authFetch,
   getApiBase: mocks.getApiBase,
   apiUrl: mocks.apiUrl,
   getAuthToken: () => 'token',
 }))
+
+vi.mock('../composables/useUpload', async () => {
+  const actual =
+    await vi.importActual<typeof import('../composables/useUpload')>('../composables/useUpload')
+  return { ...actual, postMultipartWithProgress: mocks.postMultipart }
+})
 
 vi.mock('../composables/useTransport', () => ({
   isTauri: () => false,
@@ -80,10 +85,10 @@ function makeFiles() {
 }
 
 beforeEach(() => {
-  mocks.authFetch.mockReset()
-  mocks.authFetch.mockResolvedValue({
-    ok: true,
-    json: async () => ({ saved: ['small.txt'], errors: [] }),
+  mocks.postMultipart.mockReset()
+  mocks.postMultipart.mockResolvedValue({
+    status: 200,
+    bodyText: JSON.stringify({ saved: ['small.txt'], errors: [] }),
   })
   mocks.uiConfirm.mockReset()
   mocks.uiConfirm.mockResolvedValue(true)
@@ -98,7 +103,7 @@ describe('useFileOperations upload size limit', () => {
     await ops.uploadFiles(makeFiles())
 
     expect(mocks.uiConfirm).toHaveBeenCalledTimes(1)
-    expect(mocks.authFetch).not.toHaveBeenCalled()
+    expect(mocks.postMultipart).not.toHaveBeenCalled()
   })
 
   it('filters oversized files and uploads the rest when the user confirms skip', async () => {
@@ -107,19 +112,21 @@ describe('useFileOperations upload size limit', () => {
     await ops.uploadFiles(makeFiles())
 
     expect(mocks.uiConfirm).toHaveBeenCalledTimes(1)
-    expect(mocks.authFetch).toHaveBeenCalledTimes(1)
-    const fd = mocks.authFetch.mock.calls[0][1].body as FormData
+    // One request per file: the oversized file was dropped, so only one call.
+    expect(mocks.postMultipart).toHaveBeenCalledTimes(1)
+    const fd = mocks.postMultipart.mock.calls[0][1] as FormData
     expect(fd.getAll('file')).toHaveLength(1)
     const names = fd.getAll('file').map((f) => (f as File).name)
     expect(names).toEqual(['small.txt'])
+    expect(fd.get('path')).toBe('small.txt')
   })
 
-  it('maps a 413 response to the localized rejected message', async () => {
-    mocks.authFetch.mockResolvedValue({
-      ok: false,
+  it('maps a 413 rejection to the localized rejected message', async () => {
+    // The real helper rejects (not resolves) for non-2xx; mocking it as a
+    // resolution would exercise a branch production can never reach.
+    mocks.postMultipart.mockRejectedValue({
       status: 413,
-      text: async () =>
-        JSON.stringify({ error: "file 'big.bin' exceeds upload size limit of 1 MB" }),
+      bodyText: JSON.stringify({ error: "file 'big.bin' exceeds upload size limit of 1 MB" }),
     })
     const ops = useFileOperations(makeOps())
 
@@ -131,10 +138,20 @@ describe('useFileOperations upload size limit', () => {
     )
   })
 
+  it('reports a transport failure instead of [object Object]', async () => {
+    mocks.postMultipart.mockRejectedValue({ status: 0, reason: 'network error' })
+    const ops = useFileOperations(makeOps())
+
+    await ops.uploadFiles(makeFiles())
+
+    expect(mocks.uiAlert).toHaveBeenCalledTimes(1)
+    expect(mocks.uiAlert.mock.calls[0][0]).toBe('Upload failed: network error')
+  })
+
   it('leaves per-field server errors unchanged', async () => {
-    mocks.authFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ saved: [], errors: ['write small.txt: disk error'] }),
+    mocks.postMultipart.mockResolvedValue({
+      status: 200,
+      bodyText: JSON.stringify({ saved: [], errors: ['write small.txt: disk error'] }),
     })
     const ops = useFileOperations(makeOps())
 

@@ -153,6 +153,9 @@
     @close="workspacePickerOpen = false"
     @select="onWorkspacePickerSelect"
     @add="onWorkspacePickerAdd"
+    @rename="onRenameWorkspace"
+    @delete="onWorkspacePickerDelete"
+    @reorder="onWorkspacePickerReorder"
   />
   <CreateWorkspaceDialog
     :visible="showCreateDialog || !!renamingWorkspace"
@@ -208,8 +211,14 @@ const emit = defineEmits<{
   'rename-tab': [paneId: string, title: string]
 }>()
 
-const { workspaces, defaultWorkspace, activeWorkspaceId, matchWorkspace, deleteWorkspace } =
-  useWorkspaces()
+const {
+  workspaces,
+  defaultWorkspace,
+  activeWorkspaceId,
+  matchWorkspace,
+  deleteWorkspace,
+  reorderWorkspaces,
+} = useWorkspaces()
 const { t } = useI18n()
 const session = useSessionStore()
 const ui = useUiStore()
@@ -658,6 +667,20 @@ function onRenameWorkspace(id: string) {
     id === DEFAULT_WORKSPACE_ID ? defaultWorkspace.value : workspaces.value.find((w) => w.id === id)
   if (!ws) return
   renamingWorkspace.value = ws
+}
+
+/** The mobile picker manages rows in place; both actions mirror the desktop
+ *  list's handlers so the two surfaces cannot drift apart. */
+function onWorkspacePickerDelete(id: string) {
+  deleteWorkspace(id).catch((e) => console.error('Failed to delete workspace:', e))
+}
+
+async function onWorkspacePickerReorder(ids: string[]) {
+  try {
+    await reorderWorkspaces(ids)
+  } catch (e) {
+    console.error('Failed to reorder workspaces:', e)
+  }
 }
 
 function onNewTab(cwd?: string) {

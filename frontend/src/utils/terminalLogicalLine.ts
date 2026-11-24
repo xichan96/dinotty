@@ -44,6 +44,15 @@ export interface LogicalTerminalLine {
   cells: LogicalLineCell[]
 }
 
+/** Link providers run on every hover/move. A TUI that repaints full-width rows
+ * (opencode does) leaves one soft-wrap chain spanning the whole buffer, and
+ * walking it made every hover a full-buffer scan - enough to wedge the main
+ * thread on touch, where a tap also generates mouse moves. A token never needs
+ * more than a few rows, so the join is bounded. */
+const MAX_WRAP_ROWS_BACK = 4
+const MAX_WRAP_ROWS_FORWARD = 4
+const MAX_LOGICAL_LINE_CHARS = 4096
+
 /**
  * Build the logical line containing `bufferLineNumber` (1-based, the value
  * xterm passes to link providers). Returns undefined when the row has no
@@ -58,14 +67,22 @@ export function readLogicalTerminalLine(
   if (!buffer.getLine(row)) return undefined
 
   // A continuation row carries isWrapped; walk back to the row the wrapped
-  // line started on, then forward to its last physical row.
+  // line started on, then forward to its last physical row. Stop after a few
+  // rows: the chain is unbounded in a full-width TUI.
   let first = row
-  while (first > 0 && buffer.getLine(first)?.isWrapped) first -= 1
+  for (let step = 0; step < MAX_WRAP_ROWS_BACK; step += 1) {
+    if (first <= 0 || !buffer.getLine(first)?.isWrapped) break
+    first -= 1
+  }
   let last = row
-  while (buffer.getLine(last + 1)?.isWrapped) last += 1
+  for (let step = 0; step < MAX_WRAP_ROWS_FORWARD; step += 1) {
+    if (!buffer.getLine(last + 1)?.isWrapped) break
+    last += 1
+  }
 
   const parts: string[] = []
   const cells: LogicalLineCell[] = []
+  let charCount = 0
 
   for (let y = first; y <= last; y += 1) {
     const line = buffer.getLine(y)
@@ -79,12 +96,15 @@ export function readLogicalTerminalLine(
       const width = cell.getWidth()
       // The second half of a wide glyph has width 0 and no text of its own.
       if (width === 0) continue
+      if (charCount >= MAX_LOGICAL_LINE_CHARS) break
       const chars = cell.getChars() || ' '
       for (let i = 0; i < chars.length; i += 1) {
         cells.push({ x: x + 1, y: y + 1, width: width || 1 })
       }
       parts.push(chars)
+      charCount += chars.length
     }
+    if (charCount >= MAX_LOGICAL_LINE_CHARS) break
   }
 
   const joined = parts.join('')

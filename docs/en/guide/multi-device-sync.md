@@ -31,6 +31,25 @@ Switching devices requires **no manual save**:
 4. The view is identical to the desktop, with cursor and scroll position preserved
 5. Continue typing on the phone, the desktop updates in real time
 
+## Terminal Size Ownership
+
+Each pane has a single PTY, so only one device can define its native
+`cols × rows` at a time. The **device you are actively using owns the size**:
+
+- A **trusted user gesture** claims ownership: window focus while visible,
+  a key press, a tap/click in the terminal, or a user-initiated paste.
+- The claim travels with the triggering input, so the server resizes the PTY
+  **before** processing that keystroke.
+- Every other device follows the owner's grid immediately (it may be
+  letterboxed), and never steals the size just by reconnecting, waking up,
+  or re-fitting its own layout.
+- When you pick up another device and touch it, that device claims the PTY
+  and the previous owner follows.
+
+This means “native size on the device you are using, converged within about a
+second when you switch”. Two devices cannot both be native at the same instant
+with a single PTY.
+
 ## Session Recovery
 
 After network drop, screen-off, or page refresh:

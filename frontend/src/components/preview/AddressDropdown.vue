@@ -107,6 +107,7 @@ function ctxRemoveRecent() {
         v-for="bm in bookmarks"
         :key="bm.id"
         class="address-dropdown-item"
+        @mousedown.prevent
         @click="onSelect(bm.url)"
         @contextmenu="onItemContext($event, 'bookmark', bm.id)"
       >
@@ -124,6 +125,7 @@ function ctxRemoveRecent() {
         v-for="entry in settings.recent_urls"
         :key="entry.path_or_url"
         class="address-dropdown-item"
+        @mousedown.prevent
         @click="onSelect(entry.path_or_url)"
         @contextmenu="onItemContext($event, 'recent', undefined, entry.path_or_url)"
       >

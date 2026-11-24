@@ -243,7 +243,11 @@ export class TauriIpcTransport implements Transport {
   send(msg: ClientMsg) {
     if (this._destroyed) return
     if (msg.type === 'input') {
-      const invokePromise = this._invoke('pty_write', { data: msg.data }) as Promise<void>
+      const invokePromise = this._invoke('pty_write', {
+        data: msg.data,
+        claimCols: msg.claim?.cols ?? null,
+        claimRows: msg.claim?.rows ?? null,
+      }) as Promise<void>
       void invokePromise.catch((err: unknown) => {
         const errStr = typeof err === 'string' ? err : String(err)
         if (errStr.includes('timeout') || errStr.includes('exited')) {
@@ -253,12 +257,16 @@ export class TauriIpcTransport implements Transport {
       return invokePromise
     } else if (msg.type === 'resize') {
       this._invoke('pty_resize', { cols: msg.cols, rows: msg.rows }).catch(() => {})
+    } else if (msg.type === 'claim') {
+      this._invoke('pty_claim', { cols: msg.cols, rows: msg.rows }).catch(() => {})
     } else if (msg.type === 'snapshot_request') {
-      this._invoke('pty_snapshot_request', { cols: msg.cols, rows: msg.rows }).catch(
-        (err: unknown) => {
-          console.error('pty_snapshot_request failed:', err)
-        }
-      )
+      this._invoke('pty_snapshot_request', {
+        cols: msg.cols,
+        rows: msg.rows,
+        claim: !!msg.claim,
+      }).catch((err: unknown) => {
+        console.error('pty_snapshot_request failed:', err)
+      })
     }
   }
 

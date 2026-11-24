@@ -1620,7 +1620,7 @@ dependencies = [
 
 [[package]]
 name = "dinotty-cli"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "dirs 5.0.1",
  "reqwest 0.12.28",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "dinotty-desktop"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "axum 0.7.9",
  "base64 0.22.1",
@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "dinotty-server"
-version = "0.31.1"
+version = "0.32.0"
 dependencies = [
  "arboard",
  "axum 0.7.9",

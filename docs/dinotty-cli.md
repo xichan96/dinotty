@@ -4,7 +4,7 @@ A small command-line client for a running Dinotty instance. It consolidates the
 ad-hoc scripts previously copied into skills (most notably
 `dinotty-html-viewer`) into one binary with stable output and error codes.
 
-The CLI lives in its own workspace member, [`cli/`](../cli), and depends only on
+The CLI lives in its own workspace member, [`cli/`](https://github.com/xichan96/dinotty/tree/dev/cli), and depends only on
 `reqwest` (blocking + rustls), `serde`, `serde_json`, and `dirs`.
 
 ## Install

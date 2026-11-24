@@ -794,6 +794,8 @@ mod tests {
         );
     }
 
+    // `--env` is rejected on non-POSIX platforms, so this path is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn tabs_create_payload_prefixes_env_with_the_env_binary() {
         let payload = tabs_create_payload(

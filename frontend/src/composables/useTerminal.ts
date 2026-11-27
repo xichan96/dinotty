@@ -323,6 +323,13 @@ export class TerminalInstance {
   // dictation tail replacements, but their event lifecycles must not overlap.
   private _ime229Owner: 'key' | 'tail-replacement' | null = null
   private _imeTailReplacement: { data: string; value: string; sawRaw: boolean } | null = null
+  /**
+   * Payload of a cancelled no-op dictation replacement (the engine re-inserted
+   * the exact text it was replacing). WebKit honours `preventDefault()` on
+   * `beforeinput`, so nothing reaches xterm; this only catches the case where it
+   * does not, and it is cleared on the next task so a real repeat is not eaten.
+   */
+  private _imeNoopDictation: string | null = null
   // IME composition state. Tracked via compositionstart/compositionend on the
   // xterm textarea so focusActive() can avoid .focus()/.blur()/.fit() during
   // composition - those calls interrupt the IME session and cause xterm's
@@ -744,6 +751,13 @@ export class TerminalInstance {
       let _trackedTextareaValue = ''
       textarea.addEventListener('input', ((e: Event) => {
         const ie = e as InputEvent
+        // Same no-op dictation replacement, when WebKit ignores preventDefault:
+        // xterm already forwarded it and the raw side dropped it, so this event
+        // must not arm a baseline or a rescue for text that is already there.
+        if (this._imeNoopDictation != null && ie.data === this._imeNoopDictation) {
+          this._imeNoopDictation = null
+          return
+        }
         const tailReplacement = this._imeTailReplacement
         if (tailReplacement) {
           const matches =
@@ -802,6 +816,19 @@ export class TerminalInstance {
             end === textarea.value.length &&
             this._ime229Owner !== 'key'
           ) {
+            // Dictation commits by re-inserting the draft over a selection that
+            // already holds it, sometimes the whole draft, sometimes just the
+            // last word. Replacing X with X changes nothing, but xterm forwards
+            // the payload as a fresh append, so the draft lands twice. Cancel
+            // the replacement: the textarea is already correct.
+            if (textarea.value.slice(start, end) === ie.data) {
+              e.preventDefault()
+              this._imeNoopDictation = ie.data
+              setTimeout(() => {
+                if (this._imeNoopDictation === ie.data) this._imeNoopDictation = null
+              }, 0)
+              return
+            }
             if (this._ime229Baseline == null) this._startIme229('tail-replacement')
             if (this._ime229Owner === 'tail-replacement') {
               this._imeTailReplacement = {
@@ -1308,7 +1335,15 @@ export class TerminalInstance {
     // owns the diff) and cleared the textarea. The diff then reconstructs
     // nothing; _ime229InputData still holds the authoritative committed text
     // and is the only thing preventing the whole IME word from being lost.
-    if (!data && this._ime229InputData) data = this._ime229InputData
+    //
+    // Dictation can land here too when the engine re-inserts the same draft
+    // over a selection that already held it — the textarea is unchanged, the
+    // diff is empty, and the event data is real text the terminal has not seen
+    // yet. Duplicates are prevented earlier: the no-op replacement is cancelled
+    // before it ever arms this path.
+    if (!data && this._ime229InputData) {
+      data = this._ime229InputData
+    }
     if (!data && !clearEmpty) return
     if (
       after.selectionStart !== observed.selectionStart ||
@@ -1348,6 +1383,13 @@ export class TerminalInstance {
     // key-replay dedup below must not eat them.
     if (this._wheel?.isBypassActive()) {
       this._emitInput(rawData)
+      return
+    }
+    // Cancelled no-op dictation replacement: WebKit ignored preventDefault and
+    // still handed the payload to xterm. Nothing changed in the draft, so drop
+    // the copy instead of appending it a second time.
+    if (this._imeNoopDictation != null && rawData === this._imeNoopDictation) {
+      this._imeNoopDictation = null
       return
     }
     const tailReplacement = this._imeTailReplacement

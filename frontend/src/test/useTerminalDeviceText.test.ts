@@ -469,6 +469,149 @@ describe('useTerminal device text integration', () => {
     term.destroy()
   })
 
+  it('does not re-send a dictation commit that repeats the whole draft', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '', 0, 'this is a test', 'this is a test')
+    dispatchTextareaInsert(
+      textarea,
+      'this is a test',
+      0,
+      'this is a test sentence',
+      'this is a test sentence'
+    )
+    await vi.advanceTimersByTimeAsync(80)
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['this is a test', ' sentence'])
+
+    // Dictation commits after a pause by re-inserting the finished draft over a
+    // selection covering it. The textarea does not change, so the snapshot diff
+    // is empty and the commit must not be sent a second time.
+    dispatchTextareaInsert(
+      textarea,
+      'this is a test sentence',
+      0,
+      'this is a test sentence',
+      'this is a test sentence'
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['this is a test', ' sentence'])
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it('does not re-send a dictation commit that repeats only the last word', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '', 0, 'this is a test', 'this is a test')
+    dispatchTextareaInsert(
+      textarea,
+      'this is a test',
+      0,
+      'this is a test sentence',
+      'this is a test sentence'
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    const draft = 'this is a test sentence'
+    dispatchTextareaInsert(textarea, draft, draft.length - 'sentence'.length, 'sentence', draft)
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['this is a test', ' sentence'])
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it('keeps a dictation commit whose text never reached the textarea', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    dispatchTextareaInsert(textarea, '', 0, 'this is a test', 'this is a test')
+
+    // The engine commits a new word over the tail, but the textarea never picks
+    // it up, so the snapshot diff is empty and the event data is the only copy.
+    textarea.value = 'this is a test'
+    textarea.setSelectionRange(10, 'this is a test'.length)
+    textarea.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        composed: true,
+        data: 'sentence',
+        inputType: 'insertText',
+        isComposing: false,
+      })
+    )
+    lastXterm().dataHandler!('sentence')
+    textarea.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        data: 'sentence',
+        inputType: 'insertText',
+        isComposing: false,
+      })
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['this is a test', 'sentence'])
+    term.destroy()
+    vi.useRealTimers()
+  })
+
+  it('still rescues a keydown-229 commit whose textarea was already cleared', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(true)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+    const keyHandler = lastXterm().keyHandler!
+
+    // WebKit's confirm keydown after compositionend: xterm already forwarded the
+    // commit while the baseline owned the diff, and the textarea is empty, so
+    // the diff reconstructs nothing and the held input data is the only copy.
+    keyHandler(new KeyboardEvent('keydown', { keyCode: 229, key: 'Process' }))
+    lastXterm().dataHandler!('你')
+    textarea.dispatchEvent(
+      new InputEvent('input', { inputType: 'insertText', data: '你', isComposing: false })
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['你'])
+    expect((term as any)._ime229Baseline).toBeNull()
+    term.destroy()
+    vi.useRealTimers()
+  })
+
   it('sends IME committed text via onData on desktop without 229 baseline interference', async () => {
     vi.useFakeTimers()
     mocks.isTauri.mockReturnValue(true)

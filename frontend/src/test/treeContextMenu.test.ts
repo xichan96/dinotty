@@ -20,8 +20,9 @@ function createContextMenu(isSsh = ref(false)) {
   function absolutePath(relativePath: string): string {
     return `/workspace/${relativePath}`
   }
-  function parentRelPath(): string {
-    return ''
+  function parentRelPath(relativePath: string): string {
+    const slash = relativePath.lastIndexOf('/')
+    return slash === -1 ? '' : relativePath.slice(0, slash)
   }
   async function ensureChildren(): Promise<void> {}
   async function deleteSelected(): Promise<boolean> {
@@ -29,7 +30,10 @@ function createContextMenu(isSsh = ref(false)) {
   }
   async function onSelectFile(): Promise<void> {}
   function onSelectDir(): void {}
-  function triggerUpload(): void {}
+  const uploadCalls: (string | undefined)[] = []
+  function triggerUpload(dir?: string): void {
+    uploadCalls.push(dir)
+  }
   async function downloadFile(): Promise<void> {}
   function translate(key: string): string {
     return key
@@ -59,7 +63,7 @@ function createContextMenu(isSsh = ref(false)) {
     paneId: () => 'test-pane',
     t: translate,
   })
-  return { contextMenu, selectedRel }
+  return { contextMenu, selectedRel, uploadCalls }
 }
 
 function contextMenuEvent(): MouseEvent {
@@ -153,5 +157,21 @@ describe('tree context menu placement and keyboard', () => {
     expect(ev.defaultPrevented).toBe(true)
     expect(contextMenu.contextMenu.value).toBeNull()
     expect(contextMenu.contextMenuStyle.value).toEqual({})
+  })
+
+  it('aims upload at the pressed row, or at its parent for a file', async () => {
+    const { contextMenu, uploadCalls } = createContextMenu()
+
+    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src/lib', isDir: true })
+    await nextTick()
+    contextMenu.ctxUpload()
+    await nextTick()
+
+    contextMenu.onTreeContextMenu({ ev: contextMenuEvent(), rel: 'src/lib/a.txt', isDir: false })
+    await nextTick()
+    contextMenu.ctxUpload()
+    await nextTick()
+
+    expect(uploadCalls).toEqual(['src/lib', 'src/lib'])
   })
 })

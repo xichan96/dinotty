@@ -612,6 +612,83 @@ describe('useTerminal device text integration', () => {
     }
   )
 
+  it('drops a key-owned 229 diff that only deletes text', () => {
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+    const keyHandler = lastXterm().keyHandler!
+
+    // iPadOS clears the helper textarea between a 229 keydown and its flush.
+    // Diffing the two then reads as "delete the whole line".
+    textarea.value = 'ABC'
+    textarea.setSelectionRange(3, 3)
+    keyHandler(new KeyboardEvent('keydown', { keyCode: 229, key: 'Process' }))
+    textarea.value = ''
+    textarea.setSelectionRange(0, 0)
+    keyHandler(new KeyboardEvent('keyup', { keyCode: 229, key: 'Process' }))
+
+    expect(input.mock.calls.map(([data]) => data)).toEqual([])
+    expect((term as any)._ime229Baseline).toBeNull()
+    term.destroy()
+  })
+
+  it('turns an iPad autocapitalisation replacement into the minimal edit', async () => {
+    vi.useFakeTimers()
+    mocks.isTauri.mockReturnValue(false)
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })
+    settings.mobile_input_mode = 'system'
+    const term = attach('p1')
+    const input = vi.fn()
+    term.onInput = input
+    const textarea = (term as any)._wrapper.querySelector(
+      '.xterm-helper-textarea'
+    ) as HTMLTextAreaElement
+
+    for (const ch of ['A', 'B', 'C']) {
+      textarea.value += ch
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+      lastXterm().dataHandler!(ch)
+      textarea.dispatchEvent(
+        new InputEvent('input', { inputType: 'insertText', data: ch, isComposing: false })
+      )
+    }
+
+    // Autocapitalisation replaces the typed word with a corrected casing.
+    textarea.dispatchEvent(
+      new InputEvent('beforeinput', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertReplacementText',
+        data: 'Abcd',
+        isComposing: false,
+      })
+    )
+    textarea.value = 'Abcd'
+    textarea.setSelectionRange(4, 4)
+    textarea.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertReplacementText',
+        data: 'Abcd',
+        isComposing: false,
+      })
+    )
+    await vi.advanceTimersByTimeAsync(80)
+
+    // Minimal edit: drop the two characters that changed, type the new ones.
+    // Two per replacement, never one per character of the accumulated textarea.
+    expect(input.mock.calls.map(([data]) => data)).toEqual(['A', 'B', 'C', '\x7f\x7fbcd'])
+    term.destroy()
+    vi.useRealTimers()
+  })
+
   it('preserves the desktop replacement-text workaround on Tauri touch input', () => {
     mocks.isTauri.mockReturnValue(true)
     Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 1 })

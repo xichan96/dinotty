@@ -29,6 +29,7 @@ import {
   hasTouchHardware,
   isDuplicateOnData,
   isShiftSymbolChar,
+  isTerminalEditWithoutText,
   isTouchDevice,
   mobileTerminalModifierActive,
   normalizeTerminalTextareaSelection,
@@ -814,9 +815,19 @@ export class TerminalInstance {
           }
         }
         if (this._composing) return
+        if (ie.inputType !== 'insertReplacementText') return
+        // iPadOS autocapitalisation and autocorrect also arrive as
+        // insertReplacementText. The snippet workaround below cannot help there:
+        // it deletes the whole accumulated textarea (one backspace per character
+        // ever typed) because xterm never clears that helper. Arm the snapshot
+        // instead and let the DOM diff turn the replacement into the minimal
+        // edit, so a casing fix cannot take a bite out of the line.
+        if (hasTouchHardware() && !isTauri()) {
+          if (this._ime229Owner == null) this._startIme229('key')
+          return
+        }
         // Only intercept insertReplacementText (macOS text replacement);
         // insertText is normal typing and must not send backspaces.
-        if (ie.inputType !== 'insertReplacementText') return
         const ranges = typeof ie.getTargetRanges === 'function' ? ie.getTargetRanges() : []
         const rangeLen =
           ranges.length > 0
@@ -1309,6 +1320,23 @@ export class TerminalInstance {
     // nothing; _ime229InputData still holds the authoritative committed text
     // and is the only thing preventing the whole IME word from being lost.
     if (!data && this._ime229InputData) data = this._ime229InputData
+    // iPadOS clears the helper textarea between the 229 keydown and its flush
+    // (autocapitalisation, dictation, focus changes). The snapshot diff then
+    // reads as "delete everything that was in the textarea", which erases the
+    // user's line. A key-owned edit with no printable text is never a real edit
+    // there, so drop it. Insertions and delete+insert corrections are
+    // untouched, and the tail-replacement owner keeps its own corrections.
+    if (
+      data &&
+      this._ime229Owner === 'key' &&
+      !this._composing &&
+      hasTouchHardware() &&
+      !isTauri() &&
+      isTerminalEditWithoutText(data)
+    ) {
+      this._clearIme229()
+      return
+    }
     if (!data && !clearEmpty) return
     if (
       after.selectionStart !== observed.selectionStart ||

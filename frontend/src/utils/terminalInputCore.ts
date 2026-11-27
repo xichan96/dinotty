@@ -188,6 +188,34 @@ export function terminalTextareaEdit(
 }
 
 /**
+ * True when a textarea diff carries no printable text, only cursor moves and
+ * backspaces. A key-owned IME snapshot that produces such an edit is the helper
+ * textarea being reset underneath us (iPadOS clears it between keydown and
+ * keyup), not an edit the user made; forwarding it deletes characters from the
+ * line. Insertions and delete+insert corrections do not match this predicate.
+ */
+export function isTerminalEditWithoutText(data: string): boolean {
+  let i = 0
+  while (i < data.length) {
+    const ch = data[i]
+    if (ch === '\x7f') {
+      i++
+      continue
+    }
+    if (
+      ch === '\x1b' &&
+      (data[i + 1] === '[' || data[i + 1] === 'O') &&
+      (data[i + 2] === 'C' || data[i + 2] === 'D')
+    ) {
+      i += 3
+      continue
+    }
+    return false
+  }
+  return data.length > 0
+}
+
+/**
  * Determine whether an incoming onData payload should be dropped because
  * it is a WKWebView multi-focus replay of the previous event. Exported
  * for unit testing.

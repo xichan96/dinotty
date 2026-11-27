@@ -4,11 +4,7 @@ import { uiConfirm } from './useConfirm'
 import { uiAlert } from './useAlert'
 import { isTauri, tauriInvoke } from './useTransport'
 import { settings } from './useSettings'
-import {
-  postMultipartWithProgress,
-  uploadErrorStatus,
-  uploadErrorText,
-} from './useUpload'
+import { postMultipartWithProgress, uploadErrorStatus, uploadErrorText } from './useUpload'
 import {
   addTask as addUploadTask,
   finishTask as finishUploadTask,
@@ -73,9 +69,16 @@ export function useFileOperations(opts: {
   emit: (event: 'navigate', path: string) => void
   t: (key: string, params?: Record<string, string | number>) => string
 }) {
-  const fileInputRef = ref<HTMLInputElement>()
+  const fileInputRef = ref<HTMLInputElement | null>(null)
   const dragCounter = ref(0)
   const dragging = computed(() => dragCounter.value > 0)
+  /**
+   * Target directory of the picker that is currently opening. The menu can be
+   * opened on an unselected row, so it cannot rely on the selection surviving
+   * until the file input reports its change. `undefined` means "use the
+   * selection" (the historic behaviour of the bare picker).
+   */
+  let pendingUploadDir: string | undefined
 
   function parentRelPath(rel: string): string {
     const i = rel.lastIndexOf('/')
@@ -98,7 +101,12 @@ export function useFileOperations(opts: {
     return rel ? `${root}/${rel}` : root
   }
 
-  function triggerUpload() {
+  /**
+   * Open the file picker. `dir` pins the destination for this pick ('' is the
+   * pane root); omit it to keep the upload aimed at the current selection.
+   */
+  function triggerUpload(dir?: string) {
+    pendingUploadDir = dir
     fileInputRef.value?.click()
   }
 
@@ -251,6 +259,10 @@ export function useFileOperations(opts: {
   async function onFilePick(ev: Event) {
     const inp = ev.target as HTMLInputElement
     const fileList = inp.files
+    // Consume the pinned destination even when the picker was cancelled, so a
+    // later bare upload does not inherit a stale folder.
+    const targetDir = pendingUploadDir
+    pendingUploadDir = undefined
     if (!fileList?.length) return
     const files: { file: File; path: string }[] = []
     for (let i = 0; i < fileList.length; i++) {
@@ -259,7 +271,7 @@ export function useFileOperations(opts: {
     }
     inp.value = ''
     try {
-      await uploadFiles(files)
+      await uploadFiles(files, targetDir)
     } catch (e) {
       console.error('[upload]', e)
     }

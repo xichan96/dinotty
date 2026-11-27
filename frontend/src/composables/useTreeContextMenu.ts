@@ -42,7 +42,7 @@ export function useTreeContextMenu(opts: {
   ) => Promise<boolean>
   onSelectFile: (rel: string) => Promise<void>
   onSelectDir: (rel: string) => void
-  triggerUpload: () => void
+  triggerUpload: (dir?: string) => void
   downloadFile: (rel: string) => Promise<void>
   paneId: () => string
   /** True when any open tab for (or under, for a directory) the path is dirty. */
@@ -301,8 +301,13 @@ export function useTreeContextMenu(opts: {
   }
 
   function ctxUpload() {
+    if (!contextMenu.value) return
+    const { rel, isDir } = contextMenu.value
     closeContextMenu()
-    nextTick(() => opts.triggerUpload())
+    // Upload into the row that was long-pressed, not into whatever happened to
+    // be selected before. Files take their parent directory.
+    const targetDir = isDir ? rel : opts.parentRelPath(rel)
+    nextTick(() => opts.triggerUpload(targetDir))
   }
 
   async function ctxDownload() {

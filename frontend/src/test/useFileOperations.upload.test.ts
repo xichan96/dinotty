@@ -17,8 +17,9 @@ vi.mock('../composables/apiBase', () => ({
 }))
 
 vi.mock('../composables/useUpload', async () => {
-  const actual =
-    await vi.importActual<typeof import('../composables/useUpload')>('../composables/useUpload')
+  const actual = await vi.importActual<typeof import('../composables/useUpload')>(
+    '../composables/useUpload'
+  )
   return { ...actual, postMultipartWithProgress: mocks.postMultipart }
 })
 
@@ -158,5 +159,33 @@ describe('useFileOperations upload size limit', () => {
     await ops.uploadFiles(makeFiles())
 
     expect(mocks.uiAlert.mock.calls[0][0]).toBe('Upload failed:\nwrite small.txt: disk error')
+  })
+})
+
+describe('useFileOperations picker target', () => {
+  const pickEvent = (files: File[]) => ({ target: { files, value: 'picked' } }) as unknown as Event
+
+  it('uploads into the directory pinned by triggerUpload', async () => {
+    const ops = useFileOperations(makeOps())
+
+    ops.triggerUpload('src/lib')
+    await ops.onFilePick(pickEvent([new File(['x'], 'x.txt')]))
+
+    const url = mocks.postMultipart.mock.calls[0][0] as string
+    expect(url).toContain('dir=src%2Flib')
+  })
+
+  it('drops the pinned directory when the picker is cancelled', async () => {
+    const options = makeOps()
+    options.selectedRel.value = 'selected-dir'
+    options.selectedIsDir.value = true
+    const ops = useFileOperations(options)
+
+    ops.triggerUpload('src')
+    await ops.onFilePick(pickEvent([]))
+    await ops.onFilePick(pickEvent([new File(['x'], 'x.txt')]))
+
+    const url = mocks.postMultipart.mock.calls[0][0] as string
+    expect(url).toContain('dir=selected-dir')
   })
 })

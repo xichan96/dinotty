@@ -68,7 +68,13 @@
           <X :size="12" />
         </button>
       </div>
-      <input ref="ops.fileInputRef" type="file" multiple class="sr-only" @change="ops.onFilePick" />
+      <input
+        :ref="setUploadInput"
+        type="file"
+        multiple
+        class="sr-only"
+        @change="ops.onFilePick"
+      />
       <div
         ref="fileWorkspaceBodyRef"
         class="file-workspace-body"
@@ -116,6 +122,7 @@
             @open-search="openSearch(true)"
             @new-file="startNewFile"
             @new-folder="startNewFolder"
+            @upload="onHeaderUpload"
             @refresh="onHeaderRefresh"
             @collapse-all="collapseAll"
             @close-search="closeSearch"
@@ -276,6 +283,7 @@ import { provideTabBufferStore } from '../../composables/useTabBufferStore'
 import { saveFileWorkspaceState } from '../../composables/useFileWorkspaceState'
 import { setEditorSplitForCursorGroup } from '../../composables/useCursorGroup'
 import { useFileOperations } from '../../composables/useFileOperations'
+import { singleElRef } from '../../utils/singleElRef'
 import { useTreeContextMenu } from '../../composables/useTreeContextMenu'
 import {
   useTreeKeyboard,
@@ -500,6 +508,14 @@ const ops = useFileOperations({
   emit: (event, path) => emit(event, path),
   t,
 })
+
+/**
+ * `ref="ops.fileInputRef"` looks reasonable but Vue resolves string refs
+ * against setup-state keys only, so a dotted name lands in `$refs` and the
+ * composable's ref stays null — which made the picker open nothing. A function
+ * ref writes straight into the ref the composable reads.
+ */
+const setUploadInput = singleElRef(ops.fileInputRef)
 
 const ctxMenu = useTreeContextMenu({
   selectedRel,
@@ -981,6 +997,12 @@ onBeforeUnmount(() => {
   }
   fileWatch.disconnectTreeWatchSocket()
 })
+
+/** Header upload: aim at the selected directory, otherwise the browser root. */
+function onHeaderUpload() {
+  const dir = selectedIsDir.value && selectedRel.value ? selectedRel.value : ''
+  ops.triggerUpload(dir)
+}
 
 /** Absolute path of the current selection, or the browser root when nothing is
  *  selected. Used by the native window shell to carry its location when it is

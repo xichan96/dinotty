@@ -52,7 +52,7 @@ After an SSH connection is established, the workspace file browser switches to S
 - **Browse**: remote directory tree expands
 - **Edit**: double-click to download to a temp cache, edit with Monaco
 - **Save**: auto-uploads back to remote on save
-- **Upload**: drag local files into the file browser, or use the upload icon in the tree header / right-click -> Upload Files
+- **Upload**: drag local files into the file browser, or right-click -> Upload Files
 - **Download**: right-click a file -> Download
 - **Delete / Rename**: via the right-click menu
 

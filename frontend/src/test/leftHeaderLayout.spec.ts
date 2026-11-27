@@ -12,17 +12,17 @@ describe('leftHeaderTier', () => {
     expect(leftHeaderTier(Number.NaN)).toBe('full')
   })
 
-  it('keeps every action inline at 270px and above', () => {
-    expect(leftHeaderTier(270)).toBe('full')
+  it('keeps every action inline at 250px and above', () => {
+    expect(leftHeaderTier(250)).toBe('full')
     expect(leftHeaderTier(320)).toBe('full')
   })
 
-  it('moves the trailing actions into the menu between 210 and 269', () => {
-    expect(leftHeaderTier(269)).toBe('compact')
+  it('moves the trailing actions into the menu between 210 and 249', () => {
+    expect(leftHeaderTier(249)).toBe('compact')
     expect(leftHeaderTier(210)).toBe('compact')
   })
 
-  it('also hides search and upload between 170 and 209', () => {
+  it('also hides search between 170 and 209', () => {
     expect(leftHeaderTier(209)).toBe('tight')
     expect(leftHeaderTier(170)).toBe('tight')
   })
@@ -44,36 +44,18 @@ describe('hiddenTreeActions', () => {
     expect(hidden('compact')).toEqual(['new-file', 'new-folder', 'collapse'])
   })
 
-  it('adds search and upload in tight', () => {
-    expect(hidden('tight')).toEqual(['search', 'new-file', 'new-folder', 'upload', 'collapse'])
+  it('adds search in tight', () => {
+    expect(hidden('tight')).toEqual(['search', 'new-file', 'new-folder', 'collapse'])
   })
 
   it('adds refresh in tiny', () => {
-    expect(hidden('tiny')).toEqual([
-      'search',
-      'new-file',
-      'new-folder',
-      'upload',
-      'refresh',
-      'collapse',
-    ])
-  })
-
-  it('keeps upload inline in compact', () => {
-    expect(hidden('compact')).not.toContain('upload')
+    expect(hidden('tiny')).toEqual(['search', 'new-file', 'new-folder', 'refresh', 'collapse'])
   })
 
   it('matches actionIsInline', () => {
     for (const tier of ['full', 'compact', 'tight', 'tiny'] as const) {
       const hiddenActions = hidden(tier)
-      for (const action of [
-        'search',
-        'new-file',
-        'new-folder',
-        'upload',
-        'refresh',
-        'collapse',
-      ] as const) {
+      for (const action of ['search', 'new-file', 'new-folder', 'refresh', 'collapse'] as const) {
         expect(actionIsInline(tier, action)).toBe(!hiddenActions.includes(action))
       }
     }

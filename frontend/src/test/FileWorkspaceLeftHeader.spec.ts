@@ -51,7 +51,6 @@ describe('FileWorkspaceLeftHeader', () => {
     await nextTick()
 
     expect(wrapper.find('[data-testid="tree-head-search"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="tree-head-upload"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="tree-head-refresh"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="tree-head-new-file"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="tree-head-new-folder"]').exists()).toBe(false)
@@ -59,7 +58,6 @@ describe('FileWorkspaceLeftHeader', () => {
 
     await wrapper.find('[data-testid="tree-head-more"]').trigger('click')
     expect(wrapper.find('[data-testid="tree-head-menu-new-file"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="tree-head-menu-upload"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="tree-head-menu-search"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="tree-head-menu-new-file"]').trigger('click')
@@ -67,32 +65,11 @@ describe('FileWorkspaceLeftHeader', () => {
     expect(wrapper.find('.fw-more-menu').exists()).toBe(false)
   })
 
-  it('tucks upload into the overflow menu when the header is tight', async () => {
-    const wrapper = mountHeader(190)
-    await nextTick()
-
-    expect(wrapper.find('[data-testid="tree-head-upload"]').exists()).toBe(false)
-
-    await wrapper.find('[data-testid="tree-head-more"]').trigger('click')
-    await wrapper.find('[data-testid="tree-head-menu-upload"]').trigger('click')
-
-    expect(wrapper.emitted('upload')).toHaveLength(1)
-  })
-
-  it('emits upload from the inline button', async () => {
-    const wrapper = mountHeader(320)
-    await nextTick()
-
-    await wrapper.find('[data-testid="tree-head-upload"]').trigger('click')
-
-    expect(wrapper.emitted('upload')).toHaveLength(1)
-  })
-
   it('keeps every action inline at full width', async () => {
     const wrapper = mountHeader(320)
     await nextTick()
 
-    for (const id of ['search', 'new-file', 'new-folder', 'upload', 'refresh', 'collapse-all']) {
+    for (const id of ['search', 'new-file', 'new-folder', 'refresh', 'collapse-all']) {
       expect(wrapper.find(`[data-testid="tree-head-${id}"]`).exists()).toBe(true)
     }
     expect(wrapper.find('[data-testid="tree-head-more"]').exists()).toBe(false)

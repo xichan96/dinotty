@@ -122,7 +122,6 @@
             @open-search="openSearch(true)"
             @new-file="startNewFile"
             @new-folder="startNewFolder"
-            @upload="onHeaderUpload"
             @refresh="onHeaderRefresh"
             @collapse-all="collapseAll"
             @close-search="closeSearch"
@@ -997,12 +996,6 @@ onBeforeUnmount(() => {
   }
   fileWatch.disconnectTreeWatchSocket()
 })
-
-/** Header upload: aim at the selected directory, otherwise the browser root. */
-function onHeaderUpload() {
-  const dir = selectedIsDir.value && selectedRel.value ? selectedRel.value : ''
-  ops.triggerUpload(dir)
-}
 
 /** Absolute path of the current selection, or the browser root when nothing is
  *  selected. Used by the native window shell to carry its location when it is

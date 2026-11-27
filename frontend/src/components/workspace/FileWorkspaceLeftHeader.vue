@@ -78,16 +78,6 @@
           <FolderPlus :size="14" />
         </button>
         <button
-          v-if="inline('upload')"
-          type="button"
-          data-testid="tree-head-upload"
-          :title="t('filePreview.uploadFiles')"
-          :aria-label="t('filePreview.uploadFiles')"
-          @click="$emit('upload')"
-        >
-          <Upload :size="14" />
-        </button>
-        <button
           v-if="inline('refresh')"
           type="button"
           data-testid="tree-head-refresh"
@@ -173,7 +163,6 @@ import {
   MoreHorizontal,
   RotateCw,
   Search,
-  Upload,
   X,
 } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
@@ -197,7 +186,6 @@ const emit = defineEmits<{
   'open-search': []
   'new-file': []
   'new-folder': []
-  upload: []
   refresh: []
   'collapse-all': []
   'close-search': []
@@ -215,7 +203,6 @@ const ACTION_META: Record<LeftHeaderAction, { icon: Component; labelKey: string 
   search: { icon: Search, labelKey: 'workspaceSearch.menuLabel' },
   'new-file': { icon: FilePlus, labelKey: 'filePreview.newFile' },
   'new-folder': { icon: FolderPlus, labelKey: 'filePreview.newFolder' },
-  upload: { icon: Upload, labelKey: 'filePreview.uploadFiles' },
   refresh: { icon: RotateCw, labelKey: 'filePreview.refresh' },
   collapse: { icon: ChevronsDownUp, labelKey: 'filePreview.collapseAll' },
 }
@@ -239,9 +226,6 @@ function runAction(action: LeftHeaderAction): void {
       break
     case 'new-folder':
       emit('new-folder')
-      break
-    case 'upload':
-      emit('upload')
       break
     case 'refresh':
       emit('refresh')

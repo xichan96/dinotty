@@ -8,13 +8,7 @@
 
 export type LeftHeaderTier = 'full' | 'compact' | 'tight' | 'tiny'
 
-export type LeftHeaderAction =
-  | 'search'
-  | 'new-file'
-  | 'new-folder'
-  | 'upload'
-  | 'refresh'
-  | 'collapse'
+export type LeftHeaderAction = 'search' | 'new-file' | 'new-folder' | 'refresh' | 'collapse'
 
 /**
  * Pick a tier from the header's rendered width.
@@ -24,9 +18,7 @@ export type LeftHeaderAction =
  */
 export function leftHeaderTier(width: number): LeftHeaderTier {
   if (!Number.isFinite(width) || width <= 0) return 'full'
-  // 270 rather than 250: the segmented switch, close button and six 24px action
-  // buttons already use ~255px, so six actions at 250 would spill horizontally.
-  if (width >= 270) return 'full'
+  if (width >= 250) return 'full'
   if (width >= 210) return 'compact'
   if (width >= 170) return 'tight'
   return 'tiny'
@@ -40,9 +32,9 @@ export function hiddenTreeActions(tier: LeftHeaderTier): LeftHeaderAction[] {
     case 'compact':
       return ['new-file', 'new-folder', 'collapse']
     case 'tight':
-      return ['search', 'new-file', 'new-folder', 'upload', 'collapse']
+      return ['search', 'new-file', 'new-folder', 'collapse']
     case 'tiny':
-      return ['search', 'new-file', 'new-folder', 'upload', 'refresh', 'collapse']
+      return ['search', 'new-file', 'new-folder', 'refresh', 'collapse']
   }
 }
 
